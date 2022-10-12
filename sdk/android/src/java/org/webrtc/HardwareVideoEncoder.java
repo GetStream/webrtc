@@ -533,6 +533,7 @@ class HardwareVideoEncoder implements VideoEncoder {
     if (status != VideoCodecStatus.OK) {
       return status;
     }
+
     width = newWidth;
     height = newHeight;
     useSurfaceMode = newUseSurfaceMode;
