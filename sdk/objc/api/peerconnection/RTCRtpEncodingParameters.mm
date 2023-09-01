@@ -25,6 +25,7 @@
 @synthesize bitratePriority = _bitratePriority;
 @synthesize networkPriority = _networkPriority;
 @synthesize adaptiveAudioPacketTime = _adaptiveAudioPacketTime;
+@synthesize scalabilityMode = _scalabilityMode;
 
 - (instancetype)init {
   webrtc::RtpEncodingParameters nativeParameters;
@@ -58,6 +59,9 @@
     }
     if (nativeParameters.ssrc) {
       _ssrc = [NSNumber numberWithUnsignedLong:*nativeParameters.ssrc];
+    }
+    if (nativeParameters.scalability_mode.has_value()) {
+      _scalabilityMode = [NSString stringForStdString:nativeParameters.scalability_mode.value()];
     }
     _bitratePriority = nativeParameters.bitrate_priority;
     _networkPriority = [RTC_OBJC_TYPE(RTCRtpEncodingParameters)
@@ -96,6 +100,9 @@
   parameters.network_priority =
       [RTC_OBJC_TYPE(RTCRtpEncodingParameters) nativePriorityFromPriority:_networkPriority];
   parameters.adaptive_ptime = _adaptiveAudioPacketTime;
+  if (_scalabilityMode != nil) {
+    parameters.scalability_mode = [NSString stdStringForString:_scalabilityMode];
+  }
   return parameters;
 }
 

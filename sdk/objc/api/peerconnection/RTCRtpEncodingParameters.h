@@ -69,6 +69,8 @@ RTC_OBJC_EXPORT
  https://w3c.github.io/webrtc-extensions/#dom-rtcrtpencodingparameters-adaptiveptime */
 @property(nonatomic, assign) BOOL adaptiveAudioPacketTime;
 
+@property(nonatomic, copy, nullable) NSString *scalabilityMode;
+
 - (instancetype)init;
 
 @end
