@@ -2579,6 +2579,24 @@ WebRtcVideoReceiveChannel::~WebRtcVideoReceiveChannel() {
     delete kv.second;
 }
 
+void WebRtcVideoReceiveChannel::StartReceive(uint32_t ssrc) {
+  RTC_DCHECK_RUN_ON(&thread_checker_);
+  WebRtcVideoReceiveStream* stream = FindReceiveStream(ssrc);
+  if(!stream) {
+    return;
+  }
+  stream->StartStream();
+}
+
+void WebRtcVideoReceiveChannel::StopReceive(uint32_t ssrc) {
+  RTC_DCHECK_RUN_ON(&thread_checker_);
+  WebRtcVideoReceiveStream* stream = FindReceiveStream(ssrc);
+  if(!stream) {
+    return;
+  }
+  stream->StopStream();
+}
+
 void WebRtcVideoReceiveChannel::SetReceiverFeedbackParameters(
     bool lntf_enabled,
     bool nack_enabled,
@@ -3475,6 +3493,17 @@ void WebRtcVideoReceiveChannel::WebRtcVideoReceiveStream::SetReceiverParameters(
     RecreateReceiveStream();
   } else {
     RTC_DLOG_F(LS_INFO) << "No receive stream recreate needed.";
+  }
+}
+
+void WebRtcVideoReceiveChannel::WebRtcVideoReceiveStream::StartStream(){
+  if (stream_) {
+    stream_->Start();
+  }
+}
+void WebRtcVideoReceiveChannel::WebRtcVideoReceiveStream::StopStream(){
+  if (stream_) {
+    stream_->Stop();
   }
 }
 

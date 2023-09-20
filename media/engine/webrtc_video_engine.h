@@ -294,7 +294,6 @@ class WebRtcVideoSendChannel : public MediaChannelUtil,
     }
     return send_codec()->rtx_time;
   }
-
  private:
   struct ChangedSenderParameters {
     // These optionals are unset if not changed.
@@ -643,6 +642,8 @@ class WebRtcVideoReceiveChannel : public MediaChannelUtil,
                                      webrtc::RtcpMode rtcp_mode,
                                      absl::optional<int> rtx_time) override;
 
+  void StartReceive(uint32_t ssrc) override;
+  void StopReceive(uint32_t ssrc) override;
  private:
   class WebRtcVideoReceiveStream;
   struct ChangedReceiverParameters {
@@ -743,6 +744,9 @@ class WebRtcVideoReceiveChannel : public MediaChannelUtil,
     void SetDepacketizerToDecoderFrameTransformer(
         rtc::scoped_refptr<webrtc::FrameTransformerInterface>
             frame_transformer);
+
+    void StartStream();
+    void StopStream();
 
     void SetLocalSsrc(uint32_t local_ssrc);
     void UpdateRtxSsrc(uint32_t ssrc);
