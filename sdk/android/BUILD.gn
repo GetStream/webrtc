@@ -528,6 +528,8 @@ if (is_android) {
     sources = [
       "api/org/webrtc/SoftwareVideoDecoderFactory.java",
       "api/org/webrtc/SoftwareVideoEncoderFactory.java",
+      "api/org/webrtc/SimulcastVideoEncoder.java",
+      "api/org/webrtc/SimulcastVideoEncoderFactory.java",
     ]
 
     deps = [
@@ -874,6 +876,23 @@ if (current_os == "linux" || is_android) {
     ]
   }
 
+  rtc_library("simulcast_jni") {
+    visibility = [ "*" ]
+    allow_poison = [ "software_video_codecs" ]
+    sources = [
+      "src/jni/simulcast_video_encoder.cc",
+      "src/jni/simulcast_video_encoder.h",
+      "src/jni/simulcast_video_encoder_factory.cc",
+      "src/jni/simulcast_video_encoder_factory.h"
+    ]
+    deps = [
+      ":base_jni",
+      ":video_jni",
+      ":native_api_codecs",
+      "../../media:rtc_simulcast_encoder_adapter"
+    ]
+  }
+
   rtc_library("libaom_av1_encoder_jni") {
     visibility = [ "*" ]
     allow_poison = [ "software_video_codecs" ]
@@ -911,6 +930,7 @@ if (current_os == "linux" || is_android) {
       ":generated_swcodecs_jni",
       ":libvpx_vp8_jni",
       ":libvpx_vp9_jni",
+      ":simulcast_jni",
       ":native_api_jni",
       ":video_jni",
       "../../api/environment",
