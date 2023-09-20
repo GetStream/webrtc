@@ -57,5 +57,16 @@ static jboolean JNI_VideoTrack_GetShouldReceive(JNIEnv* jni,
   return reinterpret_cast<VideoTrackInterface*>(j_native_track)->should_receive();
 }
 
+static void JNI_VideoTrack_SetShouldReceive(JNIEnv* jni,
+                                      jlong j_native_track,
+                                      jboolean should_receive) {
+  reinterpret_cast<VideoTrackInterface*>(j_native_track)->set_should_receive(should_receive);
+}
+
+static jboolean JNI_VideoTrack_GetShouldReceive(JNIEnv* jni,
+                                      jlong j_native_track) {
+  return reinterpret_cast<VideoTrackInterface*>(j_native_track)->should_receive();
+}
+
 }  // namespace jni
 }  // namespace webrtc
