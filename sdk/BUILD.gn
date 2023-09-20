@@ -1461,6 +1461,7 @@ if (is_ios || is_mac) {
           "objc/components/video_codec/RTCVideoDecoderH264.h",
           "objc/components/video_codec/RTCVideoEncoderFactoryH264.h",
           "objc/components/video_codec/RTCVideoEncoderH264.h",
+          "objc/components/video_codec/RTCVideoEncoderFactorySimulcast.h",
           "objc/components/video_frame_buffer/RTCCVPixelBuffer.h",
           "objc/helpers/RTCDispatcher.h",
           "objc/helpers/RTCYUVHelper.h",
@@ -1517,6 +1518,7 @@ if (is_ios || is_mac) {
           "objc/api/video_codec/RTCVideoEncoderVP8.h",
           "objc/api/video_codec/RTCVideoEncoderVP9.h",
           "objc/api/video_codec/RTCVideoEncoderAV1.h",
+          "objc/api/video_codec/RTCVideoEncoderSimulcast.h",
           "objc/api/video_frame_buffer/RTCNativeI420Buffer.h",
           "objc/api/video_frame_buffer/RTCNativeMutableI420Buffer.h",
           # Added for Simulcast support
