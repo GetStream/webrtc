@@ -16,6 +16,8 @@
 #include "api/video_codecs/scalability_mode.h"
 #include "modules/video_coding/svc/scalability_mode_util.h"
 
+#include "absl/container/inlined_vector.h"
+
 namespace webrtc {
 namespace jni {
 
