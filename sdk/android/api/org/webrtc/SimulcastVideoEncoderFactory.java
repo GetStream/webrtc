@@ -15,28 +15,35 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Arrays;
-
+ 
 public class SimulcastVideoEncoderFactory implements VideoEncoderFactory {
+ 
+    static native List<VideoCodecInfo> nativeVP9Codecs();
+    static native VideoCodecInfo nativeAV1Codec();
 
     VideoEncoderFactory primary;
     VideoEncoderFactory fallback;
-
+ 
     public SimulcastVideoEncoderFactory(VideoEncoderFactory primary, VideoEncoderFactory fallback) {
         this.primary = primary;
         this.fallback = fallback;
     }
-
+ 
     @Nullable
     @Override
     public VideoEncoder createEncoder(VideoCodecInfo info) {
         return new SimulcastVideoEncoder(primary, fallback, info);
     }
-
+ 
     @Override
     public VideoCodecInfo[] getSupportedCodecs() {
         List<VideoCodecInfo> codecs = new ArrayList<VideoCodecInfo>();
         codecs.addAll(Arrays.asList(primary.getSupportedCodecs()));
-        codecs.addAll(Arrays.asList(fallback.getSupportedCodecs()));
+        if (fallback != null) {
+            codecs.addAll(Arrays.asList(fallback.getSupportedCodecs()));
+        }
+        codecs.addAll(nativeVP9Codecs());
+        codecs.add(nativeAV1Codec());
         return codecs.toArray(new VideoCodecInfo[codecs.size()]);
     }
 
