@@ -10,7 +10,7 @@ extern "C" {
 /*
  * Class:     io_getstream_webrtc_SimulcastVideoEncoder
  * Method:    nativeCreateEncoder
- * Signature: (Lorg/webrtc/VideoEncoderFactory;Lorg/webrtc/VideoEncoderFactory;Lorg/webrtc/VideoCodecInfo;)J
+ * Signature: (Lio/getstream/webrtc/VideoEncoderFactory;Lio/getstream/webrtc/VideoEncoderFactory;Lio/getstream/webrtc/VideoCodecInfo;)J
  */
 
 JNIEXPORT jlong JNICALL Java_io_getstream_webrtc_SimulcastVideoEncoder_nativeCreateEncoder

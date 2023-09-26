@@ -18,7 +18,7 @@ JNIEXPORT jobject JNICALL Java_io_getstream_webrtc_SimulcastVideoEncoderFactory_
 /*
  * Class:     io_getstream_webrtc_SimulcastVideoEncoderFactory
  * Method:    nativeAV1Codec
- * Signature: ()Lorg/webrtc/VideoCodecInfo;
+ * Signature: ()Lio/getstream/webrtc/VideoCodecInfo;
  */
 JNIEXPORT jobject JNICALL Java_io_getstream_webrtc_SimulcastVideoEncoderFactory_nativeAV1Codec
   (JNIEnv *, jclass);
