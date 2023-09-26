@@ -421,7 +421,7 @@ const int64_t kNanosecondsPerSecond = 1000000000;
 - (dispatch_queue_t)frameQueue {
   if (!_frameQueue) {
     _frameQueue = RTCDispatchQueueCreateWithTarget(
-        "org.webrtc.cameravideocapturer.video",
+        "io.getstream.webrtc.cameravideocapturer.video",
         DISPATCH_QUEUE_SERIAL,
         dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0));
   }

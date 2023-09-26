@@ -17,7 +17,7 @@
 #import "base/RTCLogging.h"
 #import "helpers/NSString+StdString.h"
 
-NSString *const kRTCRtpTransceiverErrorDomain = @"org.webrtc.RTCRtpTranceiver";
+NSString *const kRTCRtpTransceiverErrorDomain = @"io.getstream.webrtc.RTCRtpTranceiver";
 
 @implementation RTC_OBJC_TYPE (RTCRtpTransceiverInit)
 

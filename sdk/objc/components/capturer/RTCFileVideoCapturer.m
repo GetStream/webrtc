@@ -16,7 +16,7 @@
 #include "rtc_base/system/gcd_helpers.h"
 
 NSString *const kRTCFileVideoCapturerErrorDomain =
-    @"org.webrtc.RTC_OBJC_TYPE(RTCFileVideoCapturer)";
+    @"io.getstream.webrtc.RTC_OBJC_TYPE(RTCFileVideoCapturer)";
 
 typedef NS_ENUM(NSInteger, RTCFileVideoCapturerErrorCode) {
   RTCFileVideoCapturerErrorCode_CapturerRunning = 2000,
@@ -121,7 +121,7 @@ typedef NS_ENUM(NSInteger, RTCFileVideoCapturerStatus) {
 - (dispatch_queue_t)frameQueue {
   if (!_frameQueue) {
     _frameQueue = RTCDispatchQueueCreateWithTarget(
-        "org.webrtc.filecapturer.video",
+        "io.getstream.webrtc.filecapturer.video",
         DISPATCH_QUEUE_SERIAL,
         dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0));
   }
