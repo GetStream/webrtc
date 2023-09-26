@@ -36,7 +36,7 @@ enum SdkCode {
   SDK_CODE_N = 24,
 };
 
-// Utility class used to query the Java class (org/webrtc/voiceengine/BuildInfo)
+// Utility class used to query the Java class (io/getstream/webrtc/voiceengine/BuildInfo)
 // for device and Android build information.
 // The calling thread is attached to the JVM at construction if needed and a
 // valid Java environment object is also created.
