@@ -8,7 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-package org.webrtc.voiceengine;
+package io.getstream.webrtc.voiceengine;
 
 import android.os.Build;
 

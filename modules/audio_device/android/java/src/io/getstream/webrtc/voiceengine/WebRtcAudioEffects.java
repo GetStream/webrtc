@@ -8,7 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-package org.webrtc.voiceengine;
+package io.getstream.webrtc.voiceengine;
 
 import android.media.audiofx.AcousticEchoCanceler;
 import android.media.audiofx.AudioEffect;
@@ -18,7 +18,7 @@ import android.os.Build;
 import androidx.annotation.Nullable;
 import java.util.List;
 import java.util.UUID;
-import org.webrtc.Logging;
+import io.getstream.webrtc.Logging;
 
 // This class wraps control of three different platform effects. Supported
 // effects are: AcousticEchoCanceler (AEC) and NoiseSuppressor (NS).

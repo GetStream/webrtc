@@ -8,7 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-package org.webrtc.voiceengine;
+package io.getstream.webrtc.voiceengine;
 
 import android.media.AudioFormat;
 import android.media.AudioRecord;
@@ -20,8 +20,8 @@ import java.lang.System;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
-import org.webrtc.Logging;
-import org.webrtc.ThreadUtils;
+import io.getstream.webrtc.Logging;
+import io.getstream.webrtc.ThreadUtils;
 
 public class WebRtcAudioRecord {
   private static final boolean DEBUG = false;
