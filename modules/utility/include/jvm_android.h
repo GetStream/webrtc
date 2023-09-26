@@ -134,7 +134,7 @@ class JNIEnvironment {
 //   User::User() {
 //     // Calling thread must be attached to the JVM.
 //     env = JVM::GetInstance()->environment();
-//     reg = env->RegisterNatives("org/webrtc/WebRtcTest", ,);
+//     reg = env->RegisterNatives("io/getstream/webrtc/WebRtcTest", ,);
 //     obj = reg->NewObject("<init>", ,);
 //   }
 //
