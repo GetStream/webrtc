@@ -8,9 +8,9 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-package org.webrtc;
+package io.getstream.webrtc;
 
-import org.webrtc.Logging.Severity;
+import io.getstream.webrtc.Logging.Severity;
 
 /**
  * Java interface for WebRTC logging. The default implementation uses webrtc.Logging.
