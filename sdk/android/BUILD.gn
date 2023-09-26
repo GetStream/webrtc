@@ -156,8 +156,6 @@ if (is_android) {
     sources = [
       "api/io/getstream/webrtc/Predicate.java",
       "api/io/getstream/webrtc/RefCounted.java",
-      "api/io/getstream/webrtc/WebrtcBuildVersion.java",
-      "src/java/io/getstream/webrtc/ApplicationContextProvider.java",
       "src/java/io/getstream/webrtc/CalledByNative.java",
       "src/java/io/getstream/webrtc/CalledByNativeUnchecked.java",
       "src/java/io/getstream/webrtc/Histogram.java",
