@@ -26,7 +26,7 @@
 #error ABSL_HAVE_THREAD_LOCAL should be defined for MacOS / iOS Targets.
 #endif
 
-NSString *const kRTCAudioSessionErrorDomain = @"org.webrtc.RTC_OBJC_TYPE(RTCAudioSession)";
+NSString *const kRTCAudioSessionErrorDomain = @"io.getstream.webrtc.RTC_OBJC_TYPE(RTCAudioSession)";
 NSInteger const kRTCAudioSessionErrorLockRequired = -1;
 NSInteger const kRTCAudioSessionErrorConfiguration = -2;
 NSString * const kRTCAudioSessionOutputVolumeSelector = @"outputVolume";

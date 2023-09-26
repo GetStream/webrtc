@@ -20,13 +20,13 @@ static dispatch_queue_t kNetworkMonitorQueue = nil;
   static dispatch_once_t onceToken;
   dispatch_once(&onceToken, ^{
     kAudioSessionQueue = dispatch_queue_create(
-        "org.webrtc.RTCDispatcherAudioSession",
+        "io.getstream.webrtc.RTCDispatcherAudioSession",
         DISPATCH_QUEUE_SERIAL);
     kCaptureSessionQueue = dispatch_queue_create(
-        "org.webrtc.RTCDispatcherCaptureSession",
+        "io.getstream.webrtc.RTCDispatcherCaptureSession",
         DISPATCH_QUEUE_SERIAL);
     kNetworkMonitorQueue =
-        dispatch_queue_create("org.webrtc.RTCDispatcherNetworkMonitor", DISPATCH_QUEUE_SERIAL);
+        dispatch_queue_create("io.getstream.webrtc.RTCDispatcherNetworkMonitor", DISPATCH_QUEUE_SERIAL);
   });
 }
 

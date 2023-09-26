@@ -36,7 +36,7 @@
 #include "rtc_base/numerics/safe_conversions.h"
 #include "sdk/objc/native/api/ssl_certificate_verifier.h"
 
-NSString *const kRTCPeerConnectionErrorDomain = @"org.webrtc.RTC_OBJC_TYPE(RTCPeerConnection)";
+NSString *const kRTCPeerConnectionErrorDomain = @"io.getstream.webrtc.RTC_OBJC_TYPE(RTCPeerConnection)";
 int const kRTCPeerConnnectionSessionDescriptionError = -1;
 
 namespace {
