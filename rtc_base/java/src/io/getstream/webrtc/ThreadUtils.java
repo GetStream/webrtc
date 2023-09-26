@@ -8,7 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-package org.webrtc;
+package io.getstream.webrtc;
 
 import android.os.Handler;
 import android.os.Looper;

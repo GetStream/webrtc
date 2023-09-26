@@ -8,7 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-package org.webrtc;
+package io.getstream.webrtc;
 
 import androidx.annotation.Nullable;
 import java.io.PrintWriter;
@@ -16,7 +16,7 @@ import java.io.StringWriter;
 import java.util.EnumSet;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import org.webrtc.Loggable;
+import io.getstream.webrtc.Loggable;
 
 /**
  * Java wrapper for WebRTC logging. Logging defaults to java.util.logging.Logger, but a custom
@@ -46,7 +46,7 @@ public class Logging {
   private static Severity loggableSeverity;
 
   private static Logger createFallbackLogger() {
-    final Logger fallbackLogger = Logger.getLogger("org.webrtc.Logging");
+    final Logger fallbackLogger = Logger.getLogger("io.getstream.webrtc.Logging");
     fallbackLogger.setLevel(Level.ALL);
     return fallbackLogger;
   }

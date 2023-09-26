@@ -8,7 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-package org.webrtc;
+package io.getstream.webrtc;
 
 /**
  * Class for representing size of an object. Very similar to android.util.Size but available on all
