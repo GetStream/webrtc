@@ -429,6 +429,7 @@ if (is_android) {
       "src/java/org/webrtc/audio/WebRtcAudioRecord.java",
       "src/java/org/webrtc/audio/WebRtcAudioTrack.java",
       "src/java/org/webrtc/audio/WebRtcAudioUtils.java",
+      "src/java/org/webrtc/audio/AudioRecordDataCallback.java",
     ]
 
     deps = [
