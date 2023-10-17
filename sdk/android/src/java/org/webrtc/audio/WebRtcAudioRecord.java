@@ -115,6 +115,7 @@ class WebRtcAudioRecord {
 
   private final @Nullable AudioRecordErrorCallback errorCallback;
   private final @Nullable AudioRecordStateCallback stateCallback;
+  private final @Nullable AudioRecordDataCallback audioRecordDataCallback;
   private final @Nullable SamplesReadyCallback audioSamplesReadyCallback;
   private final @Nullable AudioBufferCallback audioBufferCallback;
   private final boolean isAcousticEchoCancelerSupported;
