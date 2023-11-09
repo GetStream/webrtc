@@ -27,6 +27,7 @@ class MediaCodecUtils {
   // Prefixes for supported hardware encoder/decoder component names.
   static final String EXYNOS_PREFIX = "OMX.Exynos.";
   static final String INTEL_PREFIX = "OMX.Intel.";
+  static final String MARVELL_PREFIX = "OMX.Marvell.";
   static final String NVIDIA_PREFIX = "OMX.Nvidia.";
   static final String QCOM_PREFIX = "OMX.qcom.";
   static final String[] SOFTWARE_IMPLEMENTATION_PREFIXES = {
@@ -46,7 +47,8 @@ class MediaCodecUtils {
       MediaCodecUtils.COLOR_QCOM_FORMATYVU420PackedSemiPlanar32m4ka,
       MediaCodecUtils.COLOR_QCOM_FORMATYVU420PackedSemiPlanar16m4ka,
       MediaCodecUtils.COLOR_QCOM_FORMATYVU420PackedSemiPlanar64x32Tile2m8ka,
-      MediaCodecUtils.COLOR_QCOM_FORMATYUV420PackedSemiPlanar32m};
+      MediaCodecUtils.COLOR_QCOM_FORMATYUV420PackedSemiPlanar32m,
+      MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible};
 
   // Color formats supported by hardware encoder - in order of preference.
   static final int[] ENCODER_COLOR_FORMATS = {
