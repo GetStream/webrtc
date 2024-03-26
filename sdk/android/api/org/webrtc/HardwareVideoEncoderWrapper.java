@@ -74,7 +74,6 @@ class HardwareVideoEncoderWrapper implements VideoEncoder {
                         originalWidth + "x" + originalHeight + " => " + nextWidth + "x" + nextHeight);
                 return true;
             }
-            return originalWidth != nextWidth || originalHeight != nextHeight;
         }
     }
 
