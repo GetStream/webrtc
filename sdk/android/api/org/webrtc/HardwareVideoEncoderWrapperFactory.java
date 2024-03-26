@@ -24,10 +24,10 @@ class HardwareVideoEncoderWrapperFactory implements VideoEncoderFactory {
 
     private static final String TAG = "HardwareVideoEncoderWrapperFactory";
 
-    private final HardwareVideoEncoderFactory factory;
+    private final VideoEncoderFactory factory;
     private final int resolutionPixelAlignment;
 
-    public HardwareVideoEncoderWrapperFactory(HardwareVideoEncoderFactory factory, int resolutionPixelAlignment) {
+    public HardwareVideoEncoderWrapperFactory(VideoEncoderFactory factory, int resolutionPixelAlignment) {
         this.factory = factory;
         this.resolutionPixelAlignment = resolutionPixelAlignment;
         if (resolutionPixelAlignment == 0) {

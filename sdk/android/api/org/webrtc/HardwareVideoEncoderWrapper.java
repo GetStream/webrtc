@@ -50,7 +50,7 @@ class HardwareVideoEncoderWrapper implements VideoEncoder {
             this.cropY = originalHeight % alignment;
             if (originalWidth != 0 && originalHeight != 0) {
                 Logging.v(TAG + " init(): alignment=" + alignment +
-                        " size=" + originalWidth + "x" + originalHeight + " => " + croppedWidth + "x" + croppedHeight);
+                        " size=" + originalWidth + "x" + originalHeight + " => " + getCroppedWidth() + "x" + getCroppedHeight());
             }
         }
 
