@@ -529,6 +529,10 @@ if (is_android) {
       "api/org/webrtc/SoftwareVideoEncoderFactory.java",
       "api/org/webrtc/SimulcastVideoEncoder.java",
       "api/org/webrtc/SimulcastVideoEncoderFactory.java",
+      "api/org/webrtc/SimulcastAlignedVideoEncoderFactory.java",
+      "api/org/webrtc/DefaultAlignedVideoEncoderFactory.java",
+      "api/org/webrtc/HardwareVideoEncoderWrapper.java",
+      "api/org/webrtc/ResolutionAdjustment.java",
     ]
 
     deps = [
