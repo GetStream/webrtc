@@ -160,7 +160,7 @@ public class SimulcastAlignedVideoEncoderFactory implements VideoEncoderFactory 
 
     private final VideoEncoderFactory primary;
     private final VideoEncoderFactory fallback;
-    private final SimulcastVideoEncoderFactory native;
+    private final SimulcastVideoEncoderFactory delegate;
 
     public SimulcastAlignedVideoEncoderFactory(EglBase.Context sharedContext, boolean enableIntelVp8Encoder, boolean enableH264HighProfile, ResolutionAdjustment resolutionAdjustment) {
         HardwareVideoEncoderFactory hardwareVideoEncoderFactory = new HardwareVideoEncoderFactory(sharedContext, enableIntelVp8Encoder, enableH264HighProfile);
@@ -172,17 +172,17 @@ public class SimulcastAlignedVideoEncoderFactory implements VideoEncoderFactory 
         }
         primary = new StreamEncoderWrapperFactory(encoderFactory);
         fallback = new SoftwareVideoEncoderFactory();
-        native = new SimulcastVideoEncoderFactory(primary, fallback);
+        delegate = new SimulcastVideoEncoderFactory(primary, fallback);
     }
 
     @Override
     public VideoEncoder createEncoder(VideoCodecInfo info) {
-        return native.createEncoder(info);
+        return delegate.createEncoder(info);
     }
 
     @Override
     public VideoCodecInfo[] getSupportedCodecs() {
-        return native.getSupportedCodecs();
+        return delegate.getSupportedCodecs();
     }
 }
 
