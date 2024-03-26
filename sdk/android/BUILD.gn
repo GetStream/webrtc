@@ -154,7 +154,6 @@ if (is_android) {
     sources = [
       "api/org/webrtc/Predicate.java",
       "api/org/webrtc/RefCounted.java",
-      "api/org/webrtc/ResolutionAdjustment.java",
       "src/java/org/webrtc/ApplicationContextProvider.java",
       "src/java/org/webrtc/CalledByNative.java",
       "src/java/org/webrtc/CalledByNativeUnchecked.java",
@@ -233,6 +232,7 @@ if (is_android) {
       "api/org/webrtc/WrappedNativeVideoEncoder.java",
       "api/org/webrtc/YuvConverter.java",
       "api/org/webrtc/YuvHelper.java",
+      "api/org/webrtc/ResolutionAdjustment.java",
       "src/java/org/webrtc/EglBase10Impl.java",
       "src/java/org/webrtc/EglBase14Impl.java",
       "src/java/org/webrtc/GlGenericDrawer.java",
