@@ -33,7 +33,7 @@ import java.util.concurrent.Executors;
  */
 public class SimulcastAlignedVideoEncoderFactory implements VideoEncoderFactory {
     private static class StreamEncoderWrapper implements VideoEncoder {
-        private static final String TAG = StreamEncoderWrapper.class.getSimpleName();
+        private static final String TAG = "StreamEncoderWrapper";
         private final VideoEncoder encoder;
         private final ExecutorService executor = Executors.newSingleThreadExecutor();
         private VideoEncoder.Settings streamSettings;
