@@ -232,6 +232,7 @@ if (is_android) {
       "api/org/webrtc/WrappedNativeVideoEncoder.java",
       "api/org/webrtc/YuvConverter.java",
       "api/org/webrtc/YuvHelper.java",
+      "api/org/webrtc/ResolutionAdjustment.java",
       "src/java/org/webrtc/EglBase10Impl.java",
       "src/java/org/webrtc/EglBase14Impl.java",
       "src/java/org/webrtc/GlGenericDrawer.java",
@@ -363,6 +364,8 @@ if (is_android) {
       "api/org/webrtc/DefaultVideoDecoderFactory.java",
       "api/org/webrtc/DefaultVideoEncoderFactory.java",
       "api/org/webrtc/WrappedVideoDecoderFactory.java",
+      "api/org/webrtc/DefaultAlignedVideoEncoderFactory.java",
+      "api/org/webrtc/SimulcastAlignedVideoEncoderFactory.java",
     ]
 
     deps = [
@@ -394,6 +397,8 @@ if (is_android) {
     sources = [
       "api/org/webrtc/HardwareVideoDecoderFactory.java",
       "api/org/webrtc/HardwareVideoEncoderFactory.java",
+      "api/org/webrtc/HardwareVideoEncoderWrapper.java",
+      "api/org/webrtc/HardwareVideoEncoderWrapperFactory.java",
       "api/org/webrtc/PlatformSoftwareVideoDecoderFactory.java",
       "src/java/org/webrtc/AndroidVideoDecoder.java",
       "src/java/org/webrtc/BaseBitrateAdjuster.java",
