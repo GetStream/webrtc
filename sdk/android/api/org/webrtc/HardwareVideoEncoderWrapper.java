@@ -49,7 +49,7 @@ class HardwareVideoEncoderWrapper implements VideoEncoder {
             this.cropX = originalWidth % alignment;
             this.cropY = originalHeight % alignment;
             if (originalWidth != 0 && originalHeight != 0) {
-                Logging.v(TAG + " init(): alignment=" + alignment +
+                Logging.v(TAG, "init(): alignment=" + alignment +
                         " size=" + originalWidth + "x" + originalHeight + " => " + getCroppedWidth() + "x" + getCroppedHeight());
             }
         }
@@ -70,7 +70,7 @@ class HardwareVideoEncoderWrapper implements VideoEncoder {
             if (originalWidth == nextWidth && originalHeight == nextHeight) {
                 return false;
             } else {
-                Logging.v(TAG + " frame size has changed: " +
+                Logging.v(TAG, "frame size has changed: " +
                         originalWidth + "x" + originalHeight + " => " + nextWidth + "x" + nextHeight);
                 return true;
             }
