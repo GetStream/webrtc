@@ -15,6 +15,7 @@
  */
 package org.webrtc;
 
+import java.util.Arrays;
 import java.util.LinkedHashSet;
 
 /**
@@ -39,7 +40,7 @@ public class DefaultAlignedVideoEncoderFactory implements VideoEncoderFactory {
             boolean enableH264HighProfile,
             ResolutionAdjustment resolutionAdjustment
     ) {
-        VideoEncoderFactory defaultFactory =
+        HardwareVideoEncoderFactory defaultFactory =
                 new HardwareVideoEncoderFactory(eglContext, enableIntelVp8Encoder, enableH264HighProfile);
         hardwareVideoEncoderFactory = (resolutionAdjustment == ResolutionAdjustment.NONE) ?
                 defaultFactory :
