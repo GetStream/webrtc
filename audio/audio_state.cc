@@ -149,8 +149,6 @@ void AudioState::AddSendingStream(webrtc::AudioSendStream* stream,
 #endif
         adm->StartRecording();
       }
-    } else {
-      RTC_DLOG_F(LS_ERROR) << "Failed to initialize recording.";
     }
   }
 }
@@ -160,7 +158,8 @@ void AudioState::RemoveSendingStream(webrtc::AudioSendStream* stream) {
   auto count = sending_streams_.erase(stream);
   RTC_DCHECK_EQ(1, count);
   UpdateAudioTransportWithSendingStreams();
-  if (sending_streams_.empty()) {
+
+  if (!ShouldRecord()) {
     config_.audio_device_module->StopRecording();
   }
 }
@@ -216,6 +215,25 @@ void AudioState::UpdateNullAudioPollerState() {
     null_audio_poller_.Stop();
   }
 }
+
+bool AudioState::ShouldRecord() {
+  // no streams to send
+  if (sending_streams_.empty()) {
+    return false;
+  }
+
+  int stream_count = sending_streams_.size();
+
+  int muted_count = 0;
+  for (const auto& kv : sending_streams_) {
+    if (kv.first->GetMuted()) {
+      muted_count++;
+    }
+  }
+
+  return muted_count != stream_count;
+}
+
 }  // namespace internal
 
 scoped_refptr<AudioState> AudioState::Create(const AudioState::Config& config) {

@@ -286,6 +286,8 @@ class AudioDeviceIOS : public AudioDeviceGeneric,
 
   bool recording_is_initialized_;
 
+  bool recording_is_initialized_;
+
   // Set to 1 when recording is active and 0 otherwise.
   std::atomic<int> recording_;
 
