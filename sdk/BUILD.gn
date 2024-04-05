@@ -1050,6 +1050,20 @@ if (is_ios || is_mac) {
         "objc/api/peerconnection/RTCVideoTrack+Private.h",
         "objc/api/peerconnection/RTCVideoTrack.h",
         "objc/api/peerconnection/RTCVideoTrack.mm",
+        "objc/components/audio/RTCAudioBuffer.h",
+        "objc/components/audio/RTCAudioBuffer.mm",
+        "objc/components/audio/RTCAudioBuffer+Private.h",
+        "objc/components/audio/RTCAudioCustomProcessingAdapter.h",
+        "objc/components/audio/RTCAudioCustomProcessingAdapter.mm",
+        "objc/components/audio/RTCAudioCustomProcessingAdapter+Private.h",
+        "objc/components/audio/RTCAudioCustomProcessingDelegate.h",
+        "objc/components/audio/RTCAudioProcessingConfig.h",
+        "objc/components/audio/RTCAudioProcessingConfig.mm",
+        "objc/components/audio/RTCAudioProcessingConfig+Private.h",
+        "objc/components/audio/RTCAudioProcessingModule.h",
+        "objc/components/audio/RTCDefaultAudioProcessingModule.h",
+        "objc/components/audio/RTCDefaultAudioProcessingModule.mm",
+        "objc/components/audio/RTCDefaultAudioProcessingModule+Private.h",
       ]
 
       configs += [
