@@ -131,7 +131,7 @@ AudioDeviceModuleImpl::AudioDeviceModuleImpl(
     AudioLayer audio_layer,
     std::unique_ptr<AudioDeviceGeneric> audio_device,
     TaskQueueFactory* task_queue_factory,
-    bool bypass_voice_processing
+    bool bypass_voice_processing,
     bool create_detached)
     : audio_layer_(audio_layer),
 #if defined(WEBRTC_IOS)

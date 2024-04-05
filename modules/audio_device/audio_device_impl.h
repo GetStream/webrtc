@@ -55,7 +55,7 @@ class AudioDeviceModuleImpl : public AudioDeviceModuleForTest {
                         std::unique_ptr<AudioDeviceGeneric> audio_device,
                         TaskQueueFactory* task_queue_factory,
                         bool bypass_voice_processing = false,
-                        bool create_detached);
+                        bool create_detached = false);
   ~AudioDeviceModuleImpl() override;
 
   // Retrieve the currently utilized audio layer
