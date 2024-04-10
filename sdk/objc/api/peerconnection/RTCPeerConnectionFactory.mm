@@ -52,6 +52,9 @@
 #include "sdk/objc/native/src/objc_video_decoder_factory.h"
 #include "sdk/objc/native/src/objc_video_encoder_factory.h"
 
+#import "components/audio/RTCAudioProcessingModule.h"
+#import "components/audio/RTCDefaultAudioProcessingModule+Private.h"
+
 #if defined(WEBRTC_IOS)
 #import "sdk/objc/native/api/audio_device_module.h"
 #endif
@@ -61,6 +64,7 @@
   std::unique_ptr<rtc::Thread> _workerThread;
   std::unique_ptr<rtc::Thread> _signalingThread;
   rtc::scoped_refptr<webrtc::AudioDeviceModule> _nativeAudioDeviceModule;
+  RTCDefaultAudioProcessingModule *_defaultAudioProcessingModule;
 
   BOOL _hasStartedAecDump;
 }
@@ -129,8 +133,9 @@
 - (instancetype)
     initWithBypassVoiceProcessing:(BOOL)bypassVoiceProcessing
                    encoderFactory:(nullable id<RTC_OBJC_TYPE(RTCVideoEncoderFactory)>)encoderFactory
-                   decoderFactory:
-                       (nullable id<RTC_OBJC_TYPE(RTCVideoDecoderFactory)>)decoderFactory {
+                   decoderFactory:(nullable id<RTC_OBJC_TYPE(RTCVideoDecoderFactory)>)decoderFactory
+            audioProcessingModule:
+                (nullable id<RTC_OBJC_TYPE(RTCAudioProcessingModule)>)audioProcessingModule{
 #ifdef HAVE_NO_MEDIA
   return [self initWithNoMedia];
 #else
