@@ -119,7 +119,6 @@ if (is_ios || is_mac) {
       "objc/base/RTCVideoFrame.mm",
       "objc/base/RTCVideoFrameBuffer.h",
       "objc/base/RTCVideoRenderer.h",
-      "objc/base/RTCAudioRenderer.h",
       "objc/base/RTCYUVPlanarBuffer.h",
     ]
 
@@ -1050,6 +1049,20 @@ if (is_ios || is_mac) {
         "objc/api/peerconnection/RTCVideoTrack+Private.h",
         "objc/api/peerconnection/RTCVideoTrack.h",
         "objc/api/peerconnection/RTCVideoTrack.mm",
+        "objc/components/audio/RTCAudioBuffer.h",
+        "objc/components/audio/RTCAudioBuffer.mm",
+        "objc/components/audio/RTCAudioBuffer+Private.h",
+        "objc/components/audio/RTCAudioCustomProcessingAdapter.h",
+        "objc/components/audio/RTCAudioCustomProcessingAdapter.mm",
+        "objc/components/audio/RTCAudioCustomProcessingAdapter+Private.h",
+        "objc/components/audio/RTCAudioCustomProcessingDelegate.h",
+        "objc/components/audio/RTCAudioProcessingConfig.h",
+        "objc/components/audio/RTCAudioProcessingConfig.mm",
+        "objc/components/audio/RTCAudioProcessingConfig+Private.h",
+        "objc/components/audio/RTCAudioProcessingModule.h",
+        "objc/components/audio/RTCDefaultAudioProcessingModule.h",
+        "objc/components/audio/RTCDefaultAudioProcessingModule.mm",
+        "objc/components/audio/RTCDefaultAudioProcessingModule+Private.h",
       ]
 
       configs += [
@@ -1363,6 +1376,11 @@ if (is_ios || is_mac) {
           # Added for Simulcast support
           "objc/components/video_codec/RTCVideoEncoderFactorySimulcast.h",
           "objc/api/video_codec/RTCVideoEncoderSimulcast.h",
+          "objc/components/audio/RTCAudioBuffer.h",
+          "objc/components/audio/RTCAudioCustomProcessingDelegate.h",
+          "objc/components/audio/RTCAudioProcessingConfig.h",
+          "objc/components/audio/RTCAudioProcessingModule.h",
+          "objc/components/audio/RTCDefaultAudioProcessingModule.h",
         ]
 
         if (!build_with_chromium) {
@@ -1513,6 +1531,11 @@ if (is_ios || is_mac) {
           # Added for Simulcast support
           "objc/components/video_codec/RTCVideoEncoderFactorySimulcast.h",
           "objc/api/video_codec/RTCVideoEncoderSimulcast.h",
+          "objc/components/audio/RTCAudioBuffer.h",
+          "objc/components/audio/RTCAudioCustomProcessingDelegate.h",
+          "objc/components/audio/RTCAudioProcessingConfig.h",
+          "objc/components/audio/RTCAudioProcessingModule.h",
+          "objc/components/audio/RTCDefaultAudioProcessingModule.h",
         ]
         if (!build_with_chromium) {
           sources += [

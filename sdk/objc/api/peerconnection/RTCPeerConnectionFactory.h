@@ -34,6 +34,8 @@ NS_ASSUME_NONNULL_BEGIN
 (RTCSSLCertificateVerifier);
 @protocol RTC_OBJC_TYPE
 (RTCAudioDevice);
+@protocol RTC_OBJC_TYPE
+(RTCAudioProcessingModule);
 
 RTC_OBJC_EXPORT
 @interface RTC_OBJC_TYPE (RTCPeerConnectionFactory) : NSObject
@@ -56,8 +58,9 @@ RTC_OBJC_EXPORT
 - (instancetype)
     initWithBypassVoiceProcessing:(BOOL)bypassVoiceProcessing
                    encoderFactory:(nullable id<RTC_OBJC_TYPE(RTCVideoEncoderFactory)>)encoderFactory
-                   decoderFactory:
-                       (nullable id<RTC_OBJC_TYPE(RTCVideoDecoderFactory)>)decoderFactory;
+                   decoderFactory:(nullable id<RTC_OBJC_TYPE(RTCVideoDecoderFactory)>)decoderFactory
+            audioProcessingModule:
+                (nullable id<RTC_OBJC_TYPE(RTCAudioProcessingModule)>)audioProcessingModule;
 
 @property(nonatomic, readonly) RTCAudioDeviceModule *audioDeviceModule;
 
