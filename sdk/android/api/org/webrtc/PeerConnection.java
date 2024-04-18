@@ -10,7 +10,10 @@
 
 package org.webrtc;
 
+import androidx.annotation.IntDef;
 import androidx.annotation.Nullable;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -456,6 +459,15 @@ public class PeerConnection {
     UNIFIED_PLAN
   }
 
+  // Keep in sync with webrtc/p2p/base/port_allocator.h
+  @IntDef(
+      flag = true,
+      value = {PORTALLOCATOR_ENABLE_ANY_ADDRESS_PORTS})
+  @Retention(RetentionPolicy.SOURCE)
+  public @interface PortAllocatorFlags {}
+
+  public static final int PORTALLOCATOR_ENABLE_ANY_ADDRESS_PORTS = 0x8000;
+
   /** Java version of PeerConnectionInterface.RTCConfiguration */
   // TODO(qingsi): Resolve the naming inconsistency of fields with/without units.
   public static class RTCConfiguration {
@@ -566,17 +578,9 @@ public class PeerConnection {
      * See: https://www.chromestatus.com/feature/6269234631933952
      */
     public boolean offerExtmapAllowMixed;
-    
-    /**
-     * When this flag is set, ports not bound to any specific network interface
-     * will be used, in addition to normal ports bound to the enumerated
-     * interfaces. Without this flag, these "any address" ports would only be
-     * used when network enumeration fails or is disabled. But under certain
-     * conditions, these ports may succeed where others fail, so they may allow
-     * the application to work in a wider variety of environments, at the expense
-     * of having to allocate additional candidates.
-     */
-    public boolean enableIceGatheringOnAnyAddressPorts;
+
+    /** Control port allocation, including what kinds of ports are allocated. */
+    @PortAllocatorFlags public int portAllocatorFlags;
 
     // TODO(deadbeef): Instead of duplicating the defaults here, we should do
     // something to pick up the defaults from C++. The Objective-C equivalent
@@ -619,7 +623,7 @@ public class PeerConnection {
       turnLoggingId = null;
       enableImplicitRollback = false;
       offerExtmapAllowMixed = true;
-      enableIceGatheringOnAnyAddressPorts = false;
+      portAllocatorFlags = 0;
     }
 
     @CalledByNative("RTCConfiguration")
@@ -830,8 +834,9 @@ public class PeerConnection {
     }
 
     @CalledByNative("RTCConfiguration")
-    boolean getEnableIceGatheringOnAnyAddressPorts() {
-      return enableIceGatheringOnAnyAddressPorts;
+    @PortAllocatorFlags
+    int getPortAllocatorFlags() {
+      return portAllocatorFlags;
     }
   };
 
