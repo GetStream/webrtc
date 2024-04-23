@@ -86,7 +86,7 @@ class VideoRtpReceiver : public RtpReceiverInternal,
   rtc::scoped_refptr<FrameDecryptorInterface> GetFrameDecryptor()
       const override;
 
-  void SetDepacketizerToDecoderFrameTransformer(
+  void SetFrameTransformer(
       rtc::scoped_refptr<FrameTransformerInterface> frame_transformer) override;
 
   // RtpReceiverInternal implementation.
