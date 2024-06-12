@@ -120,7 +120,7 @@ RtpEncodingParameters JavaToNativeRtpEncodingParameters(
   ScopedJavaLocalRef<jstring> j_scalability_mode =
       Java_Encoding_getScalabilityMode(jni, j_encoding_parameters);
   if (!IsNull(jni, j_scalability_mode)) {
-    encoding.scalability_mode = JavaToNativeString(jni, j_scalability_mode);
+    encoding.scalability_mode = JavaToNativeString(jni,j_scalability_mode);
   }
   encoding.adaptive_ptime =
       Java_Encoding_getAdaptivePTime(jni, j_encoding_parameters);

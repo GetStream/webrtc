@@ -3518,15 +3518,22 @@ void WebRtcVideoReceiveChannel::WebRtcVideoReceiveStream::SetReceiverParameters(
   }
 }
 
-void WebRtcVideoReceiveChannel::WebRtcVideoReceiveStream::StartStream(){
-  if (stream_) {
-    stream_->Start();
+void WebRtcVideoReceiveChannel::StartReceive(uint32_t ssrc) {
+  RTC_DCHECK_RUN_ON(&thread_checker_);
+  WebRtcVideoReceiveStream* stream = FindReceiveStream(ssrc);
+  if(!stream) {
+    return;
   }
+  stream->StartReceiveStream();
 }
-void WebRtcVideoReceiveChannel::WebRtcVideoReceiveStream::StopStream(){
-  if (stream_) {
-    stream_->Stop();
+
+void WebRtcVideoReceiveChannel::StopReceive(uint32_t ssrc) {
+  RTC_DCHECK_RUN_ON(&thread_checker_);
+  WebRtcVideoReceiveStream* stream = FindReceiveStream(ssrc);
+  if(!stream) {
+    return;
   }
+  stream->StopReceiveStream();
 }
 
 void WebRtcVideoReceiveChannel::WebRtcVideoReceiveStream::

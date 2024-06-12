@@ -14,6 +14,8 @@ import androidx.annotation.Nullable;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.Map;
+import java.util.List;
+import java.util.ArrayList;
 
 /**
  * Represent a video codec as encoded in SDP.
@@ -34,15 +36,16 @@ public class VideoCodecInfo {
 
   public final String name;
   public final Map<String, String> params;
-  public int[] scalabilityModes;
+  public final List<String> scalabilityModes;
+
   @Deprecated public final int payload;
 
   @CalledByNative
-  public VideoCodecInfo(String name, Map<String, String> params) {
+  public VideoCodecInfo(String name, Map<String, String> params, List<String> scalabilityModes) {
     this.payload = 0;
     this.name = name;
     this.params = params;
-    this.scalabilityModes = new int[0];
+    this.scalabilityModes = scalabilityModes;
   }
 
   @Deprecated
@@ -50,7 +53,7 @@ public class VideoCodecInfo {
     this.payload = payload;
     this.name = name;
     this.params = params;
-    this.scalabilityModes = new int[0];
+    this.scalabilityModes = new ArrayList<>();
   }
 
   @Override
@@ -88,14 +91,7 @@ public class VideoCodecInfo {
   }
 
   @CalledByNative
-  int[] getScalabilityModes() {
+  List<String> getScalabilityModes() {
     return scalabilityModes;
   }
-
-  @CalledByNative
-  void setScalabilityModes(int[] values) {
-    scalabilityModes = values;
-  }
-
-
 }
