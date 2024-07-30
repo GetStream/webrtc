@@ -1346,6 +1346,7 @@ if (rtc_include_tests) {
 
     deps = [
       ":frame_transformer_interface",
+      "../api/units:timestamp",
       "../test:test_support",
     ]
   }
