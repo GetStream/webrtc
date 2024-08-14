@@ -8,8 +8,8 @@ rtc_library("external_processor") {
    configs += [ "//build/config/android:hide_all_but_jni" ]
    defines = ["WEBRTC_ANDROID", "WEBRTC_POSIX",]
    sources = [
-      "krisp_processor.cc",
-      "krisp_processor_jni.cc",]
+      "external_processor.cc",
+      "external_processor_jni.cc",]
    lib_dirs = []
    deps = [":generated_external_jni",
            ":external_java",
@@ -17,19 +17,6 @@ rtc_library("external_processor") {
            "../../sdk/android:native_api_jni",
            "../../modules/audio_processing:audio_processing",
    ]
-   if (target_cpu == "arm64") {
-     lib_dirs += [ "lib/arm64",]
-   }
-   if (target_cpu == "x64") {
-     lib_dirs += [ "lib/x86_64",]
-   }
-   if (target_cpu == "arm") {
-     lib_dirs += [ "lib/arm",]
-   }
-   if (target_cpu == "x86") {
-     lib_dirs += [ "lib/x86",]
-   }
-   libs = [ "krisp-audio-sdk"]
 }
 
 rtc_android_library("external_java") {

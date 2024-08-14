@@ -12,12 +12,6 @@ class ExternalProcessor : public webrtc::CustomProcessing {
   ExternalProcessor& operator=(ExternalProcessor&&) = delete;
   ~ExternalProcessor();
 
-  static void ExternalGlobalDestroy();
-  static void ExternalGlobalInit(const char* weight);
-  static void ExternalGlobalInitBlob(const void* weightBlob,
-                                     unsigned int blobSize);
-  static void SetBypassFlag(bool enable);
-  static bool GetBypassFlag();
   static ExternalProcessor* getInstance() {
     if (m_instance == nullptr) {
       m_instance = new ExternalProcessor();
@@ -35,13 +29,6 @@ class ExternalProcessor : public webrtc::CustomProcessing {
  private:
   ExternalProcessor();
 
-  static bool m_bypass;
   static ExternalProcessor* m_instance;
-
-  void* m_session;
-  int m_sample_rate_hz;
-  int m_num_channels;
-  long m_last_time_stamp;
-  void createSession(int rate);
 };
 }  // namespace External
