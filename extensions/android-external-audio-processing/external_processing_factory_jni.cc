@@ -2,8 +2,8 @@
 
 #include <cstring>
 
-#include "extensions/android-external-audio-processing/generated_external_jni/ExternalAudioProcessingImpl_jni.h"
-#include "external_processor.hpp"
+#include "extensions/android-external-audio-processing/generated_external_jni/ExternalAudioProcessingFactory_jni.h"
+#include "external_processing.hpp"
 #include "rtc_base/checks.h"
 #include "rtc_base/ref_counted_object.h"
 #include "rtc_base/thread.h"
@@ -12,11 +12,11 @@
 
 namespace External {
 webrtc::AudioProcessing* apm_ptr;
-static jlong JNI_ExternalAudioProcessingImpl_ExternalGetApm(JNIEnv* env) {
-  std::unique_ptr<webrtc::CustomProcessing> external_processor(
-      ExternalProcessor::getInstance());
+static jlong JNI_ExternalAudioProcessingFactory_GetAudioProcessingModule(JNIEnv* env) {
+  std::unique_ptr<webrtc::CustomProcessing> external_processing(
+      ExternalProcessing::getInstance());
   auto apm = webrtc::AudioProcessingBuilder()
-                 .SetCapturePostProcessing(std::move(external_processor))
+                 .SetCapturePostProcessing(std::move(external_processing))
                  .Create();
   webrtc::AudioProcessing::Config config;
   config.echo_canceller.enabled = false;

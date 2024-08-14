@@ -4,17 +4,17 @@
 
 namespace External {
 
-class ExternalProcessor : public webrtc::CustomProcessing {
+class ExternalProcessing : public webrtc::CustomProcessing {
  public:
-  ExternalProcessor(const ExternalProcessor&) = delete;
-  ExternalProcessor(ExternalProcessor&&) = delete;
-  ExternalProcessor& operator=(const ExternalProcessor&) = delete;
-  ExternalProcessor& operator=(ExternalProcessor&&) = delete;
-  ~ExternalProcessor();
+  ExternalProcessing(const ExternalProcessing&) = delete;
+  ExternalProcessing(ExternalProcessing&&) = delete;
+  ExternalProcessing& operator=(const ExternalProcessing&) = delete;
+  ExternalProcessing& operator=(ExternalProcessing&&) = delete;
+  ~ExternalProcessing();
 
-  static ExternalProcessor* getInstance() {
+  static ExternalProcessing* getInstance() {
     if (m_instance == nullptr) {
-      m_instance = new ExternalProcessor();
+      m_instance = new ExternalProcessing();
     }
     return m_instance;
   }
@@ -27,8 +27,8 @@ class ExternalProcessor : public webrtc::CustomProcessing {
       webrtc::AudioProcessing::RuntimeSetting setting) override;
 
  private:
-  ExternalProcessor();
+  ExternalProcessing();
 
-  static ExternalProcessor* m_instance;
+  static ExternalProcessing* m_instance;
 };
 }  // namespace External

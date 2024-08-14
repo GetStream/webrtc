@@ -140,7 +140,7 @@ if (is_android) {
       ":video_egl_jni",
       "../../pc:libjingle_peerconnection",
       "../../rtc_base:ssl",
-      "../../extensions/android-external-audio-processing:external_processor",
+      "../../extensions/android-external-audio-processing:external_processing",
     ]
     output_extension = "so"
   }
