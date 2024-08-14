@@ -26,43 +26,4 @@ static jlong JNI_ExternalAudioProcessingImpl_ExternalGetApm(JNIEnv* env) {
   return webrtc::jni::jlongFromPointer(apm_ptr);
 }
 
-static void JNI_ExternalAudioProcessingImpl_ExternalDisable(JNIEnv* env,
-                                                            jboolean disable) {
-  ExternalProcessor::SetBypassFlag(disable);
-}
-
-static jboolean JNI_ExternalAudioProcessingImpl_IsExternalDisabled(
-    JNIEnv* env) {
-  return ExternalProcessor::GetBypassFlag();
-}
-
-static void JNI_ExternalAudioProcessingImpl_ExternalInit(
-    JNIEnv* env,
-    const webrtc::JavaParamRef<jstring>& model) {
-  jstring modelName = model.obj();
-  const char* ch_name = env->GetStringUTFChars(modelName, nullptr);
-  ExternalProcessor::ExternalGlobalInit(ch_name);
-  env->ReleaseStringUTFChars(modelName, ch_name);
-}
-
-static void JNI_ExternalAudioProcessingImpl_ExternalInitBlob(
-    JNIEnv* env,
-    const webrtc::JavaParamRef<jbyteArray>& data) {
-  jbyteArray jdata = data.obj();
-  jsize size = env->GetArrayLength(jdata);
-
-  jbyte* elements = env->GetByteArrayElements(jdata, nullptr);
-  unsigned int csize = static_cast<unsigned int>(size);
-  char* charArray = new char[csize];
-  std::memcpy(charArray, elements, csize);
-
-  ExternalProcessor::ExternalGlobalInitBlob(charArray, csize);
-
-  env->ReleaseByteArrayElements(jdata, elements, JNI_ABORT);
-  delete[] charArray;
-}
-static void JNI_ExternalAudioProcessingImpl_ExternalDestroy(JNIEnv* env) {
-  delete apm_ptr;
-}
-
 }  // end of namespace External
