@@ -1,14 +1,15 @@
 package org.webrtc;
 
-import androidx.annotation.NonNull;
 import org.webrtc.AudioProcessingFactory;
 
 public final class ExternalAudioProcessingFactory implements AudioProcessingFactory {
 
-  @NonNull
   private final ExternalAudioProcessorFactory externalProcessorFactory;
 
-  private final ExternalAudioProcessingFactory(@NonNull ExternalAudioProcessorFactory externalProcessorFactory) {
+  private final ExternalAudioProcessingFactory(ExternalAudioProcessorFactory externalProcessorFactory) {
+    if (externalProcessorFactory == null) {
+      throw new NullPointerException("externalProcessorFactory must not be null.");
+    }
     this.externalProcessorFactory = externalProcessorFactory;
   }
 	
