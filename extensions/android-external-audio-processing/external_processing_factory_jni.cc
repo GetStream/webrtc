@@ -15,7 +15,7 @@ namespace external {
 webrtc::AudioProcessing* apm_ptr;
 static jlong JNI_ExternalAudioProcessingFactory_GetAudioProcessingModule(
     JNIEnv* env,
-    jlong native_external_processor,
+    jlong native_external_processor
 ) {
 
   // Cast the jlong to ExternalProcessor*
