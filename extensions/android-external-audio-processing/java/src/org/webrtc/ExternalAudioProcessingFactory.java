@@ -4,7 +4,14 @@ import org.webrtc.AudioProcessingFactory;
 
 public final class ExternalAudioProcessingFactory implements AudioProcessingFactory {
 
-  private final ExternalAudioProcessorFactory externalProcessorFactory;
+  @Override
+  public long createNative() {
+    return nativeGetAudioProcessingModule();
+  }
+
+  private static native long nativeGetAudioProcessingModule();
+
+  /* private final ExternalAudioProcessorFactory externalProcessorFactory;
 
   private ExternalAudioProcessingFactory(ExternalAudioProcessorFactory externalProcessorFactory) {
     if (externalProcessorFactory == null) {
@@ -46,7 +53,7 @@ public final class ExternalAudioProcessingFactory implements AudioProcessingFact
       }
       return new ExternalAudioProcessingFactory(externalProcessorFactory);
     }
-  }
+  } */
 }
 
 
