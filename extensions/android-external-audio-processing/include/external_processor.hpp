@@ -1,3 +1,5 @@
+#include <cstdint>
+
 namespace external {
 
 // interface for external processor

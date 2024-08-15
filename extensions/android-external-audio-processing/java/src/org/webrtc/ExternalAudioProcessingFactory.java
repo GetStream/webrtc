@@ -6,7 +6,7 @@ public final class ExternalAudioProcessingFactory implements AudioProcessingFact
 
   private final ExternalAudioProcessorFactory externalProcessorFactory;
 
-  private final ExternalAudioProcessingFactory(ExternalAudioProcessorFactory externalProcessorFactory) {
+  private ExternalAudioProcessingFactory(ExternalAudioProcessorFactory externalProcessorFactory) {
     if (externalProcessorFactory == null) {
       throw new NullPointerException("externalProcessorFactory must not be null.");
     }
