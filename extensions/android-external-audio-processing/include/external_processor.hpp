@@ -1,3 +1,6 @@
+#ifndef EXTERNAL_PROCESSOR_HPP
+#define EXTERNAL_PROCESSOR_HPP
+
 #include <cstdint>
 
 namespace external {
@@ -17,3 +20,5 @@ class ExternalProcessor {
   virtual ~ExternalProcessor() {}
 };
 }  // namespace external
+
+#endif  // EXTERNAL_PROCESSOR_HPP

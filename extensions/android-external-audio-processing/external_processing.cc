@@ -2,8 +2,6 @@
 
 #include <syslog.h>
 
-#include "include/external_processor.hpp"
-#include "rtc_base/logging.h"
 #include "rtc_base/time_utils.h"
 
 namespace external {
@@ -39,7 +37,8 @@ void ExternalProcessing::Process(webrtc::AudioBuffer* audio) {
     ::syslog(LOG_INFO, "EXTERNAL-CIT: external_processor is null");
     return;
   }
-  external_processor->ProcessFrame(channels, num_frames, num_bands, num_channels);
+  external_processor->ProcessFrame(channels, num_frames, num_bands,
+                                   num_channels);
 }
 
 std::string ExternalProcessing::ToString() const {

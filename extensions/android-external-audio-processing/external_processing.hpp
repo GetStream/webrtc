@@ -1,3 +1,6 @@
+#ifndef EXTERNAL_PROCESSING_HPP
+#define EXTERNAL_PROCESSING_HPP
+
 #include "include/external_processor.hpp"
 #include "modules/audio_processing/audio_buffer.h"
 #include "modules/audio_processing/audio_processing_impl.h"
@@ -34,3 +37,5 @@ class ExternalProcessing : public webrtc::CustomProcessing {
   static ExternalProcessing* m_instance;
 };
 }  // namespace external
+
+#endif  // EXTERNAL_PROCESSING_HPP
