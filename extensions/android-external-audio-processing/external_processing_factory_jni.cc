@@ -10,7 +10,7 @@
 #include "rtc_base/time_utils.h"
 #include "sdk/android/src/jni/jni_helpers.h"
 
-namespace External {
+namespace external {
 webrtc::AudioProcessing* apm_ptr;
 static jlong JNI_ExternalAudioProcessingFactory_GetAudioProcessingModule(
     JNIEnv* env,
@@ -34,4 +34,4 @@ static jlong JNI_ExternalAudioProcessingFactory_GetAudioProcessingModule(
   return webrtc::jni::jlongFromPointer(apm_ptr);
 }
 
-}  // end of namespace External
+}  // end of namespace external

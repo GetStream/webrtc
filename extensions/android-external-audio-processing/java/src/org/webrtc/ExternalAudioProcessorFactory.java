@@ -4,7 +4,7 @@ import org.webrtc.AudioProcessingFactory;
 
 public interface ExternalAudioProcessorFactory {
 
-  public long createNative()
+  public long createNative();
 
 }
 

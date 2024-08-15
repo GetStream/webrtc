@@ -6,7 +6,7 @@
 #include "rtc_base/logging.h"
 #include "rtc_base/time_utils.h"
 
-namespace External {
+namespace external {
 
 ExternalProcessing* ExternalProcessing::m_instance = nullptr;
 
@@ -51,4 +51,4 @@ void ExternalProcessing::SetRuntimeSetting(
   ::syslog(LOG_INFO, "EXTERNAL-CIT: ExternalProcessing SetRuntimeSetting");
 }
 
-}  // end of namespace External
+}  // end of namespace external

@@ -3,7 +3,7 @@
 #include "modules/audio_processing/audio_processing_impl.h"
 #include "modules/audio_processing/include/audio_processing.h"
 
-namespace External {
+namespace external {
 
 class ExternalProcessing : public webrtc::CustomProcessing {
  public:
@@ -33,4 +33,4 @@ class ExternalProcessing : public webrtc::CustomProcessing {
 
   static ExternalProcessing* m_instance;
 };
-}  // namespace External
+}  // namespace external

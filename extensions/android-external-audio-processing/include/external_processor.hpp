@@ -1,4 +1,4 @@
-namespace External {
+namespace external {
 
 // interface for external processor
 class ExternalProcessor {
@@ -14,4 +14,4 @@ class ExternalProcessor {
 
   virtual ~ExternalProcessor() {}
 };
-}  // namespace External
+}  // namespace external
