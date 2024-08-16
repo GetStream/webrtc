@@ -2,11 +2,13 @@ package org.webrtc;
 
 import org.webrtc.AudioProcessingFactory;
 
-public final class ExternalAudioProcessingFactory implements AudioProcessingFactory {
+public class ExternalAudioProcessingFactory implements AudioProcessingFactory {
+
+  private ExternalAudioProcessorFactory delegate;
 
   @Override
   public long createNative() {
-    return nativeGetAudioProcessingModule(0L);
+    return nativeGetAudioProcessingModule(delegate.createNative());
   }
 
   private static native long nativeGetAudioProcessingModule(long processor);
