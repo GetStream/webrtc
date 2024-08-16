@@ -1,6 +1,8 @@
 #include <syslog.h>
 
 #include <cstring>
+#include <exception>
+#include <typeinfo>
 
 #include "external_processing.hpp"
 #include "extensions/android-external-audio-processing/generated_external_jni/ExternalAudioProcessingFactory_jni.h"
@@ -23,6 +25,22 @@ static jlong JNI_ExternalAudioProcessingFactory_GetAudioProcessingModule(
   ExternalProcessor* external_processor = reinterpret_cast<ExternalProcessor*>(processor);
 
   ::syslog(LOG_INFO, "EXTERNAL-JNI: #GetAudioProcessingModule; external_processor: %p", (void*)external_processor);
+
+  if (external_processor == nullptr) {
+    ::syslog(LOG_ERR, "EXTERNAL-JNI: #GetAudioProcessingModule; ExternalProcessor is null!");
+    return 0;
+  }
+
+  ::syslog(LOG_INFO, "EXTERNAL-JNI: #GetAudioProcessingModule; The class name of external_processor is: %s", typeid(*external_processor).name());
+
+  ::syslog(LOG_INFO, "EXTERNAL-JNI: #GetAudioProcessingModule; Size of ExternalProcessor: %zu", sizeof(*external_processor));
+
+  if (reinterpret_cast<uintptr_t>(external_processor) % alignof(external::ExternalProcessor) != 0) {
+    ::syslog(LOG_ERR, "EXTERNAL-JNI: #GetAudioProcessingModule; Misaligned external_processor pointer!");
+  }
+
+  void* vtable = *(void**)external_processor;
+  ::syslog(LOG_INFO, "EXTERNAL-JNI: #GetAudioProcessingModule; external_processor vtable address: %p", vtable);
 
   external_processor->Init(28256, 31);
 
