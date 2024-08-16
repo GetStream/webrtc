@@ -24,6 +24,10 @@ static jlong JNI_ExternalAudioProcessingFactory_GetAudioProcessingModule(
 
   ::syslog(LOG_INFO, "EXTERNAL-JNI: #GetAudioProcessingModule; external_processor: %p", (void*)external_processor);
 
+  external_processor->Init(28256, 31);
+
+  ::syslog(LOG_INFO, "EXTERNAL-JNI: #GetAudioProcessingModule; external_processor->Init was called");
+
   std::unique_ptr<webrtc::CustomProcessing> external_processing(
       ExternalProcessing::getInstance(external_processor));
   auto apm = webrtc::AudioProcessingBuilder()
