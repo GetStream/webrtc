@@ -19,8 +19,7 @@ ExternalProcessing::~ExternalProcessing() {
 
 void ExternalProcessing::Initialize(int sample_rate_hz, int num_channels) {
   ::syslog(LOG_INFO,
-           "EXTERNAL-CIT: ExternalProcessing #Init; sample_rate_hz: %i\
-             num_channels: %i",
+           "EXTERNAL-CIT: ExternalProcessing #Init; sample_rate_hz: %i, num_channels: %i",
            sample_rate_hz, num_channels);
   if (external_processor == nullptr) {
     ::syslog(LOG_INFO, "EXTERNAL-CIT: ExternalProcessing #Init; external_processor is null");

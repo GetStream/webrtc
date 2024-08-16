@@ -17,12 +17,12 @@ static jlong JNI_ExternalAudioProcessingFactory_GetAudioProcessingModule(
     jlong processor
 ) {
 
-  ::syslog(LOG_INFO, "EXTERNAL-JNI: #GetAudioProcessingModule; processor: %p", processor);
+  ::syslog(LOG_INFO, "EXTERNAL-JNI: #GetAudioProcessingModule; processor: %ld", static_cast<long>(processor));
 
   // Cast the jlong to ExternalProcessor*
   ExternalProcessor* external_processor = reinterpret_cast<ExternalProcessor*>(processor);
 
-  ::syslog(LOG_INFO, "EXTERNAL-JNI: #GetAudioProcessingModule; external_processor: %p", external_processor);
+  ::syslog(LOG_INFO, "EXTERNAL-JNI: #GetAudioProcessingModule; external_processor: %p", (void*)external_processor);
 
   std::unique_ptr<webrtc::CustomProcessing> external_processing(
       ExternalProcessing::getInstance(external_processor));
