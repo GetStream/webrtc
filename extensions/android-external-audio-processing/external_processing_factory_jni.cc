@@ -2,7 +2,6 @@
 
 #include <cstring>
 #include <exception>
-#include <typeinfo>
 
 #include "external_processing.hpp"
 #include "extensions/android-external-audio-processing/generated_external_jni/ExternalAudioProcessingFactory_jni.h"
@@ -31,7 +30,7 @@ static jlong JNI_ExternalAudioProcessingFactory_GetAudioProcessingModule(
     return 0;
   }
 
-  ::syslog(LOG_INFO, "EXTERNAL-JNI: #GetAudioProcessingModule; The class name of external_processor is: %s", typeid(*external_processor).name());
+  //::syslog(LOG_INFO, "EXTERNAL-JNI: #GetAudioProcessingModule; The class name of external_processor is: %s", typeid(*external_processor).name());
 
   ::syslog(LOG_INFO, "EXTERNAL-JNI: #GetAudioProcessingModule; Size of ExternalProcessor: %zu", sizeof(*external_processor));
 
