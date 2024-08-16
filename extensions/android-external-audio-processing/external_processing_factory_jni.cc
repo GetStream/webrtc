@@ -17,7 +17,7 @@ static jlong JNI_ExternalAudioProcessingFactory_GetAudioProcessingModule(
     jlong processor
 ) {
 
-  ::syslog(LOG_INFO, "EXTERNAL-JNI: #GetAudioProcessingModule; processor: %ld", processor);
+  ::syslog(LOG_INFO, "EXTERNAL-JNI: #GetAudioProcessingModule; processor: %lld", processor);
 
   // Cast the jlong to ExternalProcessor*
   ExternalProcessor* external_processor = reinterpret_cast<ExternalProcessor*>(processor);
