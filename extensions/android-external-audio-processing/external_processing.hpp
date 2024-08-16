@@ -1,6 +1,8 @@
 #ifndef EXTERNAL_PROCESSING_HPP
 #define EXTERNAL_PROCESSING_HPP
 
+#include <syslog.h>
+
 #include "include/external_processor.hpp"
 #include "modules/audio_processing/audio_buffer.h"
 #include "modules/audio_processing/audio_processing_impl.h"
