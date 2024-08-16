@@ -15,7 +15,9 @@ public class ExternalAudioProcessingFactory implements AudioProcessingFactory {
 
   @Override
   public long createNative() {
-    return nativeGetAudioProcessingModule(delegate.createNative());
+    long processorPtr = delegate.createNative();
+    System.out.println("[ExternalAudioProcessingFactory.createNative] processorPtr: " + processorPtr);
+    return nativeGetAudioProcessingModule(processorPtr);
   }
 
   private static native long nativeGetAudioProcessingModule(long processor);
