@@ -4,7 +4,7 @@ import org.webrtc.AudioProcessingFactory;
 
 public class ExternalAudioProcessingFactory implements AudioProcessingFactory {
 
-  private ExternalAudioProcessorFactory delegate;
+  private final ExternalAudioProcessorFactory delegate;
 
   public ExternalAudioProcessingFactory(ExternalAudioProcessorFactory delegate) {
     if (delegate == null) {
