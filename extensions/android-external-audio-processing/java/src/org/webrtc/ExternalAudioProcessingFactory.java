@@ -6,10 +6,10 @@ public final class ExternalAudioProcessingFactory implements AudioProcessingFact
 
   @Override
   public long createNative() {
-    return nativeGetAudioProcessingModule();
+    return nativeGetAudioProcessingModule(0L);
   }
 
-  private static native long nativeGetAudioProcessingModule();
+  private static native long nativeGetAudioProcessingModule(long processor);
 
   /* private final ExternalAudioProcessorFactory externalProcessorFactory;
 
