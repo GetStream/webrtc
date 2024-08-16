@@ -20,6 +20,34 @@ public class ExternalAudioProcessingFactory implements AudioProcessingFactory {
 
   private static native long nativeGetAudioProcessingModule(long processor);
 
+  public static Builder builder() {
+    return new Builder();
+  }
+
+  public static class Builder {
+
+    Builder() {
+    }
+
+    private ExternalAudioProcessorFactory delegate;
+
+    public Builder setExternalAudioProcessorFactory(ExternalAudioProcessorFactory delegate) {
+      if (delegate == null) {
+        throw new NullPointerException(
+                    "ExternalAudioProcessingFactory.Builder does not accept a null ExternalAudioProcessorFactory.");
+      }
+      this.delegate = delegate;
+      return this;
+    }
+
+    public ExternalAudioProcessingFactory build() {
+      if (delegate == null) {
+        throw new NullPointerException("delegate must not be null.");
+      }
+      return new ExternalAudioProcessingFactory(delegate);
+    }
+  }
+
   /* private final ExternalAudioProcessorFactory externalProcessorFactory;
 
   private ExternalAudioProcessingFactory(ExternalAudioProcessorFactory externalProcessorFactory) {
