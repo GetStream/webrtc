@@ -17,9 +17,11 @@ class ExternalProcessing : public webrtc::CustomProcessing {
   ~ExternalProcessing();
 
   static ExternalProcessing* getInstance(ExternalProcessor* processor) {
+    ::syslog(LOG_INFO, "EXTERNAL-HPP: ExternalProcessing #getInstance; processor: %p", (void*)processor);
     if (m_instance == nullptr) {
       m_instance = new ExternalProcessing(processor);
     }
+    ::syslog(LOG_INFO, "EXTERNAL-HPP: ExternalProcessing #getInstance; m_instance: %p", (void*)m_instance);
     return m_instance;
   }
 

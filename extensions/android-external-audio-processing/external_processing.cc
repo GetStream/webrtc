@@ -10,7 +10,7 @@ ExternalProcessing* ExternalProcessing::m_instance = nullptr;
 
 ExternalProcessing::ExternalProcessing(ExternalProcessor* processor)
     : external_processor(processor) {
-  ::syslog(LOG_INFO, "EXTERNAL-CIT: ExternalProcessing #Constructor;");
+  ::syslog(LOG_INFO, "EXTERNAL-CIT: ExternalProcessing #Constructor; external_processor: %p", (void*)processor);
 }
 
 ExternalProcessing::~ExternalProcessing() {
@@ -25,6 +25,7 @@ void ExternalProcessing::Initialize(int sample_rate_hz, int num_channels) {
     ::syslog(LOG_INFO, "EXTERNAL-CIT: ExternalProcessing #Init; external_processor is null");
     return;
   }
+  ::syslog(LOG_INFO, "EXTERNAL-CIT: ExternalProcessing #Init; external_processor: %p", (void*)processor);
   external_processor->Init(sample_rate_hz, num_channels);
 }
 
@@ -38,6 +39,7 @@ void ExternalProcessing::Process(webrtc::AudioBuffer* audio) {
     ::syslog(LOG_INFO, "EXTERNAL-CIT: ExternalProcessing #Process; external_processor is null");
     return;
   }
+  ::syslog(LOG_INFO, "EXTERNAL-CIT: ExternalProcessing #Process; external_processor: %p", (void*)processor);
   external_processor->ProcessFrame(channels, num_frames, num_bands,
                                    num_channels);
 }
