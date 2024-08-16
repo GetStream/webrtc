@@ -6,6 +6,13 @@ public class ExternalAudioProcessingFactory implements AudioProcessingFactory {
 
   private ExternalAudioProcessorFactory delegate;
 
+  public ExternalAudioProcessingFactory(ExternalAudioProcessorFactory delegate) {
+    if (delegate == null) {
+      throw new NullPointerException("delegate must not be null.");
+    }
+    this.delegate = delegate;
+  }
+
   @Override
   public long createNative() {
     return nativeGetAudioProcessingModule(delegate.createNative());
