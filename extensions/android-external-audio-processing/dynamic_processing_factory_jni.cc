@@ -1,7 +1,6 @@
 #include <syslog.h>
 
 #include <cstring>
-#include <exception>
 
 #include "dynamic_processing.hpp"
 #include "extensions/android-external-audio-processing/generated_external_jni/DynamicAudioProcessingFactory_jni.h"
@@ -13,7 +12,7 @@
 
 namespace external {
 webrtc::AudioProcessing* apm_ptr;
-static jlong JNI_DynamicAudioProcessingFactory_GetInstance(
+static jlong JNI_DynamicAudioProcessingFactory_GetApm(
     JNIEnv* env,
     jstring libname
 ) {
