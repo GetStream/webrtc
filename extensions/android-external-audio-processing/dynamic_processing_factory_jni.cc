@@ -13,11 +13,11 @@
 namespace external {
 webrtc::AudioProcessing* apm_ptr;
 static jlong JNI_DynamicAudioProcessingFactory_GetApm(
-    JNIEnv* env,
-    jstring libname
+    JNIEnv* env
 ) {
 
-  auto libname_cstr = env->GetStringUTFChars(libname, nullptr);
+//  auto libname_cstr = env->GetStringUTFChars(libname, nullptr);
+  auto libname_cstr = "libdynamic_audio_lib.so";
 
   ::syslog(LOG_INFO, "EXTERNAL-JNI: #GetInstance; libname: %s", libname_cstr);
 

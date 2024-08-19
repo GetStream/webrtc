@@ -72,10 +72,10 @@ void DynamicProcessing::Initialize(int sample_rate_hz, int num_channels) {
 
   int result = InitFunc(sample_rate_hz, num_channels);
   if (result != 0) {
-    ::syslog(LOG_ERR, "KrispLib: #Load; Failed to initialize Krisp globals");
+    ::syslog(LOG_ERR, "EXTERNAL-CIT: #Initialize; Failed to initialize Dynamic globals");
     return;
   }
-  ::syslog(LOG_INFO, "EXTERNAL-CIT: #Initialize; Krisp globals initialized successfully");
+  ::syslog(LOG_INFO, "EXTERNAL-CIT: #Initialize; Dynamic globals initialized successfully");
 }
 
 void DynamicProcessing::Process(webrtc::AudioBuffer* audio) {
