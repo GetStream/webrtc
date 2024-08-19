@@ -11,7 +11,7 @@
 #include "sdk/android/src/jni/jni_helpers.h"
 
 namespace external {
-webrtc::AudioProcessing* apm_ptr;
+webrtc::AudioProcessing* dynamic_apm_ptr;
 static jlong JNI_DynamicAudioProcessingFactory_GetApm(
     JNIEnv* env,
     const webrtc::JavaParamRef<jstring>& libname
@@ -37,8 +37,8 @@ static jlong JNI_DynamicAudioProcessingFactory_GetApm(
   config.echo_canceller.enabled = false;
   config.echo_canceller.mobile_mode = true;
   apm->ApplyConfig(config);
-  apm_ptr = apm.release();
-  return webrtc::jni::jlongFromPointer(apm_ptr);
+  dynamic_apm_ptr = apm.release();
+  return webrtc::jni::jlongFromPointer(dynamic_apm_ptr);
 }
 
 }  // end of namespace external
