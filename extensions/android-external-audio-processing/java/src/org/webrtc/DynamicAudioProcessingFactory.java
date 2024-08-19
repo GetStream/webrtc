@@ -21,7 +21,7 @@ public class DynamicAudioProcessingFactory implements AudioProcessingFactory {
     return nativeGetInstance(libname);
   }
 
-  private static native long nativeGetInstance();
+  private static native long nativeGetInstance(String libname);
 
 }
 
