@@ -26,7 +26,7 @@ void DynamicProcessing::Initialize(int sample_rate_hz, int num_channels) {
 
 
   dlerror();
-  auto libPath = env->GetStringUTFChars(libname_cstr, nullptr);
+  auto libPath = libname_cstr;
   ::syslog(LOG_INFO, "EXTERNAL-CIT: #Initialize; libPath: %s", libPath);
   void *_dllHandle = dlopen(libPath, RTLD_LAZY);
   if (!_dllHandle) {
