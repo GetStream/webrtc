@@ -18,7 +18,7 @@ static jlong JNI_DynamicAudioProcessingFactory_GetApm(
 ) {
 
   if (libname.is_null()) {
-    ::syslog(LOG_ERR, "EXTERNAL-JNI: #GetApm; libname is null")
+    ::syslog(LOG_ERR, "EXTERNAL-JNI: #GetApm; libname is null");
     return 0;
   }
 
@@ -26,7 +26,7 @@ static jlong JNI_DynamicAudioProcessingFactory_GetApm(
 
   ::syslog(LOG_INFO, "EXTERNAL-JNI: #GetApm; libname: %s", libname_cstr);
 
-  //env->ReleaseStringUTFChars(libname.obj(), init_string);
+  // TODO env->ReleaseStringUTFChars(libname.obj(), init_string);
 
   std::unique_ptr<webrtc::CustomProcessing> dynamic_processing(
       DynamicProcessing::getInstance(libname_cstr));
