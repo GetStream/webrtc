@@ -8,9 +8,13 @@ rtc_library("external_processing") {
     configs += [ "//build/config/android:hide_all_but_jni" ]
     defines = ["WEBRTC_ANDROID", "WEBRTC_POSIX",]
     sources = [
+        "include/external_processor.hpp",
+        "external_processing.hpp",
         "external_processing.cc",
         "external_processing_factory_jni.cc",
-        "include/external_processor.hpp",
+        "dynamic_processing.hpp",
+        "dynamic_processing.cc",
+        "dynamic_processing_factory_jni.cc",
     ]
     lib_dirs = []
     deps = [
@@ -25,6 +29,7 @@ rtc_library("external_processing") {
 rtc_android_library("external_java") {
     visibility = [ "*" ]
     sources = [
+        "java/src/org/webrtc/DynamicAudioProcessingFactory.java",
         "java/src/org/webrtc/ExternalAudioProcessingFactory.java",
         "java/src/org/webrtc/ExternalAudioProcessorFactory.java",
     ]
@@ -33,6 +38,7 @@ rtc_android_library("external_java") {
 
 generate_jni("generated_external_jni") {
     sources = [
+        "java/src/org/webrtc/DynamicAudioProcessingFactory.java",
         "java/src/org/webrtc/ExternalAudioProcessingFactory.java",
     ]
     namespace = "external"
