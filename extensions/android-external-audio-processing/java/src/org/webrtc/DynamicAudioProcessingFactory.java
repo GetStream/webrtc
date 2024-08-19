@@ -18,10 +18,10 @@ public class DynamicAudioProcessingFactory implements AudioProcessingFactory {
 
   @Override
   public long createNative() {
-    return nativeGetApm();
+    return nativeGetApm(libname);
   }
 
-  private static native long nativeGetApm();
+  private static native long nativeGetApm(String libname);
 
 }
 

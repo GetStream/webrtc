@@ -80,10 +80,10 @@ void DynamicProcessing::Initialize(int sample_rate_hz, int num_channels) {
 
 void DynamicProcessing::Process(webrtc::AudioBuffer* audio) {
   ::syslog(LOG_INFO, "EXTERNAL-CIT: DynamicProcessing #Process;");
-  float* const* channels = audio->channels();
+  /*float* const* channels = audio->channels();
   size_t num_frames = audio->num_frames();
   size_t num_bands = audio->num_bands();
-  size_t num_channels = audio->num_channels();
+  size_t num_channels = audio->num_channels();*/
 }
 
 std::string DynamicProcessing::ToString() const {
