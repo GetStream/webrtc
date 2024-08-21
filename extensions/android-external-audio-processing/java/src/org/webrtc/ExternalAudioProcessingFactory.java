@@ -28,7 +28,7 @@ public class ExternalAudioProcessingFactory implements AudioProcessingFactory {
   private static native long nativeCreateAudioProcessingModule(String libname);
 
 
-  private static native long nativeDestroyAudioProcessingModule();
+  private static native void nativeDestroyAudioProcessingModule();
 
 }
 

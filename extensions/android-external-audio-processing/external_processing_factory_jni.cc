@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include "extensions/android-external-audio-processing/generated_external_jni/ExternalAudioProcessingFactory_jni.h"
+#include "external_processor_loader.hpp"
 #include "external_processing.hpp"
 #include "rtc_base/checks.h"
 #include "rtc_base/ref_counted_object.h"
@@ -23,6 +24,8 @@ static jlong JNI_ExternalAudioProcessingFactory_CreateAudioProcessingModule(
   }
 
   const char* libname_cstr = env->GetStringUTFChars(libname.obj(), nullptr);
+
+  loadExternalProcessor(libname_cstr);
 
   ::syslog(LOG_INFO, "EXTERNAL-JNI: #GetApm; libname: %s", libname_cstr);
 
