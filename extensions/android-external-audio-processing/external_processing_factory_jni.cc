@@ -3,7 +3,6 @@
 #include <cstring>
 
 #include "extensions/android-external-audio-processing/generated_external_jni/ExternalAudioProcessingFactory_jni.h"
-#include "external_processor_loader.hpp"
 #include "external_processing.hpp"
 #include "rtc_base/checks.h"
 #include "rtc_base/ref_counted_object.h"
