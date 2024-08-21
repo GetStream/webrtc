@@ -29,7 +29,7 @@ static jlong JNI_ExternalAudioProcessingFactory_CreateAudioProcessingModule(
   ::syslog(LOG_INFO, "EXTERNAL-JNI: #GetApm; libname: %s", libname);
 
   auto instance = ExternalProcessing::getInstance();
-  if (!instance->Load(libname)) {
+  if (!instance->Create(libname)) {
     ::syslog(LOG_ERR, "EXTERNAL-JNI: #GetApm; Failed to load external processor");
     env->ReleaseStringUTFChars(libnameRef.obj(), libname);
     return 0;
