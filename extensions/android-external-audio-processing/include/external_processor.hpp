@@ -8,6 +8,10 @@ namespace external {
 // interface for external processor
 class ExternalProcessor {
  public:
+  // Creates all necessary resources for the processor.
+  virtual bool Create() = 0;
+  // Destroys the processor.
+  virtual bool Destroy() = 0;
   // Initializes the processor with a specific sample rate and number of
   // channels.
   virtual int Init(int sample_rate_hz, int num_channels) = 0;

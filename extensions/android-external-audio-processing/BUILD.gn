@@ -9,8 +9,6 @@ rtc_library("external_processing") {
     defines = ["WEBRTC_ANDROID", "WEBRTC_POSIX",]
     sources = [
         "include/external_processor.hpp",
-        "external_processor_loader.hpp",
-        "external_processor_loader.cc",
         "external_processing.hpp",
         "external_processing.cc",
         "external_processing_factory_jni.cc",

@@ -12,27 +12,33 @@
 #include "sdk/android/src/jni/jni_helpers.h"
 
 namespace external {
-webrtc::AudioProcessing* apm_ptr;
+
+webrtc::AudioProcessing* apm_ptr = nullptr;
+
 static jlong JNI_ExternalAudioProcessingFactory_CreateAudioProcessingModule(
     JNIEnv* env,
-    const webrtc::JavaParamRef<jstring>& libname
+    const webrtc::JavaParamRef<jstring>& libnameRef
 ) {
 
-  if (libname.is_null()) {
+  if (libnameRef.is_null()) {
     ::syslog(LOG_ERR, "EXTERNAL-JNI: #GetApm; libname is null");
     return 0;
   }
 
-  const char* libname_cstr = env->GetStringUTFChars(libname.obj(), nullptr);
+  const char* libname = env->GetStringUTFChars(libnameRef.obj(), nullptr);
 
-  loadExternalProcessor(libname_cstr);
+  ::syslog(LOG_INFO, "EXTERNAL-JNI: #GetApm; libname: %s", libname);
 
-  ::syslog(LOG_INFO, "EXTERNAL-JNI: #GetApm; libname: %s", libname_cstr);
+  auto instance = ExternalProcessing::getInstance();
+  if (!instance->Load(libname)) {
+    ::syslog(LOG_ERR, "EXTERNAL-JNI: #GetApm; Failed to load external processor");
+    env->ReleaseStringUTFChars(libnameRef.obj(), libname);
+    return 0;
+  }
 
-  // TODO env->ReleaseStringUTFChars(libname.obj(), init_string);
+  env->ReleaseStringUTFChars(libnameRef.obj(), libname);
 
-  std::unique_ptr<webrtc::CustomProcessing> external_processing(
-      ExternalProcessing::getInstance(libname_cstr));
+  std::unique_ptr<webrtc::CustomProcessing> external_processing(instance);
   auto apm = webrtc::AudioProcessingBuilder()
                  .SetCapturePostProcessing(std::move(external_processing))
                  .Create();
@@ -47,7 +53,9 @@ static jlong JNI_ExternalAudioProcessingFactory_CreateAudioProcessingModule(
 static void JNI_ExternalAudioProcessingFactory_DestroyAudioProcessingModule(
     JNIEnv* env
 ) {
+  ExternalProcessing::getInstance()->Destroy();
   delete apm_ptr;
+  apm_ptr = nullptr;
 }
 
 }  // end of namespace external
