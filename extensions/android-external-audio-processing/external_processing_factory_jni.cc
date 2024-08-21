@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-#include "extensions/android-external-audio-processing/generated_external_jni/DynamicAudioProcessingFactory_jni.h"
+#include "extensions/android-external-audio-processing/generated_external_jni/ExternalAudioProcessingFactory_jni.h"
 #include "external_processing.hpp"
 #include "rtc_base/checks.h"
 #include "rtc_base/ref_counted_object.h"
@@ -29,7 +29,7 @@ static jlong JNI_ExternalAudioProcessingFactory_CreateAudioProcessingModule(
   // TODO env->ReleaseStringUTFChars(libname.obj(), init_string);
 
   std::unique_ptr<webrtc::CustomProcessing> external_processing(
-      DynamicProcessing::getInstance(libname_cstr));
+      ExternalProcessing::getInstance(libname_cstr));
   auto apm = webrtc::AudioProcessingBuilder()
                  .SetCapturePostProcessing(std::move(external_processing))
                  .Create();

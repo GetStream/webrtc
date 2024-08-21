@@ -1,5 +1,5 @@
-#ifndef DYNAMIC_PROCESSING_HPP
-#define DYNAMIC_PROCESSING_HPP
+#ifndef EXTERNAL_PROCESSING_HPP
+#define EXTERNAL_PROCESSING_HPP
 
 #include <syslog.h>
 
@@ -39,4 +39,4 @@ class ExternalProcessing : public webrtc::CustomProcessing {
 };
 }  // namespace external
 
-#endif  // DYNAMIC_PROCESSING_HPP
+#endif  // EXTERNAL_PROCESSING_HPP
