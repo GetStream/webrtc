@@ -19,6 +19,11 @@ class ExternalProcessor {
 
   virtual ~ExternalProcessor() {}
 };
+
+extern "C" ExternalProcessor* CreateExternalProcessorInstance();
+
+extern "C" void DestroyExternalProcessorInstance(ExternalProcessor *instance);
+
 }  // namespace external
 
 #endif  // EXTERNAL_PROCESSOR_HPP
