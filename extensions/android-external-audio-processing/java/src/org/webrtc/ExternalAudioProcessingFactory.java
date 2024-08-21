@@ -2,97 +2,34 @@ package org.webrtc;
 
 import org.webrtc.AudioProcessingFactory;
 
-public class ExternalAudioProcessingFactory implements AudioProcessingFactory {
+public class DynamicAudioProcessingFactory implements AudioProcessingFactory {
 
-  private final ExternalAudioProcessorFactory delegate;
+  private final String libname;
 
-  public ExternalAudioProcessingFactory(ExternalAudioProcessorFactory delegate) {
-    if (delegate == null) {
-      throw new NullPointerException("delegate must not be null.");
+  public DynamicAudioProcessingFactory(String libname) {
+    if (libname == null) {
+      throw new NullPointerException("libname must not be null.");
     }
-    this.delegate = delegate;
+    if (libname.isEmpty()) {
+      throw new IllegalArgumentException("libname must not be empty.");
+    }
+    this.libname = libname;
   }
 
   @Override
   public long createNative() {
-    long processorPtr = delegate.createNative();
-    System.out.println("[ExternalAudioProcessingFactory.createNative] processorPtr: " + processorPtr);
-    return nativeGetAudioProcessingModule(processorPtr);
+    return nativeCreateAudioProcessingModule(libname);
   }
 
-  private static native long nativeGetAudioProcessingModule(long processor);
-
-  public static Builder builder() {
-    return new Builder();
+  public void destroyNative() {
+    nativeDestroyAudioProcessingModule();
   }
 
-  public static class Builder {
+  private static native long nativeCreateAudioProcessingModule(String libname);
 
-    Builder() {
-    }
 
-    private ExternalAudioProcessorFactory delegate;
+  private static native long nativeDestroyAudioProcessingModule();
 
-    public Builder setExternalAudioProcessorFactory(ExternalAudioProcessorFactory delegate) {
-      if (delegate == null) {
-        throw new NullPointerException(
-                    "ExternalAudioProcessingFactory.Builder does not accept a null ExternalAudioProcessorFactory.");
-      }
-      this.delegate = delegate;
-      return this;
-    }
-
-    public ExternalAudioProcessingFactory build() {
-      if (delegate == null) {
-        throw new NullPointerException("delegate must not be null.");
-      }
-      return new ExternalAudioProcessingFactory(delegate);
-    }
-  }
-
-  /* private final ExternalAudioProcessorFactory externalProcessorFactory;
-
-  private ExternalAudioProcessingFactory(ExternalAudioProcessorFactory externalProcessorFactory) {
-    if (externalProcessorFactory == null) {
-      throw new NullPointerException("externalProcessorFactory must not be null.");
-    }
-    this.externalProcessorFactory = externalProcessorFactory;
-  }
-	
-  @Override
-  public long createNative() {
-    return nativeGetAudioProcessingModule(externalProcessorFactory.createNative());
-  }
-
-  private static native long nativeGetAudioProcessingModule(long nativeExternalProcessor);
-
-  public static Builder builder() {
-    return new Builder();
-  }
-
-  public static class Builder {
-
-    Builder() {
-    }
-
-    private ExternalAudioProcessorFactory externalProcessorFactory;
-
-    public Builder setExternalAudioProcessorFactory(ExternalAudioProcessorFactory externalProcessorFactory) {
-      if (externalProcessorFactory == null) {
-        throw new NullPointerException(
-                    "ExternalAudioProcessingFactory.Builder does not accept a null ExternalAudioProcessorFactory.");
-      }
-      this.externalProcessorFactory = externalProcessorFactory;
-      return this;
-    }
-
-    public ExternalAudioProcessingFactory build() {
-      if (externalProcessorFactory == null) {
-        throw new NullPointerException("externalProcessorFactory must not be null.");
-      }
-      return new ExternalAudioProcessingFactory(externalProcessorFactory);
-    }
-  } */
 }
 
 

@@ -1,10 +1,9 @@
 #include <syslog.h>
 
 #include <cstring>
-#include <exception>
 
+#include "extensions/android-external-audio-processing/generated_external_jni/DynamicAudioProcessingFactory_jni.h"
 #include "external_processing.hpp"
-#include "extensions/android-external-audio-processing/generated_external_jni/ExternalAudioProcessingFactory_jni.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/ref_counted_object.h"
 #include "rtc_base/thread.h"
@@ -13,40 +12,24 @@
 
 namespace external {
 webrtc::AudioProcessing* apm_ptr;
-static jlong JNI_ExternalAudioProcessingFactory_GetAudioProcessingModule(
+static jlong JNI_ExternalAudioProcessingFactory_CreateAudioProcessingModule(
     JNIEnv* env,
-    jlong processor
+    const webrtc::JavaParamRef<jstring>& libname
 ) {
 
-  ::syslog(LOG_INFO, "EXTERNAL-JNI: #GetAudioProcessingModule; processor: %ld", static_cast<long>(processor));
-
-  // Cast the jlong to ExternalProcessor*
-  ExternalProcessor* external_processor = reinterpret_cast<ExternalProcessor*>(processor);
-
-  ::syslog(LOG_INFO, "EXTERNAL-JNI: #GetAudioProcessingModule; external_processor: %p", (void*)external_processor);
-
-  if (external_processor == nullptr) {
-    ::syslog(LOG_ERR, "EXTERNAL-JNI: #GetAudioProcessingModule; ExternalProcessor is null!");
+  if (libname.is_null()) {
+    ::syslog(LOG_ERR, "EXTERNAL-JNI: #GetApm; libname is null");
     return 0;
   }
 
-  //::syslog(LOG_INFO, "EXTERNAL-JNI: #GetAudioProcessingModule; The class name of external_processor is: %s", typeid(*external_processor).name());
+  const char* libname_cstr = env->GetStringUTFChars(libname.obj(), nullptr);
 
-  ::syslog(LOG_INFO, "EXTERNAL-JNI: #GetAudioProcessingModule; Size of ExternalProcessor: %zu", sizeof(*external_processor));
+  ::syslog(LOG_INFO, "EXTERNAL-JNI: #GetApm; libname: %s", libname_cstr);
 
-  if (reinterpret_cast<uintptr_t>(external_processor) % alignof(external::ExternalProcessor) != 0) {
-    ::syslog(LOG_ERR, "EXTERNAL-JNI: #GetAudioProcessingModule; Misaligned external_processor pointer!");
-  }
-
-  void* vtable = *(void**)external_processor;
-  ::syslog(LOG_INFO, "EXTERNAL-JNI: #GetAudioProcessingModule; external_processor vtable address: %p", vtable);
-
-  external_processor->Init(28256, 31);
-
-  ::syslog(LOG_INFO, "EXTERNAL-JNI: #GetAudioProcessingModule; external_processor->Init was called");
+  // TODO env->ReleaseStringUTFChars(libname.obj(), init_string);
 
   std::unique_ptr<webrtc::CustomProcessing> external_processing(
-      ExternalProcessing::getInstance(external_processor));
+      DynamicProcessing::getInstance(libname_cstr));
   auto apm = webrtc::AudioProcessingBuilder()
                  .SetCapturePostProcessing(std::move(external_processing))
                  .Create();
@@ -56,6 +39,12 @@ static jlong JNI_ExternalAudioProcessingFactory_GetAudioProcessingModule(
   apm->ApplyConfig(config);
   apm_ptr = apm.release();
   return webrtc::jni::jlongFromPointer(apm_ptr);
+}
+
+static void JNI_ExternalAudioProcessingFactory_DestroyAudioProcessingModule(
+    JNIEnv* env
+) {
+  delete apm_ptr;
 }
 
 }  // end of namespace external
