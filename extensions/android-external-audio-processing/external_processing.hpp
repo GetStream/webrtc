@@ -40,7 +40,7 @@ class ExternalProcessing : public webrtc::CustomProcessing {
   ExternalProcessing();
 
   void* m_handle = nullptr;
-  ExternalProcessor* m_processor = nullptr;
+  std::array<void *, kFunctionCount> m_functionPointers = {};
 
   static ExternalProcessing* m_instance;
 };

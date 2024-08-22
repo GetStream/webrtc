@@ -2,31 +2,48 @@
 #define EXTERNAL_PROCESSOR_HPP
 
 #include <cstdint>
+#include <array>
 
 namespace external {
 
-// interface for external processor
-class ExternalProcessor {
- public:
-  // Creates all necessary resources for the processor.
-  virtual bool Create() = 0;
-  // Destroys the processor.
-  virtual bool Destroy() = 0;
-  // Initializes the processor with a specific sample rate and number of
-  // channels.
-  virtual int Init(int sample_rate_hz, int num_channels) = 0;
-  // Processes the audio data.
-  virtual int ProcessFrame(float* const* channels,
-                            size_t num_frames,
-                            size_t num_bands,
-                            size_t num_channels) = 0;
+static constexpr unsigned int kFunctionCount = 4;
 
-  virtual ~ExternalProcessor() {}
+// Function ID struct
+struct FunctionId {
+  static constexpr unsigned int ExternalProcessorCreate = 0;
+  static constexpr unsigned int ExternalProcessorInitialize = 1;
+  static constexpr unsigned int ExternalProcessorProcessFrame = 2;
+  static constexpr unsigned int ExternalProcessorDestroy = 3;
 };
 
-extern "C" ExternalProcessor* CreateExternalProcessorInstance();
+static constexpr std::array<const char *, kFunctionCount> kFunctionNames =
+    {
+        "ExternalProcessorCreate",
+        "ExternalProcessorInitialize",
+        "ExternalProcessorProcessFrame",
+        "ExternalProcessorDestroy"
+};
 
-extern "C" void DestroyExternalProcessorInstance(ExternalProcessor *instance);
+// Function type definitions
+using ExternalProcessorCreateFuncType = bool(*)();
+using ExternalProcessorInitializeFuncType = bool(*)(int sample_rate_hz, int num_channels);
+using ExternalProcessorProcessFrameFuncType = bool(*)(float* const* channels,
+                                                       size_t num_frames,
+                                                       size_t num_bands,
+                                                       size_t num_channels);
+using ExternalProcessorDestroyFuncType = bool(*)();
+
+extern "C" bool ExternalProcessorCreate();
+
+extern "C" bool ExternalProcessorInitialize(int sample_rate_hz,
+                                            int num_channels);
+
+extern "C" bool ExternalProcessorProcessFrame(float* const* channels,
+                                              size_t num_frames,
+                                              size_t num_bands,
+                                              size_t num_channels);
+
+extern "C" bool ExternalProcessorDestroy();
 
 }  // namespace external
 

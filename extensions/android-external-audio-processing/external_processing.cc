@@ -26,36 +26,49 @@ bool ExternalProcessing::Create(const char* libname) {
   dlerror();  // Clear any existing errors
   void* handle = dlopen(libname, RTLD_LAZY);
   if (!handle) {
-    ::syslog(LOG_ERR, "ExternalProcessing: #Create; Failed to load library: %s", dlerror());
+    ::syslog(LOG_ERR, "ExternalProcessing: #Create; Failed to load library: %s",
+             dlerror());
     return false;
   }
 
-  // Load the factory function for creating the ExternalProcessor instance
-  auto createInstance = (external::ExternalProcessor* (*)())dlsym(handle, "CreateExternalProcessorInstance");
-  const char* dlsymError = dlerror();
-  if (dlsymError) {
-    ::syslog(LOG_ERR, "ExternalProcessing: #Create; Failed to load createInstance function: %s", dlsymError);
+  // Load external processor functions
+  for (size_t functionId = 0; functionId < kFunctionCount; ++functionId) {
+    const char* functionName = kFunctionNames[functionId];
+    syslog(LOG_INFO, "ExternalProcessing: #Create; Loading function: %s",
+           functionName);
+    void* functionPtr = dlsym(handle, functionName);
+    const char* dlsym_error = dlerror();
+    if (dlsym_error) {
+      syslog(LOG_ERR,
+             "ExternalProcessing: #Create; Failed to load the function: %s",
+             dlsym_error);
+      return false;
+    }
+    m_functionPointers[functionId] = functionPtr;
+  }
+
+  void* createPtr = m_functionPointers[FunctionId::ExternalProcessorCreate];
+  if (!createPtr) {
+    ::syslog(LOG_ERR,
+             "ExternalProcessing: #Create; Failed to access "
+             "ExternalProcessorCreate function");
     dlclose(handle);
     return false;
   }
 
-  // Create the ExternalProcessor instance
-  external::ExternalProcessor* processor = createInstance();
-  if (!processor) {
-    ::syslog(LOG_ERR, "ExternalProcessing: #Create; Failed to create ExternalProcessor instance");
+  auto createFunc =
+      reinterpret_cast<ExternalProcessorCreateFuncType>(createPtr);
+  if (!createFunc()) {
+    ::syslog(LOG_ERR,
+             "ExternalProcessing: #Create; Failed to invoke "
+             "ExternalProcessorCreate function");
     dlclose(handle);
     return false;
   }
 
   m_handle = handle;
-  m_processor = processor;
 
-  if (!m_processor->Create()) {
-    ::syslog(LOG_ERR, "ExternalProcessing: #Create; Failed to initialize ExternalProcessor instance");
-    Destroy();
-  }
-
-  ::syslog(LOG_INFO, "ExternalProcessing: #Create; Created ExternalProcessor instance");
+  ::syslog(LOG_INFO, "ExternalProcessing: #Create; completed successfully");
 
   return true;
 }
@@ -63,12 +76,22 @@ bool ExternalProcessing::Create(const char* libname) {
 bool ExternalProcessing::Destroy() {
   ::syslog(LOG_INFO, "ExternalProcessing: #Destroy;");
 
-  if (m_processor) {
-    if (!m_processor->Destroy()) {
-      syslog(LOG_ERR, "ExternalProcessing: #Destroy; Failed to destroy ExternalProcessor instance");
+  void* destroyPtr = m_functionPointers[FunctionId::ExternalProcessorDestroy];
+  if (destroyPtr) {
+    ::syslog(LOG_INFO,
+             "ExternalProcessing: #Destroy; Invoke ExternalProcessorDestroy "
+             "function");
+
+    auto destroyFunc =
+        reinterpret_cast<ExternalProcessorDestroyFuncType>(destroyPtr);
+    if (destroyFunc()) {
+      ::syslog(LOG_INFO,
+               "ExternalProcessing: #Destroy; Invoked ExternalProcessorDestroy "
+               "successfully");
     }
-    delete m_processor;
-    m_processor = nullptr;
+  }
+  for (auto& functionPtr : m_functionPointers) {
+    functionPtr = nullptr;
   }
   if (m_handle) {
     dlclose(m_handle);
@@ -79,15 +102,35 @@ bool ExternalProcessing::Destroy() {
 }
 
 void ExternalProcessing::Initialize(int sample_rate_hz, int num_channels) {
-  if (!m_processor) {
-    ::syslog(LOG_ERR, "ExternalProcessing: #Initialize; Processor not initialized");
+  if (m_functionPointers.size() <=
+      static_cast<size_t>(FunctionId::ExternalProcessorInitialize)) {
+    ::syslog(LOG_ERR,
+             "ExternalProcessing: #Initialize; m_functionPointers is not large "
+             "enough");
+    return;
+  }
+  void* initializePtr =
+      m_functionPointers[FunctionId::ExternalProcessorInitialize];
+  if (!initializePtr) {
+    ::syslog(LOG_ERR,
+             "ExternalProcessing: #Initialize; Failed to access "
+             "ExternalProcessorInitialize function");
+    return;
+  }
+
+  auto initializeFunc =
+      reinterpret_cast<ExternalProcessorInitializeFuncType>(initializePtr);
+  if (!initializeFunc(sample_rate_hz, num_channels)) {
+    ::syslog(LOG_ERR,
+             "ExternalProcessing: #Initialize; Failed to invoke "
+             "ExternalProcessorInitialize function");
     return;
   }
   ::syslog(LOG_INFO,
-           "ExternalProcessing: #Initialize; sample_rate_hz: %i, "
+           "ExternalProcessing: #Initialize; Invoked "
+           "ExternalProcessorInitialize; sample_rate_hz: %i, "
            "num_channels: %i",
            sample_rate_hz, num_channels);
-  m_processor->Init(sample_rate_hz, num_channels);
 }
 
 void ExternalProcessing::Process(webrtc::AudioBuffer* audio) {
@@ -95,15 +138,36 @@ void ExternalProcessing::Process(webrtc::AudioBuffer* audio) {
   size_t num_frames = audio->num_frames();
   size_t num_bands = audio->num_bands();
   size_t num_channels = audio->num_channels();
-  if (!m_processor) {
-    ::syslog(LOG_ERR, "ExternalProcessing: #Process; Processor not initialized");
+
+  if (m_functionPointers.size() <=
+      static_cast<size_t>(FunctionId::ExternalProcessorProcessFrame)) {
+    ::syslog(
+        LOG_ERR,
+        "ExternalProcessing: #Process; m_functionPointers is not large enough");
+    return;
+  }
+  void* processPtr =
+      m_functionPointers[FunctionId::ExternalProcessorProcessFrame];
+  if (!processPtr) {
+    ::syslog(LOG_ERR,
+             "ExternalProcessing: #Process; Failed to access "
+             "ExternalProcessorProcessFrame function");
+    return;
+  }
+
+  auto processFunc =
+      reinterpret_cast<ExternalProcessorProcessFrameFuncType>(processPtr);
+  if (!processFunc(channels, num_frames, num_bands, num_channels)) {
+    ::syslog(LOG_ERR,
+             "ExternalProcessing: #Process; Failed to invoke "
+             "ExternalProcessorProcessFrame function");
     return;
   }
   ::syslog(LOG_INFO,
-           "ExternalProcessing: #Process; num_frames: %zu, num_bands: %zu, "
+           "ExternalProcessing: #Process; Invoked "
+           "ExternalProcessorProcessFrame; num_frames: %zu, num_bands: %zu, "
            "num_channels: %zu",
            num_frames, num_bands, num_channels);
-  m_processor->ProcessFrame(channels, num_frames, num_bands, num_channels);
 }
 
 std::string ExternalProcessing::ToString() const {
