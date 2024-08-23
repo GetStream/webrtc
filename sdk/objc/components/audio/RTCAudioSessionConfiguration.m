@@ -53,18 +53,17 @@ static RTC_OBJC_TYPE(RTCAudioSessionConfiguration) *gWebRTCConfiguration = nil;
 @synthesize outputNumberOfChannels = _outputNumberOfChannels;
 
 - (instancetype)init {
-  if (self = [super init]) {
-    // Use AVAudioSession values for default
-    AVAudioSession *session = [AVAudioSession sharedInstance];
+  self = [super init];
+  if (self) {
     // Use a category which supports simultaneous recording and playback.
     // By default, using this category implies that our app’s audio is
     // nonmixable, hence activating the session will interrupt any other
     // audio sessions which are also nonmixable.
-    _category = session.category;
-    _categoryOptions = session.categoryOptions;
+    _category = AVAudioSessionCategoryPlayAndRecord;
+    _categoryOptions = AVAudioSessionCategoryOptionAllowBluetooth;
 
     // Specify mode for two-way voice communication (e.g. VoIP).
-    _mode = session.mode;
+    _mode = AVAudioSessionModeVoiceChat;
 
     // Use best sample rate and buffer duration if the CPU has more than one
     // core.

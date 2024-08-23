@@ -50,7 +50,8 @@ const NSString * const kRTCAv1CodecName = @(cricket::kAv1CodecName);
 
 - (instancetype)initWithNativeParameters:
     (const webrtc::RtpCodecParameters &)nativeParameters {
-  if (self = [super init]) {
+  self = [super init];
+  if (self) {
     _payloadType = nativeParameters.payload_type;
     _name = [NSString stringForStdString:nativeParameters.name];
     switch (nativeParameters.kind) {
