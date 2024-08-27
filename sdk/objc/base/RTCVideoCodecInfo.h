@@ -23,8 +23,11 @@ RTC_OBJC_EXPORT
 - (instancetype)initWithName:(NSString *)name;
 
 - (instancetype)initWithName:(NSString *)name
-                  parameters:(nullable NSDictionary<NSString *, NSString *> *)parameters
-    NS_DESIGNATED_INITIALIZER;
+                  parameters:(nullable NSDictionary<NSString *, NSString *> *)parameters;
+
+- (instancetype)initWithName:(NSString *)name
+                  parameters:(NSDictionary<NSString *, NSString *> *)parameters
+            scalabilityModes:(NSArray<NSString *> *)scalabilityModes NS_DESIGNATED_INITIALIZER;
 
 - (instancetype)initWithName:(NSString *)name
                   parameters:(nullable NSDictionary<NSString *, NSString *> *)parameters
