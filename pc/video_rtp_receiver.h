@@ -13,10 +13,10 @@
 
 #include <stdint.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
-#include "absl/types/optional.h"
 #include "api/crypto/frame_decryptor_interface.h"
 #include "api/dtls_transport_interface.h"
 #include "api/frame_transformer_interface.h"
@@ -42,8 +42,7 @@
 
 namespace webrtc {
 
-class VideoRtpReceiver : public RtpReceiverInternal,
-                         public ObserverInterface {
+class VideoRtpReceiver : public RtpReceiverInternal {
  public:
   // An SSRC of 0 will create a receiver that will match the first SSRC it
   // sees. Must be called on signaling thread.
@@ -60,9 +59,6 @@ class VideoRtpReceiver : public RtpReceiverInternal,
   virtual ~VideoRtpReceiver();
 
   rtc::scoped_refptr<VideoTrackInterface> video_track() const { return track_; }
-
-  // ObserverInterface implementation
-  void OnChanged() override;
 
   // RtpReceiverInterface implementation
   rtc::scoped_refptr<MediaStreamTrackInterface> track() const override {
@@ -93,7 +89,7 @@ class VideoRtpReceiver : public RtpReceiverInternal,
   void Stop() override;
   void SetupMediaChannel(uint32_t ssrc) override;
   void SetupUnsignaledMediaChannel() override;
-  absl::optional<uint32_t> ssrc() const override;
+  std::optional<uint32_t> ssrc() const override;
   void NotifyFirstPacketReceived() override;
   void set_stream_ids(std::vector<std::string> stream_ids) override;
   void set_transport(
@@ -104,7 +100,7 @@ class VideoRtpReceiver : public RtpReceiverInternal,
   void SetObserver(RtpReceiverObserverInterface* observer) override;
 
   void SetJitterBufferMinimumDelay(
-      absl::optional<double> delay_seconds) override;
+      std::optional<double> delay_seconds) override;
 
   void SetMediaChannel(
       cricket::MediaReceiveChannelInterface* media_channel) override;
@@ -115,15 +111,13 @@ class VideoRtpReceiver : public RtpReceiverInternal,
 
   // Combines SetMediaChannel, SetupMediaChannel and
   // SetupUnsignaledMediaChannel.
-  void SetupMediaChannel(absl::optional<uint32_t> ssrc,
+  void SetupMediaChannel(std::optional<uint32_t> ssrc,
                          cricket::MediaReceiveChannelInterface* media_channel);
 
  private:
-  void StartMediaChannel();
-  void StopMediaChannel();
-  void RestartMediaChannel(absl::optional<uint32_t> ssrc)
+  void RestartMediaChannel(std::optional<uint32_t> ssrc)
       RTC_RUN_ON(&signaling_thread_checker_);
-  void RestartMediaChannel_w(absl::optional<uint32_t> ssrc,
+  void RestartMediaChannel_w(std::optional<uint32_t> ssrc,
                              MediaSourceInterface::SourceState state)
       RTC_RUN_ON(worker_thread_);
   void SetSink(rtc::VideoSinkInterface<VideoFrame>* sink)
@@ -157,7 +151,7 @@ class VideoRtpReceiver : public RtpReceiverInternal,
   const std::string id_;
   cricket::VideoMediaReceiveChannelInterface* media_channel_
       RTC_GUARDED_BY(worker_thread_) = nullptr;
-  absl::optional<uint32_t> signaled_ssrc_ RTC_GUARDED_BY(worker_thread_);
+  std::optional<uint32_t> signaled_ssrc_ RTC_GUARDED_BY(worker_thread_);
   // `source_` is held here to be able to change the state of the source when
   // the VideoRtpReceiver is stopped.
   const rtc::scoped_refptr<VideoRtpTrackSource> source_;
@@ -168,8 +162,6 @@ class VideoRtpReceiver : public RtpReceiverInternal,
       RTC_GUARDED_BY(&signaling_thread_checker_) = nullptr;
   bool received_first_packet_ RTC_GUARDED_BY(&signaling_thread_checker_) =
       false;
-
-  bool cached_track_should_receive_ RTC_GUARDED_BY(&signaling_thread_checker_);
   const int attachment_id_;
   rtc::scoped_refptr<FrameDecryptorInterface> frame_decryptor_
       RTC_GUARDED_BY(worker_thread_);
@@ -185,7 +177,6 @@ class VideoRtpReceiver : public RtpReceiverInternal,
   // or switched.
   bool saved_generate_keyframe_ RTC_GUARDED_BY(worker_thread_) = false;
   bool saved_encoded_sink_enabled_ RTC_GUARDED_BY(worker_thread_) = false;
-  const rtc::scoped_refptr<PendingTaskSafetyFlag> worker_thread_safety_;
 };
 
 }  // namespace webrtc

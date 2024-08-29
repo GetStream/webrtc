@@ -77,12 +77,12 @@ void PostJavaCallback(JNIEnv* env,
   });
 }
 
-absl::optional<PeerConnectionFactoryInterface::Options>
+std::optional<PeerConnectionFactoryInterface::Options>
 JavaToNativePeerConnectionFactoryOptions(
     JNIEnv* jni,
     const jni_zero::JavaRef<jobject>& j_options) {
   if (j_options.is_null())
-    return absl::nullopt;
+    return std::nullopt;
 
   PeerConnectionFactoryInterface::Options native_options;
 
@@ -263,7 +263,7 @@ ScopedJavaLocalRef<jobject> CreatePeerConnectionFactoryForJava(
   signaling_thread->SetName("signaling_thread", NULL);
   RTC_CHECK(signaling_thread->Start()) << "Failed to start thread";
 
-  const absl::optional<PeerConnectionFactoryInterface::Options> options =
+  const std::optional<PeerConnectionFactoryInterface::Options> options =
       JavaToNativePeerConnectionFactoryOptions(jni, joptions);
 
   PeerConnectionFactoryDependencies dependencies;
@@ -448,7 +448,7 @@ static jlong JNI_PeerConnectionFactory_CreatePeerConnection(
     if (key_type != rtc::KT_DEFAULT) {
       rtc::scoped_refptr<rtc::RTCCertificate> certificate =
           rtc::RTCCertificateGenerator::GenerateCertificate(
-              rtc::KeyParams(key_type), absl::nullopt);
+              rtc::KeyParams(key_type), std::nullopt);
       if (!certificate) {
         RTC_LOG(LS_ERROR) << "Failed to generate certificate. KeyType: "
                           << key_type;
