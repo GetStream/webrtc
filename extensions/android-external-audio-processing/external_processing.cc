@@ -163,11 +163,6 @@ void ExternalProcessing::Process(webrtc::AudioBuffer* audio) {
              "ExternalProcessorProcessFrame function");
     return;
   }
-  ::syslog(LOG_INFO,
-           "ExternalProcessing: #Process; Invoked "
-           "ExternalProcessorProcessFrame; num_frames: %zu, num_bands: %zu, "
-           "num_channels: %zu",
-           num_frames, num_bands, num_channels);
 }
 
 std::string ExternalProcessing::ToString() const {
@@ -176,7 +171,7 @@ std::string ExternalProcessing::ToString() const {
 
 void ExternalProcessing::SetRuntimeSetting(
     webrtc::AudioProcessing::RuntimeSetting setting) {
-  ::syslog(LOG_INFO, "EXTERNAL-CIT: ExternalProcessing #SetRuntimeSetting;");
+  ::syslog(LOG_INFO, "ExternalProcessing: #SetRuntimeSetting;");
 }
 
 }  // end of namespace external
