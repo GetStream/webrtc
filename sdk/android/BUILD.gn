@@ -57,6 +57,7 @@ if (is_android) {
       ":video_api_java",
       ":video_java",
       "../../rtc_base:base_java",
+      "../../extensions/android-external-audio-processing:external_java",
     ]
   }
 
@@ -141,6 +142,7 @@ if (is_android) {
       ":video_egl_jni",
       "../../pc:libjingle_peerconnection",
       "../../rtc_base:ssl",
+      "../../extensions/android-external-audio-processing:external_processing",
     ]
     output_extension = "so"
   }
