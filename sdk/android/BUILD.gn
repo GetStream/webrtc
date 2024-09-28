@@ -57,6 +57,7 @@ if (is_android) {
       ":video_java",
       "../../rtc_base:base_java",
       "../../third_party/jni_zero:jni_zero_java",
+      "../../extensions/android-external-audio-processing:external_java",
     ]
   }
 
@@ -143,6 +144,8 @@ if (is_android) {
       "../../rtc_base:logging",
       "../../rtc_base:ssl_adapter",
       "//third_party/jni_zero",
+      "../../rtc_base:ssl",
+      "../../extensions/android-external-audio-processing:external_processing",
     ]
     output_extension = "so"
   }
