@@ -394,6 +394,7 @@ if (is_android) {
       "api/org/webrtc/DefaultVideoDecoderFactory.java",
       "api/org/webrtc/DefaultVideoEncoderFactory.java",
       "api/org/webrtc/WrappedVideoDecoderFactory.java",
+      "api/org/webrtc/DefaultBlacklistedVideoDecoderFactory.java",
       "api/org/webrtc/DefaultAlignedVideoEncoderFactory.java",
       "api/org/webrtc/SimulcastAlignedVideoEncoderFactory.java",
     ]
