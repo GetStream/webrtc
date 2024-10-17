@@ -56,7 +56,7 @@ public class DefaultBlacklistedVideoDecoderFactory implements VideoDecoderFactor
     }
 
     if (isHardwareDecoderBlacklisted.test(hardwareDecoder)) {
-      Logging.i(TAG, "[createDecoder] hardware decoder is blacklisted: " + stringifyCodec(info));
+      Logging.i(TAG, "[createDecoder] hardware decoder is blacklisted: " + hardwareDecoder.getImplementationName());
       return softwareDecoder;
     }
 
