@@ -1,13 +1,6 @@
+package org.webrtc;
+
 import androidx.annotation.Nullable;
-import org.webrtc.EglBase;
-import org.webrtc.HardwareVideoDecoderFactory;
-import org.webrtc.Logging;
-import org.webrtc.PlatformSoftwareVideoDecoderFactory;
-import org.webrtc.SoftwareVideoDecoderFactory;
-import org.webrtc.VideoCodecInfo;
-import org.webrtc.VideoDecoder;
-import org.webrtc.VideoDecoderFactory;
-import org.webrtc.VideoDecoderFallback;
 
 import java.util.Arrays;
 import java.util.HashSet;
