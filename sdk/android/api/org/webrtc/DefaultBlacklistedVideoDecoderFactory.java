@@ -30,7 +30,7 @@ public class DefaultBlacklistedVideoDecoderFactory implements VideoDecoderFactor
   private final VideoDecoderFactory hardwareVideoDecoderFactory;
   private final VideoDecoderFactory softwareVideoDecoderFactory;
   private final VideoDecoderFactory platformSoftwareVideoDecoderFactory;
-  private final Predicate<MediaCodecInfo> isHardwareDecoderBlacklisted;
+  private final Predicate<VideoDecoder> isHardwareDecoderBlacklisted;
 
   public DefaultBlacklistedVideoDecoderFactory(@Nullable EglBase.Context eglContext) {
     this(eglContext, null);
