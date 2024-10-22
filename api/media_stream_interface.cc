@@ -29,7 +29,7 @@ VideoTrackInterface::ContentHint VideoTrackInterface::content_hint() const {
   return ContentHint::kNone;
 }
 
-bool AudioTrackInterface::GetSignalLevel(int* level) {
+bool AudioTrackInterface::GetSignalLevel(int* /* level */) {
   return false;
 }
 
