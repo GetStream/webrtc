@@ -40,13 +40,8 @@ extern "C" {
   id factoryMock = OCMStrictClassMock([RTC_OBJC_TYPE(RTCPeerConnectionFactory) class]);
   OCMExpect([factoryMock alloc]).andReturn(factoryMock);
   RTC_UNUSED([[[[factoryMock expect] andReturn:factoryMock] ignoringNonObjectArgs]
-      initWithNativeAudioEncoderFactory:nullptr
-              nativeAudioDecoderFactory:nullptr
-              nativeVideoEncoderFactory:nullptr
-              nativeVideoDecoderFactory:nullptr
-                      audioDeviceModule:nullptr
-                  audioProcessingModule:nullptr]);
-  RTC_OBJC_TYPE(RTCPeerConnectionFactoryBuilder)* builder = [[RTC_OBJC_TYPE(RTCPeerConnectionFactoryBuilder) alloc] init];
+      initWithMediaAndDependencies:webrtc::PeerConnectionFactoryDependencies()]);
+  RTCPeerConnectionFactoryBuilder* builder = [[RTCPeerConnectionFactoryBuilder alloc] init];
   RTC_OBJC_TYPE(RTCPeerConnectionFactory)* peerConnectionFactory =
       [builder createPeerConnectionFactory];
   EXPECT_TRUE(peerConnectionFactory != nil);
@@ -57,13 +52,8 @@ extern "C" {
   id factoryMock = OCMStrictClassMock([RTC_OBJC_TYPE(RTCPeerConnectionFactory) class]);
   OCMExpect([factoryMock alloc]).andReturn(factoryMock);
   RTC_UNUSED([[[[factoryMock expect] andReturn:factoryMock] ignoringNonObjectArgs]
-      initWithNativeAudioEncoderFactory:nullptr
-              nativeAudioDecoderFactory:nullptr
-              nativeVideoEncoderFactory:nullptr
-              nativeVideoDecoderFactory:nullptr
-                      audioDeviceModule:nullptr
-                  audioProcessingModule:nullptr]);
-  RTC_OBJC_TYPE(RTCPeerConnectionFactoryBuilder)* builder = [RTC_OBJC_TYPE(RTCPeerConnectionFactoryBuilder) defaultBuilder];
+      initWithMediaAndDependencies:webrtc::PeerConnectionFactoryDependencies()]);
+  RTCPeerConnectionFactoryBuilder* builder = [RTCPeerConnectionFactoryBuilder defaultBuilder];
   RTC_OBJC_TYPE(RTCPeerConnectionFactory)* peerConnectionFactory =
       [builder createPeerConnectionFactory];
   EXPECT_TRUE(peerConnectionFactory != nil);
