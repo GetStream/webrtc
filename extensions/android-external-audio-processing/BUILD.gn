@@ -1,6 +1,7 @@
 import("../../webrtc.gni")
 import("//build/config/android/config.gni")
 import("//build/config/android/rules.gni")
+import("//third_party/jni_zero/jni_zero.gni")
 
 rtc_library("external_processing") {
     visibility = [ "*" ]
