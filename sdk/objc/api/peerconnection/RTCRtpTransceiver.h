@@ -16,6 +16,8 @@
 
 @class RTC_OBJC_TYPE(RTCRtpCodecCapability);
 
+@class RTC_OBJC_TYPE(RTCRtpCodecCapability);
+
 NS_ASSUME_NONNULL_BEGIN
 
 extern NSString *const RTC_CONSTANT_TYPE(RTCRtpTransceiverErrorDomain);
@@ -124,6 +126,8 @@ RTC_OBJC_EXPORT
 @property(nonatomic, readonly, copy)
     NSArray<RTC_OBJC_TYPE(RTCRtpHeaderExtensionCapability) *>
         *negotiatedHeaderExtensions;
+
+@property(nonatomic, copy) NSArray<RTC_OBJC_TYPE(RTCRtpCodecCapability) *> *codecPreferences;
 
 /** The currentDirection attribute indicates the current direction negotiated
  *  for this transceiver. If this transceiver has never been represented in an

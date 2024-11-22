@@ -43,6 +43,17 @@ RTC_OBJC_EXPORT
                     (nullable __weak id<RTC_OBJC_TYPE(RTCVideoCapturerDelegate)>)delegate
                   captureSession:(AVCaptureSession *)captureSession;
 
+#if !TARGET_OS_VISION
++ (CGFloat)defaultZoomFactorForDeviceType:(AVCaptureDeviceType)deviceType;
+#endif
+
+- (instancetype)initWithDelegate:
+    (nullable __weak id<RTC_OBJC_TYPE(RTCVideoCapturerDelegate)>)delegate;
+
+- (instancetype)initWithDelegate:
+                    (nullable __weak id<RTC_OBJC_TYPE(RTCVideoCapturerDelegate)>)delegate
+                  captureSession:(AVCaptureSession *)captureSession;
+
 // Returns the most efficient supported output pixel format for this capturer.
 - (FourCharCode)preferredOutputPixelFormat;
 
