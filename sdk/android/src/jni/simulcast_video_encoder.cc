@@ -25,7 +25,7 @@ JNIEXPORT jlong JNICALL Java_org_webrtc_SimulcastVideoEncoder_nativeCreateEncode
     return NativeToJavaPointer(std::make_unique<SimulcastEncoderAdapter>(
 			    *reinterpret_cast<const webrtc::Environment*>(webrtcEnvRef),
 			    JavaToNativeVideoEncoderFactory(env, primary).release(),
-			    fallback != nullptr ? JavaToNativeVideoEncoderFactory(env, fallback).release() : nullptr,
+			    JavaToNativeVideoEncoderFactory(env, fallback).release(),
 			    format).release());
 }
 

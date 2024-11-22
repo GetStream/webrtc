@@ -15,6 +15,9 @@
  */
 
 #import <Foundation/Foundation.h>
+#import <AVFoundation/AVFoundation.h>
+#import <CoreMedia/CoreMedia.h>
+
 #if TARGET_OS_IPHONE
 #import <UIKit/UIKit.h>
 #endif
@@ -23,11 +26,9 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-RTC_OBJC_EXPORT @protocol RTC_OBJC_TYPE
-(RTCAudioRenderer)<NSObject>
+RTC_OBJC_EXPORT @protocol RTC_OBJC_TYPE(RTCAudioRenderer)<NSObject>
 
-    - (void)renderSampleBuffer : (CMSampleBufferRef)sampleBuffer
-                                 NS_SWIFT_NAME(render(sampleBuffer:));
+- (void)renderPCMBuffer: (AVAudioPCMBuffer *)pcmBuffer NS_SWIFT_NAME(render(pcmBuffer:));
 
 @end
 

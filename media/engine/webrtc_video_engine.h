@@ -631,7 +631,6 @@ class WebRtcVideoReceiveChannel : public MediaChannelUtil,
                                      bool nack_enabled,
                                      webrtc::RtcpMode rtcp_mode,
                                      absl::optional<int> rtx_time) override;
-
   void StartReceive(uint32_t ssrc) override;
   void StopReceive(uint32_t ssrc) override;
  private:
