@@ -102,6 +102,9 @@
   if (_scalabilityMode != nil) {
     parameters.scalability_mode = std::optional<std::string>(std::string([_scalabilityMode UTF8String]));
   }
+  if (_scalabilityMode != nil) {
+    parameters.scalability_mode = absl::optional<std::string>(std::string([_scalabilityMode UTF8String]));
+  }
   parameters.bitrate_priority = _bitratePriority;
   parameters.network_priority = [RTC_OBJC_TYPE(RTCRtpEncodingParameters)
       nativePriorityFromPriority:_networkPriority];
