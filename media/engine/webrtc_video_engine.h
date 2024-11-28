@@ -286,6 +286,7 @@ class WebRtcVideoSendChannel : public MediaChannelUtil,
     }
     return send_codec()->rtx_time;
   }
+
  private:
   struct ChangedSenderParameters {
     // These optionals are unset if not changed.
@@ -717,9 +718,6 @@ class WebRtcVideoReceiveChannel : public MediaChannelUtil,
 
     void SetDepacketizerToDecoderFrameTransformer(
         scoped_refptr<FrameTransformerInterface> frame_transformer);
-
-    void StartStream();
-    void StopStream();
 
     void SetLocalSsrc(uint32_t local_ssrc);
     void UpdateRtxSsrc(uint32_t ssrc);
