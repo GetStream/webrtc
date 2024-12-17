@@ -2,11 +2,11 @@ package org.webrtc;
 
 import org.webrtc.AudioProcessingFactory;
 
-public class ExternalAudioProcessingFactory implements AudioProcessingFactory {
+public class NativeExternalAudioProcessingFactory implements AudioProcessingFactory {
 
   private final String libname;
 
-  public ExternalAudioProcessingFactory(String libname) {
+  public NativeExternalAudioProcessingFactory(String libname) {
     if (libname == null) {
       throw new NullPointerException("libname must not be null.");
     }
