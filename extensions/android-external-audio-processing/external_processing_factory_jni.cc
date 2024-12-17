@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-#include "extensions/android-external-audio-processing/generated_external_jni/ExternalAudioProcessingFactory_jni.h"
+#include "extensions/android-external-audio-processing/generated_external_jni/NativeExternalAudioProcessingFactory_jni.h"
 #include "external_processing.hpp"
 #include "rtc_base/checks.h"
 #include "rtc_base/ref_counted_object.h"
@@ -14,7 +14,7 @@ namespace external {
 
 webrtc::AudioProcessing* apm_ptr = nullptr;
 
-static jlong JNI_ExternalAudioProcessingFactory_CreateAudioProcessingModule(
+static jlong JNI_NativeExternalAudioProcessingFactory_CreateAudioProcessingModule(
     JNIEnv* env,
     const webrtc::JavaParamRef<jstring>& libnameRef
 ) {
@@ -49,7 +49,7 @@ static jlong JNI_ExternalAudioProcessingFactory_CreateAudioProcessingModule(
   return webrtc::jni::jlongFromPointer(apm_ptr);
 }
 
-static void JNI_ExternalAudioProcessingFactory_DestroyAudioProcessingModule(
+static void JNI_NativeExternalAudioProcessingFactory_DestroyAudioProcessingModule(
     JNIEnv* env
 ) {
   ExternalProcessing::getInstance()->Destroy();
