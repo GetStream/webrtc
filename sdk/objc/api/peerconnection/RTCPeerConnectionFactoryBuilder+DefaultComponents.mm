@@ -22,10 +22,11 @@
 #import "sdk/objc/native/api/audio_device_module.h"
 #endif
 
-@implementation RTC_OBJC_TYPE(RTCPeerConnectionFactoryBuilder) (DefaultComponents)
+@implementation RTCPeerConnectionFactoryBuilder (DefaultComponents)
 
-+ (RTC_OBJC_TYPE(RTCPeerConnectionFactoryBuilder) *)defaultBuilder {
-  RTC_OBJC_TYPE(RTCPeerConnectionFactoryBuilder) *builder = [[RTC_OBJC_TYPE(RTCPeerConnectionFactoryBuilder) alloc] init];
++ (RTCPeerConnectionFactoryBuilder *)defaultBuilder {
+  RTCPeerConnectionFactoryBuilder *builder =
+      [[RTCPeerConnectionFactoryBuilder alloc] init];
   auto audioEncoderFactory = webrtc::CreateBuiltinAudioEncoderFactory();
   [builder setAudioEncoderFactory:audioEncoderFactory];
 

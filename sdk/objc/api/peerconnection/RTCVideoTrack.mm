@@ -23,7 +23,8 @@
 
 @synthesize source = _source;
 
-- (instancetype)initWithFactory:(RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)factory
+- (instancetype)initWithFactory:
+                    (RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)factory
                          source:(RTC_OBJC_TYPE(RTCVideoSource) *)source
                         trackId:(NSString *)trackId {
   NSParameterAssert(factory);
@@ -31,18 +32,22 @@
   NSParameterAssert(trackId.length);
   std::string nativeId = [NSString stdStringForString:trackId];
   rtc::scoped_refptr<webrtc::VideoTrackInterface> track =
-      factory.nativeFactory->CreateVideoTrack(source.nativeVideoSource, nativeId);
-  self = [self initWithFactory:factory nativeTrack:track type:RTCMediaStreamTrackTypeVideo];
+      factory.nativeFactory->CreateVideoTrack(source.nativeVideoSource,
+                                              nativeId);
+  self = [self initWithFactory:factory
+                   nativeTrack:track
+                          type:RTCMediaStreamTrackTypeVideo];
   if (self) {
     _source = source;
   }
   return self;
 }
 
-- (instancetype)initWithFactory:(RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)factory
-                    nativeTrack:
-                        (rtc::scoped_refptr<webrtc::MediaStreamTrackInterface>)nativeMediaTrack
-                           type:(RTCMediaStreamTrackType)type {
+- (instancetype)
+    initWithFactory:(RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)factory
+        nativeTrack:(rtc::scoped_refptr<webrtc::MediaStreamTrackInterface>)
+                        nativeMediaTrack
+               type:(RTCMediaStreamTrackType)type {
   NSParameterAssert(factory);
   NSParameterAssert(nativeMediaTrack);
   NSParameterAssert(type == RTCMediaStreamTrackTypeVideo);
@@ -55,7 +60,7 @@
 }
 
 - (void)dealloc {
-  for (RTC_OBJC_TYPE(RTCVideoRendererAdapter) * adapter in _adapters) {
+  for (RTCVideoRendererAdapter *adapter in _adapters) {
     self.nativeVideoTrack->RemoveSink(adapter.nativeVideoRenderer);
   }
 }
@@ -65,59 +70,57 @@
     rtc::scoped_refptr<webrtc::VideoTrackSourceInterface> source(
         self.nativeVideoTrack->GetSource());
     if (source) {
-      _source = [[RTC_OBJC_TYPE(RTCVideoSource) alloc] initWithFactory:self.factory
-                                                     nativeVideoSource:source];
+      _source =
+          [[RTC_OBJC_TYPE(RTCVideoSource) alloc] initWithFactory:self.factory
+                                               nativeVideoSource:source];
     }
   }
   return _source;
 }
 
-- (BOOL)shouldReceive {
-  return self.nativeVideoTrack->should_receive();
-}
-
-- (void)setShouldReceive:(BOOL)shouldReceive {
-  self.nativeVideoTrack->set_should_receive(shouldReceive);
-}
-
 - (void)addRenderer:(id<RTC_OBJC_TYPE(RTCVideoRenderer)>)renderer {
   if (!_workerThread->IsCurrent()) {
-    _workerThread->BlockingCall([renderer, self] { [self addRenderer:renderer]; });
+    _workerThread->BlockingCall(
+        [renderer, self] { [self addRenderer:renderer]; });
     return;
   }
 
   // Make sure we don't have this renderer yet.
-  for (RTC_OBJC_TYPE(RTCVideoRendererAdapter) * adapter in _adapters) {
+  for (RTCVideoRendererAdapter *adapter in _adapters) {
     if (adapter.videoRenderer == renderer) {
       RTC_LOG(LS_INFO) << "|renderer| is already attached to this track";
       return;
     }
   }
   // Create a wrapper that provides a native pointer for us.
-  RTC_OBJC_TYPE(RTCVideoRendererAdapter) *adapter =
-      [[RTC_OBJC_TYPE(RTCVideoRendererAdapter) alloc] initWithNativeRenderer:renderer];
+  RTCVideoRendererAdapter *adapter =
+      [[RTCVideoRendererAdapter alloc] initWithNativeRenderer:renderer];
   [_adapters addObject:adapter];
-  self.nativeVideoTrack->AddOrUpdateSink(adapter.nativeVideoRenderer, rtc::VideoSinkWants());
+  self.nativeVideoTrack->AddOrUpdateSink(adapter.nativeVideoRenderer,
+                                         rtc::VideoSinkWants());
 }
 
 - (void)removeRenderer:(id<RTC_OBJC_TYPE(RTCVideoRenderer)>)renderer {
   if (!_workerThread->IsCurrent()) {
-    _workerThread->BlockingCall([renderer, self] { [self removeRenderer:renderer]; });
+    _workerThread->BlockingCall(
+        [renderer, self] { [self removeRenderer:renderer]; });
     return;
   }
   __block NSUInteger indexToRemove = NSNotFound;
   [_adapters enumerateObjectsUsingBlock:^(
-                 RTC_OBJC_TYPE(RTCVideoRendererAdapter) * adapter, NSUInteger idx, BOOL * stop) {
+                 RTCVideoRendererAdapter *adapter, NSUInteger idx, BOOL *stop) {
     if (adapter.videoRenderer == renderer) {
       indexToRemove = idx;
       *stop = YES;
     }
   }];
   if (indexToRemove == NSNotFound) {
-    RTC_LOG(LS_INFO) << "removeRenderer called with a renderer that has not been previously added";
+    RTC_LOG(LS_INFO) << "removeRenderer called with a renderer that has not "
+                        "been previously added";
     return;
   }
-  RTC_OBJC_TYPE(RTCVideoRendererAdapter) *adapterToRemove = [_adapters objectAtIndex:indexToRemove];
+  RTCVideoRendererAdapter *adapterToRemove =
+      [_adapters objectAtIndex:indexToRemove];
   self.nativeVideoTrack->RemoveSink(adapterToRemove.nativeVideoRenderer);
   [_adapters removeObjectAtIndex:indexToRemove];
 }

@@ -29,7 +29,8 @@
 
 @synthesize source = _source;
 
-- (instancetype)initWithFactory:(RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)factory
+- (instancetype)initWithFactory:
+                    (RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)factory
                          source:(RTC_OBJC_TYPE(RTCAudioSource) *)source
                         trackId:(NSString *)trackId {
   RTC_DCHECK(factory);
@@ -38,8 +39,11 @@
 
   std::string nativeId = [NSString stdStringForString:trackId];
   rtc::scoped_refptr<webrtc::AudioTrackInterface> track =
-      factory.nativeFactory->CreateAudioTrack(nativeId, source.nativeAudioSource.get());
-  self = [self initWithFactory:factory nativeTrack:track type:RTCMediaStreamTrackTypeAudio];
+      factory.nativeFactory->CreateAudioTrack(nativeId,
+                                              source.nativeAudioSource.get());
+  self = [self initWithFactory:factory
+                   nativeTrack:track
+                          type:RTCMediaStreamTrackTypeAudio];
   if (self) {
     _source = source;
   }
@@ -47,9 +51,11 @@
   return self;
 }
 
-- (instancetype)initWithFactory:(RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)factory
-                    nativeTrack:(rtc::scoped_refptr<webrtc::MediaStreamTrackInterface>)nativeTrack
-                           type:(RTCMediaStreamTrackType)type {
+- (instancetype)
+    initWithFactory:(RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)factory
+        nativeTrack:
+            (rtc::scoped_refptr<webrtc::MediaStreamTrackInterface>)nativeTrack
+               type:(RTCMediaStreamTrackType)type {
   NSParameterAssert(factory);
   NSParameterAssert(nativeTrack);
   NSParameterAssert(type == RTCMediaStreamTrackTypeAudio);
@@ -67,10 +73,12 @@
 
 - (RTC_OBJC_TYPE(RTCAudioSource) *)source {
   if (!_source) {
-    rtc::scoped_refptr<webrtc::AudioSourceInterface> source(self.nativeAudioTrack->GetSource());
+    rtc::scoped_refptr<webrtc::AudioSourceInterface> source(
+        self.nativeAudioTrack->GetSource());
     if (source) {
-      _source = [[RTC_OBJC_TYPE(RTCAudioSource) alloc] initWithFactory:self.factory
-                                                     nativeAudioSource:source];
+      _source =
+          [[RTC_OBJC_TYPE(RTCAudioSource) alloc] initWithFactory:self.factory
+                                               nativeAudioSource:source];
     }
   }
   return _source;
