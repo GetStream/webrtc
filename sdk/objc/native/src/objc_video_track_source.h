@@ -19,7 +19,8 @@
 
 RTC_FWD_DECL_OBJC_CLASS(RTC_OBJC_TYPE(RTCVideoFrame));
 
-@interface RTC_OBJC_TYPE(RTCObjCVideoSourceAdapter) : NSObject <RTC_OBJC_TYPE (RTCVideoCapturerDelegate)>
+@interface RTCObjCVideoSourceAdapter
+    : NSObject <RTC_OBJC_TYPE (RTCVideoCapturerDelegate)>
 @end
 
 namespace webrtc {
@@ -28,7 +29,7 @@ class ObjCVideoTrackSource : public rtc::AdaptedVideoTrackSource {
  public:
   ObjCVideoTrackSource();
   explicit ObjCVideoTrackSource(bool is_screencast);
-  explicit ObjCVideoTrackSource(RTC_OBJC_TYPE(RTCObjCVideoSourceAdapter)* adapter);
+  explicit ObjCVideoTrackSource(RTCObjCVideoSourceAdapter* adapter);
 
   bool is_screencast() const override;
 
@@ -50,7 +51,7 @@ class ObjCVideoTrackSource : public rtc::AdaptedVideoTrackSource {
   rtc::VideoBroadcaster broadcaster_;
   rtc::TimestampAligner timestamp_aligner_;
 
-  RTC_OBJC_TYPE(RTCObjCVideoSourceAdapter)* adapter_;
+  RTCObjCVideoSourceAdapter* adapter_;
   bool is_screencast_;
 };
 
