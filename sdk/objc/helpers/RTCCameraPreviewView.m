@@ -26,9 +26,7 @@
 - (instancetype)initWithFrame:(CGRect)aRect {
   self = [super initWithFrame:aRect];
   if (self) {
-#if !TARGET_OS_TV
     [self addOrientationObserver];
-#endif
   }
   return self;
 }
@@ -36,18 +34,14 @@
 - (instancetype)initWithCoder:(NSCoder *)aDecoder {
   self = [super initWithCoder:aDecoder];
   if (self) {
-#if !TARGET_OS_TV
     [self addOrientationObserver];
-#endif
   }
   return self;
 }
 
-#if !TARGET_OS_TV
 - (void)dealloc {
   [self removeOrientationObserver];
 }
-#endif
 
 - (void)setCaptureSession:(AVCaptureSession *)captureSession {
   if (_captureSession == captureSession) {
@@ -57,23 +51,23 @@
   [RTC_OBJC_TYPE(RTCDispatcher)
       dispatchAsyncOnType:RTCDispatcherTypeMain
                     block:^{
-                      AVCaptureVideoPreviewLayer *previewLayer = [self previewLayer];
+                      AVCaptureVideoPreviewLayer *previewLayer =
+                          [self previewLayer];
                       [RTC_OBJC_TYPE(RTCDispatcher)
                           dispatchAsyncOnType:RTCDispatcherTypeCaptureSession
                                         block:^{
                                           previewLayer.session = captureSession;
-#if !TARGET_OS_TV
                                           [RTC_OBJC_TYPE(RTCDispatcher)
-                                              dispatchAsyncOnType:RTCDispatcherTypeMain
+                                              dispatchAsyncOnType:
+                                                  RTCDispatcherTypeMain
                                                             block:^{
-                                                              [self setCorrectVideoOrientation];
+                                                              [self
+                                                                  setCorrectVideoOrientation];
                                                             }];
-#endif
                                         }];
                     }];
 }
 
-#if !TARGET_OS_TV
 - (void)layoutSubviews {
   [super layoutSubviews];
 
@@ -94,34 +88,39 @@
   if (previewLayer.connection.isVideoOrientationSupported) {
     // Set the video orientation based on device orientation.
     if (deviceOrientation == UIDeviceOrientationPortraitUpsideDown) {
-      previewLayer.connection.videoOrientation = AVCaptureVideoOrientationPortraitUpsideDown;
+      previewLayer.connection.videoOrientation =
+          AVCaptureVideoOrientationPortraitUpsideDown;
     } else if (deviceOrientation == UIDeviceOrientationLandscapeRight) {
-      previewLayer.connection.videoOrientation = AVCaptureVideoOrientationLandscapeRight;
+      previewLayer.connection.videoOrientation =
+          AVCaptureVideoOrientationLandscapeRight;
     } else if (deviceOrientation == UIDeviceOrientationLandscapeLeft) {
-      previewLayer.connection.videoOrientation = AVCaptureVideoOrientationLandscapeLeft;
+      previewLayer.connection.videoOrientation =
+          AVCaptureVideoOrientationLandscapeLeft;
     } else if (deviceOrientation == UIDeviceOrientationPortrait) {
-      previewLayer.connection.videoOrientation = AVCaptureVideoOrientationPortrait;
+      previewLayer.connection.videoOrientation =
+          AVCaptureVideoOrientationPortrait;
     }
-    // If device orientation switches to FaceUp or FaceDown, don't change video orientation.
+    // If device orientation switches to FaceUp or FaceDown, don't change video
+    // orientation.
   }
 }
 
 #pragma mark - Private
 
 - (void)addOrientationObserver {
-  [[NSNotificationCenter defaultCenter] addObserver:self
-                                           selector:@selector(orientationChanged:)
-                                               name:UIDeviceOrientationDidChangeNotification
-                                             object:nil];
+  [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(orientationChanged:)
+             name:UIDeviceOrientationDidChangeNotification
+           object:nil];
 }
 
 - (void)removeOrientationObserver {
-  [[NSNotificationCenter defaultCenter] removeObserver:self
-                                                  name:UIDeviceOrientationDidChangeNotification
-                                                object:nil];
+  [[NSNotificationCenter defaultCenter]
+      removeObserver:self
+                name:UIDeviceOrientationDidChangeNotification
+              object:nil];
 }
-
-#endif
 
 - (AVCaptureVideoPreviewLayer *)previewLayer {
   return (AVCaptureVideoPreviewLayer *)self.layer;
