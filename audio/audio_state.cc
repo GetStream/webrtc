@@ -98,26 +98,14 @@ void AudioState::AddSendingStream(webrtc::AudioSendStream* stream,
   UpdateAudioTransportWithSendingStreams();
 
   // Make sure recording is initialized; start recording if enabled.
-  if (ShouldRecord()) {
-    auto* adm = config_.audio_device_module.get();
-    if (!adm->Recording()) {
-      if (adm->InitRecording() == 0) {
-        if (recording_enabled_) {
-
-          // TODO: Verify if the following windows only logic is still required.
-#if defined(WEBRTC_WIN)
-          if (adm->BuiltInAECIsAvailable() && !adm->Playing()) {
-            if (!adm->PlayoutIsInitialized()) {
-              adm->InitPlayout();
-            }
-            adm->StartPlayout();
-          }
-#endif
-          adm->StartRecording();
-        }
-      } else {
-        RTC_DLOG_F(LS_ERROR) << "Failed to initialize recording.";
+  auto* adm = config_.audio_device_module.get();
+  if (!adm->Recording()) {
+    if (adm->InitRecording() == 0) {
+      if (recording_enabled_) {
+        adm->StartRecording();
       }
+    } else {
+      RTC_DLOG_F(LS_ERROR) << "Failed to initialize recording.";
     }
   }
 }
@@ -127,10 +115,7 @@ void AudioState::RemoveSendingStream(webrtc::AudioSendStream* stream) {
   auto count = sending_streams_.erase(stream);
   RTC_DCHECK_EQ(1, count);
   UpdateAudioTransportWithSendingStreams();
-
-  bool should_record = ShouldRecord();
-  RTC_LOG(LS_INFO) << "RemoveSendingStream: should_record = " << should_record;
-  if (!should_record) {
+  if (sending_streams_.empty()) {
     config_.audio_device_module->StopRecording();
   }
 }
@@ -156,13 +141,16 @@ void AudioState::SetRecording(bool enabled) {
   RTC_LOG(LS_INFO) << "SetRecording(" << enabled << ")";
   RTC_DCHECK_RUN_ON(&thread_checker_);
   if (recording_enabled_ != enabled) {
+    auto* adm = config_.audio_device_module.get();
     recording_enabled_ = enabled;
     if (enabled) {
-      if (ShouldRecord()) {
-        config_.audio_device_module->StartRecording();
+      if (!sending_streams_.empty()) {
+        if (adm->InitRecording() == 0) {
+          adm->StartRecording();
+        }
       }
     } else {
-      config_.audio_device_module->StopRecording();
+      adm->StopRecording();
     }
   }
 }
@@ -218,43 +206,6 @@ void AudioState::UpdateNullAudioPollerState() {
     null_audio_poller_.Stop();
   }
 }
-
-void AudioState::OnMuteStreamChanged() {
-
-  auto* adm = config_.audio_device_module.get();
-  bool should_record = ShouldRecord();
-
-  RTC_LOG(LS_INFO) << "OnMuteStreamChanged: should_record = " << should_record;
-  if (should_record && !adm->Recording()) {
-    if (adm->InitRecording() == 0) {
-      adm->StartRecording();
-    }
-  } else if (!should_record && adm->Recording()) {
-    adm->StopRecording();
-  }
-}
-
-bool AudioState::ShouldRecord() {
-  RTC_LOG(LS_INFO) << "ShouldRecord";
-  // no streams to send
-  if (sending_streams_.empty()) {
-    RTC_LOG(LS_INFO) << "ShouldRecord: send stream = empty";
-    return false;
-  }
-
-  int stream_count = sending_streams_.size();
-
-  int muted_count = 0;
-  for (const auto& kv : sending_streams_) {
-    if (kv.first->GetMuted()) {
-      muted_count++;
-    }
-  }
-
-  RTC_LOG(LS_INFO) << "ShouldRecord: " << muted_count << " muted, " << stream_count << " sending";
-  return muted_count != stream_count;
-}
-
 }  // namespace internal
 
 rtc::scoped_refptr<AudioState> AudioState::Create(
