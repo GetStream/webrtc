@@ -40,7 +40,7 @@ class VideoTrack : public MediaStreamTrack<VideoTrackInterface>,
   static rtc::scoped_refptr<VideoTrack> Create(
       absl::string_view label,
       rtc::scoped_refptr<VideoTrackSourceInterface> source,
-      rtc::Thread* worker_thread);
+      Thread* worker_thread);
 
   void AddOrUpdateSink(rtc::VideoSinkInterface<VideoFrame>* sink,
                        const rtc::VideoSinkWants& wants) override;
@@ -66,7 +66,7 @@ class VideoTrack : public MediaStreamTrack<VideoTrackInterface>,
       absl::string_view id,
       rtc::scoped_refptr<
           VideoTrackSourceProxyWithInternal<VideoTrackSourceInterface>> source,
-      rtc::Thread* worker_thread);
+      Thread* worker_thread);
   ~VideoTrack();
 
  private:
@@ -74,7 +74,7 @@ class VideoTrack : public MediaStreamTrack<VideoTrackInterface>,
   void OnChanged() override;
 
   RTC_NO_UNIQUE_ADDRESS SequenceChecker signaling_thread_;
-  rtc::Thread* const worker_thread_;
+  Thread* const worker_thread_;
   const rtc::scoped_refptr<
       VideoTrackSourceProxyWithInternal<VideoTrackSourceInterface>>
       video_source_;
