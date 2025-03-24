@@ -250,8 +250,17 @@ static NSUInteger _sharedMultiCamSessionCount = 0;
                       RTCLogInfo("Stop");
 
 #if TARGET_MULTICAM_CAPABLE
-                      [self.captureSession removeConnection:self->_captureConnection];
-                      self->_captureConnection = nil;
+                      if (self->_captureConnection) {
+                        // We only try to remove the connection if it's still in the session. By doing that
+                        // we avoid a crash if the connection was already removed (e.g. in the case of
+                        // a multi-camera setup).
+                        // The crash looks like this: 
+                        //  *** Terminating app due to uncaught exception 'NSInvalidArgumentException', reason: '*** -[AVCaptureSession removeConnection:] <(null): 0x0> does not exist in this session'
+                        if ([self.captureSession.connections containsObject:self->_captureConnection]) {
+                          [self.captureSession removeConnection:self->_captureConnection];
+                        }
+                        self->_captureConnection = nil;
+                      }
 #endif
 
                       for (AVCaptureDeviceInput *oldInput in [self.captureSession.inputs copy]) {
