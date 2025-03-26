@@ -201,7 +201,9 @@ class WebRtcVoiceSendChannel final : public MediaChannelUtil,
 
   ~WebRtcVoiceSendChannel() override;
 
-  MediaType media_type() const override { return webrtc::MediaType::AUDIO; }
+  webrtc::MediaType media_type() const override {
+    return webrtc::MediaType::AUDIO;
+  }
   VideoMediaSendChannelInterface* AsVideoSendChannel() override {
     RTC_CHECK_NOTREACHED();
     return nullptr;
@@ -364,7 +366,9 @@ class WebRtcVoiceReceiveChannel final
 
   ~WebRtcVoiceReceiveChannel() override;
 
-  MediaType media_type() const override { return webrtc::MediaType::AUDIO; }
+  webrtc::MediaType media_type() const override {
+    return webrtc::MediaType::AUDIO;
+  }
 
   VideoMediaReceiveChannelInterface* AsVideoReceiveChannel() override {
     RTC_CHECK_NOTREACHED();
