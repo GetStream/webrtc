@@ -38,7 +38,7 @@ AudioTrackInterface::GetAudioProcessor() {
   return nullptr;
 }
 
-const cricket::AudioOptions AudioSourceInterface::options() const {
+const AudioOptions AudioSourceInterface::options() const {
   return {};
 }
 
