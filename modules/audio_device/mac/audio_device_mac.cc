@@ -26,35 +26,35 @@
 
 namespace webrtc {
 
-#define WEBRTC_CA_RETURN_ON_ERR(expr)                                \
-  do {                                                               \
-    err = expr;                                                      \
-    if (err != noErr) {                                              \
-      logCAMsg(rtc::LS_ERROR, "Error in " #expr, (const char*)&err); \
-      return -1;                                                     \
-    }                                                                \
+#define WEBRTC_CA_RETURN_ON_ERR(expr)                                   \
+  do {                                                                  \
+    err = expr;                                                         \
+    if (err != noErr) {                                                 \
+      logCAMsg(webrtc::LS_ERROR, "Error in " #expr, (const char*)&err); \
+      return -1;                                                        \
+    }                                                                   \
   } while (0)
 
-#define WEBRTC_CA_LOG_ERR(expr)                                      \
-  do {                                                               \
-    err = expr;                                                      \
-    if (err != noErr) {                                              \
-      logCAMsg(rtc::LS_ERROR, "Error in " #expr, (const char*)&err); \
-    }                                                                \
+#define WEBRTC_CA_LOG_ERR(expr)                                         \
+  do {                                                                  \
+    err = expr;                                                         \
+    if (err != noErr) {                                                 \
+      logCAMsg(webrtc::LS_ERROR, "Error in " #expr, (const char*)&err); \
+    }                                                                   \
   } while (0)
 
-#define WEBRTC_CA_LOG_WARN(expr)                                       \
-  do {                                                                 \
-    err = expr;                                                        \
-    if (err != noErr) {                                                \
-      logCAMsg(rtc::LS_WARNING, "Error in " #expr, (const char*)&err); \
-    }                                                                  \
+#define WEBRTC_CA_LOG_WARN(expr)                                          \
+  do {                                                                    \
+    err = expr;                                                           \
+    if (err != noErr) {                                                   \
+      logCAMsg(webrtc::LS_WARNING, "Error in " #expr, (const char*)&err); \
+    }                                                                     \
   } while (0)
 
 enum { MaxNumberDevices = 64 };
 
 // CoreAudio errors are best interpreted as four character strings.
-void AudioDeviceMac::logCAMsg(const rtc::LoggingSeverity sev,
+void AudioDeviceMac::logCAMsg(const webrtc::LoggingSeverity sev,
                               const char* msg,
                               const char* err) {
   RTC_DCHECK(msg != NULL);
@@ -62,14 +62,14 @@ void AudioDeviceMac::logCAMsg(const rtc::LoggingSeverity sev,
 
 #ifdef WEBRTC_ARCH_BIG_ENDIAN
   switch (sev) {
-    case rtc::LS_ERROR:
+    case webrtc::LS_ERROR:
       RTC_LOG(LS_ERROR) << msg << ": " << err[0] << err[1] << err[2] << err[3];
       break;
-    case rtc::LS_WARNING:
+    case webrtc::LS_WARNING:
       RTC_LOG(LS_WARNING) << msg << ": " << err[0] << err[1] << err[2]
                           << err[3];
       break;
-    case rtc::LS_VERBOSE:
+    case webrtc::LS_VERBOSE:
       RTC_LOG(LS_VERBOSE) << msg << ": " << err[0] << err[1] << err[2]
                           << err[3];
       break;
@@ -79,14 +79,14 @@ void AudioDeviceMac::logCAMsg(const rtc::LoggingSeverity sev,
 #else
   // We need to flip the characters in this case.
   switch (sev) {
-    case rtc::LS_ERROR:
+    case webrtc::LS_ERROR:
       RTC_LOG(LS_ERROR) << msg << ": " << err[3] << err[2] << err[1] << err[0];
       break;
-    case rtc::LS_WARNING:
+    case webrtc::LS_WARNING:
       RTC_LOG(LS_WARNING) << msg << ": " << err[3] << err[2] << err[1]
                           << err[0];
       break;
-    case rtc::LS_VERBOSE:
+    case webrtc::LS_VERBOSE:
       RTC_LOG(LS_VERBOSE) << msg << ": " << err[3] << err[2] << err[1]
                           << err[0];
       break;
@@ -120,6 +120,8 @@ AudioDeviceMac::AudioDeviceMac()
       _twoDevices(true),
       _doStop(false),
       _doStopRec(false),
+      _macBookPro(false),
+      _macBookProPanRight(false),
       _captureLatencyUs(0),
       _renderLatencyUs(0),
       _captureDelayUs(0),
@@ -276,11 +278,8 @@ AudioDeviceGeneric::InitStatus AudioDeviceMac::Init() {
   // but now must be explicitly specified. HAL would otherwise try to use the
   // main thread to issue notifications.
   AudioObjectPropertyAddress propertyAddress = {
-    kAudioHardwarePropertyRunLoop,
-    kAudioObjectPropertyScopeGlobal,
-    kAudioObjectPropertyElementMaster
-  };
-
+      kAudioHardwarePropertyRunLoop, kAudioObjectPropertyScopeGlobal,
+      kAudioObjectPropertyElementMaster};
   CFRunLoopRef runLoop = NULL;
   UInt32 size = sizeof(CFRunLoopRef);
   int aoerr = AudioObjectSetPropertyData(
@@ -296,15 +295,22 @@ AudioDeviceGeneric::InitStatus AudioDeviceMac::Init() {
   WEBRTC_CA_LOG_ERR(AudioObjectAddPropertyListener(
       kAudioObjectSystemObject, &propertyAddress, &objectListenerProc, this));
 
-  // Listen for default output device change.
-  propertyAddress.mSelector = kAudioHardwarePropertyDefaultOutputDevice;
-  WEBRTC_CA_LOG_ERR(AudioObjectAddPropertyListener(
-      kAudioObjectSystemObject, &propertyAddress, &objectListenerProc, this));
+  // Determine if this is a MacBook Pro
+  _macBookPro = false;
+  _macBookProPanRight = false;
+  char buf[128];
+  size_t length = sizeof(buf);
+  memset(buf, 0, length);
 
-  // Listen for default input device change.
-  propertyAddress.mSelector = kAudioHardwarePropertyDefaultInputDevice;
-  WEBRTC_CA_LOG_ERR(AudioObjectAddPropertyListener(
-      kAudioObjectSystemObject, &propertyAddress, &objectListenerProc, this));
+  int intErr = sysctlbyname("hw.model", buf, &length, NULL, 0);
+  if (intErr != 0) {
+    RTC_LOG(LS_ERROR) << "Error in sysctlbyname(): " << err;
+  } else {
+    RTC_LOG(LS_VERBOSE) << "Hardware model: " << buf;
+    if (strncmp(buf, "MacBookPro", 10) == 0) {
+      _macBookPro = true;
+    }
+  }
 
   _initialized = true;
 
@@ -332,27 +338,15 @@ int32_t AudioDeviceMac::Terminate() {
   OSStatus err = noErr;
   int retVal = 0;
 
-  // Remove listeners for global scope.
   AudioObjectPropertyAddress propertyAddress = {
-    kAudioHardwarePropertyDevices, // selector
-    kAudioObjectPropertyScopeGlobal, // scope
-    kAudioObjectPropertyElementMaster // element
-  };
-
-  WEBRTC_CA_LOG_WARN(AudioObjectRemovePropertyListener(
-      kAudioObjectSystemObject, &propertyAddress, &objectListenerProc, this));
-
-  propertyAddress.mSelector = kAudioHardwarePropertyDefaultOutputDevice;
-  WEBRTC_CA_LOG_WARN(AudioObjectRemovePropertyListener(
-      kAudioObjectSystemObject, &propertyAddress, &objectListenerProc, this));
-
-  propertyAddress.mSelector = kAudioHardwarePropertyDefaultInputDevice;
+      kAudioHardwarePropertyDevices, kAudioObjectPropertyScopeGlobal,
+      kAudioObjectPropertyElementMaster};
   WEBRTC_CA_LOG_WARN(AudioObjectRemovePropertyListener(
       kAudioObjectSystemObject, &propertyAddress, &objectListenerProc, this));
 
   err = AudioHardwareUnload();
   if (err != noErr) {
-    logCAMsg(rtc::LS_ERROR, "Error in AudioHardwareUnload()",
+    logCAMsg(webrtc::LS_ERROR, "Error in AudioHardwareUnload()",
              (const char*)&err);
     retVal = -1;
   }
@@ -796,14 +790,6 @@ int16_t AudioDeviceMac::PlayoutDevices() {
                           MaxNumberDevices);
 }
 
-int32_t AudioDeviceMac::GetPlayoutDevice() const {  
-  if (_outputDeviceIsSpecified) {
-    return _outputDeviceIndex;
-  }
-
-  return 0;
-}
-
 int32_t AudioDeviceMac::SetPlayoutDevice(uint16_t index) {
   MutexLock lock(&mutex_);
 
@@ -845,11 +831,13 @@ int32_t AudioDeviceMac::PlayoutDeviceName(uint16_t index,
   }
 
   memset(name, 0, kAdmMaxDeviceNameSize);
-  memset(guid, 0, kAdmMaxGuidSize);
+
+  if (guid != NULL) {
+    memset(guid, 0, kAdmMaxGuidSize);
+  }
 
   return GetDeviceName(kAudioDevicePropertyScopeOutput, index,
-                       rtc::ArrayView<char>(name, kAdmMaxDeviceNameSize),
-                       rtc::ArrayView<char>(guid, kAdmMaxGuidSize));
+                       webrtc::ArrayView<char>(name, kAdmMaxDeviceNameSize));
 }
 
 int32_t AudioDeviceMac::RecordingDeviceName(uint16_t index,
@@ -868,22 +856,13 @@ int32_t AudioDeviceMac::RecordingDeviceName(uint16_t index,
   }
 
   return GetDeviceName(kAudioDevicePropertyScopeInput, index,
-                       rtc::ArrayView<char>(name, kAdmMaxDeviceNameSize),
-                       rtc::ArrayView<char>(guid, kAdmMaxGuidSize));
+                       webrtc::ArrayView<char>(name, kAdmMaxDeviceNameSize));
 }
 
 int16_t AudioDeviceMac::RecordingDevices() {
   AudioDeviceID recDevices[MaxNumberDevices];
   return GetNumberDevices(kAudioDevicePropertyScopeInput, recDevices,
                           MaxNumberDevices);
-}
-
-int32_t AudioDeviceMac::GetRecordingDevice() const {
-  if (_inputDeviceIsSpecified) {
-    return _inputDeviceIndex;
-  }
-
-  return 0;
 }
 
 int32_t AudioDeviceMac::SetRecordingDevice(uint16_t index) {
@@ -1001,8 +980,34 @@ int32_t AudioDeviceMac::InitPlayout() {
   _renderDeviceIsAlive = 1;
   _doStop = false;
 
+  // The internal microphone of a MacBook Pro is located under the left speaker
+  // grille. When the internal speakers are in use, we want to fully stereo
+  // pan to the right.
   AudioObjectPropertyAddress propertyAddress = {
       kAudioDevicePropertyDataSource, kAudioDevicePropertyScopeOutput, 0};
+  if (_macBookPro) {
+    _macBookProPanRight = false;
+    Boolean hasProperty =
+        AudioObjectHasProperty(_outputDeviceID, &propertyAddress);
+    if (hasProperty) {
+      UInt32 dataSource = 0;
+      size = sizeof(dataSource);
+      WEBRTC_CA_LOG_WARN(AudioObjectGetPropertyData(
+          _outputDeviceID, &propertyAddress, 0, NULL, &size, &dataSource));
+
+      if (dataSource == 'ispk') {
+        _macBookProPanRight = true;
+        RTC_LOG(LS_VERBOSE)
+            << "MacBook Pro using internal speakers; stereo panning right";
+      } else {
+        RTC_LOG(LS_VERBOSE) << "MacBook Pro not using internal speakers";
+      }
+
+      // Add a listener to determine if the status changes.
+      WEBRTC_CA_LOG_WARN(AudioObjectAddPropertyListener(
+          _outputDeviceID, &propertyAddress, &objectListenerProc, this));
+    }
+  }
 
   // Get current stream description
   propertyAddress.mSelector = kAudioDevicePropertyStreamFormat;
@@ -1012,7 +1017,7 @@ int32_t AudioDeviceMac::InitPlayout() {
       _outputDeviceID, &propertyAddress, 0, NULL, &size, &_outStreamFormat));
 
   if (_outStreamFormat.mFormatID != kAudioFormatLinearPCM) {
-    logCAMsg(rtc::LS_ERROR, "Unacceptable output stream format -> mFormatID",
+    logCAMsg(webrtc::LS_ERROR, "Unacceptable output stream format -> mFormatID",
              (const char*)&_outStreamFormat.mFormatID);
     return -1;
   }
@@ -1042,7 +1047,7 @@ int32_t AudioDeviceMac::InitPlayout() {
                       << ", mBitsPerChannel = "
                       << _outStreamFormat.mBitsPerChannel;
   RTC_LOG(LS_VERBOSE) << "mFormatFlags = " << _outStreamFormat.mFormatFlags;
-  logCAMsg(rtc::LS_VERBOSE, "mFormatID",
+  logCAMsg(webrtc::LS_VERBOSE, "mFormatID",
            (const char*)&_outStreamFormat.mFormatID);
 
   // Our preferred format to work with.
@@ -1122,7 +1127,7 @@ int32_t AudioDeviceMac::InitRecording() {
       _inputDeviceID, &propertyAddress, 0, NULL, &size, &_inStreamFormat));
 
   if (_inStreamFormat.mFormatID != kAudioFormatLinearPCM) {
-    logCAMsg(rtc::LS_ERROR, "Unacceptable input stream format -> mFormatID",
+    logCAMsg(webrtc::LS_ERROR, "Unacceptable input stream format -> mFormatID",
              (const char*)&_inStreamFormat.mFormatID);
     return -1;
   }
@@ -1155,7 +1160,7 @@ int32_t AudioDeviceMac::InitRecording() {
                       << ", mBitsPerChannel = "
                       << _inStreamFormat.mBitsPerChannel;
   RTC_LOG(LS_VERBOSE) << "mFormatFlags = " << _inStreamFormat.mFormatFlags;
-  logCAMsg(rtc::LS_VERBOSE, "mFormatID",
+  logCAMsg(webrtc::LS_VERBOSE, "mFormatID",
            (const char*)&_inStreamFormat.mFormatID);
 
   // Our preferred format to work with
@@ -1288,13 +1293,14 @@ int32_t AudioDeviceMac::StartRecording() {
   }
 
   RTC_DCHECK(capture_worker_thread_.empty());
-  capture_worker_thread_ = rtc::PlatformThread::SpawnJoinable(
+  capture_worker_thread_ = webrtc::PlatformThread::SpawnJoinable(
       [this] {
         while (CaptureWorkerThread()) {
         }
       },
-      "Audio_CaptureWorkerThread",
-      rtc::ThreadAttributes().SetPriority(rtc::ThreadPriority::kRealtime));
+      "CaptureWorkerThread",
+      webrtc::ThreadAttributes().SetPriority(
+          webrtc::ThreadPriority::kRealtime));
 
   OSStatus err = noErr;
   if (_twoDevices) {
@@ -1386,11 +1392,7 @@ int32_t AudioDeviceMac::StopRecording() {
 
   // Remove listeners.
   AudioObjectPropertyAddress propertyAddress = {
-    kAudioDevicePropertyStreamFormat, // selector
-    kAudioDevicePropertyScopeInput, // scope
-    0, // element
-  };
-
+      kAudioDevicePropertyStreamFormat, kAudioDevicePropertyScopeInput, 0};
   WEBRTC_CA_LOG_WARN(AudioObjectRemovePropertyListener(
       _inputDeviceID, &propertyAddress, &objectListenerProc, this));
 
@@ -1429,13 +1431,14 @@ int32_t AudioDeviceMac::StartPlayout() {
   }
 
   RTC_DCHECK(render_worker_thread_.empty());
-  render_worker_thread_ = rtc::PlatformThread::SpawnJoinable(
+  render_worker_thread_ = webrtc::PlatformThread::SpawnJoinable(
       [this] {
         while (RenderWorkerThread()) {
         }
       },
-      "Audio_RenderWorkerThread",
-      rtc::ThreadAttributes().SetPriority(rtc::ThreadPriority::kRealtime));
+      "RenderWorkerThread",
+      webrtc::ThreadAttributes().SetPriority(
+          webrtc::ThreadPriority::kRealtime));
 
   if (_twoDevices || !_recording) {
     OSStatus err = noErr;
@@ -1503,17 +1506,23 @@ int32_t AudioDeviceMac::StopPlayout() {
 
   // Remove listeners.
   AudioObjectPropertyAddress propertyAddress = {
-    kAudioDevicePropertyStreamFormat, // selector
-    kAudioDevicePropertyScopeOutput, // scope
-    0, // element
-  };
-
+      kAudioDevicePropertyStreamFormat, kAudioDevicePropertyScopeOutput, 0};
   WEBRTC_CA_LOG_WARN(AudioObjectRemovePropertyListener(
       _outputDeviceID, &propertyAddress, &objectListenerProc, this));
 
   propertyAddress.mSelector = kAudioDeviceProcessorOverload;
   WEBRTC_CA_LOG_WARN(AudioObjectRemovePropertyListener(
       _outputDeviceID, &propertyAddress, &objectListenerProc, this));
+
+  if (_macBookPro) {
+    Boolean hasProperty =
+        AudioObjectHasProperty(_outputDeviceID, &propertyAddress);
+    if (hasProperty) {
+      propertyAddress.mSelector = kAudioDevicePropertyDataSource;
+      WEBRTC_CA_LOG_WARN(AudioObjectRemovePropertyListener(
+          _outputDeviceID, &propertyAddress, &objectListenerProc, this));
+    }
+  }
 
   _playIsInitialized = false;
   _playing = false;
@@ -1542,11 +1551,8 @@ int32_t AudioDeviceMac::GetNumberDevices(const AudioObjectPropertyScope scope,
   OSStatus err = noErr;
 
   AudioObjectPropertyAddress propertyAddress = {
-    kAudioHardwarePropertyDevices,
-    kAudioObjectPropertyScopeGlobal,
-    kAudioObjectPropertyElementMaster,
-  };
-
+      kAudioHardwarePropertyDevices, kAudioObjectPropertyScopeGlobal,
+      kAudioObjectPropertyElementMaster};
   UInt32 size = 0;
   WEBRTC_CA_RETURN_ON_ERR(AudioObjectGetPropertyDataSize(
       kAudioObjectSystemObject, &propertyAddress, 0, NULL, &size));
@@ -1645,8 +1651,7 @@ int32_t AudioDeviceMac::GetNumberDevices(const AudioObjectPropertyScope scope,
 
 int32_t AudioDeviceMac::GetDeviceName(const AudioObjectPropertyScope scope,
                                       const uint16_t index,
-                                      rtc::ArrayView<char> name,
-                                      rtc::ArrayView<char> guid) {
+                                      webrtc::ArrayView<char> name) {
   OSStatus err = noErr;
   AudioDeviceID deviceIds[MaxNumberDevices];
 
@@ -1683,9 +1688,10 @@ int32_t AudioDeviceMac::GetDeviceName(const AudioObjectPropertyScope scope,
       isDefaultDevice = true;
     }
   }
+
   AudioObjectPropertyAddress propertyAddress = {kAudioDevicePropertyDeviceName,
                                                 scope, 0};
-  rtc::SimpleStringBuilder guid_ss(guid);
+
   if (isDefaultDevice) {
     std::array<char, kAdmMaxDeviceNameSize> devName;
     UInt32 len = devName.size();
@@ -1693,9 +1699,8 @@ int32_t AudioDeviceMac::GetDeviceName(const AudioObjectPropertyScope scope,
     WEBRTC_CA_RETURN_ON_ERR(AudioObjectGetPropertyData(
         usedID, &propertyAddress, 0, NULL, &len, devName.data()));
 
-    rtc::SimpleStringBuilder ss(name);
+    webrtc::SimpleStringBuilder ss(name);
     ss.AppendFormat("default (%s)", devName.data());
-    guid_ss << "default";
   } else {
     if (index < numberDevices) {
       usedID = deviceIds[index];
@@ -1703,7 +1708,7 @@ int32_t AudioDeviceMac::GetDeviceName(const AudioObjectPropertyScope scope,
       usedID = index;
     }
     UInt32 len = name.size();
-    guid_ss << std::to_string(deviceIds[index]);
+
     WEBRTC_CA_RETURN_ON_ERR(AudioObjectGetPropertyData(
         usedID, &propertyAddress, 0, NULL, &len, name.data()));
   }
@@ -1914,66 +1919,6 @@ OSStatus AudioDeviceMac::implObjectListenerProc(
       HandleDataSourceChange(objectId, addresses[i]);
     } else if (addresses[i].mSelector == kAudioDeviceProcessorOverload) {
       HandleProcessorOverload(addresses[i]);
-    } else if (addresses[i].mSelector == kAudioHardwarePropertyDefaultOutputDevice) {
-      RTC_LOG(LS_VERBOSE) << "kAudioHardwarePropertyDefaultOutputDevice";
-      // default audio output device changed
-      HandleDefaultOutputDeviceChange();
-    } else if (addresses[i].mSelector == kAudioHardwarePropertyDefaultInputDevice) {
-      RTC_LOG(LS_VERBOSE) << "kAudioHardwarePropertyDefaultInputDevice";
-      // default audio input device changed
-      HandleDefaultInputDeviceChange();
-    }
-  }
-
-  return 0;
-}
-
-int32_t AudioDeviceMac::HandleDefaultOutputDeviceChange() {
-
-  if (SpeakerIsInitialized()) {
-    RTC_LOG(LS_WARNING) << "Default audio output device has changed";
-    int32_t renderDeviceIsAlive = _renderDeviceIsAlive;
-    bool wasPlaying = _playing && renderDeviceIsAlive == 1;
-
-    if (wasPlaying && _outputDeviceIsSpecified && _outputDeviceIndex == 0) {
-
-      StopPlayout();
-
-      // default is already selected _outputDeviceIndex(0)
-      // re-init and start playout
-      InitPlayout();
-      StartPlayout();
-    }
-
-    // Notify default output device updated
-    if (audio_device_module_sink_) {
-      audio_device_module_sink_->OnDevicesUpdated();
-    }
-  }
-
-  return 0;
-}
-
-int32_t AudioDeviceMac::HandleDefaultInputDeviceChange() {
-
-  if (MicrophoneIsInitialized()) {
-    RTC_LOG(LS_WARNING) << "Default audio input device has changed";
-    int32_t captureDeviceIsAlive = _captureDeviceIsAlive;
-    bool wasRecording = _recording && captureDeviceIsAlive == 1;
-
-    if (wasRecording && _inputDeviceIsSpecified && _inputDeviceIndex == 0) {
-
-      StopRecording();
-
-      // default is already selected _inputDeviceIndex(0)
-      // re-init and start recording
-      InitRecording();
-      StartRecording();
-    }
-
-    // Notify default input device updated
-    if (audio_device_module_sink_) {
-      audio_device_module_sink_->OnDevicesUpdated();
     }
   }
 
@@ -1996,31 +1941,11 @@ int32_t AudioDeviceMac::HandleDeviceChange() {
                                      &size, &deviceIsAlive);
 
     if (err == kAudioHardwareBadDeviceError || deviceIsAlive == 0) {
-      RTC_LOG(LS_WARNING) << "Audio input device is not alive (probably removed) deviceID: " << _inputDeviceID;
-      //AtomicSet32(&_captureDeviceIsAlive, 0);
-
-      // Logic to switch to default device (if exists)
-      // when the current device is not alive anymore
-      int32_t captureDeviceIsAlive = _captureDeviceIsAlive;
-      bool wasRecording = _recording && captureDeviceIsAlive == 1;
-
-      StopRecording();
-
-      // was playing & default device exists
-      if (wasRecording && SetRecordingDevice(0) == 0) {
-        InitRecording();
-        StartRecording();
-      } else {
-        _mixerManager.CloseMicrophone();
-      }
-
-      // Notify input device removed
-      if (audio_device_module_sink_) {
-        audio_device_module_sink_->OnDevicesUpdated();
-      }
-
+      RTC_LOG(LS_WARNING) << "Capture device is not alive (probably removed)";
+      _captureDeviceIsAlive = 0;
+      _mixerManager.CloseMicrophone();
     } else if (err != noErr) {
-      logCAMsg(rtc::LS_ERROR, "Error in AudioDeviceGetProperty()",
+      logCAMsg(webrtc::LS_ERROR, "Error in AudioDeviceGetProperty()",
                (const char*)&err);
       return -1;
     }
@@ -2035,31 +1960,11 @@ int32_t AudioDeviceMac::HandleDeviceChange() {
                                      &size, &deviceIsAlive);
 
     if (err == kAudioHardwareBadDeviceError || deviceIsAlive == 0) {
-      RTC_LOG(LS_WARNING) << "Audio output device is not alive (probably removed) deviceID: " << _outputDeviceID;
-      // AtomicSet32(&_renderDeviceIsAlive, 0); // StopPlayout() does this
-
-      // Logic to switch to default device (if exists)
-      // when the current device is not alive anymore
-      int32_t renderDeviceIsAlive = _renderDeviceIsAlive;
-      bool wasPlaying = _playing && renderDeviceIsAlive == 1;
-
-      StopPlayout();
-
-      // was playing & default device exists
-      if (wasPlaying && SetPlayoutDevice(0) == 0) {
-        InitPlayout();
-        StartPlayout();
-      } else {
-        _mixerManager.CloseSpeaker();
-      }
-
-      // Notify output device removed
-      if (audio_device_module_sink_) {
-        audio_device_module_sink_->OnDevicesUpdated();
-      }
-
+      RTC_LOG(LS_WARNING) << "Render device is not alive (probably removed)";
+      _renderDeviceIsAlive = 0;
+      _mixerManager.CloseSpeaker();
     } else if (err != noErr) {
-      logCAMsg(rtc::LS_ERROR, "Error in AudioDeviceGetProperty()",
+      logCAMsg(webrtc::LS_ERROR, "Error in AudioDeviceGetProperty()",
                (const char*)&err);
       return -1;
     }
@@ -2086,7 +1991,7 @@ int32_t AudioDeviceMac::HandleStreamFormatChange(
       objectId, &propertyAddress, 0, NULL, &size, &streamFormat));
 
   if (streamFormat.mFormatID != kAudioFormatLinearPCM) {
-    logCAMsg(rtc::LS_ERROR, "Unacceptable input stream format -> mFormatID",
+    logCAMsg(webrtc::LS_ERROR, "Unacceptable input stream format -> mFormatID",
              (const char*)&streamFormat.mFormatID);
     return -1;
   }
@@ -2113,7 +2018,8 @@ int32_t AudioDeviceMac::HandleStreamFormatChange(
   RTC_LOG(LS_VERBOSE) << "mBytesPerFrame = " << streamFormat.mBytesPerFrame
                       << ", mBitsPerChannel = " << streamFormat.mBitsPerChannel;
   RTC_LOG(LS_VERBOSE) << "mFormatFlags = " << streamFormat.mFormatFlags;
-  logCAMsg(rtc::LS_VERBOSE, "mFormatID", (const char*)&streamFormat.mFormatID);
+  logCAMsg(webrtc::LS_VERBOSE, "mFormatID",
+           (const char*)&streamFormat.mFormatID);
 
   if (propertyAddress.mScope == kAudioDevicePropertyScopeInput) {
     const int io_block_size_samples = streamFormat.mChannelsPerFrame *
@@ -2159,10 +2065,28 @@ int32_t AudioDeviceMac::HandleStreamFormatChange(
 int32_t AudioDeviceMac::HandleDataSourceChange(
     const AudioObjectID objectId,
     const AudioObjectPropertyAddress propertyAddress) {
+  OSStatus err = noErr;
+
+  if (_macBookPro &&
+      propertyAddress.mScope == kAudioDevicePropertyScopeOutput) {
+    RTC_LOG(LS_VERBOSE) << "Data source changed";
+
+    _macBookProPanRight = false;
+    UInt32 dataSource = 0;
+    UInt32 size = sizeof(UInt32);
+    WEBRTC_CA_RETURN_ON_ERR(AudioObjectGetPropertyData(
+        objectId, &propertyAddress, 0, NULL, &size, &dataSource));
+    if (dataSource == 'ispk') {
+      _macBookProPanRight = true;
+      RTC_LOG(LS_VERBOSE)
+          << "MacBook Pro using internal speakers; stereo panning right";
+    } else {
+      RTC_LOG(LS_VERBOSE) << "MacBook Pro not using internal speakers";
+    }
+  }
 
   return 0;
 }
-
 int32_t AudioDeviceMac::HandleProcessorOverload(
     const AudioObjectPropertyAddress propertyAddress) {
   // TODO(xians): we probably want to notify the user in some way of the
@@ -2297,7 +2221,7 @@ OSStatus AudioDeviceMac::implDeviceIOProc(const AudioBufferList* inputData,
       RTC_LOG(LS_ERROR) << "Error in AudioConverterFillComplexBuffer()";
       return 1;
     } else {
-      logCAMsg(rtc::LS_ERROR, "Error in AudioConverterFillComplexBuffer()",
+      logCAMsg(webrtc::LS_ERROR, "Error in AudioConverterFillComplexBuffer()",
                (const char*)&err);
       return 1;
     }
@@ -2480,6 +2404,24 @@ bool AudioDeviceMac::RenderWorkerThread() {
   uint32_t nOutSamples = nSamples * _outDesiredFormat.mChannelsPerFrame;
 
   SInt16* pPlayBuffer = (SInt16*)&playBuffer;
+  if (_macBookProPanRight && (_playChannels == 2)) {
+    // Mix entirely into the right channel and zero the left channel.
+    SInt32 sampleInt32 = 0;
+    for (uint32_t sampleIdx = 0; sampleIdx < nOutSamples; sampleIdx += 2) {
+      sampleInt32 = pPlayBuffer[sampleIdx];
+      sampleInt32 += pPlayBuffer[sampleIdx + 1];
+      sampleInt32 /= 2;
+
+      if (sampleInt32 > 32767) {
+        sampleInt32 = 32767;
+      } else if (sampleInt32 < -32768) {
+        sampleInt32 = -32768;
+      }
+
+      pPlayBuffer[sampleIdx] = 0;
+      pPlayBuffer[sampleIdx + 1] = static_cast<SInt16>(sampleInt32);
+    }
+  }
 
   PaUtil_WriteRingBuffer(_paRenderBuffer, pPlayBuffer, nOutSamples);
 
@@ -2507,7 +2449,7 @@ bool AudioDeviceMac::CaptureWorkerThread() {
       // This is our own error.
       return false;
     } else {
-      logCAMsg(rtc::LS_ERROR, "Error in AudioConverterFillComplexBuffer()",
+      logCAMsg(webrtc::LS_ERROR, "Error in AudioConverterFillComplexBuffer()",
                (const char*)&err);
       return false;
     }
