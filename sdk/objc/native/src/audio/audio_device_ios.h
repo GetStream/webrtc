@@ -239,7 +239,7 @@ class AudioDeviceIOS : public AudioDeviceGeneric,
   SequenceChecker io_thread_checker_;
 
   // Thread that this object is created on.
-  rtc::Thread* thread_;
+  webrtc::Thread* thread_;
 
   // Raw pointer handle provided to us in AttachAudioBuffer(). Owned by the
   // AudioDeviceModuleImpl class and called by AudioDeviceModule::Create().
@@ -282,7 +282,7 @@ class AudioDeviceIOS : public AudioDeviceGeneric,
   // On real iOS devices, the size will be fixed and set once. For iOS
   // simulators, the size can vary from callback to callback and the size
   // will be changed dynamically to account for this behavior.
-  rtc::BufferT<int16_t> record_audio_buffer_;
+  webrtc::BufferT<int16_t> record_audio_buffer_;
 
   bool recording_is_initialized_;
 
@@ -322,7 +322,7 @@ class AudioDeviceIOS : public AudioDeviceGeneric,
   int64_t last_output_volume_change_time_ RTC_GUARDED_BY(thread_);
 
   // Avoids running pending task after `this` is Terminated.
-  rtc::scoped_refptr<PendingTaskSafetyFlag> safety_ =
+  webrtc::scoped_refptr<PendingTaskSafetyFlag> safety_ =
       PendingTaskSafetyFlag::Create();
 
   // Playout stats.
