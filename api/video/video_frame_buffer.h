@@ -49,7 +49,7 @@ class RTC_EXPORT VideoFrameBuffer : public webrtc::RefCountInterface {
   // New frame buffer types will be added conservatively when there is an
   // opportunity to optimize the path between some pair of video source and
   // video sink.
-  // GENERATED_JAVA_ENUM_PACKAGE: org.webrtc
+  // GENERATED_JAVA_ENUM_PACKAGE: io.getstream.webrtc
   // GENERATED_JAVA_CLASS_NAME_OVERRIDE: VideoFrameBufferType
   enum class Type {
     kNative,
