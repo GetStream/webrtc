@@ -144,7 +144,6 @@ if (is_android) {
       "../../rtc_base:ssl",
       "../../extensions/android-external-audio-processing:external_processing",
     ]
-    output_name = "libgetstream_webrtc_jingle_peerconnection_so"
     output_extension = "so"
   }
 
