@@ -36,6 +36,7 @@ SCRIPT_DIR = os.path.dirname(os.path.realpath(sys.argv[0]))
 SRC_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, os.pardir, os.pardir))
 DEFAULT_ARCHS = ['armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64']
 NEEDED_SO_FILES = ['libjingle_peerconnection_so.so']
+OUTPUT_SO_FILES = {'libjingle_peerconnection_so.so': 'libstream_jingle_peerconnection_so.so'}
 JAR_FILE = 'lib.java/sdk/android/libwebrtc.jar'
 MANIFEST_FILE = 'sdk/android/AndroidManifest.xml'
 TARGETS = [
@@ -217,8 +218,9 @@ def Collect(aar_file, build_dir, arch, unstripped):
     for so_file in NEEDED_SO_FILES:
         source_so_file = os.path.join("lib.unstripped",
                                       so_file) if unstripped else so_file
+        output_so_file = OUTPUT_SO_FILES.get(so_file, so_file)
         aar_file.write(os.path.join(output_directory, source_so_file),
-                       os.path.join(abi_dir, so_file))
+                       os.path.join(abi_dir, output_so_file))
 
 
 def GenerateLicenses(output_dir, build_dir, archs):
