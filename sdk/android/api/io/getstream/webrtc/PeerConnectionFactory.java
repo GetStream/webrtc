@@ -91,7 +91,7 @@ public class PeerConnectionFactory {
       private String fieldTrials = "";
       private boolean enableInternalTracer;
       private NativeLibraryLoader nativeLibraryLoader = new NativeLibrary.DefaultLoader();
-      private String nativeLibraryName = "libstream_jingle_peerconnection_so";
+      private String nativeLibraryName = "stream_jingle_peerconnection_so";
       @Nullable private Loggable loggable;
       @Nullable private Severity loggableSeverity;
 
