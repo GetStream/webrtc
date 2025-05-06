@@ -15,7 +15,7 @@ extern "C" {
 #endif
 
 // (VideoEncoderFactory primary, VideoEncoderFactory fallback, VideoCodecInfo info)
-JNIEXPORT jlong JNICALL Java_org_webrtc_SimulcastVideoEncoder_nativeCreateEncoder(JNIEnv *env, jclass klass, jlong webrtcEnvRef, jobject primary, jobject fallback, jobject info) {
+JNIEXPORT jlong JNICALL Java_io_getstream_webrtc_SimulcastVideoEncoder_nativeCreateEncoder(JNIEnv *env, jclass klass, jlong webrtcEnvRef, jobject primary, jobject fallback, jobject info) {
     RTC_LOG(LS_INFO) << "Create simulcast video encoder";
     JavaParamRef<jobject> info_ref(info);
     SdpVideoFormat format = VideoCodecInfoToSdpVideoFormat(env, info_ref);

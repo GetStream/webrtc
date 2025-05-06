@@ -1,6 +1,6 @@
-package org.webrtc;
+package io.getstream.webrtc;
 
-import org.webrtc.AudioProcessingFactory;
+import io.getstream.webrtc.AudioProcessingFactory;
 
 public class NativeExternalAudioProcessingFactory implements AudioProcessingFactory {
 

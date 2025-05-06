@@ -27,14 +27,14 @@ rtc_library("external_processing") {
 rtc_android_library("external_java") {
     visibility = [ "*" ]
     sources = [
-        "java/src/org/webrtc/NativeExternalAudioProcessingFactory.java",
+        "java/src/io/getstream/webrtc/NativeExternalAudioProcessingFactory.java",
     ]
     deps = ["//sdk/android:peerconnection_java",]
 }
 
 generate_jni("generated_external_jni") {
     sources = [
-        "java/src/org/webrtc/NativeExternalAudioProcessingFactory.java",
+        "java/src/io/getstream/webrtc/NativeExternalAudioProcessingFactory.java",
     ]
     namespace = "external"
     jni_generator_include = "//sdk/android/src/jni/jni_generator_helper.h"

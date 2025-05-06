@@ -8,11 +8,11 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-package org.webrtc.native_test;
+package io.getstream.webrtc.native_test;
 
 import android.app.Activity;
 import org.chromium.native_test.NativeUnitTest;
-import org.webrtc.ContextUtils;
+import io.getstream.webrtc.ContextUtils;
 
 /**
  * Native unit test that calls ContextUtils.initialize for WebRTC.

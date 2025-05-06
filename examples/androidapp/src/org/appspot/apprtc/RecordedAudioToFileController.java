@@ -20,8 +20,8 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.concurrent.ExecutorService;
-import org.webrtc.audio.JavaAudioDeviceModule;
-import org.webrtc.audio.JavaAudioDeviceModule.SamplesReadyCallback;
+import io.getstream.webrtc.audio.JavaAudioDeviceModule;
+import io.getstream.webrtc.audio.JavaAudioDeviceModule.SamplesReadyCallback;
 
 /**
  * Implements the AudioRecordSamplesReadyCallback interface and writes

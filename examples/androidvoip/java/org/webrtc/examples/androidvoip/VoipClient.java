@@ -8,14 +8,14 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-package org.webrtc.examples.androidvoip;
+package io.getstream.webrtc.examples.androidvoip;
 
 import android.content.Context;
 import android.os.Handler;
 import android.os.HandlerThread;
 import java.util.ArrayList;
 import java.util.List;
-import org.webrtc.CalledByNative;
+import io.getstream.webrtc.CalledByNative;
 
 public class VoipClient {
   private long nativeClient;

@@ -76,7 +76,7 @@ ScopedJavaLocalRef<jobjectArray> NativeToJavaFrameTypeArray(
     JNIEnv* env,
     const std::vector<VideoFrameType>& frame_types) {
   return NativeToJavaObjectArray(
-      env, frame_types, org_webrtc_EncodedImage_00024FrameType_clazz(env),
+      env, frame_types, io_getstream_webrtc_EncodedImage_00024FrameType_clazz(env),
       &NativeToJavaFrameType);
 }
 
