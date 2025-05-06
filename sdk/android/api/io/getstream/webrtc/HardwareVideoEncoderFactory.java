@@ -10,9 +10,9 @@
 
 package io.getstream.webrtc;
 
-import static org.webrtc.MediaCodecUtils.EXYNOS_PREFIX;
-import static org.webrtc.MediaCodecUtils.INTEL_PREFIX;
-import static org.webrtc.MediaCodecUtils.QCOM_PREFIX;
+import static io.getstream.webrtc.MediaCodecUtils.EXYNOS_PREFIX;
+import static io.getstream.webrtc.MediaCodecUtils.INTEL_PREFIX;
+import static io.getstream.webrtc.MediaCodecUtils.QCOM_PREFIX;
 
 import android.media.MediaCodecInfo;
 import android.media.MediaCodecList;

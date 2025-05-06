@@ -12,11 +12,11 @@ package io.getstream.webrtc;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
-import static org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_BALANCED;
-import static org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL;
-import static org.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FIT;
-import static org.webrtc.RendererCommon.getDisplaySize;
-import static org.webrtc.RendererCommon.getLayoutMatrix;
+import static io.getstream.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_BALANCED;
+import static io.getstream.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FILL;
+import static io.getstream.webrtc.RendererCommon.ScalingType.SCALE_ASPECT_FIT;
+import static io.getstream.webrtc.RendererCommon.getDisplaySize;
+import static io.getstream.webrtc.RendererCommon.getLayoutMatrix;
 
 import android.graphics.Point;
 import androidx.test.filters.SmallTest;

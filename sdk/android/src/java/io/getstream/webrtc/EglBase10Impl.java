@@ -312,7 +312,7 @@ class EglBase10Impl implements EglBase10 {
   }
 
   @Override
-  public org.webrtc.EglBase.Context getEglBaseContext() {
+  public io.getstream.webrtc.EglBase.Context getEglBaseContext() {
     return new Context(
         eglConnection.getEgl(), eglConnection.getContext(), eglConnection.getConfig());
   }

@@ -27,11 +27,11 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.webrtc.VideoCodecMimeType.AV1;
-import static org.webrtc.VideoCodecMimeType.H264;
-import static org.webrtc.VideoCodecMimeType.H265;
-import static org.webrtc.VideoCodecMimeType.VP8;
-import static org.webrtc.VideoCodecMimeType.VP9;
+import static io.getstream.webrtc.VideoCodecMimeType.AV1;
+import static io.getstream.webrtc.VideoCodecMimeType.H264;
+import static io.getstream.webrtc.VideoCodecMimeType.H265;
+import static io.getstream.webrtc.VideoCodecMimeType.VP8;
+import static io.getstream.webrtc.VideoCodecMimeType.VP9;
 
 import android.media.MediaCodec;
 import android.media.MediaFormat;

@@ -3,7 +3,7 @@ syntax = "proto2";
 package webrtc.audio_network_adaptor.config;
 
 option optimize_for = LITE_RUNTIME;
-option java_package = "org.webrtc.AudioNetworkAdaptor";
+option java_package = "io.getstream.webrtc.AudioNetworkAdaptor";
 option java_outer_classname = "Config";
 option objc_class_prefix = "WANA";
 

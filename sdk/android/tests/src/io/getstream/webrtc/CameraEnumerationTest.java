@@ -11,7 +11,7 @@
 package io.getstream.webrtc;
 
 import static org.junit.Assert.assertEquals;
-import static org.webrtc.CameraEnumerationAndroid.getClosestSupportedFramerateRange;
+import static io.getstream.webrtc.CameraEnumerationAndroid.getClosestSupportedFramerateRange;
 
 import androidx.test.runner.AndroidJUnit4;
 import java.util.Arrays;
