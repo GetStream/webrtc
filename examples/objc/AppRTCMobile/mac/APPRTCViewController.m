@@ -13,7 +13,7 @@
 #import <AVFoundation/AVFoundation.h>
 
 #import "sdk/objc/api/peerconnection/RTCVideoTrack.h"
-#import "sdk/objc/components/renderer/metal/RTCMTLNSVideoView.h"
+#import "sdk/objc/components/renderer/metal/RTCMTLVideoView.h"
 
 #import "ARDAppClient.h"
 #import "ARDCaptureController.h"
@@ -215,8 +215,8 @@ static NSUInteger const kBottomViewHeight = 200;
   [_scrollView setDocumentView:_logView];
   [self addSubview:_scrollView];
 
-  _remoteVideoView = [[RTC_OBJC_TYPE(RTCMTLNSVideoView) alloc] initWithFrame:NSZeroRect];
-  _localVideoView = [[RTC_OBJC_TYPE(RTCMTLNSVideoView) alloc] initWithFrame:NSZeroRect];
+  _remoteVideoView = [[RTC_OBJC_TYPE(RTCMTLVideoView) alloc] initWithFrame:NSZeroRect];
+  _localVideoView = [[RTC_OBJC_TYPE(RTCMTLVideoView) alloc] initWithFrame:NSZeroRect];
 
   [_remoteVideoView setTranslatesAutoresizingMaskIntoConstraints:NO];
   [self addSubview:_remoteVideoView];

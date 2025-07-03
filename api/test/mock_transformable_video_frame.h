@@ -43,6 +43,7 @@ class MockTransformableVideoFrame
               GetCaptureTimeIdentifier,
               (),
               (const, override));
+  MOCK_METHOD(const RTPVideoHeader&, header, (), (const, override));
 };
 
 static_assert(!std::is_abstract_v<MockTransformableVideoFrame>, "");

@@ -42,6 +42,7 @@ class MockAudioSendStream : public AudioSendStream {
       (int payload_type, int payload_frequency, int event, int duration_ms),
       (override));
   MOCK_METHOD(void, SetMuted, (bool muted), (override));
+  MOCK_METHOD(bool, GetMuted, (), (override));
   MOCK_METHOD(Stats, GetStats, (), (const, override));
   MOCK_METHOD(Stats, GetStats, (bool has_remote_tracks), (const, override));
 };

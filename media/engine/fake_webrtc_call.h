@@ -58,6 +58,7 @@ class FakeAudioSendStream final : public webrtc::AudioSendStream {
   TelephoneEvent GetLatestTelephoneEvent() const;
   bool IsSending() const { return sending_; }
   bool muted() const { return muted_; }
+  bool GetMuted() override { return muted_; }
 
  private:
   // webrtc::AudioSendStream implementation.
