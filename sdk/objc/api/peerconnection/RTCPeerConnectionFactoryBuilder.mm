@@ -15,15 +15,16 @@
 #include "api/audio/audio_processing.h"
 #include "api/audio_codecs/audio_decoder_factory.h"
 #include "api/audio_codecs/audio_encoder_factory.h"
+#include "api/transport/network_control.h"
 #include "api/video_codecs/video_decoder_factory.h"
 #include "api/video_codecs/video_encoder_factory.h"
 
-@implementation RTCPeerConnectionFactoryBuilder {
+@implementation RTC_OBJC_TYPE(RTCPeerConnectionFactoryBuilder) {
   webrtc::PeerConnectionFactoryDependencies _dependencies;
 }
 
-+ (RTCPeerConnectionFactoryBuilder *)builder {
-  return [[RTCPeerConnectionFactoryBuilder alloc] init];
++ (RTC_OBJC_TYPE(RTCPeerConnectionFactoryBuilder) *)builder {
+  return [[RTC_OBJC_TYPE(RTCPeerConnectionFactoryBuilder) alloc] init];
 }
 
 - (RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)createPeerConnectionFactory {

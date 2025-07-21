@@ -26,11 +26,10 @@
 #error ABSL_HAVE_THREAD_LOCAL should be defined for MacOS / iOS Targets.
 #endif
 
-NSString *const kRTCAudioSessionErrorDomain =
-    @"org.webrtc.RTC_OBJC_TYPE(RTCAudioSession)";
-NSInteger const kRTCAudioSessionErrorLockRequired = -1;
-NSInteger const kRTCAudioSessionErrorConfiguration = -2;
-NSString *const kRTCAudioSessionOutputVolumeSelector = @"outputVolume";
+NSString *const RTC_CONSTANT_TYPE(RTCAudioSessionErrorDomain) = @"org.webrtc.RTC_OBJC_TYPE(RTCAudioSession)";
+NSInteger const RTC_CONSTANT_TYPE(RTCAudioSessionErrorLockRequired) = -1;
+NSInteger const RTC_CONSTANT_TYPE(RTCAudioSessionErrorConfiguration) = -2;
+NSString * const RTC_CONSTANT_TYPE(RTCAudioSessionOutputVolumeSelector) = @"outputVolume";
 
 namespace {
 // Since webrtc::Mutex is not a reentrant lock and cannot check if the mutex is
@@ -114,11 +113,10 @@ ABSL_CONST_INIT thread_local bool mutex_locked = false;
                selector:@selector(handleApplicationDidBecomeActive:)
                    name:UIApplicationDidBecomeActiveNotification
                  object:nil];
-    [_session
-        addObserver:self
-         forKeyPath:kRTCAudioSessionOutputVolumeSelector
-            options:NSKeyValueObservingOptionNew | NSKeyValueObservingOptionOld
-            context:(__bridge void *)RTC_OBJC_TYPE(RTCAudioSession).class];
+    [_session addObserver:self
+               forKeyPath:RTC_CONSTANT_TYPE(RTCAudioSessionOutputVolumeSelector)
+                  options:NSKeyValueObservingOptionNew | NSKeyValueObservingOptionOld
+                  context:(__bridge void *)RTC_OBJC_TYPE(RTCAudioSession).class];
 
     RTCLog(@"RTC_OBJC_TYPE(RTCAudioSession) (%p): init.", self);
   }
@@ -127,10 +125,9 @@ ABSL_CONST_INIT thread_local bool mutex_locked = false;
 
 - (void)dealloc {
   [[NSNotificationCenter defaultCenter] removeObserver:self];
-  [_session
-      removeObserver:self
-          forKeyPath:kRTCAudioSessionOutputVolumeSelector
-             context:(__bridge void *)RTC_OBJC_TYPE(RTCAudioSession).class];
+  [_session removeObserver:self
+                forKeyPath:RTC_CONSTANT_TYPE(RTCAudioSessionOutputVolumeSelector)
+                   context:(__bridge void *)RTC_OBJC_TYPE(RTCAudioSession).class];
   RTCLog(@"RTC_OBJC_TYPE(RTCAudioSession) (%p): dealloc.", self);
 }
 
@@ -641,14 +638,11 @@ ABSL_CONST_INIT thread_local bool mutex_locked = false;
 #pragma mark - Private
 
 + (NSError *)lockError {
-  NSDictionary *userInfo = @{
-    NSLocalizedDescriptionKey :
-        @"Must call lockForConfiguration before calling this method."
-  };
-  NSError *error =
-      [[NSError alloc] initWithDomain:kRTCAudioSessionErrorDomain
-                                 code:kRTCAudioSessionErrorLockRequired
-                             userInfo:userInfo];
+  NSDictionary *userInfo =
+      @{NSLocalizedDescriptionKey : @"Must call lockForConfiguration before calling this method."};
+  NSError *error = [[NSError alloc] initWithDomain:RTC_CONSTANT_TYPE(RTCAudioSessionErrorDomain)
+                                              code:RTC_CONSTANT_TYPE(RTCAudioSessionErrorLockRequired)
+                                          userInfo:userInfo];
   return error;
 }
 
@@ -817,8 +811,8 @@ ABSL_CONST_INIT thread_local bool mutex_locked = false;
   NSDictionary *userInfo = @{
     NSLocalizedDescriptionKey : description,
   };
-  return [[NSError alloc] initWithDomain:kRTCAudioSessionErrorDomain
-                                    code:kRTCAudioSessionErrorConfiguration
+  return [[NSError alloc] initWithDomain:RTC_CONSTANT_TYPE(RTCAudioSessionErrorDomain)
+                                    code:RTC_CONSTANT_TYPE(RTCAudioSessionErrorConfiguration)
                                 userInfo:userInfo];
 }
 
@@ -832,6 +826,7 @@ ABSL_CONST_INIT thread_local bool mutex_locked = false;
                   withOptions:options
                         error:&error]) {
     self.isActive = shouldActivate;
+     RTCLogError(@"Did set session active to %d", shouldActivate);
   } else {
     RTCLogError(@"Failed to set session active to %d. Error:%@",
                 shouldActivate,
@@ -907,10 +902,9 @@ ABSL_CONST_INIT thread_local bool mutex_locked = false;
     SEL sel = @selector(audioSession:audioUnitStartFailedWithError:);
     if ([delegate respondsToSelector:sel]) {
       [delegate audioSession:self
-          audioUnitStartFailedWithError:
-              [NSError errorWithDomain:kRTCAudioSessionErrorDomain
-                                  code:error
-                              userInfo:nil]];
+          audioUnitStartFailedWithError:[NSError errorWithDomain:RTC_CONSTANT_TYPE(RTCAudioSessionErrorDomain)
+                                                            code:error
+                                                        userInfo:nil]];
     }
   }
 }

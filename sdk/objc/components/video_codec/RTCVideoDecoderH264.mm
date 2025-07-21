@@ -66,7 +66,7 @@ void decompressionOutputCallback(void *decoderRef,
   RTC_OBJC_TYPE(
       RTCVideoFrame) *decodedFrame = [[RTC_OBJC_TYPE(RTCVideoFrame) alloc]
       initWithBuffer:frameBuffer
-            rotation:RTCVideoRotation_0
+            rotation:RTC_OBJC_TYPE(RTCVideoRotation_0)
          timeStampNs:CMTimeGetSeconds(timestamp) * webrtc::kNumNanosecsPerSec];
   decodedFrame.timeStamp = decodeParams->timestamp;
   decodeParams->callback(decodedFrame);
