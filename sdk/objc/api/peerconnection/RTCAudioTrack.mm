@@ -147,18 +147,4 @@
       static_cast<webrtc::AudioTrackInterface *>(self.nativeTrack.get()));
 }
 
-- (void)didCaptureSampleBuffer:(CMSampleBufferRef)sampleBuffer {
-  bool is_locked = os_unfair_lock_trylock(&_lock);
-  if (!is_locked) {
-    RTC_LOG(LS_INFO) << "RTCAudioTrack didCaptureSampleBuffer already locked, skipping...";
-    return;
-  }
-  NSArray *renderers = [_renderers allObjects];
-  os_unfair_lock_unlock(&_lock);
-
-  for (id<RTCAudioRenderer> renderer in renderers) {
-    [renderer renderSampleBuffer:sampleBuffer];
-  }
-}
-
 @end

@@ -127,8 +127,6 @@ RTC_OBJC_EXPORT
     NSArray<RTC_OBJC_TYPE(RTCRtpHeaderExtensionCapability) *>
         *negotiatedHeaderExtensions;
 
-@property(nonatomic, copy) NSArray<RTC_OBJC_TYPE(RTCRtpCodecCapability) *> *codecPreferences;
-
 /** The currentDirection attribute indicates the current direction negotiated
  *  for this transceiver. If this transceiver has never been represented in an
  *  offer/answer exchange, or if the transceiver is stopped, the value is not
