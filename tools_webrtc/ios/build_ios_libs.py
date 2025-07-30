@@ -108,6 +108,11 @@ def _ParseArgs():
         default=[],
         nargs='*',
         help='Additional GN args to be used during Ninja generation.')
+    parser.add_argument(
+        '--no-licenses',
+        action='store_true',
+        default=False,
+        help='Skip license file generation.')
 
     return parser.parse_args()
 
@@ -345,11 +350,14 @@ def main():
     _RunCommand(cmd)
 
     # Generate the license file.
-    logging.info('Generate license file.')
-    gn_target_full_name = '//sdk:' + gn_target_name
-    builder = LicenseBuilder(all_lib_paths, [gn_target_full_name])
-    builder.generate_license_text(
-        os.path.join(args.output_dir, SDK_XCFRAMEWORK_NAME))
+    if not args.no_licenses:
+        logging.info('Generate license file.')
+        gn_target_full_name = '//sdk:' + gn_target_name
+        builder = LicenseBuilder(all_lib_paths, [gn_target_full_name])
+        builder.generate_license_text(
+            os.path.join(args.output_dir, SDK_XCFRAMEWORK_NAME))
+    else:
+        logging.info('Skipping license file generation.')
 
     logging.info('Done.')
     return 0
