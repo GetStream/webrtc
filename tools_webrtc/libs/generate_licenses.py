@@ -267,12 +267,20 @@ class LicenseBuilder:
 
             output_license_file.write('# %s\n' % license_lib)
             output_license_file.write('```\n')
+            found_license = False
             for path in self.common_licenses_dict[license_lib]:
                 license_path = os.path.join(WEBRTC_ROOT, path)
+                if not os.path.exists(license_path):
+                    logging.warning('License file not found: %s', license_path)
+                    continue
+                found_license = True
                 with open(license_path, 'r') as license_file:
                     license_text = escape(license_file.read(), quote=True)
                     output_license_file.write(license_text)
                     output_license_file.write('\n')
+            if not found_license:
+                logging.warning('No license files found for library: %s', license_lib)
+                output_license_file.write('No license file available.\n')
             output_license_file.write('```\n\n')
 
         output_license_file.close()
