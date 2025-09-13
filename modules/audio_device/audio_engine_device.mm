@@ -1972,13 +1972,13 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate state) {
     AVAudioFormat* engine_input_format = [[AVAudioFormat alloc]
         initWithCommonFormat:input_node_format.commonFormat  // Usually float32
                   sampleRate:input_node_format.sampleRate
-                    channels:1
+                    channels:input_node_format.channelCount
                  interleaved:input_node_format.interleaved];
 
     AVAudioFormat* rtc_input_format =
         [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatInt16
                                          sampleRate:engine_input_format.sampleRate
-                                           channels:1
+                                           channels:input_node_format.channelCount
                                         interleaved:YES];
 
     audio_device_buffer_->SetRecordingSampleRate(rtc_input_format.sampleRate);
@@ -2003,15 +2003,15 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate state) {
     AVAudioSinkNodeReceiverBlock sink_block =
         ^OSStatus(const AudioTimeStamp* timestamp, AVAudioFrameCount frameCount,
                   const AudioBufferList* inputData) {
-          RTC_DCHECK(inputData->mNumberBuffers == 1);
+          //handle for stereo
+          RTC_DCHECK((inputData->mNumberBuffers == 1 || inputData->mNumberBuffers == 2));
 
           AudioBufferList* converter_buffer_abl =
               const_cast<AudioBufferList*>(converter_buffer_.audioBufferList);
-          RTC_DCHECK(converter_buffer_abl->mNumberBuffers == inputData->mNumberBuffers);
 
-          // Fails for conversions where there is a variation between the input and output data
-          // buffer sizes.
-          converter_buffer_abl->mBuffers[0].mDataByteSize = inputData->mBuffers[0].mDataByteSize;
+
+          UInt32 input_data_size = inputData->mBuffers[0].mDataByteSize;
+          converter_buffer_abl->mBuffers[0].mDataByteSize = input_data_size;
 
           RTC_DCHECK(converter_buffer_abl->mBuffers[0].mDataByteSize ==
                      inputData->mBuffers[0].mDataByteSize);
@@ -2024,7 +2024,7 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate state) {
           const int64_t capture_time_ns = timestamp->mHostTime * machTickUnitsToNanoseconds_;
 
           fine_audio_buffer_->DeliverRecordedData(
-              webrtc::ArrayView<const int16_t>(rtc_buffer, frameCount), kFixedRecordDelayEstimate,
+              webrtc::ArrayView<const int16_t>(rtc_buffer, frameCount * rtc_input_format.channelCount), kFixedRecordDelayEstimate,
               capture_time_ns);
 
           return noErr;
