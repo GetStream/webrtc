@@ -222,10 +222,12 @@
                                  SetParametersCallback callback) override;
  
    void SetSend(bool send) override;
-   bool SetAudioSend(uint32_t ssrc,
-                     bool enable,
-                     const AudioOptions* options,
-                     AudioSource* source) override;
+  bool SetAudioSend(uint32_t ssrc,
+                    bool enable,
+                    const AudioOptions* options,
+                    AudioSource* source) override;
+  void SetSenderDetachedFromTransport(uint32_t ssrc,
+                                      bool detached) override;
    bool AddSendStream(const StreamParams& sp) override;
    bool RemoveSendStream(uint32_t ssrc) override;
  

@@ -104,6 +104,7 @@ rtc_library("rtc_media_base") {
     "../call:call_interfaces",
     "../common_video",
     "../modules/async_audio_processing",
+    "../audio:audio",
     "../modules/audio_device",
     "../modules/rtp_rtcp:rtp_rtcp_format",
     "../rtc_base:async_packet_socket",
@@ -155,6 +156,18 @@ rtc_library("adapted_video_track_source") {
 
 rtc_source_set("audio_source") {
   sources = [ "base/audio_source.h" ]
+}
+
+rtc_library("external_audio_source") {
+  sources = [
+    "base/external_audio_source.cc",
+    "base/external_audio_source.h",
+  ]
+  deps = [
+    ":audio_source",
+    "../api:call_api",
+    "../rtc_base/synchronization:mutex",
+  ]
 }
 
 rtc_library("video_adapter") {
@@ -584,6 +597,7 @@ rtc_library("rtc_audio_video") {
     ":media_constants",
     ":media_engine",
     ":rid_description",
+    ":external_audio_source",
     ":rtc_media_config",
     ":rtp_utils",
     ":stream_params",

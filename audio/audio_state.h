@@ -13,6 +13,7 @@
 
 #include <map>
 #include <memory>
+#include <unordered_set>
 
 #include "api/sequence_checker.h"
 #include "audio/audio_transport_impl.h"
@@ -62,6 +63,14 @@ class AudioState : public webrtc::AudioState {
                         size_t num_channels);
   void RemoveSendingStream(webrtc::AudioSendStream* stream);
 
+  // Detach/attach a specific sending stream from/to the AudioTransport fan-out.
+  // When detached, the stream will not receive microphone PCM frames coming
+  // from the factory's AudioDeviceModule via AudioTransportImpl. This allows
+  // a sender to be driven solely by a custom AudioSource (e.g., external
+  // screenshare audio) without affecting microphone tracks.
+  void DetachFromAudioTransport(webrtc::AudioSendStream* stream);
+  void AttachToAudioTransport(webrtc::AudioSendStream* stream);
+
  private:
   void UpdateAudioTransportWithSendingStreams();
   void UpdateNullAudioPollerState() RTC_RUN_ON(&thread_checker_);
@@ -90,6 +99,11 @@ class AudioState : public webrtc::AudioState {
     size_t num_channels = 0;
   };
   std::map<webrtc::AudioSendStream*, StreamProperties> sending_streams_;
+
+  // Streams in this set are excluded from the AudioTransportImpl fan-out of
+  // recorded (microphone) audio. They are expected to be driven by a custom
+  // cricket::AudioSource through the media channel.
+  std::unordered_set<webrtc::AudioSendStream*> detached_from_transport_;
 };
 }  // namespace internal
 }  // namespace webrtc

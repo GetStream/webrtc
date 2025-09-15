@@ -892,6 +892,11 @@ class VoiceMediaSendChannelInterface : public MediaSendChannelInterface {
                             bool enable,
                             const webrtc::AudioOptions* options,
                             webrtc::AudioSource* source) = 0;
+  // Mark a specific sender as detached from the AudioDeviceModule transport
+  // fan-out (microphone). When detached, the sender is expected to be driven
+  // solely by the provided AudioSource.
+  virtual void SetSenderDetachedFromTransport(uint32_t ssrc,
+                                              bool detached) = 0;
   // Returns if the telephone-event has been negotiated.
   virtual bool CanInsertDtmf() = 0;
   // Send a DTMF `event`. The DTMF out-of-band signal will be used.

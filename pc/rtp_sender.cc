@@ -730,6 +730,51 @@ bool AudioRtpSender::InsertDtmf(int code, int duration) {
   return success;
 }
 
+bool AudioRtpSender::SetExternalAudioSource(cricket::AudioSource* source) {
+  RTC_DCHECK_RUN_ON(signaling_thread_);
+  if (!media_channel_) {
+    RTC_LOG(LS_ERROR) << "SetExternalAudioSource: No audio channel exists.";
+    return false;
+  }
+  if (!ssrc_) {
+    RTC_LOG(LS_ERROR) << "SetExternalAudioSource: Sender does not have SSRC.";
+    return false;
+  }
+
+  // Replicate option propagation from SetSend.
+  AudioOptions options;
+#if !defined(WEBRTC_CHROMIUM_BUILD) && !defined(WEBRTC_WEBKIT_BUILD)
+  if (track_ && track_->enabled() && audio_track()->GetSource() &&
+      !audio_track()->GetSource()->remote()) {
+    options = audio_track()->GetSource()->options();
+  }
+#endif
+  const bool track_enabled = track_ ? track_->enabled() : true;
+
+  bool success = worker_thread_->BlockingCall([&] {
+    return voice_media_channel()->SetAudioSend(ssrc_, track_enabled, &options,
+                                               source);
+  });
+  if (!success) {
+    RTC_LOG(LS_ERROR) << "SetExternalAudioSource: SetAudioSend failed.";
+  }
+  // Ensure this sender is detached from ADM fan-out since it's externally
+  // driven.
+  worker_thread_->BlockingCall([&] {
+    voice_media_channel()->SetSenderDetachedFromTransport(ssrc_, true);
+  });
+  return success;
+}
+
+bool AttachExternalAudioSourceToSender(RtpSenderInterface* sender,
+                                       cricket::AudioSource* source) {
+  if (!sender || sender->media_type() != webrtc::MediaType::AUDIO) {
+    return false;
+  }
+  auto* audio = static_cast<AudioRtpSender*>(sender);
+  return audio->SetExternalAudioSource(source);
+}
+
 void AudioRtpSender::OnChanged() {
   RTC_DCHECK_RUN_ON(signaling_thread_);
   TRACE_EVENT0("webrtc", "AudioRtpSender::OnChanged");
@@ -738,6 +783,10 @@ void AudioRtpSender::OnChanged() {
     cached_track_enabled_ = track_->enabled();
     if (can_send_track()) {
       SetSend();
+      // Ensure default (track-driven) mode re-attaches to ADM fan-out.
+      worker_thread_->BlockingCall([&] {
+        voice_media_channel()->SetSenderDetachedFromTransport(ssrc_, false);
+      });
     }
   }
 }
