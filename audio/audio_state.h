@@ -47,7 +47,7 @@ class AudioState : public webrtc::AudioState {
 
   void SetStereoChannelSwapping(bool enable) override;
 
-  void OnMuteStreamChanged() override;
+  void OnMuteStreamChanged();
 
   AudioDeviceModule* audio_device_module() {
     RTC_DCHECK(config_.audio_device_module);
