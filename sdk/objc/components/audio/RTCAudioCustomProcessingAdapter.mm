@@ -115,6 +115,7 @@ class AudioCustomProcessingAdapter : public webrtc::CustomProcessing {
     _adapter = new webrtc::AudioCustomProcessingAdapter();
     RTC_LOG(LS_INFO) << "RTCAudioCustomProcessingAdapter init";
   }
+  [self setAudioCustomProcessingDelegate:audioCustomProcessingDelegate];
 
   return self;
 }
