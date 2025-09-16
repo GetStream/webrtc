@@ -5,6 +5,7 @@ import("//third_party/jni_zero/jni_zero.gni")
 
 rtc_library("external_processing") {
     visibility = [ "*" ]
+    allow_poison = [ "environment_construction" ]
     configs += [ "../../modules/audio_processing:apm_debug_dump", ]
     configs += [ "//build/config/android:hide_all_but_jni" ]
     defines = ["WEBRTC_ANDROID", "WEBRTC_POSIX",]
