@@ -93,5 +93,6 @@ public class VideoCodecInfo {
   @CalledByNative
   List<String> getScalabilityModes() {
     return scalabilityModes;
+  }
 
 }
