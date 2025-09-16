@@ -18,6 +18,8 @@ rtc_library("external_processing") {
     deps = [
         ":generated_external_jni",
         ":external_java",
+        "../../api/audio:builtin_audio_processing_builder",
+        "../../api/environment:environment_factory",
         "../../rtc_base:logging",
         "../../sdk/android:native_api_jni",
         "../../modules/audio_processing:audio_processing",
