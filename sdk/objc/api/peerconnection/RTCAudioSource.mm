@@ -8,11 +8,21 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#import <Foundation/Foundation.h>
+
 #import "RTCAudioSource+Private.h"
+#import "sdk/objc/base/RTCAudioCapturer.h"
+#import "sdk/objc/base/RTCAudioFrame.h"
 
 #include "rtc_base/checks.h"
+#include "sdk/objc/native/src/objc_audio_track_source.h"
+
+@interface RTC_OBJC_TYPE (RTCAudioSource) () <RTC_OBJC_TYPE(RTCAudioCapturerDelegate)>
+- (void)pushAudioFrame:(RTC_OBJC_TYPE(RTCAudioFrame) *)frame;
+@end
 
 @implementation RTC_OBJC_TYPE (RTCAudioSource) {
+  dispatch_queue_t _captureQueue;
 }
 
 @synthesize volume = _volume;
@@ -30,6 +40,7 @@
                                type:RTC_OBJC_TYPE(RTCMediaSourceTypeAudio)];
   if (self) {
     _nativeAudioSource = nativeAudioSource;
+    _captureQueue = dispatch_queue_create("org.webrtc.audio.capturer", DISPATCH_QUEUE_SERIAL);
   }
   return self;
 }
@@ -53,6 +64,29 @@
 - (void)setVolume:(double)volume {
   _volume = volume;
   _nativeAudioSource->SetVolume(volume);
+}
+
+#pragma mark - RTCAudioCapturerDelegate
+
+- (void)capturer:(RTC_OBJC_TYPE(RTCAudioCapturer) *)capturer
+    didCaptureAudioFrame:(RTC_OBJC_TYPE(RTCAudioFrame) *)frame {
+  if (!frame) {
+    return;
+  }
+  dispatch_async(_captureQueue, ^{
+    [self pushAudioFrame:frame];
+  });
+}
+
+#pragma mark - Private
+
+- (void)pushAudioFrame:(RTC_OBJC_TYPE(RTCAudioFrame) *)frame {
+  webrtc::ObjCAudioTrackSource *pushable =
+      webrtc::ObjCAudioTrackSource::FromAudioSource(_nativeAudioSource.get());
+  if (!pushable) {
+    return;
+  }
+  pushable->OnCapturedFrame(frame);
 }
 
 @end

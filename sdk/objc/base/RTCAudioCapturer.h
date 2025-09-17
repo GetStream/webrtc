@@ -12,16 +12,17 @@
 
 #import "sdk/objc/base/RTCMacros.h"
 
-NS_ASSUME_NONNULL_BEGIN
+#if !defined(__OBJC__)
+#error "RTCAudioCapturer.h requires Objective-C/Objective-C++ compilation"
+#endif
 
 @class RTC_OBJC_TYPE(RTCAudioCapturer);
-@class RTC_OBJC_TYPE(RTCAudioBuffer);
+@class RTC_OBJC_TYPE(RTCAudioFrame);
 
 RTC_OBJC_EXPORT
-@protocol RTC_OBJC_TYPE
-(RTCAudioCapturerDelegate)<NSObject>
+@protocol RTC_OBJC_TYPE(RTCAudioCapturerDelegate)<NSObject>
 - (void)capturer:(RTC_OBJC_TYPE(RTCAudioCapturer) *)capturer
-    didCaptureAudioBuffer:(RTC_OBJC_TYPE(RTCAudioBuffer) *)buffer;
+    didCaptureAudioFrame:(RTC_OBJC_TYPE(RTCAudioFrame) *)frame;
 @end
 
 RTC_OBJC_EXPORT
@@ -33,5 +34,3 @@ RTC_OBJC_EXPORT
     (id<RTC_OBJC_TYPE(RTCAudioCapturerDelegate)>)delegate;
 
 @end
-
-NS_ASSUME_NONNULL_END

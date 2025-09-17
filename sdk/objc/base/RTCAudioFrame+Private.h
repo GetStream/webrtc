@@ -8,21 +8,16 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#import <Foundation/Foundation.h>
+#import "RTCAudioFrame.h"
 
-#import "RTCAudioCapturer.h"
+#include "api/audio/audio_frame.h"
 
-@implementation RTC_OBJC_TYPE (RTCAudioCapturer)
+NS_ASSUME_NONNULL_BEGIN
 
-@synthesize delegate = _delegate;
+@interface RTC_OBJC_TYPE(RTCAudioFrame) ()
 
-- (instancetype)initWithDelegate:
-    (id<RTC_OBJC_TYPE(RTCAudioCapturerDelegate)>)delegate {
-  self = [super init];
-  if (self) {
-    _delegate = delegate;
-  }
-  return self;
-}
+- (void)fillNativeAudioFrame:(webrtc::AudioFrame *)frame;
 
 @end
+
+NS_ASSUME_NONNULL_END
