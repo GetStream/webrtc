@@ -11,12 +11,14 @@
 #ifndef SDK_OBJC_NATIVE_SRC_OBJC_AUDIO_DEVICE_H_
 #define SDK_OBJC_NATIVE_SRC_OBJC_AUDIO_DEVICE_H_
 
+#include <functional>
 #include <memory>
 
 #import "components/audio/RTCAudioDevice.h"
 
 #include "api/audio/audio_device.h"
 #include "modules/audio_device/audio_device_buffer.h"
+#include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/thread.h"
 
 @class RTC_OBJC_TYPE(RTCObjCAudioDeviceDelegate);
@@ -29,6 +31,9 @@ namespace objc_adm {
 
 class ObjCAudioDeviceModule : public AudioDeviceModule {
  public:
+  using RecordedDataCallback =
+      std::function<void(int16_t*, size_t, int, size_t, int64_t)>;
+
   explicit ObjCAudioDeviceModule(
       id<RTC_OBJC_TYPE(RTCAudioDevice)> audio_device);
   ~ObjCAudioDeviceModule() override;
@@ -144,6 +149,8 @@ class ObjCAudioDeviceModule : public AudioDeviceModule {
       const AudioBufferList* io_data,
       void* render_context,
       RTC_OBJC_TYPE(RTCAudioDeviceRenderRecordedDataBlock) render_block);
+
+  void SetRecordedDataCallback(RecordedDataCallback callback);
 
   OSStatus OnGetPlayoutData(AudioUnitRenderActionFlags* flags,
                             const AudioTimeStamp* time_stamp,
@@ -278,6 +285,11 @@ class ObjCAudioDeviceModule : public AudioDeviceModule {
 
   // Delegate object provided to RTCAudioDevice during initialization
   RTC_OBJC_TYPE(RTCObjCAudioDeviceDelegate)* audio_device_delegate_;
+
+  webrtc::Mutex microphone_callback_lock_;
+  RecordedDataCallback microphone_callback_ RTC_GUARDED_BY(microphone_callback_lock_);
+
+  double mach_tick_units_to_nanoseconds_ = 0;
 };
 
 }  // namespace objc_adm

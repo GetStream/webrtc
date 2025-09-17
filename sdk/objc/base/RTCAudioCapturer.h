@@ -30,7 +30,14 @@ RTC_OBJC_EXPORT
 
 @property(nonatomic, weak) id<RTC_OBJC_TYPE(RTCAudioCapturerDelegate)> delegate;
 
+@property(nonatomic, readonly, getter=isRunning) BOOL running;
+
 - (instancetype)initWithDelegate:
     (id<RTC_OBJC_TYPE(RTCAudioCapturerDelegate)>)delegate;
+
+- (void)start;
+- (void)stop;
+
+- (BOOL)isRunning;
 
 @end

@@ -23,6 +23,7 @@
 
 #import "modules/audio_device/audio_engine_device.h"
 #import "sdk/objc/native/api/audio_device_module.h"
+#import "sdk/objc/native/src/objc_audio_device.h"
 
 NSString *const RTC_CONSTANT_TYPE(RTCAudioEngineInputMixerNodeKey) =
     webrtc::kAudioEngineInputMixerNodeKey;
@@ -162,6 +163,27 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
   _observer = new AudioDeviceObserver(self);
 
   return self;
+}
+
+- (void)setMicrophoneFrameBlock:(nullable RTCMicrophoneFrameBlock)block {
+  RTCMicrophoneFrameBlock blockCopy = [block copy];
+  _workerThread->BlockingCall([self, blockCopy] {
+    auto* native = static_cast<webrtc::objc_adm::ObjCAudioDeviceModule*>(_native.get());
+    if (!native) {
+      return;
+    }
+    webrtc::objc_adm::ObjCAudioDeviceModule::RecordedDataCallback callback;
+    if (blockCopy) {
+      callback = [blockCopy](int16_t* samples,
+                             size_t frames,
+                             int sampleRate,
+                             size_t channels,
+                             int64_t timestampNs) {
+        blockCopy(samples, frames, sampleRate, channels, timestampNs);
+      };
+    }
+    native->SetRecordedDataCallback(std::move(callback));
+  });
 }
 
 - (NSArray<RTC_OBJC_TYPE(RTCIODevice) *> *)outputDevices {

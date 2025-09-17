@@ -21,10 +21,18 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+typedef void (^RTCMicrophoneFrameBlock)(int16_t *samples,
+                                        size_t frames,
+                                        int sampleRate,
+                                        size_t channels,
+                                        int64_t timestampNs);
+
 @interface RTC_OBJC_TYPE(RTCAudioDeviceModule) ()
 
 - (instancetype)initWithNativeModule:(webrtc::scoped_refptr<webrtc::AudioDeviceModule>)module
                         workerThread:(webrtc::Thread *)workerThread;
+
+- (void)setMicrophoneFrameBlock:(nullable RTCMicrophoneFrameBlock)block;
 
 @end
 
