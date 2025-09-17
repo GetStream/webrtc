@@ -32,6 +32,7 @@
 #include "media/base/rid_description.h"
 #include "media/base/stream_params.h"
 #include "rtc_base/checks.h"
+#include "rtc_base/logging.h"
 
 namespace webrtc {
 namespace {
@@ -92,6 +93,23 @@ RTCError CheckScalabilityModeValues(const RtpParameters& rtp_parameters,
                                     std::optional<Codec> send_codec) {
   using webrtc::RTCErrorType;
 
+  RTC_LOG(LS_ERROR) << "CheckScalabilityModeValues: Starting check with "
+                   << send_codecs.size() << " send_codecs";
+
+  // Log all available codecs and their scalability modes for debugging
+  for (size_t idx = 0; idx < send_codecs.size(); ++idx) {
+    const webrtc::Codec& codec = send_codecs[idx];
+    RTC_LOG(LS_ERROR) << "CheckScalabilityModeValues: Available codec[" << idx
+                     << "] name=" << codec.name 
+                     << " payload_type=" << codec.id
+                     << " scalability_modes_count=" << codec.scalability_modes.size();
+    for (size_t mode_idx = 0; mode_idx < codec.scalability_modes.size(); ++mode_idx) {
+      std::string mode_string = ScalabilityModeToString(codec.scalability_modes[mode_idx]);
+      RTC_LOG(LS_ERROR) << "CheckScalabilityModeValues:   available_mode[" << mode_idx
+                       << "] = '" << mode_string << "'";
+    }
+  }
+
   if (send_codecs.empty()) {
     // This is an audio sender or an extra check in the stack where the codec
     // list is not available and we can't check the scalability_mode values.
@@ -120,11 +138,26 @@ RTCError CheckScalabilityModeValues(const RtpParameters& rtp_parameters,
     if (rtp_parameters.encodings[i].scalability_mode) {
       if (!send_codec) {
         bool scalabilityModeFound = false;
-        for (const webrtc::Codec& codec : send_codecs) {
-          for (const auto& scalability_mode : codec.scalability_modes) {
-            if (ScalabilityModeToString(scalability_mode) ==
-                *rtp_parameters.encodings[i].scalability_mode) {
+        RTC_LOG(LS_INFO) << "CheckScalabilityModeValues: Checking scalability mode '"
+                         << *rtp_parameters.encodings[i].scalability_mode
+                         << "' for encoding " << i << " against " << send_codecs.size() << " send_codecs";
+        
+        for (size_t codec_idx = 0; codec_idx < send_codecs.size(); ++codec_idx) {
+          const webrtc::Codec& codec = send_codecs[codec_idx];
+          RTC_LOG(LS_INFO) << "CheckScalabilityModeValues: Checking codec[" << codec_idx 
+                           << "] name=" << codec.name 
+                           << " payload_type=" << codec.id
+                           << " with " << codec.scalability_modes.size() << " scalability modes";
+          
+          for (size_t mode_idx = 0; mode_idx < codec.scalability_modes.size(); ++mode_idx) {
+            const auto& scalability_mode = codec.scalability_modes[mode_idx];
+            std::string mode_string = ScalabilityModeToString(scalability_mode);
+            RTC_LOG(LS_INFO) << "CheckScalabilityModeValues:   mode[" << mode_idx 
+                             << "] = '" << mode_string << "'";
+            
+            if (mode_string == *rtp_parameters.encodings[i].scalability_mode) {
               scalabilityModeFound = true;
+              RTC_LOG(LS_INFO) << "CheckScalabilityModeValues: Found matching scalability mode!";
               break;
             }
           }
@@ -133,6 +166,9 @@ RTCError CheckScalabilityModeValues(const RtpParameters& rtp_parameters,
         }
 
         if (!scalabilityModeFound) {
+          RTC_LOG(LS_ERROR) << "CheckScalabilityModeValues: scalabilityModeFound is false. "
+                            << "Requested scalability mode '" << *rtp_parameters.encodings[i].scalability_mode
+                            << "' not found in any of the " << send_codecs.size() << " send_codecs";
           LOG_AND_RETURN_ERROR(
               RTCErrorType::INVALID_MODIFICATION,
               "Attempted to set RtpParameters scalabilityMode "
@@ -140,14 +176,30 @@ RTCError CheckScalabilityModeValues(const RtpParameters& rtp_parameters,
         }
       } else {
         bool scalabilityModeFound = false;
-        for (const auto& scalability_mode : send_codec->scalability_modes) {
-          if (ScalabilityModeToString(scalability_mode) ==
-              *rtp_parameters.encodings[i].scalability_mode) {
+        RTC_LOG(LS_INFO) << "CheckScalabilityModeValues: Checking scalability mode '"
+                         << *rtp_parameters.encodings[i].scalability_mode
+                         << "' for encoding " << i << " against send_codec name=" 
+                         << send_codec->name << " payload_type=" << send_codec->id
+                         << " with " << send_codec->scalability_modes.size() << " scalability modes";
+        
+        for (size_t mode_idx = 0; mode_idx < send_codec->scalability_modes.size(); ++mode_idx) {
+          const auto& scalability_mode = send_codec->scalability_modes[mode_idx];
+          std::string mode_string = ScalabilityModeToString(scalability_mode);
+          RTC_LOG(LS_INFO) << "CheckScalabilityModeValues:   send_codec mode[" << mode_idx 
+                           << "] = '" << mode_string << "'";
+          
+          if (mode_string == *rtp_parameters.encodings[i].scalability_mode) {
             scalabilityModeFound = true;
+            RTC_LOG(LS_INFO) << "CheckScalabilityModeValues: Found matching scalability mode in send_codec!";
             break;
           }
         }
+        
         if (!scalabilityModeFound) {
+          RTC_LOG(LS_ERROR) << "CheckScalabilityModeValues: scalabilityModeFound is false. "
+                            << "Requested scalability mode '" << *rtp_parameters.encodings[i].scalability_mode
+                            << "' not found in send_codec name=" << send_codec->name 
+                            << " payload_type=" << send_codec->id;
           LOG_AND_RETURN_ERROR(
               RTCErrorType::INVALID_MODIFICATION,
               "Attempted to set RtpParameters scalabilityMode "
