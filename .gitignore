@@ -79,3 +79,5 @@
 /node_modules
 /libwebrtc
 /args.txt
+fastlane/vendor
+out_ios_libs
