@@ -14,10 +14,6 @@
 #import "components/audio/RTCAudioDevice.h"
 #include "modules/audio_device/fine_audio_buffer.h"
 
-#include <mach/mach_time.h>
-
-#include <utility>
-
 #include "api/task_queue/default_task_queue_factory.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/numerics/safe_minmax.h"
@@ -61,11 +57,6 @@ ObjCAudioDeviceModule::ObjCAudioDeviceModule(
   thread_checker_.Detach();
   io_playout_thread_checker_.Detach();
   io_record_thread_checker_.Detach();
-
-  mach_timebase_info_data_t timebase_info;
-  mach_timebase_info(&timebase_info);
-  mach_tick_units_to_nanoseconds_ =
-      static_cast<double>(timebase_info.numer) / timebase_info.denom;
 }
 
 ObjCAudioDeviceModule::~ObjCAudioDeviceModule() {
@@ -497,33 +488,12 @@ OSStatus ObjCAudioDeviceModule::OnDeliverRecordedData(
     return result;
   }
 
-  int64_t capture_timestamp_ns = -1;
-  if (time_stamp && time_stamp->mFlags & kAudioTimeStampHostTimeValid) {
-    capture_timestamp_ns = static_cast<int64_t>(
-        time_stamp->mHostTime * mach_tick_units_to_nanoseconds_);
-  }
-
   // Get a pointer to the recorded audio and send it to the WebRTC ADB.
   // Use the FineAudioBuffer instance to convert between native buffer size
   // and the 10ms buffer size used by WebRTC.
-  {
-    webrtc::MutexLock cb_lock(&microphone_callback_lock_);
-    if (microphone_callback_) {
-      microphone_callback_(record_audio_buffer_.data(),
-                           num_frames,
-                           static_cast<int>(record_parameters_.sample_rate()),
-                           record_parameters_.channels(),
-                           capture_timestamp_ns);
-    }
-  }
   record_fine_audio_buffer_->DeliverRecordedData(
       record_audio_buffer_, cached_recording_delay_ms_.load());
   return noErr;
-}
-
-void ObjCAudioDeviceModule::SetRecordedDataCallback(RecordedDataCallback callback) {
-  webrtc::MutexLock lock(&microphone_callback_lock_);
-  microphone_callback_ = std::move(callback);
 }
 
 OSStatus ObjCAudioDeviceModule::OnGetPlayoutData(

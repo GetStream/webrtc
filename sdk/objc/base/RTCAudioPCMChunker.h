@@ -31,25 +31,18 @@ RTC_OBJC_EXPORT
 /** Returns the number of pending frames awaiting emission. */
 - (NSUInteger)pendingFrames;
 
-@property(nonatomic, readonly) int sampleRate;
-@property(nonatomic, readonly) NSUInteger channels;
-
 /**
  * Consumes interleaved PCM, buffering until 10 ms of audio is available. For
  * each chunk, the handler is invoked on the caller's thread.
  *
  * @param samples Pointer to interleaved 16-bit PCM.
  * @param frames Number of frames per channel in `samples`.
- * @param sampleRate Sample rate of the input audio in Hz.
- * @param channels Number of interleaved channels in `samples`.
  * @param timestampNs Capture timestamp for the first sample (nanoseconds). Pass
  *        a value < 0 to allow the chunker to synthesize timestamps.
  * @param handler Invoked for every emitted audio frame.
  */
 - (void)consumePCM:(const int16_t *)samples
             frames:(NSUInteger)frames
-       sampleRate:(int)sampleRate
-         channels:(NSUInteger)channels
       timestampNs:(int64_t)timestampNs
            handler:(void (^)(RTC_OBJC_TYPE(RTCAudioFrame) *frame))handler;
 

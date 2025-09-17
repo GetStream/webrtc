@@ -12,36 +12,17 @@
 
 #import "RTCAudioCapturer.h"
 
-@interface RTC_OBJC_TYPE (RTCAudioCapturer) () {
-  BOOL _running;
-}
-@end
-
 @implementation RTC_OBJC_TYPE (RTCAudioCapturer)
 
 @synthesize delegate = _delegate;
-@synthesize running = _running;
 
 - (instancetype)initWithDelegate:
     (id<RTC_OBJC_TYPE(RTCAudioCapturerDelegate)>)delegate {
   self = [super init];
   if (self) {
     _delegate = delegate;
-    _running = NO;
   }
   return self;
-}
-
-- (void)start {
-  _running = YES;
-}
-
-- (void)stop {
-  _running = NO;
-}
-
-- (BOOL)isRunning {
-  return _running;
 }
 
 @end

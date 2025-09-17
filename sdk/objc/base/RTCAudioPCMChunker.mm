@@ -65,32 +65,14 @@ constexpr double kNanosecondsPerSecond = 1e9;
   return _pending.size() / _channels;
 }
 
-- (int)sampleRate {
-  return _sampleRate;
-}
-
-- (NSUInteger)channels {
-  return _channels;
-}
-
 - (void)consumePCM:(const int16_t *)samples
             frames:(NSUInteger)frames
-       sampleRate:(int)sampleRate
-         channels:(NSUInteger)channels
       timestampNs:(int64_t)timestampNs
            handler:(void (^)(RTC_OBJC_TYPE(RTCAudioFrame) *))handler {
-  if (frames == 0 || !samples) {
+  if (frames == 0 || _channels == 0 || _framesPerChunk == 0 || !samples) {
     return;
   }
   RTC_DCHECK(handler);
-
-  if (sampleRate > 0 && channels > 0 &&
-      (sampleRate != _sampleRate || channels != _channels)) {
-    [self resetWithSampleRate:sampleRate channels:channels];
-  }
-  if (_channels == 0 || _framesPerChunk == 0) {
-    return;
-  }
 
   const size_t incomingSamples = frames * _channels;
   const size_t previousSize = _pending.size();
