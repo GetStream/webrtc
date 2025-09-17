@@ -104,7 +104,7 @@ RTCError CheckScalabilityModeValues(const RtpParameters& rtp_parameters,
                      << " payload_type=" << codec.id
                      << " scalability_modes_count=" << codec.scalability_modes.size();
     for (size_t mode_idx = 0; mode_idx < codec.scalability_modes.size(); ++mode_idx) {
-      std::string mode_string = ScalabilityModeToString(codec.scalability_modes[mode_idx]);
+      std::string mode_string = std::string(ScalabilityModeToString(codec.scalability_modes[mode_idx]));
       RTC_LOG(LS_ERROR) << "CheckScalabilityModeValues:   available_mode[" << mode_idx
                        << "] = '" << mode_string << "'";
     }
@@ -151,7 +151,7 @@ RTCError CheckScalabilityModeValues(const RtpParameters& rtp_parameters,
           
           for (size_t mode_idx = 0; mode_idx < codec.scalability_modes.size(); ++mode_idx) {
             const auto& scalability_mode = codec.scalability_modes[mode_idx];
-            std::string mode_string = ScalabilityModeToString(scalability_mode);
+            std::string mode_string = std::string(ScalabilityModeToString(scalability_mode));
             RTC_LOG(LS_INFO) << "CheckScalabilityModeValues:   mode[" << mode_idx 
                              << "] = '" << mode_string << "'";
             
@@ -184,7 +184,7 @@ RTCError CheckScalabilityModeValues(const RtpParameters& rtp_parameters,
         
         for (size_t mode_idx = 0; mode_idx < send_codec->scalability_modes.size(); ++mode_idx) {
           const auto& scalability_mode = send_codec->scalability_modes[mode_idx];
-          std::string mode_string = ScalabilityModeToString(scalability_mode);
+          std::string mode_string = std::string(ScalabilityModeToString(scalability_mode));
           RTC_LOG(LS_INFO) << "CheckScalabilityModeValues:   send_codec mode[" << mode_idx 
                            << "] = '" << mode_string << "'";
           
