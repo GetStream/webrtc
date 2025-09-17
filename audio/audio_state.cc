@@ -175,30 +175,12 @@ void AudioState::UpdateAudioTransportWithSendingStreams() {
   int max_sample_rate_hz = 8000;
   size_t max_num_channels = 1;
   for (const auto& kv : sending_streams_) {
-    // Exclude streams that are detached from the transport fan-out. These
-    // streams are expected to be driven by a custom AudioSource via the media
-    // channel and should not receive microphone PCM from the ADM.
-    if (detached_from_transport_.find(kv.first) != detached_from_transport_.end()) {
-      continue;
-    }
     audio_senders.push_back(kv.first);
     max_sample_rate_hz = std::max(max_sample_rate_hz, kv.second.sample_rate_hz);
     max_num_channels = std::max(max_num_channels, kv.second.num_channels);
   }
   audio_transport_.UpdateAudioSenders(std::move(audio_senders),
                                       max_sample_rate_hz, max_num_channels);
-}
-
-void AudioState::DetachFromAudioTransport(webrtc::AudioSendStream* stream) {
-  RTC_DCHECK_RUN_ON(&thread_checker_);
-  detached_from_transport_.insert(stream);
-  UpdateAudioTransportWithSendingStreams();
-}
-
-void AudioState::AttachToAudioTransport(webrtc::AudioSendStream* stream) {
-  RTC_DCHECK_RUN_ON(&thread_checker_);
-  detached_from_transport_.erase(stream);
-  UpdateAudioTransportWithSendingStreams();
 }
 
 void AudioState::UpdateNullAudioPollerState() {

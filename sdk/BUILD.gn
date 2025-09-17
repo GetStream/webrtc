@@ -1048,8 +1048,6 @@ if (is_ios || is_mac) {
         "objc/api/peerconnection/RTCAudioTrack+Private.h",
         "objc/api/peerconnection/RTCAudioTrack.h",
         "objc/api/peerconnection/RTCAudioTrack.mm",
-        "objc/api/peerconnection/RTCExternalAudioTrack.h",
-        "objc/api/peerconnection/RTCExternalAudioTrack.mm",
         "objc/api/peerconnection/RTCCertificate.h",
         "objc/api/peerconnection/RTCCertificate.mm",
         "objc/api/peerconnection/RTCConfiguration+Native.h",
@@ -1252,8 +1250,6 @@ if (is_ios || is_mac) {
         "../stats:rtc_stats",
         "../system_wrappers:field_trial",
         "../system_wrappers:metrics",
-        "../media:external_audio_source",
-        "../pc:rtp_sender",
       ]
 
       if (is_ios) {
@@ -1274,7 +1270,6 @@ if (is_ios || is_mac) {
             "objc/unittests/ObjCVideoTrackSource_xctest.mm",
             "objc/unittests/RTCAudioDeviceModule_xctest.mm",
             "objc/unittests/RTCAudioDevice_xctest.mm",
-            "objc/unittests/RTCExternalAudioTrack_xctest.mm",
             "objc/unittests/RTCAudioSessionTest.mm",
             "objc/unittests/RTCCVPixelBuffer_xctest.mm",
             "objc/unittests/RTCCallbackLogger_xctest.m",
@@ -1511,7 +1506,6 @@ if (is_ios || is_mac) {
           "objc/api/peerconnection/RTCSessionDescription.h",
           "objc/api/peerconnection/RTCStatisticsReport.h",
           "objc/api/peerconnection/RTCTracing.h",
-          "objc/api/peerconnection/RTCExternalAudioTrack.h",
           "objc/api/peerconnection/RTCCertificate.h",
           "objc/api/peerconnection/RTCCryptoOptions.h",
           "objc/api/peerconnection/RTCVideoSource.h",

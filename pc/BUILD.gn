@@ -1900,7 +1900,7 @@ rtc_library("remote_audio_source") {
 }
 
 rtc_library("rtp_sender") {
-  visibility = [ ":*", "//sdk:*" ]
+  visibility = [ ":*" ]
   sources = [
     "rtp_sender.cc",
     "rtp_sender.h",

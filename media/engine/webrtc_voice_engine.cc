@@ -91,7 +91,6 @@
 #include "rtc_base/dscp.h"
 #include "rtc_base/experiments/struct_parameters_parser.h"
 #include "rtc_base/logging.h"
-#include "audio/audio_state.h"
 #include "rtc_base/network/sent_packet.h"
 #include "rtc_base/network_route.h"
 #include "rtc_base/race_checker.h"
@@ -824,7 +823,6 @@ class WebRtcVoiceSendChannel::WebRtcAudioSendStream : public AudioSource::Sink {
       int rtcp_report_interval_ms,
       const std::optional<std::string>& audio_network_adaptor_config,
       Call* call,
-      webrtc::AudioState* audio_state,
       Transport* send_transport,
       const scoped_refptr<AudioEncoderFactory>& encoder_factory,
       const std::optional<AudioCodecPairId> codec_pair_id,
@@ -832,7 +830,6 @@ class WebRtcVoiceSendChannel::WebRtcAudioSendStream : public AudioSource::Sink {
       const CryptoOptions& crypto_options)
       : adaptive_ptime_config_(call->trials()),
         call_(call),
-        audio_state_(audio_state),
         config_(send_transport),
         max_send_bitrate_bps_(max_send_bitrate_bps),
         rtp_parameters_(CreateRtpParametersWithOneEncoding()) {
@@ -1018,17 +1015,6 @@ class WebRtcVoiceSendChannel::WebRtcAudioSendStream : public AudioSource::Sink {
       source_ = nullptr;
     }
     UpdateSendState();
-  }
-
-  void SetDetachedFromTransport(bool detached) {
-    RTC_DCHECK_RUN_ON(&worker_thread_checker_);
-    if (!audio_state_) return;
-    auto* audio_state_impl = static_cast<webrtc::internal::AudioState*>(audio_state_);
-    if (detached) {
-      audio_state_impl->DetachFromAudioTransport(stream_);
-    } else {
-      audio_state_impl->AttachToAudioTransport(stream_);
-    }
   }
 
   // AudioSource::Sink implementation.
@@ -1229,7 +1215,6 @@ class WebRtcVoiceSendChannel::WebRtcAudioSendStream : public AudioSource::Sink {
   SequenceChecker worker_thread_checker_;
   RaceChecker audio_capture_race_checker_;
   Call* call_ = nullptr;
-  webrtc::AudioState* audio_state_ = nullptr;
   AudioSendStream::Config config_;
   // The stream is owned by WebRtcAudioSendStream and may be reallocated if
   // configuration changes.
@@ -1575,17 +1560,6 @@ bool WebRtcVoiceSendChannel::SetAudioSend(uint32_t ssrc,
   return true;
 }
 
-void WebRtcVoiceSendChannel::SetSenderDetachedFromTransport(uint32_t ssrc,
-                                                            bool detached) {
-  RTC_DCHECK_RUN_ON(worker_thread_);
-  auto it = send_streams_.find(ssrc);
-  if (it == send_streams_.end()) {
-    RTC_LOG(LS_WARNING) << "SetSenderDetachedFromTransport unknown ssrc: " << ssrc;
-    return;
-  }
-  it->second->SetDetachedFromTransport(detached);
-}
-
 bool WebRtcVoiceSendChannel::AddSendStream(const StreamParams& sp) {
   TRACE_EVENT0("webrtc", "WebRtcVoiceMediaChannel::AddSendStream");
   RTC_DCHECK_RUN_ON(worker_thread_);
@@ -1605,7 +1579,7 @@ bool WebRtcVoiceSendChannel::AddSendStream(const StreamParams& sp) {
       ssrc, mid_, sp.cname, sp.id, send_codec_spec_, ExtmapAllowMixed(),
       send_rtp_extensions_, max_send_bitrate_bps_,
       audio_config_.rtcp_report_interval_ms, audio_network_adaptor_config,
-      call_, engine()->audio_state(), transport(), engine()->encoder_factory_, codec_pair_id_, nullptr,
+      call_, transport(), engine()->encoder_factory_, codec_pair_id_, nullptr,
       crypto_options_);
   send_streams_.insert(std::make_pair(ssrc, stream));
   if (ssrc_list_changed_callback_) {

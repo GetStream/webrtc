@@ -27,7 +27,6 @@
 #include "api/dtls_transport_interface.h"
 #include "api/dtmf_sender_interface.h"
 #include "api/environment/environment.h"
-#include "media/base/audio_source.h"
 #include "api/field_trials_view.h"
 #include "api/frame_transformer_interface.h"
 #include "api/media_stream_interface.h"
@@ -360,12 +359,6 @@ class AudioRtpSender : public DtmfProviderInterface, public RtpSenderBase {
   bool CanInsertDtmf() override;
   bool InsertDtmf(int code, int duration) override;
 
-  // Install an external cricket::AudioSource for this sender. This will cause
-  // the underlying voice media channel to use `source` to drive this stream,
-  // instead of the default track-driven LocalAudioSinkAdapter. Intended for
-  // injected audio (e.g., screenshare).
-  bool SetExternalAudioSource(cricket::AudioSource* source);
-
   // ObserverInterface implementation.
   void OnChanged() override;
 
@@ -413,11 +406,6 @@ class AudioRtpSender : public DtmfProviderInterface, public RtpSenderBase {
   // webrtc::AudioSource.
   std::unique_ptr<LocalAudioSinkAdapter> sink_adapter_;
 };
-
-// Helper to attach an external cricket::AudioSource to a sender. Returns false
-// if the sender is not an audio sender.
-bool AttachExternalAudioSourceToSender(RtpSenderInterface* sender,
-                                       cricket::AudioSource* source);
 
 class VideoRtpSender : public RtpSenderBase {
  public:
