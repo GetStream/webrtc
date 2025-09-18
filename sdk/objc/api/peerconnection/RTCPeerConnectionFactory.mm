@@ -57,6 +57,7 @@
 #include "sdk/objc/native/api/video_encoder_factory.h"
 #include "sdk/objc/native/src/objc_video_decoder_factory.h"
 #include "sdk/objc/native/src/objc_video_encoder_factory.h"
+#include "sdk/objc/native/src/objc_audio_track_source.h"
 
 #import "components/audio/RTCAudioProcessingModule.h"
 #import "components/audio/RTCDefaultAudioProcessingModule+Private.h"
@@ -377,6 +378,15 @@
   webrtc::scoped_refptr<webrtc::AudioSourceInterface> source =
       _nativeFactory->CreateAudioSource(options);
   return [[RTC_OBJC_TYPE(RTCAudioSource) alloc] initWithFactory:self nativeAudioSource:source];
+}
+
+- (RTC_OBJC_TYPE(RTCAudioSource) *)manualAudioSource {
+  webrtc::scoped_refptr<webrtc::ObjCAudioTrackSource> source =
+      webrtc::make_ref_counted<webrtc::ObjCAudioTrackSource>();
+  RTC_OBJC_TYPE(RTCAudioSource) *objcSource = [[RTC_OBJC_TYPE(RTCAudioSource) alloc]
+      initWithFactory:self
+      nativeAudioSource:source];
+  return objcSource;
 }
 
 - (RTC_OBJC_TYPE(RTCAudioTrack) *)audioTrackWithTrackId:(NSString *)trackId {

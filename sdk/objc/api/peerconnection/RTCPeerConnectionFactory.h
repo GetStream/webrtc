@@ -87,6 +87,12 @@ RTC_OBJC_EXPORT
 - (RTC_OBJC_TYPE(RTCAudioSource) *)audioSourceWithConstraints:
     (nullable RTC_OBJC_TYPE(RTCMediaConstraints) *)constraints;
 
+// Creates an audio source intended for manual sample injection via
+// RTCAudioCapturer implementations (e.g. RTCCMSampleBufferAudioCapturer).
+// The returned source is backed by an ObjCAudioTrackSource so push-based
+// capturers can deliver frames straight into WebRTC's transport pipeline.
+- (RTC_OBJC_TYPE(RTCAudioSource) *)manualAudioSource;
+
 /** Initialize an RTCAudioTrack with an id. Convenience ctor to use an audio source
  * with no constraints.
  */

@@ -15,6 +15,7 @@
 #import "sdk/objc/base/RTCAudioFrame.h"
 
 #include "rtc_base/checks.h"
+#include "rtc_base/logging.h"
 #include "sdk/objc/native/src/objc_audio_track_source.h"
 
 @interface RTC_OBJC_TYPE (RTCAudioSource) () <RTC_OBJC_TYPE(RTCAudioCapturerDelegate)>
@@ -84,8 +85,14 @@
   webrtc::ObjCAudioTrackSource *pushable =
       webrtc::ObjCAudioTrackSource::FromAudioSource(_nativeAudioSource.get());
   if (!pushable) {
+    RTC_LOG(LS_WARNING)
+        << "RTCAudioSource pushAudioFrame: no ObjCAudioTrackSource registered";
     return;
   }
+  RTC_LOG(LS_VERBOSE) << "RTCAudioSource pushAudioFrame forwarding frames="
+                      << frame.frames << " channels=" << frame.channels
+                      << " sample_rate=" << frame.sampleRate
+                      << " timestamp_ns=" << frame.timestampNs;
   pushable->OnCapturedFrame(frame);
 }
 
