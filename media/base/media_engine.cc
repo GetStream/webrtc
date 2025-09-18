@@ -121,8 +121,7 @@ RTCError CheckScalabilityModeValues(const RtpParameters& rtp_parameters,
       bool codecFound = false;
       for (const webrtc::Codec& codec : send_codecs) {
         if (IsSameRtpCodecIgnoringLevel(codec,
-                                        *rtp_parameters.encodings[i].codec) &&
-            SupportsMode(codec, rtp_parameters.encodings[i].scalability_mode)) {
+                                        *rtp_parameters.encodings[i].codec)) {
           codecFound = true;
           send_codec = codec;
           break;
