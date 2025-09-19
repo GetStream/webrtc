@@ -12,9 +12,20 @@
 
 #include <cstdint>
 #include <optional>
+#include <utility>
 #include <vector>
 
 #include "api/audio/audio_frame.h"
+#include "api/audio/builtin_audio_processing_builder.h"
+#include "api/audio_codecs/audio_format.h"
+#include "api/make_ref_counted.h"
+#include "api/environment/environment_factory.h"
+#include "call/audio_state.h"
+#include "call/call.h"
+#include "call/call_config.h"
+#include "modules/audio_device/include/fake_audio_device.h"
+#include "modules/audio_mixer/audio_mixer_impl.h"
+#include "sdk/objc/native/src/standalone_audio_send_helper.h"
 #include "test/gtest.h"
 
 namespace webrtc {
@@ -143,6 +154,47 @@ TEST(StandaloneAudioTrackSourceTest, RemoveSinkStopsDelivery) {
   source.RemoveSink(&sink);
   source.PushAudioFrame(frame);
   EXPECT_EQ(1, sink.callback_count());
+}
+
+class NullTransport : public Transport {
+ public:
+  bool SendRtp(const uint8_t* /*packet*/, size_t /*length*/,
+              const PacketOptions& /*options*/) override {
+    return true;
+  }
+
+  bool SendRtcp(const uint8_t* /*packet*/, size_t /*length*/) override {
+    return true;
+  }
+};
+
+TEST(StandaloneAudioSendHelperTest, CreatesStreamAndExposesInterfaces) {
+  const Environment env = CreateEnvironment();
+
+  AudioState::Config audio_state_config;
+  audio_state_config.audio_mixer = AudioMixerImpl::Create();
+  audio_state_config.audio_processing =
+      BuiltinAudioProcessingBuilder().Create();
+  audio_state_config.audio_device_module =
+      make_ref_counted<FakeAudioDeviceModule>();
+
+  auto audio_state = AudioState::Create(audio_state_config);
+
+  CallConfig call_config(env);
+  call_config.audio_state = audio_state;
+  std::unique_ptr<Call> call = Call::Create(std::move(call_config));
+
+  NullTransport transport;
+  AudioSendStream::Config config(&transport);
+  config.rtp.ssrc = 1234;
+
+  StandaloneAudioTrackSource source;
+  auto helper = source.CreateSendStream(call.get(), config);
+
+  ASSERT_NE(helper, nullptr);
+  EXPECT_NE(helper->audio_send_stream(), nullptr);
+  EXPECT_NE(helper->channel_send(), nullptr);
+  EXPECT_NE(helper->rtp_rtcp(), nullptr);
 }
 
 }  // namespace

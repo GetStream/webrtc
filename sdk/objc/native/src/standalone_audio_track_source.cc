@@ -12,6 +12,8 @@
 
 #include <algorithm>
 
+#include "sdk/objc/native/src/standalone_audio_send_helper.h"
+
 namespace webrtc {
 
 namespace {
@@ -86,13 +88,9 @@ StandaloneAudioTrackSource::CreateSendStream(
     Call* call,
     const AudioSendStream::Config& config) {
   RTC_DCHECK(call);
-  AudioSendStream* stream = call->CreateAudioSendStream(config);
-  RTC_CHECK(stream);
-  return AudioSendStreamPtr(stream, [call](AudioSendStream* to_destroy) {
-    if (to_destroy) {
-      call->DestroyAudioSendStream(to_destroy);
-    }
-  });
+  auto helper = std::make_unique<StandaloneAudioSendHelper>(call, config);
+  RTC_CHECK(helper->audio_send_stream());
+  return helper;
 }
 
 void StandaloneAudioTrackSource::SetState(SourceState new_state) {

@@ -1919,6 +1919,8 @@ if (is_ios || is_mac) {
     rtc_library("standalone_audio_track_source") {
       visibility = [ "*" ]
       sources = [
+        "objc/native/src/standalone_audio_send_helper.cc",
+        "objc/native/src/standalone_audio_send_helper.h",
         "objc/native/src/standalone_audio_track_source.cc",
         "objc/native/src/standalone_audio_track_source.h",
       ]
@@ -1945,6 +1947,11 @@ if (is_ios || is_mac) {
           ":standalone_audio_track_source",
           "../api:media_stream_interface",
           "../api/audio:audio_frame_api",
+          "../api/audio:builtin_audio_processing_builder",
+          "../api/environment:environment_factory",
+          "../call:call",
+          "../modules/audio_device:audio_device",
+          "../modules/audio_mixer:audio_mixer_impl",
           "../test:test_support",
         ]
       }

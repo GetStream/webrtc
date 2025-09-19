@@ -27,6 +27,8 @@
 
 namespace webrtc {
 
+class StandaloneAudioSendHelper;
+
 // StandaloneAudioTrackSource provides a manual audio pipeline surface that can
 // be fed with 10 ms PCM frames without relying on AudioTransportImpl.
 class StandaloneAudioTrackSource : public Notifier<AudioSourceInterface> {
@@ -48,10 +50,8 @@ class StandaloneAudioTrackSource : public Notifier<AudioSourceInterface> {
   // Allows callers to push 10 ms 16-bit PCM frames directly into the source.
   void PushAudioFrame(const AudioFrame& frame);
 
-  using AudioSendStreamPtr =
-      std::unique_ptr<AudioSendStream, std::function<void(AudioSendStream*)>>;
-
   // Creates a dedicated AudioSendStream associated with the supplied Call.
+  using AudioSendStreamPtr = std::unique_ptr<StandaloneAudioSendHelper>;
   AudioSendStreamPtr CreateSendStream(Call* call,
                                       const AudioSendStream::Config& config);
 
