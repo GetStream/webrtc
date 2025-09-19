@@ -1908,6 +1908,40 @@ if (is_ios || is_mac) {
       ]
     }
 
+    rtc_library("standalone_audio_track_source") {
+      visibility = [ "*" ]
+      sources = [
+        "objc/native/src/standalone_audio_track_source.cc",
+        "objc/native/src/standalone_audio_track_source.h",
+      ]
+
+      configs += [ "..:common_objc" ]
+
+      public_configs = [ ":common_config_objc" ]
+
+      deps = [
+        "../api:media_stream_interface",
+        "../api/audio:audio_frame_api",
+        "../call:call_interfaces",
+        "../rtc_base:checks",
+        "../rtc_base/synchronization:mutex",
+      ]
+    }
+
+    if (rtc_include_tests) {
+      rtc_test("standalone_audio_track_source_unittest") {
+        testonly = true
+        sources =
+            [ "objc/native/src/standalone_audio_track_source_unittest.cc" ]
+        deps = [
+          ":standalone_audio_track_source",
+          "../api:media_stream_interface",
+          "../api/audio:audio_frame_api",
+          "../test:test_support",
+        ]
+      }
+    }
+
     rtc_library("video_toolbox_cc") {
       visibility = [
         ":sdk_unittests_sources",
