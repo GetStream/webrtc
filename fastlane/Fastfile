@@ -1,3 +1,5 @@
+skip_docs
+
 require 'json'
 require 'net/http'
 require 'fileutils'
