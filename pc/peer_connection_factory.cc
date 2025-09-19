@@ -198,8 +198,10 @@ RtpCapabilities PeerConnectionFactory::GetRtpReceiverCapabilities(
 }
 
 scoped_refptr<AudioSourceInterface> PeerConnectionFactory::CreateAudioSource(
-    const AudioOptions& options) {
+    const AudioOptions& options, bool standalone_audio_source) {
   RTC_DCHECK(signaling_thread()->IsCurrent());
+  RTC_DCHECK(!standalone_audio_source)
+      << "Standalone audio sources not implemented yet.";
   scoped_refptr<LocalAudioSource> source(LocalAudioSource::Create(&options));
   return source;
 }

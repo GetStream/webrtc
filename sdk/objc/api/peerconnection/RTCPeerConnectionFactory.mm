@@ -367,6 +367,12 @@
 
 - (RTC_OBJC_TYPE(RTCAudioSource) *)audioSourceWithConstraints:
     (nullable RTC_OBJC_TYPE(RTCMediaConstraints) *)constraints {
+  return [self audioSourceWithConstraints:constraints standalone:NO];
+}
+
+- (RTC_OBJC_TYPE(RTCAudioSource) *)audioSourceWithConstraints:
+    (nullable RTC_OBJC_TYPE(RTCMediaConstraints) *)constraints
+                          standalone:(BOOL)standalone {
   std::unique_ptr<webrtc::MediaConstraints> nativeConstraints;
   if (constraints) {
     nativeConstraints = constraints.nativeConstraints;
@@ -375,7 +381,7 @@
   CopyConstraintsIntoAudioOptions(nativeConstraints.get(), &options);
 
   webrtc::scoped_refptr<webrtc::AudioSourceInterface> source =
-      _nativeFactory->CreateAudioSource(options);
+      _nativeFactory->CreateAudioSource(options, standalone);
   return [[RTC_OBJC_TYPE(RTCAudioSource) alloc] initWithFactory:self nativeAudioSource:source];
 }
 

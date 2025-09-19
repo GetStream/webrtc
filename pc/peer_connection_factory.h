@@ -74,7 +74,8 @@ class PeerConnectionFactory : public PeerConnectionFactoryInterface {
       const std::string& stream_id) override;
 
   scoped_refptr<AudioSourceInterface> CreateAudioSource(
-      const AudioOptions& options) override;
+      const AudioOptions& options,
+      bool standalone_audio_source = false) override;
 
   scoped_refptr<VideoTrackInterface> CreateVideoTrack(
       scoped_refptr<VideoTrackSourceInterface> video_source,

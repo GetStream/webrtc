@@ -43,9 +43,10 @@ PROXY_CONSTMETHOD1(RtpCapabilities,
 PROXY_METHOD1(scoped_refptr<MediaStreamInterface>,
               CreateLocalMediaStream,
               const std::string&)
-PROXY_METHOD1(scoped_refptr<AudioSourceInterface>,
+PROXY_METHOD2(scoped_refptr<AudioSourceInterface>,
               CreateAudioSource,
-              const AudioOptions&)
+              const AudioOptions&,
+              bool)
 PROXY_METHOD2(scoped_refptr<VideoTrackInterface>,
               CreateVideoTrack,
               scoped_refptr<VideoTrackSourceInterface>,

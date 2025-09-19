@@ -1562,7 +1562,8 @@ class RTC_EXPORT PeerConnectionFactoryInterface
   // Creates an AudioSourceInterface.
   // `options` decides audio processing settings.
   virtual scoped_refptr<AudioSourceInterface> CreateAudioSource(
-      const AudioOptions& options) = 0;
+      const AudioOptions& options,
+      bool standalone_audio_source = false) = 0;
 
   // Creates a new local VideoTrack. The same `source` can be used in several
   // tracks.

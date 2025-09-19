@@ -56,7 +56,7 @@ class MockPeerConnectionFactoryInterface
               (override));
   MOCK_METHOD(scoped_refptr<AudioSourceInterface>,
               CreateAudioSource,
-              (const webrtc::AudioOptions&),
+              (const webrtc::AudioOptions&, bool),
               (override));
   MOCK_METHOD(scoped_refptr<VideoTrackInterface>,
               CreateVideoTrack,
