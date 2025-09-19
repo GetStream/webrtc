@@ -33,14 +33,22 @@ using NativeStandaloneSource = webrtc::StandaloneAudioTrackSource;
 
 @synthesize nativeStandaloneSource = _nativeStandaloneSource;
 
+- (instancetype)initWithFactory:(RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)factory
+        nativeStandaloneSource:
+            (rtc::scoped_refptr<NativeStandaloneSource>)nativeStandaloneSource {
+  RTC_DCHECK(factory);
+  RTC_DCHECK(nativeStandaloneSource);
+  self = [super initWithFactory:factory nativeAudioSource:nativeStandaloneSource];
+  if (self) {
+    _nativeStandaloneSource = std::move(nativeStandaloneSource);
+  }
+  return self;
+}
+
 - (instancetype)initWithFactory:(RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)factory {
   RTC_DCHECK(factory);
   auto native_source = rtc::make_ref_counted<NativeStandaloneSource>();
-  self = [super initWithFactory:factory nativeAudioSource:native_source];
-  if (self) {
-    _nativeStandaloneSource = std::move(native_source);
-  }
-  return self;
+  return [self initWithFactory:factory nativeStandaloneSource:native_source];
 }
 
 - (void)start {

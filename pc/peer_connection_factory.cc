@@ -66,6 +66,10 @@
 #include "rtc_base/rtc_certificate_generator.h"
 #include "rtc_base/system/file_wrapper.h"
 
+#if defined(WEBRTC_IOS)
+#include "sdk/objc/native/src/standalone_audio_track_source.h"
+#endif  // defined(WEBRTC_IOS)
+
 namespace webrtc {
 
 scoped_refptr<PeerConnectionFactoryInterface>
@@ -200,8 +204,15 @@ RtpCapabilities PeerConnectionFactory::GetRtpReceiverCapabilities(
 scoped_refptr<AudioSourceInterface> PeerConnectionFactory::CreateAudioSource(
     const AudioOptions& options, bool standalone_audio_source) {
   RTC_DCHECK(signaling_thread()->IsCurrent());
+#if defined(WEBRTC_IOS)
+  if (standalone_audio_source) {
+    return make_ref_counted<StandaloneAudioTrackSource>();
+  }
+#else
   RTC_DCHECK(!standalone_audio_source)
       << "Standalone audio sources not implemented yet.";
+#endif
+
   scoped_refptr<LocalAudioSource> source(LocalAudioSource::Create(&options));
   return source;
 }

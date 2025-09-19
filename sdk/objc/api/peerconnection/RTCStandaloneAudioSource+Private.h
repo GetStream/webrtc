@@ -24,6 +24,11 @@ NS_ASSUME_NONNULL_BEGIN
     rtc::scoped_refptr<webrtc::StandaloneAudioTrackSource>
         nativeStandaloneSource;
 
+- (instancetype)initWithFactory:
+                    (RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)factory
+        nativeStandaloneSource:(rtc::scoped_refptr<webrtc::StandaloneAudioTrackSource>)
+                                  nativeStandaloneSource;
+
 @end
 
 NS_ASSUME_NONNULL_END
