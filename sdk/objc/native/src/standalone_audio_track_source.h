@@ -42,6 +42,7 @@ class StandaloneAudioTrackSource : public Notifier<AudioSourceInterface> {
   // MediaSourceInterface implementation.
   SourceState state() const override;
   bool remote() const override { return false; }
+  bool is_standalone() const override { return true; }
 
   // AudioSourceInterface implementation.
   void AddSink(AudioTrackSinkInterface* sink) override;

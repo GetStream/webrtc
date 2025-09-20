@@ -872,6 +872,10 @@ class WebRtcVoiceSendChannel::WebRtcAudioSendStream : public AudioSource::Sink {
     call_->DestroyAudioSendStream(stream_);
   }
 
+#if defined(WEBRTC_IOS)
+  webrtc::AudioSendStream* audio_send_stream() const { return stream_; }
+#endif
+
   void SetSendCodecSpec(
       const AudioSendStream::Config::SendCodecSpec& send_codec_spec) {
     UpdateSendCodecSpec(send_codec_spec);
@@ -1858,6 +1862,17 @@ void WebRtcVoiceSendChannel::SetEncoderToPacketizerFrameTransformer(
   matching_stream->second->SetEncoderToPacketizerFrameTransformer(
       std::move(frame_transformer));
 }
+
+#if defined(WEBRTC_IOS)
+webrtc::AudioSendStream* WebRtcVoiceSendChannel::GetAudioSendStream(
+    uint32_t ssrc) {
+  auto matching_stream = send_streams_.find(ssrc);
+  if (matching_stream == send_streams_.end()) {
+    return nullptr;
+  }
+  return matching_stream->second->audio_send_stream();
+}
+#endif
 
 RtpParameters WebRtcVoiceSendChannel::GetRtpSendParameters(
     uint32_t ssrc) const {

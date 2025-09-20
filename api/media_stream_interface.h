@@ -263,6 +263,10 @@ class RTC_EXPORT AudioSourceInterface : public MediaSourceInterface {
   virtual void AddSink(AudioTrackSinkInterface* /* sink */) {}
   virtual void RemoveSink(AudioTrackSinkInterface* /* sink */) {}
 
+  // Indicates whether the source produces standalone PCM frames that bypass
+  // the legacy audio device module pipeline.
+  virtual bool is_standalone() const { return false; }
+
   // Returns options for the AudioSource.
   // (for some of the settings this approach is broken, e.g. setting
   // audio network adaptation on the source is the wrong layer of abstraction).

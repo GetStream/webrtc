@@ -251,9 +251,12 @@
  
    // Sets a frame transformer between encoder and packetizer, to transform
    // encoded frames before sending them out the network.
-   void SetEncoderToPacketizerFrameTransformer(
-       uint32_t ssrc,
-       scoped_refptr<FrameTransformerInterface> frame_transformer) override;
+  void SetEncoderToPacketizerFrameTransformer(
+      uint32_t ssrc,
+      scoped_refptr<FrameTransformerInterface> frame_transformer) override;
+#if defined(WEBRTC_IOS)
+  webrtc::AudioSendStream* GetAudioSendStream(uint32_t ssrc) override;
+#endif
  
    bool SenderNackEnabled() const override {
      if (!send_codec_spec_) {
@@ -302,7 +305,7 @@
  
    const MediaConfig::Audio audio_config_;
  
-   class WebRtcAudioSendStream;
+  class WebRtcAudioSendStream;
  
    std::map<uint32_t, WebRtcAudioSendStream*> send_streams_;
    std::vector<RtpExtension> send_rtp_extensions_;

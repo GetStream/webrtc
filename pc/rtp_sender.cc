@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "absl/algorithm/container.h"
+#include "api/audio/audio_frame.h"
 #include "api/audio_options.h"
 #include "api/crypto/frame_encryptor_interface.h"
 #include "api/dtmf_sender_interface.h"
@@ -49,6 +50,10 @@
 #include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/thread.h"
 #include "rtc_base/trace_event.h"
+
+#if defined(WEBRTC_IOS)
+#include "call/audio_send_stream.h"
+#endif
 
 namespace webrtc {
 
@@ -671,6 +676,75 @@ void LocalAudioSinkAdapter::SetSink(AudioSource::Sink* sink) {
   sink_ = sink;
 }
 
+#if defined(WEBRTC_IOS)
+StandaloneAudioFrameForwarder::StandaloneAudioFrameForwarder() = default;
+
+void StandaloneAudioFrameForwarder::SetSendStream(
+    AudioSendStream* send_stream) {
+  MutexLock lock(&lock_);
+  send_stream_ = send_stream;
+  if (!send_stream_) {
+    timestamp_ = 0;
+  }
+}
+
+void StandaloneAudioFrameForwarder::SetEnabled(bool enabled) {
+  MutexLock lock(&lock_);
+  enabled_ = enabled;
+}
+
+void StandaloneAudioFrameForwarder::Reset() {
+  MutexLock lock(&lock_);
+  send_stream_ = nullptr;
+  enabled_ = false;
+  timestamp_ = 0;
+}
+
+void StandaloneAudioFrameForwarder::OnData(
+    const void* audio_data,
+    int bits_per_sample,
+    int sample_rate,
+    size_t number_of_channels,
+    size_t number_of_frames) {
+  OnData(audio_data, bits_per_sample, sample_rate, number_of_channels,
+         number_of_frames, std::nullopt);
+}
+
+void StandaloneAudioFrameForwarder::OnData(
+    const void* audio_data,
+    int bits_per_sample,
+    int sample_rate,
+    size_t number_of_channels,
+    size_t number_of_frames,
+    std::optional<int64_t> absolute_capture_timestamp_ms) {
+  RTC_DCHECK_EQ(bits_per_sample, 16);
+  AudioSendStream* send_stream = nullptr;
+  uint32_t timestamp = 0;
+  {
+    MutexLock lock(&lock_);
+    if (!enabled_ || !send_stream_) {
+      return;
+    }
+    send_stream = send_stream_;
+    timestamp = timestamp_;
+    timestamp_ += static_cast<uint32_t>(number_of_frames);
+  }
+
+  RTC_DCHECK(audio_data);
+
+  auto frame = std::make_unique<AudioFrame>();
+  frame->UpdateFrame(timestamp, static_cast<const int16_t*>(audio_data),
+                     number_of_frames, sample_rate,
+                     AudioFrame::kNormalSpeech, AudioFrame::kVadUnknown,
+                     number_of_channels);
+  if (absolute_capture_timestamp_ms) {
+    frame->set_absolute_capture_timestamp_ms(
+        *absolute_capture_timestamp_ms);
+  }
+  send_stream->SendAudioData(std::move(frame));
+}
+#endif
+
 scoped_refptr<AudioRtpSender> AudioRtpSender::Create(
     const webrtc::Environment& env,
     Thread* worker_thread,
@@ -744,12 +818,38 @@ void AudioRtpSender::OnChanged() {
 
 void AudioRtpSender::DetachTrack() {
   RTC_DCHECK(track_);
+  RTC_DCHECK_RUN_ON(signaling_thread_);
+#if defined(WEBRTC_IOS)
+  if (using_standalone_source_) {
+    if (standalone_frame_forwarder_) {
+      audio_track()->RemoveSink(standalone_frame_forwarder_.get());
+      standalone_frame_forwarder_->Reset();
+    }
+    using_standalone_source_ = false;
+    return;
+  }
+#endif
   audio_track()->RemoveSink(sink_adapter_.get());
 }
 
 void AudioRtpSender::AttachTrack() {
   RTC_DCHECK(track_);
+  RTC_DCHECK_RUN_ON(signaling_thread_);
   cached_track_enabled_ = track_->enabled();
+#if defined(WEBRTC_IOS)
+  using_standalone_source_ =
+      audio_track()->GetSource() && audio_track()->GetSource()->is_standalone();
+  if (using_standalone_source_) {
+    if (!standalone_frame_forwarder_) {
+      standalone_frame_forwarder_ =
+          std::make_unique<StandaloneAudioFrameForwarder>();
+    }
+    standalone_frame_forwarder_->Reset();
+    standalone_frame_forwarder_->SetEnabled(cached_track_enabled_);
+    audio_track()->AddSink(standalone_frame_forwarder_.get());
+    return;
+  }
+#endif
   audio_track()->AddSink(sink_adapter_.get());
 }
 
@@ -800,6 +900,30 @@ void AudioRtpSender::SetSend() {
   // `track_->enabled()` hops to the signaling thread, so call it before we hop
   // to the worker thread or else it will deadlock.
   bool track_enabled = track_->enabled();
+#if defined(WEBRTC_IOS)
+  if (using_standalone_source_) {
+    bool success = worker_thread_->BlockingCall([&] {
+      return voice_media_channel()->SetAudioSend(ssrc_, track_enabled, &options,
+                                                 nullptr);
+    });
+    if (!success) {
+      RTC_LOG(LS_ERROR) << "SetAudioSend: ssrc is incorrect: " << ssrc_;
+    }
+    AudioSendStream* send_stream = worker_thread_->BlockingCall([&] {
+      return voice_media_channel()->GetAudioSendStream(ssrc_);
+    });
+    if (!send_stream) {
+      RTC_LOG(LS_WARNING)
+          << "Standalone audio source missing AudioSendStream for ssrc "
+          << ssrc_;
+    }
+    if (standalone_frame_forwarder_) {
+      standalone_frame_forwarder_->SetSendStream(send_stream);
+      standalone_frame_forwarder_->SetEnabled(track_enabled);
+    }
+    return;
+  }
+#endif
   bool success = worker_thread_->BlockingCall([&] {
     return voice_media_channel()->SetAudioSend(ssrc_, track_enabled, &options,
                                                sink_adapter_.get());
@@ -818,6 +942,22 @@ void AudioRtpSender::ClearSend() {
     return;
   }
   AudioOptions options;
+#if defined(WEBRTC_IOS)
+  if (using_standalone_source_) {
+    if (standalone_frame_forwarder_) {
+      standalone_frame_forwarder_->SetEnabled(false);
+      standalone_frame_forwarder_->SetSendStream(nullptr);
+    }
+    bool success = worker_thread_->BlockingCall([&] {
+      return voice_media_channel()->SetAudioSend(ssrc_, false, &options,
+                                                nullptr);
+    });
+    if (!success) {
+      RTC_LOG(LS_WARNING) << "ClearAudioSend: ssrc is incorrect: " << ssrc_;
+    }
+    return;
+  }
+#endif
   bool success = worker_thread_->BlockingCall([&] {
     return voice_media_channel()->SetAudioSend(ssrc_, false, &options, nullptr);
   });

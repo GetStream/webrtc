@@ -47,6 +47,8 @@
 
 namespace webrtc {
 
+class AudioSendStream;
+
 bool UnimplementedRtpParameterHasValue(const RtpParameters& parameters);
 
 // Internal interface used by PeerConnection.
@@ -338,6 +340,35 @@ class LocalAudioSinkAdapter : public AudioTrackSinkInterface,
   int num_preferred_channels_ = -1;
 };
 
+#if defined(WEBRTC_IOS)
+class StandaloneAudioFrameForwarder : public AudioTrackSinkInterface {
+ public:
+  StandaloneAudioFrameForwarder();
+  void SetSendStream(AudioSendStream* send_stream);
+  void SetEnabled(bool enabled);
+  void Reset();
+
+ private:
+  void OnData(const void* audio_data,
+              int bits_per_sample,
+              int sample_rate,
+              size_t number_of_channels,
+              size_t number_of_frames,
+              std::optional<int64_t> absolute_capture_timestamp_ms) override;
+  void OnData(const void* audio_data,
+              int bits_per_sample,
+              int sample_rate,
+              size_t number_of_channels,
+              size_t number_of_frames) override;
+  int NumPreferredChannels() const override { return -1; }
+
+  Mutex lock_;
+  AudioSendStream* send_stream_ RTC_GUARDED_BY(lock_) = nullptr;
+  bool enabled_ RTC_GUARDED_BY(lock_) = false;
+  uint32_t timestamp_ RTC_GUARDED_BY(lock_) = 0;
+};
+#endif
+
 class AudioRtpSender : public DtmfProviderInterface, public RtpSenderBase {
  public:
   // Construct an RtpSender for audio with the given sender ID.
@@ -405,6 +436,10 @@ class AudioRtpSender : public DtmfProviderInterface, public RtpSenderBase {
   // Used to pass the data callback from the `track_` to the other end of
   // webrtc::AudioSource.
   std::unique_ptr<LocalAudioSinkAdapter> sink_adapter_;
+#if defined(WEBRTC_IOS)
+  bool using_standalone_source_ RTC_GUARDED_BY(signaling_thread_) = false;
+  std::unique_ptr<StandaloneAudioFrameForwarder> standalone_frame_forwarder_;
+#endif
 };
 
 class VideoRtpSender : public RtpSenderBase {

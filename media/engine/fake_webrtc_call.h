@@ -88,6 +88,7 @@ class FakeAudioSendStream final : public AudioSendStream {
   TelephoneEvent GetLatestTelephoneEvent() const;
   bool IsSending() const { return sending_; }
   bool muted() const { return muted_; }
+  int sent_audio_frames() const { return sent_audio_frames_; }
 
  private:
   // webrtc::AudioSendStream implementation.
@@ -95,7 +96,9 @@ class FakeAudioSendStream final : public AudioSendStream {
                    SetParametersCallback callback) override;
   void Start() override { sending_ = true; }
   void Stop() override { sending_ = false; }
-  void SendAudioData(std::unique_ptr<AudioFrame> /* audio_frame */) override {}
+  void SendAudioData(std::unique_ptr<AudioFrame> /* audio_frame */) override {
+    ++sent_audio_frames_;
+  }
   bool SendTelephoneEvent(int payload_type,
                           int payload_frequency,
                           int event,
@@ -110,6 +113,7 @@ class FakeAudioSendStream final : public AudioSendStream {
   AudioSendStream::Stats stats_;
   bool sending_ = false;
   bool muted_ = false;
+  int sent_audio_frames_ = 0;
 };
 
 class FakeAudioReceiveStream final : public AudioReceiveStreamInterface {

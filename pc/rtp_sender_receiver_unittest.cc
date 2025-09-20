@@ -10,6 +10,7 @@
 
 #include <stddef.h>
 
+#include <array>
 #include <cstdint>
 #include <iterator>
 #include <memory>
@@ -21,6 +22,7 @@
 #include "absl/algorithm/container.h"
 #include "api/audio_codecs/audio_codec_pair_id.h"
 #include "api/audio_options.h"
+#include "api/audio/audio_frame.h"
 #include "api/crypto/crypto_options.h"
 #include "api/crypto/frame_decryptor_interface.h"
 #include "api/crypto/frame_encryptor_interface.h"
@@ -68,6 +70,10 @@
 #include "test/gtest.h"
 #include "test/run_loop.h"
 #include "test/wait_until.h"
+
+#if defined(WEBRTC_IOS)
+#include "sdk/objc/native/src/standalone_audio_track_source.h"
+#endif
 
 namespace {
 
@@ -186,7 +192,8 @@ class RtpSenderReceiverTest
 
   void CreateAudioRtpSender() { CreateAudioRtpSender(nullptr); }
 
-  void CreateAudioRtpSender(const scoped_refptr<LocalAudioSource>& source) {
+  void CreateAudioRtpSender(
+      const scoped_refptr<AudioSourceInterface>& source) {
     audio_track_ = AudioTrack::Create(kAudioTrackId, source);
     EXPECT_TRUE(local_stream_->AddTrack(audio_track_));
     std::unique_ptr<MockSetStreamsObserver> set_streams_observer =
@@ -336,6 +343,14 @@ class RtpSenderReceiverTest
   void VerifyVoiceChannelInput() { VerifyVoiceChannelInput(kAudioSsrc); }
 
   void VerifyVoiceChannelInput(uint32_t ssrc) {
+#if defined(WEBRTC_IOS)
+    if (!voice_media_send_channel()->HasSource(ssrc)) {
+      EXPECT_NE(nullptr,
+                voice_media_send_channel()->GetAudioSendStream(ssrc));
+      EXPECT_FALSE(voice_media_send_channel()->IsStreamMuted(ssrc));
+      return;
+    }
+#endif
     // Verify that the media channel has an audio source, and the stream isn't
     // muted.
     EXPECT_TRUE(voice_media_send_channel()->HasSource(ssrc));
@@ -583,6 +598,34 @@ TEST_F(RtpSenderReceiverTest, LocalAudioSourceOptionsApplied) {
 
   DestroyAudioRtpSender();
 }
+
+#if defined(WEBRTC_IOS)
+TEST_F(RtpSenderReceiverTest, StandaloneAudioSourceForwardsFrames) {
+  auto standalone_source =
+      rtc::make_ref_counted<StandaloneAudioTrackSource>();
+  CreateAudioRtpSender(standalone_source);
+
+  auto* send_stream =
+      voice_media_send_channel()->GetFakeAudioSendStreamForTesting(kAudioSsrc);
+  ASSERT_NE(nullptr, send_stream);
+  EXPECT_EQ(0, send_stream->sent_audio_frames());
+
+  standalone_source->Start();
+  constexpr int kSampleRateHz = 48000;
+  constexpr size_t kNumChannels = 1;
+  constexpr size_t kFramesPerBuffer = kSampleRateHz / 100;
+  std::array<int16_t, kFramesPerBuffer> samples{};
+  AudioFrame frame;
+  frame.UpdateFrame(0, samples.data(), kFramesPerBuffer, kSampleRateHz,
+                    AudioFrame::kNormalSpeech, AudioFrame::kVadUnknown,
+                    kNumChannels);
+  standalone_source->PushAudioFrame(frame);
+
+  EXPECT_EQ(1, send_stream->sent_audio_frames());
+
+  DestroyAudioRtpSender();
+}
+#endif
 
 // Test that the stream is muted when the track is disabled, and unmuted when
 // the track is enabled.
