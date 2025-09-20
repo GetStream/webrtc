@@ -17,6 +17,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @class RTC_OBJC_TYPE(RTCRtpCapabilities);
 @class RTC_OBJC_TYPE(RTCAudioSource);
+@class RTC_OBJC_TYPE(RTCStandaloneAudioSource);
 @class RTC_OBJC_TYPE(RTCAudioTrack);
 @class RTC_OBJC_TYPE(RTCConfiguration);
 @class RTC_OBJC_TYPE(RTCMediaConstraints);
@@ -91,6 +92,10 @@ RTC_OBJC_EXPORT
 - (RTC_OBJC_TYPE(RTCAudioSource) *)audioSourceWithConstraints:
     (nullable RTC_OBJC_TYPE(RTCMediaConstraints) *)constraints
                           standalone:(BOOL)standalone;
+
+/** Convenience helper that returns a standalone audio source. */
+- (RTC_OBJC_TYPE(RTCStandaloneAudioSource) *)standaloneAudioSourceWithConstraints:
+    (nullable RTC_OBJC_TYPE(RTCMediaConstraints) *)constraints;
 
 /** Initialize an RTCAudioTrack with an id. Convenience ctor to use an audio source
  * with no constraints.

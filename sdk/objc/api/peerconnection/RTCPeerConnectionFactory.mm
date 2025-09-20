@@ -404,6 +404,13 @@
   return [self audioTrackWithSource:audioSource trackId:trackId];
 }
 
+- (RTC_OBJC_TYPE(RTCStandaloneAudioSource) *)
+    standaloneAudioSourceWithConstraints:
+        (nullable RTC_OBJC_TYPE(RTCMediaConstraints) *)constraints {
+  return static_cast<RTC_OBJC_TYPE(RTCStandaloneAudioSource) *>(
+      [self audioSourceWithConstraints:constraints standalone:YES]);
+}
+
 - (RTC_OBJC_TYPE(RTCAudioTrack) *)audioTrackWithSource:(RTC_OBJC_TYPE(RTCAudioSource) *)source
                                                trackId:(NSString *)trackId {
   return [[RTC_OBJC_TYPE(RTCAudioTrack) alloc] initWithFactory:self source:source trackId:trackId];

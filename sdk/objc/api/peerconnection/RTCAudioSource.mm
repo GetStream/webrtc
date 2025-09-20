@@ -10,6 +10,9 @@
 
 #import "RTCAudioSource+Private.h"
 
+#import "RTCAudioFrame.h"
+#import "RTCLogging.h"
+
 #include "rtc_base/checks.h"
 
 @implementation RTC_OBJC_TYPE (RTCAudioSource) {
@@ -53,6 +56,10 @@
 - (void)setVolume:(double)volume {
   _volume = volume;
   _nativeAudioSource->SetVolume(volume);
+}
+
+- (void)pushAudioFrame:(RTC_OBJC_TYPE(RTCAudioFrame) *)frame {
+  RTCLogWarning(@"pushAudioFrame is only supported by RTCStandaloneAudioSource.");
 }
 
 @end
