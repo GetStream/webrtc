@@ -29,6 +29,7 @@ using NativeStandaloneSource = webrtc::StandaloneAudioTrackSource;
 
 @implementation RTC_OBJC_TYPE(RTCStandaloneAudioSource) {
   rtc::scoped_refptr<NativeStandaloneSource> _nativeStandaloneSource;
+  rtc::Thread *_signalingThread;
 }
 
 @synthesize nativeStandaloneSource = _nativeStandaloneSource;
@@ -41,6 +42,7 @@ using NativeStandaloneSource = webrtc::StandaloneAudioTrackSource;
   self = [super initWithFactory:factory nativeAudioSource:nativeStandaloneSource];
   if (self) {
     _nativeStandaloneSource = std::move(nativeStandaloneSource);
+    _signalingThread = factory.signalingThread;
   }
   return self;
 }
@@ -52,10 +54,24 @@ using NativeStandaloneSource = webrtc::StandaloneAudioTrackSource;
 }
 
 - (void)start {
+  if (_signalingThread && !_signalingThread->IsCurrent()) {
+    _signalingThread->BlockingCall([self] {
+      [self start];
+    });
+    return;
+  }
+
   _nativeStandaloneSource->Start();
 }
 
 - (void)stop {
+  if (_signalingThread && !_signalingThread->IsCurrent()) {
+    _signalingThread->BlockingCall([self] {
+      [self stop];
+    });
+    return;
+  }
+
   _nativeStandaloneSource->Stop();
 }
 
