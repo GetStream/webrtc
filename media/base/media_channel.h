@@ -899,6 +899,9 @@ class VoiceMediaSendChannelInterface : public MediaSendChannelInterface {
 #if defined(WEBRTC_IOS)
   // Returns the underlying AudioSendStream associated with `ssrc`, if any.
   virtual webrtc::AudioSendStream* GetAudioSendStream(uint32_t ssrc) = 0;
+  // Enables or disables bypass of the shared AudioTransportImpl pipeline for
+  // the send stream identified by `ssrc`.
+  virtual bool SetStandaloneAudioMode(uint32_t ssrc, bool enabled) = 0;
 #endif
   // Returns if the telephone-event has been negotiated.
   virtual bool CanInsertDtmf() = 0;

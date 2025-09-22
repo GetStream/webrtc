@@ -256,6 +256,7 @@
       scoped_refptr<FrameTransformerInterface> frame_transformer) override;
 #if defined(WEBRTC_IOS)
   webrtc::AudioSendStream* GetAudioSendStream(uint32_t ssrc) override;
+  bool SetStandaloneAudioMode(uint32_t ssrc, bool enabled) override;
 #endif
  
    bool SenderNackEnabled() const override {

@@ -41,6 +41,8 @@ std::string AudioSendStream::Config::ToString() const {
   ss << ", has_dscp: " << (has_dscp ? "true" : "false");
   ss << ", send_codec_spec: "
      << (send_codec_spec ? send_codec_spec->ToString() : "<unset>");
+  ss << ", bypass_audio_transport: "
+     << (bypass_audio_transport ? "true" : "false");
   ss << "}";
   return ss.Release();
 }

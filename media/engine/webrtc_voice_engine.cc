@@ -874,6 +874,22 @@ class WebRtcVoiceSendChannel::WebRtcAudioSendStream : public AudioSource::Sink {
 
 #if defined(WEBRTC_IOS)
   webrtc::AudioSendStream* audio_send_stream() const { return stream_; }
+  void SetBypassAudioTransport(bool bypass) {
+    RTC_DCHECK_RUN_ON(&worker_thread_checker_);
+    if (config_.bypass_audio_transport == bypass) {
+      return;
+    }
+    const bool was_running = send_ && rtp_parameters_.encodings[0].active;
+    if (was_running) {
+      stream_->Stop();
+    }
+    config_.bypass_audio_transport = bypass;
+    stream_->Reconfigure(config_, nullptr);
+    if (was_running) {
+      stream_->Start();
+      stream_->SetMuted(muted_);
+    }
+  }
 #endif
 
   void SetSendCodecSpec(
@@ -1871,6 +1887,17 @@ webrtc::AudioSendStream* WebRtcVoiceSendChannel::GetAudioSendStream(
     return nullptr;
   }
   return matching_stream->second->audio_send_stream();
+}
+
+bool WebRtcVoiceSendChannel::SetStandaloneAudioMode(uint32_t ssrc,
+                                                    bool enabled) {
+  RTC_DCHECK_RUN_ON(worker_thread_);
+  auto matching_stream = send_streams_.find(ssrc);
+  if (matching_stream == send_streams_.end()) {
+    return false;
+  }
+  matching_stream->second->SetBypassAudioTransport(enabled);
+  return true;
 }
 #endif
 

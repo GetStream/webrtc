@@ -348,8 +348,10 @@ void AudioSendStream::Start() {
   }
   channel_send_->StartSend();
   sending_ = true;
-  audio_state()->AddSendingStream(this, encoder_sample_rate_hz_,
-                                  encoder_num_channels_);
+  if (!config_.bypass_audio_transport) {
+    audio_state()->AddSendingStream(this, encoder_sample_rate_hz_,
+                                    encoder_num_channels_);
+  }
 }
 
 void AudioSendStream::Stop() {
@@ -361,7 +363,9 @@ void AudioSendStream::Stop() {
   RemoveBitrateObserver();
   channel_send_->StopSend();
   sending_ = false;
-  audio_state()->RemoveSendingStream(this);
+  if (!config_.bypass_audio_transport) {
+    audio_state()->RemoveSendingStream(this);
+  }
 }
 
 void AudioSendStream::SendAudioData(std::unique_ptr<AudioFrame> audio_frame) {

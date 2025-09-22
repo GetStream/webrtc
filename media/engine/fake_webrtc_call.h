@@ -89,6 +89,9 @@ class FakeAudioSendStream final : public AudioSendStream {
   bool IsSending() const { return sending_; }
   bool muted() const { return muted_; }
   int sent_audio_frames() const { return sent_audio_frames_; }
+  void set_bypass_audio_transport(bool bypass) {
+    config_.bypass_audio_transport = bypass;
+  }
 
  private:
   // webrtc::AudioSendStream implementation.

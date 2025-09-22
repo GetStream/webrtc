@@ -622,6 +622,7 @@ class FakeVoiceMediaSendChannel
   webrtc::AudioSendStream* GetAudioSendStream(uint32_t ssrc) override;
   webrtc::FakeAudioSendStream* GetFakeAudioSendStreamForTesting(
       uint32_t ssrc);
+  bool SetStandaloneAudioMode(uint32_t ssrc, bool enabled) override;
 #endif
 
  private:

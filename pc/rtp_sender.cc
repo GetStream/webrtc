@@ -718,22 +718,15 @@ void StandaloneAudioFrameForwarder::OnData(
     size_t number_of_frames,
     std::optional<int64_t> absolute_capture_timestamp_ms) {
   RTC_DCHECK_EQ(bits_per_sample, 16);
-  AudioSendStream* send_stream = nullptr;
-  uint32_t timestamp = 0;
-  {
-    MutexLock lock(&lock_);
-    if (!enabled_ || !send_stream_) {
-      return;
-    }
-    send_stream = send_stream_;
-    timestamp = timestamp_;
-    timestamp_ += static_cast<uint32_t>(number_of_frames);
-  }
-
   RTC_DCHECK(audio_data);
 
   auto frame = std::make_unique<AudioFrame>();
-  frame->UpdateFrame(timestamp, static_cast<const int16_t*>(audio_data),
+  MutexLock lock(&lock_);
+  if (!enabled_ || !send_stream_) {
+    return;
+  }
+
+  frame->UpdateFrame(timestamp_, static_cast<const int16_t*>(audio_data),
                      number_of_frames, sample_rate,
                      AudioFrame::kNormalSpeech, AudioFrame::kVadUnknown,
                      number_of_channels);
@@ -741,7 +734,10 @@ void StandaloneAudioFrameForwarder::OnData(
     frame->set_absolute_capture_timestamp_ms(
         *absolute_capture_timestamp_ms);
   }
-  send_stream->SendAudioData(std::move(frame));
+  timestamp_ += static_cast<uint32_t>(number_of_frames);
+  // Keep the lock while forwarding to guarantee serialized access into the
+  // AudioSendStream and satisfy its race checker.
+  send_stream_->SendAudioData(std::move(frame));
 }
 #endif
 
@@ -902,6 +898,13 @@ void AudioRtpSender::SetSend() {
   bool track_enabled = track_->enabled();
 #if defined(WEBRTC_IOS)
   if (using_standalone_source_) {
+    bool mode_set = worker_thread_->BlockingCall([&] {
+      return voice_media_channel()->SetStandaloneAudioMode(ssrc_, true);
+    });
+    if (!mode_set) {
+      RTC_LOG(LS_ERROR) << "Failed to enable standalone audio mode for ssrc "
+                        << ssrc_;
+    }
     bool success = worker_thread_->BlockingCall([&] {
       return voice_media_channel()->SetAudioSend(ssrc_, track_enabled, &options,
                                                  nullptr);
@@ -922,6 +925,15 @@ void AudioRtpSender::SetSend() {
       standalone_frame_forwarder_->SetEnabled(track_enabled);
     }
     return;
+  }
+#endif
+#if defined(WEBRTC_IOS)
+  bool mode_reset = worker_thread_->BlockingCall([&] {
+    return voice_media_channel()->SetStandaloneAudioMode(ssrc_, false);
+  });
+  if (!mode_reset) {
+    RTC_LOG(LS_WARNING)
+        << "Failed to disable standalone audio mode for ssrc " << ssrc_;
   }
 #endif
   bool success = worker_thread_->BlockingCall([&] {
@@ -947,6 +959,14 @@ void AudioRtpSender::ClearSend() {
     if (standalone_frame_forwarder_) {
       standalone_frame_forwarder_->SetEnabled(false);
       standalone_frame_forwarder_->SetSendStream(nullptr);
+    }
+    bool mode_set = worker_thread_->BlockingCall([&] {
+      return voice_media_channel()->SetStandaloneAudioMode(ssrc_, true);
+    });
+    if (!mode_set) {
+      RTC_LOG(LS_WARNING)
+          << "Failed to keep standalone audio mode enabled for ssrc "
+          << ssrc_;
     }
     bool success = worker_thread_->BlockingCall([&] {
       return voice_media_channel()->SetAudioSend(ssrc_, false, &options,
