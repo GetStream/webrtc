@@ -14,6 +14,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
 #include <memory>
 #include <optional>
 #include <string>
@@ -67,6 +68,7 @@
 #include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/system/no_unique_address.h"
 #include "rtc_base/thread_annotations.h"
+#include "rtc_base/third_party/base64/base64.h"
 #include "rtc_base/trace_event.h"
 #include "system_wrappers/include/metrics.h"
 
@@ -77,6 +79,40 @@ namespace {
 
 constexpr TimeDelta kMaxRetransmissionWindow = TimeDelta::Seconds(1);
 constexpr TimeDelta kMinRetransmissionWindow = TimeDelta::Millis(30);
+
+struct PcmFrameStats {
+  double rms;
+  int32_t max_abs;
+  bool all_zero;
+};
+
+PcmFrameStats ComputePcmFrameStats(const int16_t* samples, size_t sample_count) {
+  PcmFrameStats stats{0.0, 0, true};
+  if (!samples || sample_count == 0) {
+    return stats;
+  }
+
+  long double sum_squares = 0;
+  int32_t peak = 0;
+  bool all_zero = true;
+
+  for (size_t i = 0; i < sample_count; ++i) {
+    const int32_t sample = samples[i];
+    if (sample != 0) {
+      all_zero = false;
+    }
+    const int32_t abs_sample = sample < 0 ? -sample : sample;
+    if (abs_sample > peak) {
+      peak = abs_sample;
+    }
+    sum_squares += static_cast<long double>(sample) * sample;
+  }
+
+  stats.rms = std::sqrt(static_cast<double>(sum_squares / sample_count));
+  stats.max_abs = peak;
+  stats.all_zero = all_zero;
+  return stats;
+}
 
 class RtpPacketSenderProxy;
 class TransportSequenceNumberProxy;
@@ -475,6 +511,20 @@ int32_t ChannelSend::SendRtpAudio(AudioFrameType frameType,
   if (include_audio_level_indication_.load() && audio_level_dbov) {
     frame.audio_level_dbov = *audio_level_dbov;
   }
+
+  const std::string audio_level_str = audio_level_dbov
+                                          ? std::to_string(static_cast<int>(*audio_level_dbov))
+                                          : std::string("none");
+  RTC_LOG(LS_VERBOSE)
+      << "ChannelSend::SendRtpAudio frameType=" << static_cast<int>(frameType)
+      << " payloadType=" << static_cast<int>(payloadType)
+      << " rtp_timestamp=" << frame.rtp_timestamp
+      << " payload_bytes=" << payload.size()
+      << " audio_level_dbov=" << audio_level_str
+      << " abs_capture_ms="
+      << (absolute_capture_timestamp_ms > 0
+              ? std::to_string(absolute_capture_timestamp_ms)
+              : std::string("none"));
   if (!rtp_sender_audio_->SendAudio(frame)) {
     RTC_DLOG(LS_ERROR)
         << "ChannelSend::SendData() failed to send data to RTP/RTCP module";
@@ -868,8 +918,29 @@ void ChannelSend::ProcessAndEncodeAudio(
                                    audio_frame->ElapsedProfileTimeMs());
 
         bool is_muted = InputMute();
+        static std::atomic<int> standalone_frame_counter{0};
+        const int count = ++standalone_frame_counter;
         AudioFrameOperations::Mute(audio_frame.get(), previous_frame_muted_,
                                    is_muted);
+
+        const size_t samples_per_packet =
+            audio_frame->samples_per_channel_ * audio_frame->num_channels_;
+        const PcmFrameStats pcm_stats =
+            ComputePcmFrameStats(audio_frame->data(), samples_per_packet);
+        const std::string capture_ts = audio_frame->absolute_capture_timestamp_ms()
+                                           ? std::to_string(*audio_frame->absolute_capture_timestamp_ms())
+                                           : std::string("none");
+        RTC_LOG(LS_VERBOSE)
+            << "ChannelSend::ProcessAndEncodeAudio frame#" << count
+            << " muted=" << (is_muted ? "true" : "false")
+            << " samples/ch=" << audio_frame->samples_per_channel_
+            << " channels=" << audio_frame->num_channels_
+            << " rate=" << audio_frame->sample_rate_hz_
+            << " timestamp=" << audio_frame->timestamp_
+            << " abs_capture_ms=" << capture_ts
+            << " pcm_rms=" << pcm_stats.rms
+            << " pcm_peak=" << pcm_stats.max_abs
+            << " pcm_all_zero=" << (pcm_stats.all_zero ? "true" : "false");
 
         if (include_audio_level_indication_.load()) {
           size_t length =
@@ -889,6 +960,17 @@ void ChannelSend::ProcessAndEncodeAudio(
         // transmission. Otherwise, it will return without invoking the
         // callback.
         int32_t encoded_bytes = audio_coding_->Add10MsData(*audio_frame);
+        if (count % 100 == 0) {
+          RTC_LOG(LS_INFO)
+              << "ChannelSend::ProcessAndEncodeAudio muted="
+              << (is_muted ? "true" : "false")
+              << " samples/ch=" << audio_frame->samples_per_channel_
+              << " rate=" << audio_frame->sample_rate_hz_
+              << " channels=" << audio_frame->num_channels_
+              << " encoded_bytes=" << encoded_bytes
+              << " pcm_rms=" << pcm_stats.rms
+              << " pcm_peak=" << pcm_stats.max_abs;
+        }
         MutexLock lock(&bitrate_accountant_mutex_);
         if (encoded_bytes < 0) {
           RTC_DLOG(LS_ERROR) << "ACM::Add10MsData() failed.";

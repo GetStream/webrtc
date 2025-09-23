@@ -13,6 +13,7 @@
 #import "RTCAudioFrame.h"
 #import "RTCAudioSource+Private.h"
 #import "RTCPeerConnectionFactory+Private.h"
+#import "RTCLogging.h"
 
 #include <utility>
 
@@ -30,6 +31,7 @@ using NativeStandaloneSource = webrtc::StandaloneAudioTrackSource;
 @implementation RTC_OBJC_TYPE(RTCStandaloneAudioSource) {
   rtc::scoped_refptr<NativeStandaloneSource> _nativeStandaloneSource;
   rtc::Thread *_signalingThread;
+  uint32_t _pushCounter;
 }
 
 @synthesize nativeStandaloneSource = _nativeStandaloneSource;
@@ -43,6 +45,7 @@ using NativeStandaloneSource = webrtc::StandaloneAudioTrackSource;
   if (self) {
     _nativeStandaloneSource = std::move(nativeStandaloneSource);
     _signalingThread = factory.signalingThread;
+    _pushCounter = 0;
   }
   return self;
 }
@@ -61,6 +64,7 @@ using NativeStandaloneSource = webrtc::StandaloneAudioTrackSource;
     return;
   }
 
+  RTCLogInfo(@"RTCStandaloneAudioSource start");
   _nativeStandaloneSource->Start();
 }
 
@@ -72,6 +76,7 @@ using NativeStandaloneSource = webrtc::StandaloneAudioTrackSource;
     return;
   }
 
+  RTCLogInfo(@"RTCStandaloneAudioSource stop");
   _nativeStandaloneSource->Stop();
 }
 
@@ -92,6 +97,31 @@ using NativeStandaloneSource = webrtc::StandaloneAudioTrackSource;
   if (frame.absoluteCaptureTimestampMs != nil) {
     native_frame.set_absolute_capture_timestamp_ms(
         frame.absoluteCaptureTimestampMs.longLongValue);
+  }
+
+  ++_pushCounter;
+  if (_pushCounter % 100 == 1) {
+    const int16_t *samples = static_cast<const int16_t *>(frame.data.bytes);
+    const size_t totalSamples = frame.framesPerChannel * frame.channels;
+    int32_t maxAbs = 0;
+    int64_t accumAbs = 0;
+    for (size_t i = 0; i < totalSamples; ++i) {
+      int32_t value = samples[i];
+      if (value < 0) {
+        value = -value;
+      }
+      if (value > maxAbs) {
+        maxAbs = value;
+      }
+      accumAbs += value;
+    }
+    const double meanAbs = totalSamples > 0
+                               ? static_cast<double>(accumAbs) /
+                                     static_cast<double>(totalSamples)
+                               : 0.0;
+    RTCLogInfo(@"RTCStandaloneAudioSource push #%u: rate=%d Hz channels=%ld frames/ch=%ld avg_abs=%.1f max_abs=%d",
+               _pushCounter, frame.sampleRateHz, (long)frame.channels,
+               (long)frame.framesPerChannel, meanAbs, maxAbs);
   }
 
   _nativeStandaloneSource->PushAudioFrame(native_frame);
