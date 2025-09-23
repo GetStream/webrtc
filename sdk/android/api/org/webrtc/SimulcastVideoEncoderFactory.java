@@ -49,6 +49,8 @@ public class SimulcastVideoEncoderFactory implements VideoEncoderFactory {
         
         // Sort codecs: first by codec type (name), then by scalability mode presence
         // Codecs with scalability modes come first within the same type
+        // This is needed because webrtc_video_engine.cc removes duplicate encoders from the list before sending them
+        // So send the enncoders that have scalability mode ahead
         Collections.sort(codecs, new Comparator<VideoCodecInfo>() {
             @Override
             public int compare(VideoCodecInfo a, VideoCodecInfo b) {
