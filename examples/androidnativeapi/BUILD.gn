@@ -10,8 +10,8 @@ if (is_android) {
     target_sdk_version = 31
 
     sources = [
-      "java/org/webrtc/examples/androidnativeapi/CallClient.java",
-      "java/org/webrtc/examples/androidnativeapi/MainActivity.java",
+      "java/io/getstream/webrtc/examples/androidnativeapi/CallClient.java",
+      "java/io/getstream/webrtc/examples/androidnativeapi/MainActivity.java",
     ]
 
     deps = [
@@ -29,7 +29,7 @@ if (is_android) {
 
   generate_jni("generated_jni") {
     testonly = true
-    sources = [ "java/org/webrtc/examples/androidnativeapi/CallClient.java" ]
+    sources = [ "java/io/getstream/webrtc/examples/androidnativeapi/CallClient.java" ]
     namespace = "webrtc_examples"
     jni_generator_include = "//sdk/android/src/jni/jni_generator_helper.h"
   }

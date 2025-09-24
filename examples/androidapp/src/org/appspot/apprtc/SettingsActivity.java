@@ -16,8 +16,8 @@ import android.content.SharedPreferences.OnSharedPreferenceChangeListener;
 import android.os.Bundle;
 import android.preference.ListPreference;
 import android.preference.Preference;
-import org.webrtc.Camera2Enumerator;
-import org.webrtc.audio.JavaAudioDeviceModule;
+import io.getstream.webrtc.Camera2Enumerator;
+import io.getstream.webrtc.audio.JavaAudioDeviceModule;
 
 /**
  * Settings activity for AppRTC.

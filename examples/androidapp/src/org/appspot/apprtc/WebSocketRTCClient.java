@@ -22,8 +22,8 @@ import org.appspot.apprtc.util.AsyncHttpURLConnection.AsyncHttpEvents;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.webrtc.IceCandidate;
-import org.webrtc.SessionDescription;
+import io.getstream.webrtc.IceCandidate;
+import io.getstream.webrtc.SessionDescription;
 
 /**
  * Negotiates signaling for chatting with https://appr.tc "rooms".

@@ -18,9 +18,9 @@ if (is_android) {
     target_sdk_version = 31
 
     sources = [
-      "java/org/webrtc/examples/androidvoip/MainActivity.java",
-      "java/org/webrtc/examples/androidvoip/OnVoipClientTaskCompleted.java",
-      "java/org/webrtc/examples/androidvoip/VoipClient.java",
+      "java/io/getstream/webrtc/examples/androidvoip/MainActivity.java",
+      "java/io/getstream/webrtc/examples/androidvoip/OnVoipClientTaskCompleted.java",
+      "java/io/getstream/webrtc/examples/androidvoip/VoipClient.java",
     ]
 
     deps = [
@@ -38,7 +38,7 @@ if (is_android) {
 
   generate_jni("generated_jni") {
     testonly = true
-    sources = [ "java/org/webrtc/examples/androidvoip/VoipClient.java" ]
+    sources = [ "java/io/getstream/webrtc/examples/androidvoip/VoipClient.java" ]
     namespace = "webrtc_examples"
     jni_generator_include = "//sdk/android/src/jni/jni_generator_helper.h"
   }

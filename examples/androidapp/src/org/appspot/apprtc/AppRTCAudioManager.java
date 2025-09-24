@@ -26,7 +26,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 import org.appspot.apprtc.util.AppRTCUtils;
-import org.webrtc.ThreadUtils;
+import io.getstream.webrtc.ThreadUtils;
 
 /**
  * AppRTCAudioManager manages all audio related parts of the AppRTC demo.

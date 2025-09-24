@@ -8,15 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-package org.webrtc.examples.androidnativeapi;
+package io.getstream.webrtc.examples.androidnativeapi;
 
 import android.content.Context;
 import android.os.Handler;
 import android.os.HandlerThread;
-import org.webrtc.CapturerObserver;
-import org.webrtc.SurfaceTextureHelper;
-import org.webrtc.VideoCapturer;
-import org.webrtc.VideoSink;
+import io.getstream.webrtc.CapturerObserver;
+import io.getstream.webrtc.SurfaceTextureHelper;
+import io.getstream.webrtc.VideoCapturer;
+import io.getstream.webrtc.VideoSink;
 
 public class CallClient {
   private static final String TAG = "CallClient";

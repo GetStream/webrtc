@@ -16,6 +16,6 @@ app can be found at:
 https://webrtc.org/native-code/android/
 
 To use the Java API, start by looking at the public interface of
-org.webrtc.PeerConnection{,Factory} and the org.webrtc.PeerConnectionTest.
+io.getstream.webrtc.PeerConnection{,Factory} and the io.getstream.webrtc.PeerConnectionTest.
 
 To understand the implementation of the API, see the native code in src/jni/pc/.
