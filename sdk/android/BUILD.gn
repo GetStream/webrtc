@@ -169,8 +169,8 @@ if (is_android) {
       "src/java/io/getstream/webrtc/JniCommon.java",
       "src/java/io/getstream/webrtc/JniHelper.java",
       "src/java/io/getstream/webrtc/RefCountDelegate.java",
-      "src/java/org/webrtc/RtcError.java",
-            "src/java/org/webrtc/RtcException.java",
+      "src/java/io/getstream/webrtc/RtcError.java",
+      "src/java/io/getstream/webrtc/RtcException.java",
       "src/java/io/getstream/webrtc/WebRtcClassLoader.java",
     ]
 
@@ -283,8 +283,8 @@ if (is_android) {
       "api/io/getstream/webrtc/CandidatePairChangeEvent.java",
       "api/io/getstream/webrtc/CryptoOptions.java",
       "api/io/getstream/webrtc/DataChannel.java",
-      "api/org/webrtc/DataPacketCryptor.java",
-            "api/org/webrtc/DataPacketCryptorFactory.java",
+      "api/io/getstream/webrtc/DataPacketCryptor.java",
+      "api/io/getstream/webrtc/DataPacketCryptorFactory.java",
       "api/io/getstream/webrtc/DtmfSender.java",
       "api/io/getstream/webrtc/ExternalAudioProcessingFactory.java",
       "api/io/getstream/webrtc/FecControllerFactoryFactoryInterface.java",
@@ -1465,7 +1465,7 @@ if (current_os == "linux" || is_android) {
   }
 
   generate_jni("generated_rtcerror_jni") {
-    sources = [ "src/java/org/webrtc/RtcError.java" ]
+    sources = [ "src/java/io/getstream/webrtc/RtcError.java" ]
     namespace = "webrtc::jni"
     jni_generator_include = "//sdk/android/src/jni/jni_generator_helper.h"
   }
@@ -1479,8 +1479,8 @@ if (current_os == "linux" || is_android) {
       "api/io/getstream/webrtc/CandidatePairChangeEvent.java",
       "api/io/getstream/webrtc/CryptoOptions.java",
       "api/io/getstream/webrtc/DataChannel.java",
-      "api/org/webrtc/DataPacketCryptor.java",
-            "api/org/webrtc/DataPacketCryptorFactory.java",
+      "api/io/getstream/webrtc/DataPacketCryptor.java",
+      "api/io/getstream/webrtc/DataPacketCryptorFactory.java",
       "api/io/getstream/webrtc/DtmfSender.java",
       "api/io/getstream/webrtc/ExternalAudioProcessingFactory.java",
       "api/io/getstream/webrtc/FrameCryptor.java",

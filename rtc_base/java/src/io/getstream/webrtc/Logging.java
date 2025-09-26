@@ -46,7 +46,7 @@ public class Logging {
   private static Severity loggableSeverity;
 
   private static Logger createFallbackLogger() {
-    final Logger fallbackLogger = Logger.getLogger("org.webrtc.Logging");
+    final Logger fallbackLogger = Logger.getLogger("io.getstream.webrtc.Logging");
     fallbackLogger.setLevel(Level.ALL);
     return fallbackLogger;
   }
