@@ -21,6 +21,8 @@ private_lane :configure_gclient do |options|
         execute_command(command: "gclient root", verbose: options[:verbose])
 
         # Configure gclient with the spec
+        target_oses = Array(options[:target_os]).compact.map(&:to_s)
+        target_os_entries = target_oses.map { |os| "\"#{os}\"" }.join(', ')
         gclient_spec = <<~SPEC
             solutions = [
             {
@@ -31,7 +33,7 @@ private_lane :configure_gclient do |options|
                 "custom_deps": {},
             },
             ]
-            target_os = ["#{options[:target_os]}"]
+            target_os = [#{target_os_entries}]
         SPEC
 
         # Write spec to temporary file and configure

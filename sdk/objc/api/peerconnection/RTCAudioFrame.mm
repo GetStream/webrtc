@@ -10,8 +10,8 @@
 
 #import "RTCAudioFrame.h"
 
-static inline size_t BytesForFrame(NSUInteger channels,
-                                   NSUInteger framesPerChannel) {
+[[maybe_unused]] static inline size_t BytesForFrame(NSUInteger channels,
+                                                    NSUInteger framesPerChannel) {
   return channels * framesPerChannel * sizeof(int16_t);
 }
 

@@ -17,6 +17,8 @@ platform :ios do
     options[:rename_to_sdk_name] = "Stream#{options[:sdk_name]}"
     options[:product] = File.join(options[:products_root], "#{options[:rename_to_sdk_name]}.xcframework")
     options[:match_file] = File.join(options[:root], "src/fastlane/Matchfile")
+    catalyst_option = options.key?(:maccatalyst_support) ? options[:maccatalyst_support] : true
+    options[:maccatalyst_support] = !%w[false 0 off no].include?(catalyst_option.to_s.downcase)
 
     log_info(message: "Root: #{options[:root]}")
     log_info(message: "Build root: #{options[:build_root]}")
@@ -25,6 +27,7 @@ platform :ios do
     log_info(message: "Build tool: #{options[:build_tool]}")
     log_info(message: "Matchfile: #{options[:match_file]}")
     log_info(message: "Product: #{options[:product]}")
+    log_info(message: "Mac Catalyst support: #{options[:maccatalyst_support]}")
 
     setup_ci if is_ci
     clean_up_products(options)
@@ -35,6 +38,7 @@ platform :ios do
     rename_product(options)
     prepare_signing(options)
     sign_product(options)
+    verify_signatures(options)
     zip_product(options)
   end
 
@@ -76,11 +80,15 @@ platform :ios do
   end
 
   lane :configure_google_client do |options|
-    lane_options = extract_prefixed_options(options, "configure_google_client_")
+    lane_options = extract_prefixed_options(options, "configure_google_client")
     next if lane_options[:skip] == true
 
+    target_os = ["ios"]
+    target_os << "mac" if options[:maccatalyst_support]
+    log_info(message: "Configuring gclient target_os: #{target_os.join(', ')}")
+
     configure_gclient(
-      target_os: "ios",
+      target_os: target_os,
       verbose: options[:verbose],
       number_of_jobs: options[:number_of_jobs],
       output: options[:build_root]
@@ -92,6 +100,7 @@ platform :ios do
     next if lane_options[:skip] == true
 
     deployment_target = options[:deployment_target] || "13.0"
+    maccatalyst_support = options[:maccatalyst_support]
 
     args_list = resolve_build_product_args(
       args: extract_prefixed_options(lane_options, "arg"),
@@ -102,6 +111,10 @@ platform :ios do
     Dir.chdir(options[:build_root]) do
       command_parts = ["\"#{script_path}\""]
       command_parts << "--deployment-target #{deployment_target}"
+      archs = ["device:arm64", "simulator:arm64", "simulator:x64"]
+      archs += ["catalyst:arm64", "catalyst:x64"] if maccatalyst_support
+      command_parts << "--arch"
+      command_parts.concat(archs)
       command_parts << "--extra-gn-args"
       command_parts.concat(args_list)
 
@@ -113,7 +126,7 @@ platform :ios do
   end
 
   lane :move_product do |options|
-    lane_options = extract_prefixed_options(options, "move_product_")
+    lane_options = extract_prefixed_options(options, "move_product")
     next if lane_options[:skip] == true
 
     product_source = options[:product_source]
@@ -133,7 +146,7 @@ platform :ios do
   end
 
   lane :rename_product do |options|
-    lane_options = extract_prefixed_options(options, "rename_product_")
+    lane_options = extract_prefixed_options(options, "rename_product")
     next if lane_options[:skip] == true
 
     product_source = options[:product_source]
@@ -199,7 +212,7 @@ platform :ios do
 
   lane :prepare_signing do |options|
     lane_options = extract_prefixed_options(options, "prepare_signing")
-    next unless lane_options[:skip] != true
+    next unless lane_options[:skip] == true
 
     custom_match(
       api_key: appstore_api_key,
@@ -209,21 +222,45 @@ platform :ios do
   end
 
   lane :sign_product do |options|
-    lane_options = extract_prefixed_options(options, "sign_product_")
+    lane_options = extract_prefixed_options(options, "sign_product")
     next if lane_options[:skip] == true
     
     matchfile = options[:match_file]
     assert(message: "Missing required option :match_file") if matchfile.to_s.strip.empty?
     
     team_id = File.read(matchfile).match(/team_id\("(.*)"\)/)[1]
-    execute_command(
-      command: "codesign --force --timestamp -v --sign 'Apple Distribution: Stream.io Inc (#{team_id})' #{options[:product]}",
-      verbose: options[:verbose]
-    )
+    frameworks = Dir.glob("#{options[:product]}/**/*.framework")
+    frameworks.each do |framework|
+      execute_command(
+        command: "/usr/bin/codesign --force --timestamp --deep -v --sign 'Apple Distribution: Stream.io Inc (#{team_id})' \"#{framework}\"",
+        verbose: options[:verbose]
+      )
+    end
+  end
+
+  lane :verify_signatures do |options|
+    lane_options = extract_prefixed_options(options, "verify_signatures")
+    next if lane_options[:skip] == true
+
+    product_path = options[:product]
+    assert(message: "Missing required option :product") if product_path.to_s.strip.empty?
+    assert(message: "Product not found at #{product_path}") unless File.exist?(product_path)
+
+    frameworks = Dir.glob("#{product_path}/**/*.framework")
+    assert(message: "No frameworks found to validate signatures") if frameworks.empty?
+
+    log_info(message: "Validating code signatures for #{frameworks.count} frameworks")
+
+    frameworks.each do |framework|
+      execute_command(
+        command: "/usr/bin/codesign --verify --deep --strict --verbose=2 \"#{framework}\"",
+        verbose: options[:verbose]
+      )
+    end
   end
 
   lane :zip_product do |options|
-    lane_options = extract_prefixed_options(options, "zip_product_")
+    lane_options = extract_prefixed_options(options, "zip_product")
     next if lane_options[:skip] == true
 
     file_path = options[:product]
