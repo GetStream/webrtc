@@ -285,6 +285,23 @@ bool FakeVoiceMediaSendChannel::SetAudioSend(uint32_t ssrc,
           ssrc, !enable)) {
     return false;
   }
+#if defined(WEBRTC_IOS)
+  if (!source) {
+    if (enable) {
+      auto& stream = standalone_send_streams_[ssrc];
+      if (!stream) {
+        webrtc::AudioSendStream::Config config(/*send_transport=*/nullptr);
+        config.rtp.ssrc = ssrc;
+        stream =
+            std::make_unique<webrtc::FakeAudioSendStream>(ssrc, config);
+      }
+    } else {
+      standalone_send_streams_.erase(ssrc);
+    }
+  } else {
+    standalone_send_streams_.erase(ssrc);
+  }
+#endif
   if (enable && options) {
     return SetOptions(*options);
   }
@@ -318,6 +335,43 @@ bool FakeVoiceMediaSendChannel::GetOutputVolume(uint32_t ssrc, double* volume) {
 bool FakeVoiceMediaSendChannel::GetStats(VoiceMediaSendInfo* /* info */) {
   return false;
 }
+
+#if defined(WEBRTC_IOS)
+webrtc::AudioSendStream* FakeVoiceMediaSendChannel::GetAudioSendStream(
+    uint32_t ssrc) {
+  auto it = standalone_send_streams_.find(ssrc);
+  return it != standalone_send_streams_.end() ? it->second.get() : nullptr;
+}
+
+webrtc::FakeAudioSendStream*
+FakeVoiceMediaSendChannel::GetFakeAudioSendStreamForTesting(uint32_t ssrc) {
+  auto it = standalone_send_streams_.find(ssrc);
+  return it != standalone_send_streams_.end() ? it->second.get() : nullptr;
+}
+
+bool FakeVoiceMediaSendChannel::SetStandaloneAudioMode(uint32_t ssrc,
+                                                       bool enabled) {
+  auto it = standalone_send_streams_.find(ssrc);
+  if (!enabled) {
+    if (it != standalone_send_streams_.end()) {
+      it->second->set_bypass_audio_transport(false);
+    }
+    return true;
+  }
+
+  if (it == standalone_send_streams_.end()) {
+    webrtc::AudioSendStream::Config config(/*send_transport=*/nullptr);
+    config.rtp.ssrc = ssrc;
+    auto stream = std::make_unique<webrtc::FakeAudioSendStream>(ssrc, config);
+    stream->set_bypass_audio_transport(true);
+    standalone_send_streams_.emplace(ssrc, std::move(stream));
+    return true;
+  }
+
+  it->second->set_bypass_audio_transport(true);
+  return true;
+}
+#endif
 bool FakeVoiceMediaSendChannel::SetSendCodecs(
     const std::vector<Codec>& codecs) {
   if (fail_set_send_codecs()) {

@@ -1,0 +1,34 @@
+/*
+ *  Copyright 2024 The WebRTC project authors. All Rights Reserved.
+ *
+ *  Use of this source code is governed by a BSD-style license
+ *  that can be found in the LICENSE file in the root of the source
+ *  tree. An additional intellectual property rights grant can be found
+ *  in the file PATENTS.  All contributing project authors may
+ *  be found in the AUTHORS file in the root of the source tree.
+ */
+
+#import "RTCStandaloneAudioSource.h"
+
+#include "api/scoped_refptr.h"
+
+namespace webrtc {
+class StandaloneAudioTrackSource;
+}  // namespace webrtc
+
+NS_ASSUME_NONNULL_BEGIN
+
+@interface RTC_OBJC_TYPE(RTCStandaloneAudioSource) ()
+
+@property(nonatomic, readonly)
+    rtc::scoped_refptr<webrtc::StandaloneAudioTrackSource>
+        nativeStandaloneSource;
+
+- (instancetype)initWithFactory:
+                    (RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)factory
+        nativeStandaloneSource:(rtc::scoped_refptr<webrtc::StandaloneAudioTrackSource>)
+                                  nativeStandaloneSource;
+
+@end
+
+NS_ASSUME_NONNULL_END

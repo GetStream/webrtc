@@ -15,8 +15,17 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+@class RTC_OBJC_TYPE(RTCAudioFrame);
+
 RTC_OBJC_EXPORT
-@interface RTC_OBJC_TYPE (RTCAudioSource) : RTC_OBJC_TYPE(RTCMediaSource)
+@protocol RTC_OBJC_TYPE(RTCAudioCapturerDelegate)<NSObject>
+
+- (void)pushAudioFrame:(RTC_OBJC_TYPE(RTCAudioFrame) *)frame;
+
+@end
+
+RTC_OBJC_EXPORT
+@interface RTC_OBJC_TYPE (RTCAudioSource) : RTC_OBJC_TYPE(RTCMediaSource) <RTC_OBJC_TYPE(RTCAudioCapturerDelegate)>
 
 - (instancetype)init NS_UNAVAILABLE;
 

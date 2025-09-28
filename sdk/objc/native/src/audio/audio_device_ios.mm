@@ -758,7 +758,7 @@ void AudioDeviceIOS::HandleOutputVolumeChange() {
 }
 
 bool AudioDeviceIOS::RestartAudioUnit(bool enable_input) {
-  RTC_DCHECK_RUN_ON(&io_thread_checker_);
+  RTC_DCHECK_RUN_ON(thread_);
 
   LOGI() << "RestartAudioUnit";
 

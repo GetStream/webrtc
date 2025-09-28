@@ -1574,6 +1574,9 @@ rtc_source_set("peer_connection_factory") {
     "//third_party/abseil-cpp/absl/strings",
     "//third_party/abseil-cpp/absl/strings:string_view",
   ]
+  if (is_ios) {
+    deps += [ "../sdk:standalone_audio_track_source" ]
+  }
 }
 
 rtc_library("peer_connection_message_handler") {

@@ -9,6 +9,7 @@
  */
 
 #include <memory>
+#include <utility>
 
 #import "RTCPeerConnectionFactory+Native.h"
 #import "RTCPeerConnectionFactory+Private.h"
@@ -22,6 +23,7 @@
 #import "RTCAudioTrack+Private.h"
 #import "RTCMediaConstraints+Private.h"
 #import "RTCMediaStream+Private.h"
+#import "RTCStandaloneAudioSource+Private.h"
 #import "RTCPeerConnection+Private.h"
 #import "RTCVideoSource+Private.h"
 #import "RTCVideoTrack+Private.h"
@@ -57,6 +59,7 @@
 #include "sdk/objc/native/api/video_encoder_factory.h"
 #include "sdk/objc/native/src/objc_video_decoder_factory.h"
 #include "sdk/objc/native/src/objc_video_encoder_factory.h"
+#include "sdk/objc/native/src/standalone_audio_track_source.h"
 
 #import "components/audio/RTCAudioProcessingModule.h"
 #import "components/audio/RTCDefaultAudioProcessingModule+Private.h"
@@ -367,6 +370,12 @@
 
 - (RTC_OBJC_TYPE(RTCAudioSource) *)audioSourceWithConstraints:
     (nullable RTC_OBJC_TYPE(RTCMediaConstraints) *)constraints {
+  return [self audioSourceWithConstraints:constraints standalone:NO];
+}
+
+- (RTC_OBJC_TYPE(RTCAudioSource) *)audioSourceWithConstraints:
+    (nullable RTC_OBJC_TYPE(RTCMediaConstraints) *)constraints
+                          standalone:(BOOL)standalone {
   std::unique_ptr<webrtc::MediaConstraints> nativeConstraints;
   if (constraints) {
     nativeConstraints = constraints.nativeConstraints;
@@ -375,13 +384,31 @@
   CopyConstraintsIntoAudioOptions(nativeConstraints.get(), &options);
 
   webrtc::scoped_refptr<webrtc::AudioSourceInterface> source =
-      _nativeFactory->CreateAudioSource(options);
+      _nativeFactory->CreateAudioSource(options, standalone);
+  if (standalone) {
+    auto* standalone_ptr =
+        static_cast<webrtc::StandaloneAudioTrackSource*>(source.get());
+    RTC_CHECK(standalone_ptr);
+    rtc::scoped_refptr<webrtc::StandaloneAudioTrackSource> standalone_source(
+        standalone_ptr);
+    return [[RTC_OBJC_TYPE(RTCStandaloneAudioSource) alloc]
+        initWithFactory:self
+    nativeStandaloneSource:std::move(standalone_source)];
+  }
+
   return [[RTC_OBJC_TYPE(RTCAudioSource) alloc] initWithFactory:self nativeAudioSource:source];
 }
 
 - (RTC_OBJC_TYPE(RTCAudioTrack) *)audioTrackWithTrackId:(NSString *)trackId {
   RTC_OBJC_TYPE(RTCAudioSource) *audioSource = [self audioSourceWithConstraints:nil];
   return [self audioTrackWithSource:audioSource trackId:trackId];
+}
+
+- (RTC_OBJC_TYPE(RTCStandaloneAudioSource) *)
+    standaloneAudioSourceWithConstraints:
+        (nullable RTC_OBJC_TYPE(RTCMediaConstraints) *)constraints {
+  return static_cast<RTC_OBJC_TYPE(RTCStandaloneAudioSource) *>(
+      [self audioSourceWithConstraints:constraints standalone:YES]);
 }
 
 - (RTC_OBJC_TYPE(RTCAudioTrack) *)audioTrackWithSource:(RTC_OBJC_TYPE(RTCAudioSource) *)source

@@ -15,6 +15,7 @@
 
 #import "RTCAudioRenderer.h"
 #import "RTCAudioSource+Private.h"
+#import "RTCStandaloneAudioSource.h"
 #import "RTCMediaStreamTrack+Private.h"
 #import "RTCPeerConnectionFactory+Private.h"
 #import "api/RTCAudioRendererAdapter+Private.h"
@@ -63,6 +64,28 @@
   }
 
   return self;
+}
+
+- (void)setIsEnabled:(BOOL)isEnabled {
+  BOOL wasEnabled = self.isEnabled;
+  [super setIsEnabled:isEnabled];
+  if (wasEnabled == isEnabled) {
+    return;
+  }
+
+  RTC_OBJC_TYPE(RTCAudioSource) *source = _source;
+  if (!source) {
+    source = [self source];
+  }
+  if ([source isKindOfClass:[RTC_OBJC_TYPE(RTCStandaloneAudioSource) class]]) {
+    RTC_OBJC_TYPE(RTCStandaloneAudioSource) *standaloneSource =
+        (RTC_OBJC_TYPE(RTCStandaloneAudioSource) *)source;
+    if (isEnabled) {
+      [standaloneSource start];
+    } else {
+      [standaloneSource stop];
+    }
+  }
 }
 
 - (void)dealloc {

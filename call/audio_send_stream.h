@@ -170,6 +170,11 @@ class AudioSendStream : public AudioSender {
     // An optional frame transformer used by insertable streams to transform
     // encoded frames.
     scoped_refptr<webrtc::FrameTransformerInterface> frame_transformer;
+
+    // When true, the stream skips registration with the shared
+    // AudioTransportImpl microphone pipeline and expects audio frames to be
+    // supplied manually via SendAudioData().
+    bool bypass_audio_transport = false;
   };
 
   virtual ~AudioSendStream() = default;

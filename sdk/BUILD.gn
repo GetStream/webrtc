@@ -1042,9 +1042,16 @@ if (is_ios || is_mac) {
         "objc/api/peerconnection/RTCAudioDeviceModule.mm",
         "objc/api/peerconnection/RTCIODevice.h",
         "objc/api/peerconnection/RTCIODevice.mm",
+        "objc/api/peerconnection/RTCAudioFrame.h",
+        "objc/api/peerconnection/RTCAudioFrame.mm",
         "objc/api/peerconnection/RTCAudioSource+Private.h",
         "objc/api/peerconnection/RTCAudioSource.h",
         "objc/api/peerconnection/RTCAudioSource.mm",
+        "objc/api/peerconnection/RTCStandaloneAudioSource+Private.h",
+        "objc/api/peerconnection/RTCStandaloneAudioSource.h",
+        "objc/api/peerconnection/RTCStandaloneAudioSource.mm",
+        "objc/api/peerconnection/RTCPCMAudioCapturer.h",
+        "objc/api/peerconnection/RTCPCMAudioCapturer.mm",
         "objc/api/peerconnection/RTCAudioTrack+Private.h",
         "objc/api/peerconnection/RTCAudioTrack.h",
         "objc/api/peerconnection/RTCAudioTrack.mm",
@@ -1203,6 +1210,7 @@ if (is_ios || is_mac) {
         ":audiorendereradapter_objc",
         ":videosource_objc",
         ":videotoolbox_objc",
+        ":standalone_audio_track_source",
         "../api/crypto:frame_crypto_transformer",
         "../api:dtmf_sender_interface",
         "../api:enable_media",
@@ -1467,7 +1475,10 @@ if (is_ios || is_mac) {
           "objc/helpers/UIDevice+RTCDevice.h",
           "objc/api/peerconnection/RTCAudioDeviceModule.h",
           "objc/api/peerconnection/RTCIODevice.h",
+          "objc/api/peerconnection/RTCAudioFrame.h",
           "objc/api/peerconnection/RTCAudioSource.h",
+          "objc/api/peerconnection/RTCStandaloneAudioSource.h",
+          "objc/api/peerconnection/RTCPCMAudioCapturer.h",
           "objc/api/peerconnection/RTCAudioTrack.h",
           "objc/api/peerconnection/RTCConfiguration.h",
           "objc/api/peerconnection/RTCDataChannel.h",
@@ -1906,6 +1917,47 @@ if (is_ios || is_mac) {
         "../rtc_base:timestamp_aligner",
         "../rtc_base:timeutils",
       ]
+    }
+
+    rtc_library("standalone_audio_track_source") {
+      visibility = [ "*" ]
+      sources = [
+        "objc/native/src/standalone_audio_send_helper.cc",
+        "objc/native/src/standalone_audio_send_helper.h",
+        "objc/native/src/standalone_audio_track_source.cc",
+        "objc/native/src/standalone_audio_track_source.h",
+      ]
+
+      configs += [ "..:common_objc" ]
+
+      public_configs = [ ":common_config_objc" ]
+
+      deps = [
+        "../api:media_stream_interface",
+        "../api/audio:audio_frame_api",
+        "../call:call_interfaces",
+        "../rtc_base:checks",
+        "../rtc_base/synchronization:mutex",
+      ]
+    }
+
+    if (rtc_include_tests) {
+      rtc_test("standalone_audio_track_source_unittest") {
+        testonly = true
+        sources =
+            [ "objc/native/src/standalone_audio_track_source_unittest.cc" ]
+        deps = [
+          ":standalone_audio_track_source",
+          "../api:media_stream_interface",
+          "../api/audio:audio_frame_api",
+          "../api/audio:builtin_audio_processing_builder",
+          "../api/environment:environment_factory",
+          "../call:call",
+          "../modules/audio_device:audio_device",
+          "../modules/audio_mixer:audio_mixer_impl",
+          "../test:test_support",
+        ]
+      }
     }
 
     rtc_library("video_toolbox_cc") {

@@ -72,6 +72,10 @@
 #include "rtc_base/system/file_wrapper.h"
 #include "test/explicit_key_value_config.h"
 
+#if defined(WEBRTC_IOS)
+#include "media/engine/fake_webrtc_call.h"
+#endif
+
 namespace webrtc {
 
 class FakeMediaEngine;
@@ -614,6 +618,12 @@ class FakeVoiceMediaSendChannel
   std::optional<Codec> GetSendCodec() const override;
 
   bool GetStats(VoiceMediaSendInfo* stats) override;
+#if defined(WEBRTC_IOS)
+  webrtc::AudioSendStream* GetAudioSendStream(uint32_t ssrc) override;
+  webrtc::FakeAudioSendStream* GetFakeAudioSendStreamForTesting(
+      uint32_t ssrc);
+  bool SetStandaloneAudioMode(uint32_t ssrc, bool enabled) override;
+#endif
 
  private:
   class VoiceChannelAudioSink : public AudioSource::Sink {
@@ -646,6 +656,10 @@ class FakeVoiceMediaSendChannel
   AudioOptions options_;
   std::map<uint32_t, std::unique_ptr<VoiceChannelAudioSink>> local_sinks_;
   int max_bps_;
+#if defined(WEBRTC_IOS)
+  std::map<uint32_t, std::unique_ptr<webrtc::FakeAudioSendStream>>
+      standalone_send_streams_;
+#endif
 };
 
 // A helper function to compare the FakeVoiceMediaChannel::DtmfInfo.
