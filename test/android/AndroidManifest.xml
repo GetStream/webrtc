@@ -10,7 +10,7 @@ be found in the AUTHORS file in the root of the source tree.
 -->
 
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-      package="org.webrtc.native_test"
+      package="io.getstream.webrtc.native_test"
       android:versionCode="1"
       android:versionName="1.0">
 
@@ -29,7 +29,7 @@ be found in the AUTHORS file in the root of the source tree.
     <uses-permission android:name="android.permission.SET_TIME_ZONE"/> <!-- From Chromium -->
 
     <application android:label="NativeTests"
-            android:name="org.webrtc.native_test.RTCNativeTestApplication">
+            android:name="io.getstream.webrtc.native_test.RTCNativeTestApplication">
         <uses-library android:name="android.test.runner"/>
         <activity android:name=".RTCNativeUnitTestActivity"
                 android:label="NativeTest"
@@ -45,7 +45,7 @@ be found in the AUTHORS file in the root of the source tree.
     </application>
 
     <instrumentation android:name="org.chromium.build.gtest_apk.NativeTestInstrumentationTestRunner"
-            android:targetPackage="org.webrtc.native_test"
-            android:label="Instrumentation entry point for org.webrtc.native_test" />
+            android:targetPackage="io.getstream.webrtc.native_test"
+            android:label="Instrumentation entry point for io.getstream.webrtc.native_test" />
 
 </manifest>

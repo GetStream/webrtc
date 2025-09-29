@@ -74,7 +74,7 @@ ScopedJavaLocalRef<jobjectArray> NativeToJavaCandidateArray(
     JNIEnv* jni,
     const std::vector<Candidate>& candidates) {
   return NativeToJavaObjectArray(jni, candidates,
-                                 org_webrtc_IceCandidate_clazz(jni),
+                                 io.getstream.webrtc_IceCandidate_clazz(jni),
                                  &NativeToJavaCandidate);
 }
 

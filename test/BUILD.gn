@@ -1312,11 +1312,11 @@ if (!build_with_chromium && is_android) {
   rtc_android_library("native_test_java") {
     testonly = true
     sources = [
-      "android/org/webrtc/native_test/NativeTestWebrtc.java",
-      "android/org/webrtc/native_test/RTCNativeTestApplication.java",
-      "android/org/webrtc/native_test/RTCNativeUnitTest.java",
-      "android/org/webrtc/native_test/RTCNativeUnitTestActivity.java",
-      "android/org/webrtc/native_test/StrictModeContext.java",
+      "android/io.getstream.webrtc/native_test/NativeTestWebrtc.java",
+      "android/io.getstream.webrtc/native_test/RTCNativeTestApplication.java",
+      "android/io.getstream.webrtc/native_test/RTCNativeUnitTest.java",
+      "android/io.getstream.webrtc/native_test/RTCNativeUnitTestActivity.java",
+      "android/io.getstream.webrtc/native_test/StrictModeContext.java",
     ]
     srcjar_deps = [ ":native_test_jni" ]
     deps = [
@@ -1347,7 +1347,7 @@ if (!build_with_chromium && is_android) {
 
   generate_jni("native_test_jni") {
     testonly = true
-    sources = [ "android/org/webrtc/native_test/NativeTestWebrtc.java" ]
+    sources = [ "android/io.getstream.webrtc/native_test/NativeTestWebrtc.java" ]
   }
 }
 

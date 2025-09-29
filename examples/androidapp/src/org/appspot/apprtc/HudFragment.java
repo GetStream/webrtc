@@ -17,8 +17,8 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageButton;
 import android.widget.TextView;
-import org.webrtc.RTCStats;
-import org.webrtc.RTCStatsReport;
+import io.getstream.webrtc.RTCStats;
+import io.getstream.webrtc.RTCStatsReport;
 
 /**
  * Fragment for HUD statistics display.

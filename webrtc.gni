@@ -223,7 +223,7 @@ declare_args() {
 
   # When set to false, builtin audio encoder/decoder factories and all the
   # audio codecs they depend on will not be included in libwebrtc.{a|lib}
-  # (they will still be included in libjingle_peerconnection_so.so and
+  # (they will still be included in libstream_jingle_peerconnection_so.so and
   # WebRTC.framework)
   rtc_include_builtin_audio_codecs = true
 

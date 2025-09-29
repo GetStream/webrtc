@@ -47,7 +47,7 @@ SYMBOL_DIR="${TMPDIR:-/tmp}/android_symbols"
 # Used as a temporary folder on the Android device for data storage.
 DEV_TMP_DIR="/data/local/tmp"
 # Relative path to native shared library containing symbols.
-NATIVE_LIB_PATH="/lib.unstripped/libjingle_peerconnection_so.so"
+NATIVE_LIB_PATH="/lib.unstripped/libstream_jingle_peerconnection_so.so"
 # Name of application package for the AppRTCMobile demo.
 APP_NAME="org.appspot.apprtc"
 
@@ -75,7 +75,7 @@ else
   return 1
 fi
 
-# Full (relative) path to the libjingle_peerconnection_so.so file.
+# Full (relative) path to the libstream_jingle_peerconnection_so.so file.
 function native_shared_lib_path() {
   echo "${BUILD_DIR}${NATIVE_LIB_PATH}"
 }

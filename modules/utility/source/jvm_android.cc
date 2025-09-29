@@ -221,7 +221,7 @@ void JVM::Initialize(JavaVM* jvm, jobject context) {
 
   // Pass in the context to the new ContextUtils class.
   JNIEnv* jni = g_jvm->jni();
-  jclass context_utils = FindClass(jni, "org/webrtc/ContextUtils");
+  jclass context_utils = FindClass(jni, "io.getstream.webrtc/ContextUtils");
   jmethodID initialize_method = jni->GetStaticMethodID(
       context_utils, "initialize", "(Landroid/content/Context;)V");
   jni->CallStaticVoidMethod(context_utils, initialize_method, context);

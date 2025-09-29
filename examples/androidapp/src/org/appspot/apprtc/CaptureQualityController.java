@@ -16,7 +16,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
-import org.webrtc.CameraEnumerationAndroid.CaptureFormat;
+import io.getstream.webrtc.CameraEnumerationAndroid.CaptureFormat;
 
 /**
  * Control capture format based on a seekbar listener.

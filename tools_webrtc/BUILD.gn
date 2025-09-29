@@ -10,9 +10,9 @@ if (target_os == "android") {
   action("binary_version_check") {
     testonly = true
     script = "binary_version_check.py"
-    deps = [ "../sdk/android:libjingle_peerconnection_so" ]
-    inputs = [ "$root_out_dir/libjingle_peerconnection_so.so" ]
+    deps = [ "../sdk/android:libstream_jingle_peerconnection_so" ]
+    inputs = [ "$root_out_dir/libstream_jingle_peerconnection_so.so" ]
     outputs = [ "$root_out_dir/webrtc_binary_version_check" ]
-    args = [ "libjingle_peerconnection_so.so" ]
+    args = [ "libstream_jingle_peerconnection_so.so" ]
   }
 }
