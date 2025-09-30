@@ -28,6 +28,7 @@
 \#*#
 .*.sw?
 .cache
+.idea
 .cipd
 .clangd
 .classpath
