@@ -83,4 +83,6 @@
 
 # Stream specifics
 fastlane/vendor
+fastlane/Gemfile.lock
+fastlane/*.xml
 out_ios_libs

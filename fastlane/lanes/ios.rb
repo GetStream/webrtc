@@ -3,21 +3,22 @@
 require 'fileutils'
 require 'pathname'
 require 'shellwords'
-fastlane_require "fastlane-plugin-stream_actions"
+fastlane_require 'fastlane-plugin-stream_actions'
 
+# rubocop:disable Metrics/BlockLength
 platform :ios do
-  desc "Sync dependencies and build the WebRTC iOS libraries"
+  desc 'Sync dependencies and build the WebRTC iOS libraries'
 
   lane :build do |options|
     options[:root] = Pathname.new(__dir__).join('..', '..', '..').expand_path
-    options[:build_root] = File.join(options[:root], ".output")
-    options[:products_root] = File.join(options[:root], ".products")
-    options[:sdk_name] = "WebRTC"
+    options[:build_root] = File.join(options[:root], '.output')
+    options[:products_root] = File.join(options[:root], '.products')
+    options[:sdk_name] = 'WebRTC'
     options[:product_source] = File.join(options[:root], "src/out_ios_libs/#{options[:sdk_name]}.xcframework")
-    options[:build_tool] = File.join(options[:root], "src/tools_webrtc/ios/build_ios_libs.py")
+    options[:build_tool] = File.join(options[:root], 'src/tools_webrtc/ios/build_ios_libs.py')
     options[:rename_to_sdk_name] = "Stream#{options[:sdk_name]}"
     options[:product] = File.join(options[:products_root], "#{options[:rename_to_sdk_name]}.xcframework")
-    options[:match_file] = File.join(options[:root], "src/fastlane/Matchfile")
+    options[:match_file] = File.join(options[:root], 'src/fastlane/Matchfile')
     catalyst_option = options.key?(:maccatalyst_support) ? options[:maccatalyst_support] : true
     options[:maccatalyst_support] = !%w[false 0 off no].include?(catalyst_option.to_s.downcase)
 
@@ -31,6 +32,8 @@ platform :ios do
     log_info(message: "Mac Catalyst support: #{options[:maccatalyst_support]}")
 
     setup_ci if is_ci
+    setup_git_config if is_ci
+
     clean_up_products(options)
     verify_environment(options)
     configure_google_client(options)
@@ -44,16 +47,15 @@ platform :ios do
   end
 
   lane :clean_up_products do |options|
-    lane_options = extract_prefixed_options(options, "clean_up_products")
+    lane_options = extract_prefixed_options(options, 'clean_up_products')
     next unless lane_options[:skip] != true
-    log_debug(message: "Cleaning up products", verbose: options[:verbose])
+
+    log_debug(message: 'Cleaning up products', verbose: options[:verbose])
 
     products_root = options[:products_root]
-    assert(message: "Missing required option :products_root") if products_root.to_s.strip.empty?
+    assert(message: 'Missing required option :products_root') if products_root.to_s.strip.empty?
 
-    unless Dir.exist?(products_root)
-      return
-    end
+    return unless Dir.exist?(products_root)
 
     log_info(message: "Cleaning products directory at #{products_root}")
     Dir.children(products_root).each do |entry|
@@ -62,30 +64,26 @@ platform :ios do
   end
 
   lane :verify_environment do |options|
-    lane_options = extract_prefixed_options(options, "verify_environment")
+    lane_options = extract_prefixed_options(options, 'verify_environment')
     next unless lane_options[:skip] != true
 
     verify_build_environment(verbose: options[:verbose])
 
-    ensure_required_tool(tool: "xcodebuild", verbose: options[:verbose])
-    
+    ensure_required_tool(tool: 'xcodebuild', verbose: options[:verbose])
+
     # Check if we're on macOS
-    unless RUBY_PLATFORM.include?('darwin')
-      log_error(message: "iOS builds require macOS")
-    end
+    log_error(message: 'iOS builds require macOS') unless RUBY_PLATFORM.include?('darwin')
 
     # Check if Xcode is installed
-    unless system("xcode-select -p > /dev/null 2>&1")
-      log_error(message: "Xcode command line tools not found")
-    end
+    log_error(message: 'Xcode command line tools not found') unless system('xcode-select -p > /dev/null 2>&1')
   end
 
   lane :configure_google_client do |options|
-    lane_options = extract_prefixed_options(options, "configure_google_client")
+    lane_options = extract_prefixed_options(options, 'configure_google_client')
     next if lane_options[:skip] == true
 
-    target_os = ["ios"]
-    target_os << "mac" if options[:maccatalyst_support]
+    target_os = ['ios']
+    target_os << 'mac' if options[:maccatalyst_support]
     log_info(message: "Configuring gclient target_os: #{target_os.join(', ')}")
 
     configure_gclient(
@@ -97,14 +95,14 @@ platform :ios do
   end
 
   lane :build_product do |options|
-    lane_options = extract_prefixed_options(options, "build_product")
+    lane_options = extract_prefixed_options(options, 'build_product')
     next if lane_options[:skip] == true
 
-    deployment_target = options[:deployment_target] || "13.0"
+    deployment_target = options[:deployment_target] || '13.0'
     maccatalyst_support = options[:maccatalyst_support]
 
     args_list = resolve_build_product_args(
-      args: extract_prefixed_options(lane_options, "arg"),
+      args: extract_prefixed_options(lane_options, 'arg'),
       verbose: options[:verbose]
     )
 
@@ -112,11 +110,11 @@ platform :ios do
     Dir.chdir(options[:build_root]) do
       command_parts = ["\"#{script_path}\""]
       command_parts << "--deployment-target #{deployment_target}"
-      archs = ["device:arm64", "simulator:arm64", "simulator:x64"]
-      archs += ["catalyst:arm64", "catalyst:x64"] if maccatalyst_support
-      command_parts << "--arch"
+      archs = ['device:arm64', 'simulator:arm64', 'simulator:x64']
+      archs += ['catalyst:arm64', 'catalyst:x64'] if maccatalyst_support
+      command_parts << '--arch'
       command_parts.concat(archs)
-      command_parts << "--extra-gn-args"
+      command_parts << '--extra-gn-args'
       command_parts.concat(args_list)
 
       execute_command(
@@ -127,15 +125,15 @@ platform :ios do
   end
 
   lane :move_product do |options|
-    lane_options = extract_prefixed_options(options, "move_product")
+    lane_options = extract_prefixed_options(options, 'move_product')
     next if lane_options[:skip] == true
 
     product_source = options[:product_source]
-    assert(message: "Missing required option :product_source") if product_source.to_s.strip.empty?
+    assert(message: 'Missing required option :product_source') if product_source.to_s.strip.empty?
     assert(message: "Product not found at #{product_source}") unless File.exist?(product_source)
 
     product_destination = options[:products_root]
-    assert(message: "Missing required option :products_root") if product_destination.to_s.strip.empty?
+    assert(message: 'Missing required option :products_root') if product_destination.to_s.strip.empty?
 
     FileUtils.mkdir_p(product_destination)
 
@@ -147,21 +145,21 @@ platform :ios do
   end
 
   lane :rename_product do |options|
-    lane_options = extract_prefixed_options(options, "rename_product")
+    lane_options = extract_prefixed_options(options, 'rename_product')
     next if lane_options[:skip] == true
 
     product_source = options[:product_source]
-    assert(message: "Missing required option :product_source") if product_source.to_s.strip.empty?
+    assert(message: 'Missing required option :product_source') if product_source.to_s.strip.empty?
     products_root = options[:products_root]
-    assert(message: "Missing required option :products_root") if products_root.to_s.strip.empty?
-    product_destination = File.join(products_root, File.basename(product_source)) 
-    assert(message: "Missing required option :product_destination") if product_destination.to_s.strip.empty?
+    assert(message: 'Missing required option :products_root') if products_root.to_s.strip.empty?
+    product_destination = File.join(products_root, File.basename(product_source))
+    assert(message: 'Missing required option :product_destination') if product_destination.to_s.strip.empty?
     assert(message: "Product not found at #{product_destination}") unless File.exist?(product_destination)
     sdk_name = options[:sdk_name]
-    assert(message: "Missing required option :sdk_name") if sdk_name.to_s.strip.empty?
+    assert(message: 'Missing required option :sdk_name') if sdk_name.to_s.strip.empty?
     modified_sdk_name = options[:rename_to_sdk_name]
-    assert(message: "Missing required option :rename_to_sdk_name") if modified_sdk_name.to_s.strip.empty?
-    
+    assert(message: 'Missing required option :rename_to_sdk_name') if modified_sdk_name.to_s.strip.empty?
+
     old_framework_path = product_destination
     new_framework_path = File.join(products_root, "#{modified_sdk_name}.xcframework")
 
@@ -194,7 +192,9 @@ platform :ios do
     end
 
     # Rename the rpath for all the frameworks and update symlinks if required
+    # rubocop:disable Metrics/LineLength
     framework_paths = new_framework_path.include?('.xcframework') ? Dir.glob("#{new_framework_path}/**/*.framework") : [new_framework_path]
+    # rubocop:enable Metrics/LineLength
     framework_paths.each do |path|
       Dir.chdir(path) do
         if File.symlink?(modified_sdk_name)
@@ -212,7 +212,7 @@ platform :ios do
   end
 
   lane :prepare_signing do |options|
-    lane_options = extract_prefixed_options(options, "prepare_signing")
+    lane_options = extract_prefixed_options(options, 'prepare_signing')
     next unless lane_options[:skip] == true
 
     custom_match(
@@ -223,32 +223,33 @@ platform :ios do
   end
 
   lane :sign_product do |options|
-    lane_options = extract_prefixed_options(options, "sign_product")
+    lane_options = extract_prefixed_options(options, 'sign_product')
     next if lane_options[:skip] == true
-    
+
     matchfile = options[:match_file]
-    assert(message: "Missing required option :match_file") if matchfile.to_s.strip.empty?
-    
+    assert(message: 'Missing required option :match_file') if matchfile.to_s.strip.empty?
+
     team_id = File.read(matchfile).match(/team_id\("(.*)"\)/)[1]
     frameworks = Dir.glob("#{options[:product]}/**/*.framework")
+    signing_identity = "'Apple Distribution: Stream.io Inc (#{team_id})'"
     frameworks.each do |framework|
       execute_command(
-        command: "/usr/bin/codesign --force --timestamp --deep -v --sign 'Apple Distribution: Stream.io Inc (#{team_id})' \"#{framework}\"",
+        command: "/usr/bin/codesign --force --timestamp --deep -v --sign #{signing_identity} \"#{framework}\"",
         verbose: options[:verbose]
       )
     end
   end
 
   lane :verify_signatures do |options|
-    lane_options = extract_prefixed_options(options, "verify_signatures")
+    lane_options = extract_prefixed_options(options, 'verify_signatures')
     next if lane_options[:skip] == true
 
     product_path = options[:product]
-    assert(message: "Missing required option :product") if product_path.to_s.strip.empty?
+    assert(message: 'Missing required option :product') if product_path.to_s.strip.empty?
     assert(message: "Product not found at #{product_path}") unless File.exist?(product_path)
 
     frameworks = Dir.glob("#{product_path}/**/*.framework")
-    assert(message: "No frameworks found to validate signatures") if frameworks.empty?
+    assert(message: 'No frameworks found to validate signatures') if frameworks.empty?
 
     log_info(message: "Validating code signatures for #{frameworks.count} frameworks")
 
@@ -261,7 +262,7 @@ platform :ios do
   end
 
   lane :zip_product do |options|
-    lane_options = extract_prefixed_options(options, "zip_product")
+    lane_options = extract_prefixed_options(options, 'zip_product')
     next if lane_options[:skip] == true
 
     file_path = options[:product]
@@ -273,21 +274,24 @@ platform :ios do
     zip_path
   end
 
-  desc "Compute a checksum for the packaged xcframework zip"
+  desc 'Compute a checksum for the packaged xcframework zip'
   lane :compute_zip_checksum do |options|
-    lane_options = extract_prefixed_options(options, "compute_zip_checksum")
+    lane_options = extract_prefixed_options(options, 'compute_zip_checksum')
     next if lane_options[:skip] == true
 
-    ensure_required_tool(tool: "swift", verbose: options[:verbose])
+    ensure_required_tool(tool: 'swift', verbose: options[:verbose])
 
     zip_path = lane_options[:zip_path] || options[:zip_path]
     if zip_path.to_s.strip.empty?
       products_root = options[:products_root]
       rename_to_sdk_name = options[:rename_to_sdk_name]
-      zip_path = File.join(products_root, "#{rename_to_sdk_name}.zip") unless products_root.to_s.strip.empty? || rename_to_sdk_name.to_s.strip.empty?
+      unless products_root.to_s.strip.empty? || rename_to_sdk_name.to_s.strip.empty?
+        zip_path = File.join(products_root,
+                             "#{rename_to_sdk_name}.zip")
+      end
     end
 
-    assert(message: "Missing required option :zip_path") if zip_path.to_s.strip.empty?
+    assert(message: 'Missing required option :zip_path') if zip_path.to_s.strip.empty?
     assert(message: "Zip file not found at #{zip_path}") unless File.exist?(zip_path)
 
     command = "swift package compute-checksum #{Shellwords.escape(zip_path)}"
@@ -304,7 +308,7 @@ platform :ios do
     args = options[:args] || {}
 
     provided_args = []
-    
+
     arg_options = args.each_with_object({}) do |(key, value), memo|
       key_str = key.to_s
 
@@ -314,15 +318,15 @@ platform :ios do
     end
 
     arg_options.each do |key, value|
-      value_str = value.is_a?(TrueClass) || value.is_a?(FalseClass) ? value.to_s : value.to_s
+      value_str = value.to_s
       provided_args << "#{key}=#{value_str}"
     end
 
     default_args = {
-      "is_debug" => "false",
-      "use_goma" => "false",
-      "use_rtti" => "false",
-      "rtc_libvpx_build_vp9" => "true"
+      'is_debug' => 'false',
+      'use_goma' => 'false',
+      'use_rtti' => 'false',
+      'rtc_libvpx_build_vp9' => 'true'
     }
 
     args_map = default_args.dup
@@ -368,3 +372,4 @@ platform :ios do
     )
   end
 end
+# rubocop:enable Metrics/BlockLength

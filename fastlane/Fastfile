@@ -1,9 +1,11 @@
+# frozen_string_literal: true
+
 skip_docs
 
 require 'json'
 require 'net/http'
 require 'fileutils'
 
-import "./lanes/utilities"
-import "./lanes/gclient"
-import "./lanes/ios"
+import './lanes/utilities.rb'
+import './lanes/gclient.rb'
+import './lanes/ios.rb'
