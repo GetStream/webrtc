@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-# rubocop:disable Metrics/MethodLength
 private_lane :verify_build_environment do |options|
   log_debug(
     message: 'Verifying build environment...',
@@ -65,4 +64,3 @@ def extract_prefixed_options(options, prefix)
     extracted[stripped_key.to_sym] = value
   end
 end
-# rubocop:enable Metrics/MethodLength

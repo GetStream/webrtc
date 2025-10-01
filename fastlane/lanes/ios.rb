@@ -5,7 +5,6 @@ require 'pathname'
 require 'shellwords'
 fastlane_require 'fastlane-plugin-stream_actions'
 
-# rubocop:disable Metrics/BlockLength
 platform :ios do
   desc 'Sync dependencies and build the WebRTC iOS libraries'
 
@@ -30,9 +29,6 @@ platform :ios do
     log_info(message: "Matchfile: #{options[:match_file]}")
     log_info(message: "Product: #{options[:product]}")
     log_info(message: "Mac Catalyst support: #{options[:maccatalyst_support]}")
-
-    setup_ci if is_ci
-    setup_git_config if is_ci
 
     clean_up_products(options)
     verify_environment(options)
@@ -192,9 +188,7 @@ platform :ios do
     end
 
     # Rename the rpath for all the frameworks and update symlinks if required
-    # rubocop:disable Metrics/LineLength
     framework_paths = new_framework_path.include?('.xcframework') ? Dir.glob("#{new_framework_path}/**/*.framework") : [new_framework_path]
-    # rubocop:enable Metrics/LineLength
     framework_paths.each do |path|
       Dir.chdir(path) do
         if File.symlink?(modified_sdk_name)
@@ -372,4 +366,3 @@ platform :ios do
     )
   end
 end
-# rubocop:enable Metrics/BlockLength

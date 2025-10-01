@@ -8,7 +8,12 @@ gem 'cocoapods'
 gem 'fastlane'
 gem 'json'
 gem 'plist'
-gem 'rubocop'
+gem 'rubocop', '1.38', group: :rubocop_dependencies
+
+group :rubocop_dependencies do
+  gem 'rubocop-performance'
+  gem 'rubocop-require_tools'
+end
 
 plugins_path = File.join(File.dirname(__FILE__), 'Pluginfile')
 eval_gemfile(plugins_path) if File.exist?(plugins_path)

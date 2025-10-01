@@ -2,7 +2,6 @@
 
 require 'fileutils'
 
-# rubocop:disable Metrics/BlockLength
 private_lane :configure_gclient do |options|
   log_debug(
     message: 'Configuring gclient...',
@@ -51,7 +50,6 @@ private_lane :configure_gclient do |options|
     )
   end
 end
-# rubocop:enable Metrics/BlockLength
 
 private_lane :sync_dependencies do |options|
   jobs = options[:number_of_jobs] || 8

@@ -228,8 +228,6 @@ GEM
     json (2.13.0)
     jwt (2.10.2)
       base64
-    language_server-protocol (3.17.0.5)
-    lint_roller (1.1.0)
     logger (1.7.0)
     mini_magick (4.13.2)
     mini_mime (1.1.5)
@@ -263,20 +261,24 @@ GEM
     retriable (3.1.2)
     rexml (3.4.1)
     rouge (3.28.0)
-    rubocop (1.81.1)
+    rubocop (1.38.0)
       json (~> 2.3)
-      language_server-protocol (~> 3.17.0.2)
-      lint_roller (~> 1.1.0)
       parallel (~> 1.10)
-      parser (>= 3.3.0.2)
+      parser (>= 3.1.2.1)
       rainbow (>= 2.2.2, < 4.0)
-      regexp_parser (>= 2.9.3, < 3.0)
-      rubocop-ast (>= 1.47.1, < 2.0)
+      regexp_parser (>= 1.8, < 3.0)
+      rexml (>= 3.2.5, < 4.0)
+      rubocop-ast (>= 1.23.0, < 2.0)
       ruby-progressbar (~> 1.7)
-      unicode-display_width (>= 2.4.0, < 4.0)
+      unicode-display_width (>= 1.4.0, < 3.0)
     rubocop-ast (1.47.1)
       parser (>= 3.3.7.2)
       prism (~> 1.4)
+    rubocop-performance (1.19.1)
+      rubocop (>= 1.7.0, < 2.0)
+      rubocop-ast (>= 0.4.0)
+    rubocop-require_tools (0.1.2)
+      rubocop (>= 0.49.1)
     ruby-macho (2.5.1)
     ruby-progressbar (1.13.0)
     ruby2_keywords (0.0.5)
@@ -329,7 +331,9 @@ DEPENDENCIES
   fastlane-plugin-stream_actions (= 0.3.90)
   json
   plist
-  rubocop
+  rubocop (= 1.38)
+  rubocop-performance
+  rubocop-require_tools
 
 BUNDLED WITH
    2.3.3

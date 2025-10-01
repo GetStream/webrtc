@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 skip_docs
+opt_out_usage
 
 require 'json'
 require 'net/http'
@@ -9,3 +10,9 @@ require 'fileutils'
 import './lanes/utilities.rb'
 import './lanes/gclient.rb'
 import './lanes/ios.rb'
+
+before_all do |lane|
+    setup_ci if is_ci
+    setup_git_config if is_ci
+    sh('bundle exec rubocop') if is_ci
+end
