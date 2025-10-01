@@ -1,7 +1,4 @@
-# frozen_string_literal: true
-
 require 'fileutils'
-require 'pathname'
 require 'shellwords'
 fastlane_require 'fastlane-plugin-stream_actions'
 
@@ -9,7 +6,7 @@ platform :ios do
   desc 'Sync dependencies and build the WebRTC iOS libraries'
 
   lane :build do |options|
-    options[:root] = Pathname.new(__dir__).join('..', '..', '..').expand_path
+    options[:root] = File.expand_path('../../..', __dir__)
     options[:build_root] = File.join(options[:root], '.output')
     options[:products_root] = File.join(options[:root], '.products')
     options[:sdk_name] = 'WebRTC'

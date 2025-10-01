@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 require 'fileutils'
 
 private_lane :configure_gclient do |options|

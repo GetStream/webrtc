@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 private_lane :verify_build_environment do |options|
   log_debug(
     message: 'Verifying build environment...',
