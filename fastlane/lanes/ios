@@ -2,6 +2,7 @@
 
 require 'fileutils'
 require 'pathname'
+require 'shellwords'
 fastlane_require "fastlane-plugin-stream_actions"
 
 platform :ios do
@@ -270,6 +271,33 @@ platform :ios do
       verbose: options[:verbose]
     )
     zip_path
+  end
+
+  desc "Compute a checksum for the packaged xcframework zip"
+  lane :compute_zip_checksum do |options|
+    lane_options = extract_prefixed_options(options, "compute_zip_checksum")
+    next if lane_options[:skip] == true
+
+    ensure_required_tool(tool: "swift", verbose: options[:verbose])
+
+    zip_path = lane_options[:zip_path] || options[:zip_path]
+    if zip_path.to_s.strip.empty?
+      products_root = options[:products_root]
+      rename_to_sdk_name = options[:rename_to_sdk_name]
+      zip_path = File.join(products_root, "#{rename_to_sdk_name}.zip") unless products_root.to_s.strip.empty? || rename_to_sdk_name.to_s.strip.empty?
+    end
+
+    assert(message: "Missing required option :zip_path") if zip_path.to_s.strip.empty?
+    assert(message: "Zip file not found at #{zip_path}") unless File.exist?(zip_path)
+
+    command = "swift package compute-checksum #{Shellwords.escape(zip_path)}"
+    checksum = execute_command(
+      command: command,
+      verbose: options[:verbose]
+    ).to_s.strip
+
+    log_info(message: "Checksum for #{zip_path}: #{checksum}")
+    checksum
   end
 
   private_lane :resolve_build_product_args do |options|
