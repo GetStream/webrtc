@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="fastlane.lanes">
+    
+    
+    
+      
+      <testcase classname="fastlane.lanes" name="00: Switch to ios log_info lane" time="0.000146">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="01: Switch to ios log_info lane" time="6.5e-05">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="02: Switch to ios log_info lane" time="6.3e-05">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="03: Switch to ios log_info lane" time="5.9e-05">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="04: Switch to ios log_info lane" time="5.6e-05">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="05: Switch to ios log_info lane" time="5.8e-05">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="06: Switch to ios log_info lane" time="0.000224">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="07: Switch to ios log_info lane" time="5.6e-05">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="08: is_ci" time="8.2e-05">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="09: Switch to ios clean_up_products lane" time="5.7e-05">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="10: Switch to ios log_debug lane" time="5.7e-05">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="11: Switch to ios log_info lane" time="5.6e-05">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="12: Switch to ios verify_environment lane" time="0.00028">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="13: Switch to ios verify_build_environment lane" time="7.1e-05">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="14: Switch to ios log_debug lane" time="6.3e-05">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="15: Switch to ios ensure_required_tool lane" time="5.9e-05">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="16: Switch to ios ensure_required_tool lane" time="0.000127">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="17: Switch to ios ensure_required_tool lane" time="0.000117">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="18: Switch to ios configure_google_client lane" time="0.000425">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="19: Switch to ios log_info lane" time="8.9e-05">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="20: Switch to ios configure_gclient lane" time="6.4e-05">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="21: Switch to ios log_debug lane" time="6.2e-05">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="22: Switch to ios execute_command lane" time="6.7e-05">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="23: gclient root" time="0.446775">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="24: Switch to ios execute_command lane" time="0.000392">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="25: gclient config --spec &apos;solutions = [
+{
+    &quot;name&quot;: &quot;src&quot;,
+    &quot;url&quot;: &quot;git@github.com:GetStream/webrtc.git&quot;,
+    &quot;deps_file&quot;: &quot;DEPS&quot;,
+    &quot;managed&quot;: False,
+    &quot;custom_deps&quot;: {},
+},
+]
+target_os = [&quot;ios&quot;, &quot;mac&quot;]
+&apos;" time="1.008767">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="26: Switch to ios sync_dependencies lane" time="0.000117">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="27: Switch to ios log_debug lane" time="7.5e-05">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="28: Switch to ios execute_command lane" time="7.3e-05">
+        
+      </testcase>
+    
+      
+      <testcase classname="fastlane.lanes" name="29: gclient sync -j8" time="1.236896">
+        
+      </testcase>
+    
+  </testsuite>
+</testsuites>
