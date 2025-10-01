@@ -6,16 +6,16 @@
   android:layout_width="match_parent"
   android:layout_height="match_parent"
   android:padding="8dp"
-  tools:context="org.webrtc.examples.androidnativeapi.MainActivity">
+  tools:context="io.getstream.webrtc.examples.androidnativeapi.MainActivity">
 
-  <org.webrtc.SurfaceViewRenderer
+  <io.getstream.webrtc.SurfaceViewRenderer
     android:id="@+id/local_renderer"
     android:layout_width="match_parent"
     android:layout_height="0dp"
     android:layout_weight="1"
     android:layout_margin="8dp"/>
 
-  <org.webrtc.SurfaceViewRenderer
+  <io.getstream.webrtc.SurfaceViewRenderer
     android:id="@+id/remote_renderer"
     android:layout_width="match_parent"
     android:layout_height="0dp"

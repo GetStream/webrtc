@@ -8,7 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-package org.webrtc.examples.androidvoip;
+package io.getstream.webrtc.examples.androidvoip;
 
 import android.Manifest.permission;
 import android.app.Activity;
@@ -37,7 +37,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
-import org.webrtc.ContextUtils;
+import io.getstream.webrtc.ContextUtils;
 
 public class MainActivity extends Activity implements OnVoipClientTaskCompleted {
   private static final int NUM_SUPPORTED_CODECS = 6;

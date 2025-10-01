@@ -14,7 +14,7 @@ import android.os.ParcelFileDescriptor;
 import android.util.Log;
 import java.io.File;
 import java.io.IOException;
-import org.webrtc.PeerConnection;
+import io.getstream.webrtc.PeerConnection;
 
 public class RtcEventLog {
   private static final String TAG = "RtcEventLog";

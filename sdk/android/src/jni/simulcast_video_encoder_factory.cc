@@ -22,13 +22,13 @@ using namespace webrtc::jni;
 extern "C" {
 #endif
 
-JNIEXPORT jobject JNICALL Java_org_webrtc_SimulcastVideoEncoderFactory_nativeVP9Codecs
+JNIEXPORT jobject JNICALL Java_io_getstream_webrtc_SimulcastVideoEncoderFactory_nativeVP9Codecs
   (JNIEnv *env, jclass klass) {
     std::vector<SdpVideoFormat> formats = SupportedVP9Codecs(true);
     return NativeToJavaList(env, formats, &SdpVideoFormatToVideoCodecInfo).Release();
 }
 
-JNIEXPORT jobject JNICALL Java_org_webrtc_SimulcastVideoEncoderFactory_nativeAV1Codec
+JNIEXPORT jobject JNICALL Java_io_getstream_webrtc_SimulcastVideoEncoderFactory_nativeAV1Codec
   (JNIEnv *env, jclass klass) {
     SdpVideoFormat format = SdpVideoFormat(
         cricket::kAv1CodecName, CodecParameterMap(),

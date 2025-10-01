@@ -40,7 +40,7 @@ ScopedJavaLocalRef<jobjectArray> NativeToJavaStatsReportValueArray(
   for (const auto& it : value_map)
     values.push_back(it.second);
   return NativeToJavaObjectArray(env, values,
-                                 org_webrtc_StatsReport_00024Value_clazz(env),
+                                 io_getstream_webrtc_StatsReport_00024Value_clazz(env),
                                  &NativeToJavaStatsReportValue);
 }
 
@@ -63,7 +63,7 @@ StatsObserverJni::~StatsObserverJni() = default;
 void StatsObserverJni::OnComplete(const StatsReports& reports) {
   JNIEnv* env = AttachCurrentThreadIfNeeded();
   ScopedJavaLocalRef<jobjectArray> j_reports =
-      NativeToJavaObjectArray(env, reports, org_webrtc_StatsReport_clazz(env),
+      NativeToJavaObjectArray(env, reports, io_getstream_webrtc_StatsReport_clazz(env),
                               [](JNIEnv* env, const StatsReport* report) {
                                 return NativeToJavaStatsReport(env, *report);
                               });
