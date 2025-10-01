@@ -79,3 +79,9 @@
 /node_modules
 /libwebrtc
 /args.txt
+
+
+# Stream specifics
+fastlane/vendor
+fastlane/*.xml
+out_ios_libs
