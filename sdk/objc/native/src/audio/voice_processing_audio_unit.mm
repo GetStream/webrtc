@@ -598,8 +598,13 @@ AudioStreamBasicDescription VoiceProcessingAudioUnit::GetFormat(
   return format;
 }
 
+namespace {
+constexpr uint32_t kMaxSupportedChannels = 2;
+}  // namespace
+
 uint32_t VoiceProcessingAudioUnit::SanitizeChannelCount(uint32_t channels) const {
-  return std::max<uint32_t>(1, channels);
+  return std::min<uint32_t>(kMaxSupportedChannels,
+                            std::max<uint32_t>(1, channels));
 }
 
 void VoiceProcessingAudioUnit::DisposeAudioUnit() {
