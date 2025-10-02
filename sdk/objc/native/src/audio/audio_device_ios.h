@@ -146,6 +146,9 @@ class AudioDeviceIOS : public AudioDeviceGeneric,
   int32_t SetStereoPlayout(bool enable) override;
   int32_t StereoPlayout(bool& enabled) const override;
   int32_t StereoRecordingIsAvailable(bool& available) override;
+  // Enabling stereo recording automatically bypasses the hardware voice
+  // processing (AEC/AGC) stage since the Voice Processing I/O unit only
+  // supports mono processing. See UpdateVoiceProcessingBypassRequirement().
   int32_t SetStereoRecording(bool enable) override;
   int32_t StereoRecording(bool& enabled) const override;
 
@@ -195,13 +198,18 @@ class AudioDeviceIOS : public AudioDeviceGeneric,
   // This method asks for the current hardware parameters and takes actions
   // if they should differ from what we have asked for initially. It also
   // defines `playout_parameters_` and `record_parameters_`.
-  void SetupAudioBuffersForActiveAudioSession();
+  void SetupAudioBuffersForActiveAudioSession() RTC_RUN_ON(thread_);
 
   // Creates the audio unit.
-  bool CreateAudioUnit();
+  bool CreateAudioUnit() RTC_RUN_ON(thread_);
 
   // Updates the audio unit state based on current state.
   void UpdateAudioUnit(bool can_play_or_record);
+
+  // Ensures the hardware voice-processing stage is bypassed when multi-channel
+  // playout or recording is requested. If the audio unit is already running,
+  // the updated state will be applied on the next initialization.
+  void UpdateVoiceProcessingBypassRequirement() RTC_RUN_ON(thread_);
 
   // Configures the audio session for WebRTC.
   bool ConfigureAudioSession();
@@ -223,7 +231,8 @@ class AudioDeviceIOS : public AudioDeviceGeneric,
   void PrepareForNewStart();
 
   // Determines whether voice processing should be enabled or disabled.
-  const bool bypass_voice_processing_;
+  const bool default_bypass_voice_processing_;
+  bool bypass_voice_processing_ RTC_GUARDED_BY(thread_);
 
   // Handle a user speaking during muted event
   AudioDeviceModule::MutedSpeechEventHandler muted_speech_event_handler_;

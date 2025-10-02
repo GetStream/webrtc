@@ -99,7 +99,8 @@ AudioDeviceIOS::AudioDeviceIOS(
     bool bypass_voice_processing,
     AudioDeviceModule::MutedSpeechEventHandler muted_speech_event_handler,
     AudioDeviceIOSRenderErrorHandler render_error_handler)
-    : bypass_voice_processing_(bypass_voice_processing),
+    : default_bypass_voice_processing_(bypass_voice_processing),
+      bypass_voice_processing_(bypass_voice_processing),
       muted_speech_event_handler_(muted_speech_event_handler),
       render_error_handler_(render_error_handler),
       disregard_next_render_error_(false),
@@ -172,6 +173,7 @@ AudioDeviceGeneric::InitStatus AudioDeviceIOS::Init() {
   // we will always tell the I/O audio unit to do a channel format conversion
   // to guarantee mono on the "input side" of the audio unit.
   UpdateAudioDeviceBuffer();
+  UpdateVoiceProcessingBypassRequirement();
   initialized_ = true;
   return InitStatus::OK;
 }
@@ -797,6 +799,33 @@ bool AudioDeviceIOS::RestartAudioUnit(bool enable_input) {
   return true;
 }
 
+void AudioDeviceIOS::UpdateVoiceProcessingBypassRequirement() {
+  RTC_DCHECK_RUN_ON(thread_);
+
+  const bool multi_channel_requested =
+      playout_parameters_.channels() > 1 || record_parameters_.channels() > 1;
+  const bool desired_bypass =
+      default_bypass_voice_processing_ || multi_channel_requested;
+
+  if (desired_bypass == bypass_voice_processing_) {
+    return;
+  }
+
+  RTC_LOG(LS_INFO) << "Voice processing "
+                   << (desired_bypass ? "will be bypassed" : "remains enabled")
+                   << (multi_channel_requested
+                           ? " because multi-channel I/O is requested."
+                           : " as requested by the application.");
+
+  bypass_voice_processing_ = desired_bypass;
+
+  if (audio_unit_) {
+    audio_unit_->SetBypassVoiceProcessing(desired_bypass);
+    RTC_LOG(LS_INFO) << "Voice-processing bypass update will take effect the "
+                        "next time the audio unit is initialized.";
+  }
+}
+
 void AudioDeviceIOS::UpdateAudioDeviceBuffer() {
   LOGI() << "UpdateAudioDevicebuffer";
   // AttachAudioBuffer() is called at construction by the main class but check
@@ -804,8 +833,8 @@ void AudioDeviceIOS::UpdateAudioDeviceBuffer() {
   RTC_DCHECK(audio_device_buffer_) << "AttachAudioBuffer must be called first";
   RTC_DCHECK_GT(playout_parameters_.sample_rate(), 0);
   RTC_DCHECK_GT(record_parameters_.sample_rate(), 0);
-  RTC_DCHECK_EQ(playout_parameters_.channels(), 1);
-  RTC_DCHECK_EQ(record_parameters_.channels(), 1);
+  RTC_DCHECK_GT(playout_parameters_.channels(), 0);
+  RTC_DCHECK_GT(record_parameters_.channels(), 0);
   // Inform the audio device buffer (ADB) about the new audio format.
   audio_device_buffer_->SetPlayoutSampleRate(playout_parameters_.sample_rate());
   audio_device_buffer_->SetPlayoutChannels(playout_parameters_.channels());
@@ -816,6 +845,7 @@ void AudioDeviceIOS::UpdateAudioDeviceBuffer() {
 
 void AudioDeviceIOS::SetupAudioBuffersForActiveAudioSession() {
   LOGI() << "SetupAudioBuffersForActiveAudioSession";
+  RTC_DCHECK_RUN_ON(thread_);
   // Verify the current values once the audio session has been activated.
   RTC_OBJC_TYPE(RTCAudioSession)* session =
       [RTC_OBJC_TYPE(RTCAudioSession) sharedInstance];
@@ -863,6 +893,8 @@ void AudioDeviceIOS::SetupAudioBuffersForActiveAudioSession() {
   RTC_DCHECK_EQ(playout_parameters_.GetBytesPerBuffer(),
                 record_parameters_.GetBytesPerBuffer());
 
+  UpdateVoiceProcessingBypassRequirement();
+
   // Update the ADB parameters since the sample rate might have changed.
   UpdateAudioDeviceBuffer();
 
@@ -874,6 +906,7 @@ void AudioDeviceIOS::SetupAudioBuffersForActiveAudioSession() {
 }
 
 bool AudioDeviceIOS::CreateAudioUnit() {
+  RTC_DCHECK_RUN_ON(thread_);
   RTC_DCHECK(!audio_unit_);
   RTC_DCHECK(!playout_is_initialized_ && !recording_is_initialized_);
   if (audio_unit_ || playout_is_initialized_ || recording_is_initialized_) {

@@ -19,7 +19,8 @@
 namespace webrtc {
 
 // If `bypass_voice_processing` is true, WebRTC will attempt to disable hardware
-// audio processing on iOS.
+// audio processing on iOS. Stereo capture is automatically configured to bypass
+// voice processing even if this parameter is left as false.
 // Warning: Setting `bypass_voice_processing` will have unpredictable
 // consequences for the audio path in the device. It is not advisable to use in
 // most scenarios.

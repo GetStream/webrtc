@@ -212,6 +212,14 @@ VoiceProcessingAudioUnit::State VoiceProcessingAudioUnit::GetState() const {
   return state_;
 }
 
+void VoiceProcessingAudioUnit::SetBypassVoiceProcessing(bool bypass) {
+  if (bypass_voice_processing_ == bypass) {
+    return;
+  }
+  bypass_voice_processing_ = bypass;
+  RTCLog(@"Voice processing bypass state updated to %d", bypass);
+}
+
 bool VoiceProcessingAudioUnit::Initialize(Float64 sample_rate, bool enable_input) {
   RTC_DCHECK_GE(state_, kUninitialized);
   RTCLog(@"Initializing audio unit with sample rate: %f", sample_rate);

@@ -83,6 +83,11 @@ class VoiceProcessingAudioUnit {
   // Initializes the underlying audio unit with the given sample rate.
   bool Initialize(Float64 sample_rate, bool enable_input);
 
+  // Updates whether the hardware voice-processing stage should be bypassed.
+  // The new value is applied the next time Initialize() is invoked.
+  void SetBypassVoiceProcessing(bool bypass);
+  bool bypass_voice_processing() const { return bypass_voice_processing_; }
+
   // Starts the underlying audio unit.
   OSStatus Start();
 
@@ -139,7 +144,7 @@ class VoiceProcessingAudioUnit {
   // Deletes the underlying audio unit.
   void DisposeAudioUnit();
 
-  const bool bypass_voice_processing_;
+  bool bypass_voice_processing_;
   const bool detect_mute_speech_;
   VoiceProcessingAudioUnitObserver* observer_;
   AudioUnit vpio_unit_;
