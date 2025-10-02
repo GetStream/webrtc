@@ -155,6 +155,8 @@ class VoiceProcessingAudioUnit {
   // Deletes the underlying audio unit.
   void DisposeAudioUnit();
 
+  // Mutable: SetBypassVoiceProcessing() records the desired state so it can
+  // be applied the next time Initialize() is invoked.
   bool bypass_voice_processing_;
   const bool detect_mute_speech_;
   uint32_t playout_channels_;

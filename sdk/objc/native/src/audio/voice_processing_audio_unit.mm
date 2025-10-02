@@ -227,14 +227,16 @@ void VoiceProcessingAudioUnit::SetBypassVoiceProcessing(bool bypass) {
 void VoiceProcessingAudioUnit::SetStreamChannelConfiguration(
     uint32_t playout_channels,
     uint32_t record_channels) {
-  const uint32_t sanitized_playout = SanitizeChannelCount(playout_channels);
-  const uint32_t sanitized_record = SanitizeChannelCount(record_channels);
-  if (sanitized_playout == playout_channels_ &&
-      sanitized_record == record_channels_) {
+  const uint32_t effective_playout_channels =
+      SanitizeChannelCount(playout_channels);
+  const uint32_t effective_record_channels =
+      SanitizeChannelCount(record_channels);
+  if (effective_playout_channels == playout_channels_ &&
+      effective_record_channels == record_channels_) {
     return;
   }
-  playout_channels_ = sanitized_playout;
-  record_channels_ = sanitized_record;
+  playout_channels_ = effective_playout_channels;
+  record_channels_ = effective_record_channels;
   RTCLog(@"Updated VPIO channel configuration. playout=%u record=%u",
          static_cast<unsigned int>(playout_channels_),
          static_cast<unsigned int>(record_channels_));
@@ -245,13 +247,15 @@ bool VoiceProcessingAudioUnit::Initialize(Float64 sample_rate, bool enable_input
   RTCLog(@"Initializing audio unit with sample rate: %f", sample_rate);
 
   OSStatus result = noErr;
-  const uint32_t playout_channels = SanitizeChannelCount(playout_channels_);
-  const uint32_t record_channels = SanitizeChannelCount(record_channels_);
+  const uint32_t effective_playout_channels =
+      SanitizeChannelCount(playout_channels_);
+  const uint32_t effective_record_channels =
+      SanitizeChannelCount(record_channels_);
 
   AudioStreamBasicDescription playout_format =
-      GetFormat(sample_rate, playout_channels);
+      GetFormat(sample_rate, effective_playout_channels);
   AudioStreamBasicDescription record_format =
-      GetFormat(sample_rate, record_channels);
+      GetFormat(sample_rate, effective_record_channels);
   UInt32 playout_size = sizeof(playout_format);
   UInt32 record_size = sizeof(record_format);
 #if !defined(NDEBUG)

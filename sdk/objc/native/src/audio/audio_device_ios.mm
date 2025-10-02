@@ -1049,6 +1049,12 @@ void AudioDeviceIOS::SetupAudioBuffersForActiveAudioSession() {
                    << playout_parameters_.GetBytesPerBuffer();
   RTC_LOG(LS_INFO) << " recording bytes per I/O buffer: "
                    << record_parameters_.GetBytesPerBuffer();
+  if (playout_parameters_.GetBytesPerBuffer() !=
+      record_parameters_.GetBytesPerBuffer()) {
+    RTC_LOG(LS_WARNING) << "Playout and recording bytes per I/O buffer differ: "
+                        << playout_parameters_.GetBytesPerBuffer() << " vs "
+                        << record_parameters_.GetBytesPerBuffer();
+  }
 
   UpdateVoiceProcessingBypassRequirement();
 
