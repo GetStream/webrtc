@@ -924,6 +924,47 @@ bool AudioDeviceIOS::ApplyChannelConfigurationChange() {
   return true;
 }
 
+bool AudioDeviceIOS::ApplyChannelConfigurationChangeOrRollback(
+    const char* failure_log_message,
+    size_t previous_desired_playout,
+    size_t previous_desired_record,
+    const AudioParameters& previous_playout_parameters,
+    const AudioParameters& previous_record_parameters) {
+  RTC_DCHECK_RUN_ON(thread_);
+
+  if (ApplyChannelConfigurationChange()) {
+    return true;
+  }
+
+  desired_playout_channels_ = previous_desired_playout;
+  desired_record_channels_ = previous_desired_record;
+  playout_parameters_ = previous_playout_parameters;
+  record_parameters_ = previous_record_parameters;
+
+  UpdateAudioSessionChannelPreferences();
+
+  if (audio_unit_) {
+    audio_unit_->SetStreamChannelConfiguration(
+        static_cast<uint32_t>(desired_playout_channels_),
+        static_cast<uint32_t>(desired_record_channels_));
+  }
+
+  if (initialized_) {
+    UpdateAudioDeviceBuffer();
+    if (fine_audio_buffer_) {
+      fine_audio_buffer_.reset(new FineAudioBuffer(audio_device_buffer_));
+    }
+  }
+
+  UpdateVoiceProcessingBypassRequirement();
+
+  if (!ApplyChannelConfigurationChange()) {
+    RTCLogError(@"%s", failure_log_message);
+  }
+
+  return false;
+}
+
 void AudioDeviceIOS::UpdateAudioDeviceBuffer() {
   LOGI() << "UpdateAudioDevicebuffer";
   // AttachAudioBuffer() is called at construction by the main class but check
@@ -1396,6 +1437,7 @@ int32_t AudioDeviceIOS::SetStereoRecording(bool enable) {
   LOGI() << "SetStereoRecording";
   RTC_DCHECK_RUN_ON(thread_);
 
+  const size_t previous_desired_playout = desired_playout_channels_;
   const size_t previous_desired_record = desired_record_channels_;
   const AudioParameters previous_playout_parameters = playout_parameters_;
   const AudioParameters previous_record_parameters = record_parameters_;
@@ -1441,26 +1483,12 @@ int32_t AudioDeviceIOS::SetStereoRecording(bool enable) {
   }
 
   UpdateVoiceProcessingBypassRequirement();
-  if (!ApplyChannelConfigurationChange()) {
-    desired_record_channels_ = previous_desired_record;
-    playout_parameters_ = previous_playout_parameters;
-    record_parameters_ = previous_record_parameters;
-    UpdateAudioSessionChannelPreferences();
-    if (audio_unit_) {
-      audio_unit_->SetStreamChannelConfiguration(
-          static_cast<uint32_t>(desired_playout_channels_),
-          static_cast<uint32_t>(desired_record_channels_));
-    }
-    if (initialized_) {
-      UpdateAudioDeviceBuffer();
-      if (fine_audio_buffer_) {
-        fine_audio_buffer_.reset(new FineAudioBuffer(audio_device_buffer_));
-      }
-    }
-    UpdateVoiceProcessingBypassRequirement();
-    if (!ApplyChannelConfigurationChange()) {
-      RTCLogError(@"Failed to restore previous channel configuration after recording update failure.");
-    }
+  if (!ApplyChannelConfigurationChangeOrRollback(
+          "Failed to restore previous channel configuration after recording update failure.",
+          previous_desired_playout,
+          previous_desired_record,
+          previous_playout_parameters,
+          previous_record_parameters)) {
     return -1;
   }
   return 0;
@@ -1486,6 +1514,7 @@ int32_t AudioDeviceIOS::SetStereoPlayout(bool enable) {
   RTC_DCHECK_RUN_ON(thread_);
 
   const size_t previous_desired_playout = desired_playout_channels_;
+  const size_t previous_desired_record = desired_record_channels_;
   const AudioParameters previous_playout_parameters = playout_parameters_;
   const AudioParameters previous_record_parameters = record_parameters_;
 
@@ -1530,26 +1559,12 @@ int32_t AudioDeviceIOS::SetStereoPlayout(bool enable) {
   }
 
   UpdateVoiceProcessingBypassRequirement();
-  if (!ApplyChannelConfigurationChange()) {
-    desired_playout_channels_ = previous_desired_playout;
-    playout_parameters_ = previous_playout_parameters;
-    record_parameters_ = previous_record_parameters;
-    UpdateAudioSessionChannelPreferences();
-    if (audio_unit_) {
-      audio_unit_->SetStreamChannelConfiguration(
-          static_cast<uint32_t>(desired_playout_channels_),
-          static_cast<uint32_t>(desired_record_channels_));
-    }
-    if (initialized_) {
-      UpdateAudioDeviceBuffer();
-      if (fine_audio_buffer_) {
-        fine_audio_buffer_.reset(new FineAudioBuffer(audio_device_buffer_));
-      }
-    }
-    UpdateVoiceProcessingBypassRequirement();
-    if (!ApplyChannelConfigurationChange()) {
-      RTCLogError(@"Failed to restore previous channel configuration after playout update failure.");
-    }
+  if (!ApplyChannelConfigurationChangeOrRollback(
+          "Failed to restore previous channel configuration after playout update failure.",
+          previous_desired_playout,
+          previous_desired_record,
+          previous_playout_parameters,
+          previous_record_parameters)) {
     return -1;
   }
   return 0;

@@ -221,6 +221,15 @@ class AudioDeviceIOS : public AudioDeviceGeneric,
   // reconfiguration is required.
   bool ApplyChannelConfigurationChange() RTC_RUN_ON(thread_);
 
+  // Applies a channel configuration change and rolls back to the previous
+  // state if the update fails. Returns true when the change is successful.
+  bool ApplyChannelConfigurationChangeOrRollback(
+      const char* failure_log_message,
+      size_t previous_desired_playout,
+      size_t previous_desired_record,
+      const AudioParameters& previous_playout_parameters,
+      const AudioParameters& previous_record_parameters) RTC_RUN_ON(thread_);
+
   // Configures the audio session for WebRTC.
   bool ConfigureAudioSession();
 
