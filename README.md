@@ -4,6 +4,10 @@ This repository is a fork of the WebRTC project. The original README can be foun
 
 ### Fork Specifics
 
+#### Features
+
+- Stereo playout/recording on iOS [#58](https://github.com/GetStream/webrtc/pull/58)
+
 #### `.gitignore`
 
 Due to the fork specifics, the repo's `.gitignore` has been updated to match the fork's requirements.
