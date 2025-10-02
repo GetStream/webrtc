@@ -14,6 +14,7 @@
 #include "audio_device_ios.h"
 
 #include <mach/mach_time.h>
+#include <algorithm>
 #include <cmath>
 
 #include "api/array_view.h"
@@ -101,6 +102,8 @@ AudioDeviceIOS::AudioDeviceIOS(
     AudioDeviceIOSRenderErrorHandler render_error_handler)
     : default_bypass_voice_processing_(bypass_voice_processing),
       bypass_voice_processing_(bypass_voice_processing),
+      desired_playout_channels_(1),
+      desired_record_channels_(1),
       muted_speech_event_handler_(muted_speech_event_handler),
       render_error_handler_(render_error_handler),
       disregard_next_render_error_(false),
@@ -166,13 +169,18 @@ AudioDeviceGeneric::InitStatus AudioDeviceIOS::Init() {
   // store the parameters now and then verify at a later stage.
   RTC_OBJC_TYPE(RTCAudioSessionConfiguration)* config =
       [RTC_OBJC_TYPE(RTCAudioSessionConfiguration) webRTCConfiguration];
-  playout_parameters_.reset(config.sampleRate, config.outputNumberOfChannels);
-  record_parameters_.reset(config.sampleRate, config.inputNumberOfChannels);
+  desired_playout_channels_ = static_cast<size_t>(
+      std::max<NSInteger>(1, config.outputNumberOfChannels));
+  desired_record_channels_ = static_cast<size_t>(
+      std::max<NSInteger>(1, config.inputNumberOfChannels));
+  playout_parameters_.reset(config.sampleRate, desired_playout_channels_);
+  record_parameters_.reset(config.sampleRate, desired_record_channels_);
   // Ensure that the audio device buffer (ADB) knows about the internal audio
   // parameters. Note that, even if we are unable to get a mono audio session,
   // we will always tell the I/O audio unit to do a channel format conversion
   // to guarantee mono on the "input side" of the audio unit.
   UpdateAudioDeviceBuffer();
+  UpdateAudioSessionChannelPreferences();
   UpdateVoiceProcessingBypassRequirement();
   initialized_ = true;
   return InitStatus::OK;
@@ -802,8 +810,12 @@ bool AudioDeviceIOS::RestartAudioUnit(bool enable_input) {
 void AudioDeviceIOS::UpdateVoiceProcessingBypassRequirement() {
   RTC_DCHECK_RUN_ON(thread_);
 
-  const bool multi_channel_requested =
-      playout_parameters_.channels() > 1 || record_parameters_.channels() > 1;
+  const size_t effective_playout_channels =
+      std::max(playout_parameters_.channels(), desired_playout_channels_);
+  const size_t effective_record_channels =
+      std::max(record_parameters_.channels(), desired_record_channels_);
+  const bool multi_channel_requested = effective_playout_channels > 1 ||
+                                       effective_record_channels > 1;
   const bool desired_bypass =
       default_bypass_voice_processing_ || multi_channel_requested;
 
@@ -824,6 +836,16 @@ void AudioDeviceIOS::UpdateVoiceProcessingBypassRequirement() {
     RTC_LOG(LS_INFO) << "Voice-processing bypass update will take effect the "
                         "next time the audio unit is initialized.";
   }
+}
+
+void AudioDeviceIOS::UpdateAudioSessionChannelPreferences() {
+  RTC_DCHECK_RUN_ON(thread_);
+
+  RTC_OBJC_TYPE(RTCAudioSessionConfiguration)* config =
+      [RTC_OBJC_TYPE(RTCAudioSessionConfiguration) webRTCConfiguration];
+  config.inputNumberOfChannels = desired_record_channels_;
+  config.outputNumberOfChannels = desired_playout_channels_;
+  [RTC_OBJC_TYPE(RTCAudioSessionConfiguration) setWebRTCConfiguration:config];
 }
 
 void AudioDeviceIOS::UpdateAudioDeviceBuffer() {
@@ -880,11 +902,26 @@ void AudioDeviceIOS::SetupAudioBuffersForActiveAudioSession() {
   // number of audio frames.
   // Example: IO buffer size = 0.008 seconds <=> 128 audio frames at 16kHz.
   // Hence, 128 is the size we expect to see in upcoming render callbacks.
-  playout_parameters_.reset(
-      sample_rate, playout_parameters_.channels(), io_buffer_duration);
+  const size_t output_channels = static_cast<size_t>(
+      std::max<NSInteger>(1, session.outputNumberOfChannels));
+  const size_t input_channels = static_cast<size_t>(
+      std::max<NSInteger>(1, session.inputNumberOfChannels));
+  if (output_channels != desired_playout_channels_) {
+    RTC_LOG(LS_WARNING)
+        << "Requested " << desired_playout_channels_
+        << " output channel(s) but session configured " << output_channels
+        << ".";
+  }
+  if (input_channels != desired_record_channels_) {
+    RTC_LOG(LS_WARNING)
+        << "Requested " << desired_record_channels_
+        << " input channel(s) but session configured " << input_channels
+        << ".";
+  }
+
+  playout_parameters_.reset(sample_rate, output_channels, io_buffer_duration);
   RTC_DCHECK(playout_parameters_.is_complete());
-  record_parameters_.reset(
-      sample_rate, record_parameters_.channels(), io_buffer_duration);
+  record_parameters_.reset(sample_rate, input_channels, io_buffer_duration);
   RTC_DCHECK(record_parameters_.is_complete());
   RTC_LOG(LS_INFO) << " frames per I/O buffer: "
                    << playout_parameters_.frames_per_buffer();
@@ -1265,32 +1302,116 @@ int32_t AudioDeviceIOS::MicrophoneMute(bool& enabled) const {
 }
 
 int32_t AudioDeviceIOS::StereoRecordingIsAvailable(bool& available) {
-  available = false;
+  RTC_DCHECK_RUN_ON(thread_);
+
+  RTC_OBJC_TYPE(RTCAudioSession)* session =
+      [RTC_OBJC_TYPE(RTCAudioSession) sharedInstance];
+  available = session.maximumInputNumberOfChannels > 1;
   return 0;
 }
 
 int32_t AudioDeviceIOS::SetStereoRecording(bool enable) {
-  RTC_LOG_F(LS_WARNING) << "Not implemented";
-  return -1;
+  LOGI() << "SetStereoRecording";
+  RTC_DCHECK_RUN_ON(thread_);
+
+  const size_t requested_channels = enable ? 2 : 1;
+  if (requested_channels == desired_record_channels_) {
+    return 0;
+  }
+
+  bool stereo_available = false;
+  StereoRecordingIsAvailable(stereo_available);
+  if (enable && !stereo_available) {
+    RTC_LOG(LS_WARNING) << "Stereo recording is not supported on the current route.";
+    return -1;
+  }
+
+  desired_record_channels_ = requested_channels;
+
+  if (initialized_) {
+    if (record_parameters_.is_complete()) {
+      record_parameters_.reset(record_parameters_.sample_rate(),
+                               requested_channels,
+                               record_parameters_.frames_per_buffer());
+    } else if (record_parameters_.is_valid()) {
+      record_parameters_.reset(record_parameters_.sample_rate(),
+                               requested_channels);
+    }
+  }
+
+  UpdateAudioSessionChannelPreferences();
+
+  if (initialized_) {
+    UpdateAudioDeviceBuffer();
+    if (fine_audio_buffer_) {
+      fine_audio_buffer_.reset(new FineAudioBuffer(audio_device_buffer_));
+    }
+  }
+
+  UpdateVoiceProcessingBypassRequirement();
+  return 0;
 }
 
 int32_t AudioDeviceIOS::StereoRecording(bool& enabled) const {
-  enabled = false;
+  RTC_DCHECK_RUN_ON(thread_);
+  enabled = record_parameters_.channels() > 1;
   return 0;
 }
 
 int32_t AudioDeviceIOS::StereoPlayoutIsAvailable(bool& available) {
-  available = false;
+  RTC_DCHECK_RUN_ON(thread_);
+
+  RTC_OBJC_TYPE(RTCAudioSession)* session =
+      [RTC_OBJC_TYPE(RTCAudioSession) sharedInstance];
+  available = session.maximumOutputNumberOfChannels > 1;
   return 0;
 }
 
 int32_t AudioDeviceIOS::SetStereoPlayout(bool enable) {
-  RTC_LOG_F(LS_WARNING) << "Not implemented";
-  return -1;
+  LOGI() << "SetStereoPlayout";
+  RTC_DCHECK_RUN_ON(thread_);
+
+  const size_t requested_channels = enable ? 2 : 1;
+  if (requested_channels == desired_playout_channels_) {
+    return 0;
+  }
+
+  bool stereo_available = false;
+  StereoPlayoutIsAvailable(stereo_available);
+  if (enable && !stereo_available) {
+    RTC_LOG(LS_WARNING) << "Stereo playout is not supported on the current route.";
+    return -1;
+  }
+
+  desired_playout_channels_ = requested_channels;
+
+  if (initialized_) {
+    if (playout_parameters_.is_complete()) {
+      playout_parameters_.reset(playout_parameters_.sample_rate(),
+                                requested_channels,
+                                playout_parameters_.frames_per_buffer());
+    } else if (playout_parameters_.is_valid()) {
+      playout_parameters_.reset(playout_parameters_.sample_rate(),
+                                requested_channels);
+    }
+  }
+
+  UpdateAudioSessionChannelPreferences();
+
+  if (initialized_) {
+    UpdateAudioDeviceBuffer();
+    if (fine_audio_buffer_) {
+      fine_audio_buffer_.reset(new FineAudioBuffer(audio_device_buffer_));
+    }
+  }
+
+  UpdateVoiceProcessingBypassRequirement();
+  return 0;
 }
 
 int32_t AudioDeviceIOS::StereoPlayout(bool& enabled) const {
-  enabled = false;
+  RTC_DCHECK_RUN_ON(thread_);
+  enabled = playout_parameters_.channels() > 1;
   return 0;
 }
 

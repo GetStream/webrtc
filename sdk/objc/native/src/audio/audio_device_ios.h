@@ -211,6 +211,11 @@ class AudioDeviceIOS : public AudioDeviceGeneric,
   // the updated state will be applied on the next initialization.
   void UpdateVoiceProcessingBypassRequirement() RTC_RUN_ON(thread_);
 
+  // Updates the preferred channel counts stored in
+  // RTCAudioSessionConfiguration so forthcoming session activations request
+  // the desired layout.
+  void UpdateAudioSessionChannelPreferences() RTC_RUN_ON(thread_);
+
   // Configures the audio session for WebRTC.
   bool ConfigureAudioSession();
 
@@ -233,6 +238,8 @@ class AudioDeviceIOS : public AudioDeviceGeneric,
   // Determines whether voice processing should be enabled or disabled.
   const bool default_bypass_voice_processing_;
   bool bypass_voice_processing_ RTC_GUARDED_BY(thread_);
+  size_t desired_playout_channels_ RTC_GUARDED_BY(thread_);
+  size_t desired_record_channels_ RTC_GUARDED_BY(thread_);
 
   // Handle a user speaking during muted event
   AudioDeviceModule::MutedSpeechEventHandler muted_speech_event_handler_;

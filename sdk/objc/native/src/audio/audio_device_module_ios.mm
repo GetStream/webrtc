@@ -340,11 +340,11 @@ int32_t AudioDeviceModuleIOS::StereoRecordingIsAvailable(
 int32_t AudioDeviceModuleIOS::SetStereoRecording(bool enable) {
   RTC_DLOG(LS_INFO) << __FUNCTION__ << "(" << enable << ")";
   CHECKinitialized_();
-  if (enable) {
-    RTC_LOG(LS_WARNING) << "recording in stereo is not supported";
+  if (audio_device_->SetStereoRecording(enable) == -1) {
+    ReportError(kStereoRecordingFailed);
+    return -1;
   }
-  ReportError(kStereoRecordingFailed);
-  return -1;
+  return 0;
 }
 
 int32_t AudioDeviceModuleIOS::StereoRecording(bool* enabled) const {
@@ -382,16 +382,10 @@ int32_t AudioDeviceModuleIOS::SetStereoPlayout(bool enable) {
     ReportError(kStereoPlayoutFailed);
     return -1;
   }
-  if (audio_device_->SetStereoPlayout(enable)) {
-    RTC_LOG(LS_WARNING) << "stereo playout is not supported";
+  if (audio_device_->SetStereoPlayout(enable) == -1) {
     ReportError(kStereoPlayoutFailed);
     return -1;
   }
-  int8_t nChannels(1);
-  if (enable) {
-    nChannels = 2;
-  }
-  audio_device_buffer_.get()->SetPlayoutChannels(nChannels);
   return 0;
 }
 
