@@ -150,6 +150,8 @@ class VoiceProcessingAudioUnit {
   AudioStreamBasicDescription GetFormat(Float64 sample_rate,
                                         uint32_t channels) const;
 
+  uint32_t SanitizeChannelCount(uint32_t channels) const;
+
   // Deletes the underlying audio unit.
   void DisposeAudioUnit();
 

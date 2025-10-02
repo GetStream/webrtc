@@ -570,7 +570,7 @@ OSStatus AudioDeviceIOS::OnGetPlayoutData(AudioUnitRenderActionFlags* flags,
       playout_delay_ms);
 
   last_hw_output_latency_update_sample_count_ += num_frames;
-  total_playout_samples_count_.fetch_add(num_frames * playout_channels,
+  total_playout_samples_count_.fetch_add(num_frames,
                                          std::memory_order_relaxed);
   total_playout_samples_duration_ms_.fetch_add(
       num_frames * 1000 / playout_parameters_.sample_rate(),

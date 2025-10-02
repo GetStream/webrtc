@@ -227,8 +227,8 @@ void VoiceProcessingAudioUnit::SetBypassVoiceProcessing(bool bypass) {
 void VoiceProcessingAudioUnit::SetStreamChannelConfiguration(
     uint32_t playout_channels,
     uint32_t record_channels) {
-  uint32_t sanitized_playout = std::max<uint32_t>(1, playout_channels);
-  uint32_t sanitized_record = std::max<uint32_t>(1, record_channels);
+  const uint32_t sanitized_playout = SanitizeChannelCount(playout_channels);
+  const uint32_t sanitized_record = SanitizeChannelCount(record_channels);
   if (sanitized_playout == playout_channels_ &&
       sanitized_record == record_channels_) {
     return;
@@ -245,9 +245,8 @@ bool VoiceProcessingAudioUnit::Initialize(Float64 sample_rate, bool enable_input
   RTCLog(@"Initializing audio unit with sample rate: %f", sample_rate);
 
   OSStatus result = noErr;
-  const uint32_t playout_channels =
-      std::max<uint32_t>(1, playout_channels_);
-  const uint32_t record_channels = std::max<uint32_t>(1, record_channels_);
+  const uint32_t playout_channels = SanitizeChannelCount(playout_channels_);
+  const uint32_t record_channels = SanitizeChannelCount(record_channels_);
 
   AudioStreamBasicDescription playout_format =
       GetFormat(sample_rate, playout_channels);
@@ -593,6 +592,10 @@ AudioStreamBasicDescription VoiceProcessingAudioUnit::GetFormat(
   format.mBitsPerChannel = 8 * kBytesPerSample;
   format.mReserved = 0;
   return format;
+}
+
+uint32_t VoiceProcessingAudioUnit::SanitizeChannelCount(uint32_t channels) const {
+  return std::max<uint32_t>(1, channels);
 }
 
 void VoiceProcessingAudioUnit::DisposeAudioUnit() {
