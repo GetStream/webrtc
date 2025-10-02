@@ -10,6 +10,8 @@
 
 #import "voice_processing_audio_unit.h"
 
+#include <algorithm>
+
 #include "rtc_base/checks.h"
 #include "system_wrappers/include/metrics.h"
 
@@ -79,6 +81,8 @@ VoiceProcessingAudioUnit::VoiceProcessingAudioUnit(
     VoiceProcessingAudioUnitObserver* observer)
     : bypass_voice_processing_(bypass_voice_processing),
       detect_mute_speech_(detect_mute_speech),
+      playout_channels_(1),
+      record_channels_(1),
       observer_(observer),
       vpio_unit_(nullptr),
       state_(kInitRequired) {
@@ -220,15 +224,40 @@ void VoiceProcessingAudioUnit::SetBypassVoiceProcessing(bool bypass) {
   RTCLog(@"Voice processing bypass state updated to %d", bypass);
 }
 
+void VoiceProcessingAudioUnit::SetStreamChannelConfiguration(
+    uint32_t playout_channels,
+    uint32_t record_channels) {
+  uint32_t sanitized_playout = std::max<uint32_t>(1, playout_channels);
+  uint32_t sanitized_record = std::max<uint32_t>(1, record_channels);
+  if (sanitized_playout == playout_channels_ &&
+      sanitized_record == record_channels_) {
+    return;
+  }
+  playout_channels_ = sanitized_playout;
+  record_channels_ = sanitized_record;
+  RTCLog(@"Updated VPIO channel configuration. playout=%u record=%u",
+         static_cast<unsigned int>(playout_channels_),
+         static_cast<unsigned int>(record_channels_));
+}
+
 bool VoiceProcessingAudioUnit::Initialize(Float64 sample_rate, bool enable_input) {
   RTC_DCHECK_GE(state_, kUninitialized);
   RTCLog(@"Initializing audio unit with sample rate: %f", sample_rate);
 
   OSStatus result = noErr;
-  AudioStreamBasicDescription format = GetFormat(sample_rate);
-  UInt32 size = sizeof(format);
+  const uint32_t playout_channels =
+      std::max<uint32_t>(1, playout_channels_);
+  const uint32_t record_channels = std::max<uint32_t>(1, record_channels_);
+
+  AudioStreamBasicDescription playout_format =
+      GetFormat(sample_rate, playout_channels);
+  AudioStreamBasicDescription record_format =
+      GetFormat(sample_rate, record_channels);
+  UInt32 playout_size = sizeof(playout_format);
+  UInt32 record_size = sizeof(record_format);
 #if !defined(NDEBUG)
-  LogStreamDescription(format);
+  LogStreamDescription(playout_format);
+  LogStreamDescription(record_format);
 #endif
 
   UInt32 _enable_input = enable_input ? 1 : 0;
@@ -249,8 +278,8 @@ bool VoiceProcessingAudioUnit::Initialize(Float64 sample_rate, bool enable_input
                                 kAudioUnitProperty_StreamFormat,
                                 kAudioUnitScope_Output,
                                 kInputBus,
-                                &format,
-                                size);
+                                &record_format,
+                                record_size);
   if (result != noErr) {
     RTCLogError(@"Failed to set format on output scope of input bus. "
                  "Error=%ld.",
@@ -263,8 +292,8 @@ bool VoiceProcessingAudioUnit::Initialize(Float64 sample_rate, bool enable_input
                                 kAudioUnitProperty_StreamFormat,
                                 kAudioUnitScope_Input,
                                 kOutputBus,
-                                &format,
-                                size);
+                                &playout_format,
+                                playout_size);
   if (result != noErr) {
     RTCLogError(@"Failed to set format on input scope of output bus. "
                  "Error=%ld.",
@@ -545,23 +574,24 @@ OSStatus VoiceProcessingAudioUnit::NotifyDeliverRecordedData(
 }
 
 AudioStreamBasicDescription VoiceProcessingAudioUnit::GetFormat(
-    Float64 sample_rate) const {
+    Float64 sample_rate,
+    uint32_t channels) const {
   // Set the application formats for input and output:
   // - use same format in both directions
   // - avoid resampling in the I/O unit by using the hardware sample rate
   // - linear PCM => noncompressed audio data format with one frame per packet
-  // - no need to specify interleaving since only mono is supported
+  // - audio data is interleaved across channels
   AudioStreamBasicDescription format;
-  RTC_DCHECK_EQ(1, RTC_CONSTANT_TYPE(RTCAudioSessionPreferredNumberOfChannels));
   format.mSampleRate = sample_rate;
   format.mFormatID = kAudioFormatLinearPCM;
   format.mFormatFlags =
       kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked;
-  format.mBytesPerPacket = kBytesPerSample;
+  format.mBytesPerPacket = kBytesPerSample * channels;
   format.mFramesPerPacket = 1;  // uncompressed.
-  format.mBytesPerFrame = kBytesPerSample;
-  format.mChannelsPerFrame = RTC_CONSTANT_TYPE(RTCAudioSessionPreferredNumberOfChannels);
+  format.mBytesPerFrame = kBytesPerSample * channels;
+  format.mChannelsPerFrame = channels;
   format.mBitsPerChannel = 8 * kBytesPerSample;
+  format.mReserved = 0;
   return format;
 }
 

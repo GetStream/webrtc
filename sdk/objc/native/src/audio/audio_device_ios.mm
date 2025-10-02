@@ -440,7 +440,9 @@ OSStatus AudioDeviceIOS::OnDeliverRecordedData(
   // in combination with potential reallocations.
   // On real iOS devices, the size will only be set once (at first callback).
   record_audio_buffer_.Clear();
-  record_audio_buffer_.SetSize(num_frames);
+  const size_t record_channels = record_parameters_.channels();
+  const size_t record_samples = num_frames * record_channels;
+  record_audio_buffer_.SetSize(record_samples);
 
   // Get audio timestamp for the audio.
   // The timestamp will not have NTP time epoch, but that will be addressed by
@@ -456,9 +458,9 @@ OSStatus AudioDeviceIOS::OnDeliverRecordedData(
   AudioBufferList audio_buffer_list;
   audio_buffer_list.mNumberBuffers = 1;
   AudioBuffer* audio_buffer = &audio_buffer_list.mBuffers[0];
-  audio_buffer->mNumberChannels = record_parameters_.channels();
+  audio_buffer->mNumberChannels = record_channels;
   audio_buffer->mDataByteSize =
-      record_audio_buffer_.size() * VoiceProcessingAudioUnit::kBytesPerSample;
+      record_samples * VoiceProcessingAudioUnit::kBytesPerSample;
   audio_buffer->mData = reinterpret_cast<int8_t*>(record_audio_buffer_.data());
 
   // Obtain the recorded audio samples by initiating a rendering cycle.
@@ -496,14 +498,16 @@ OSStatus AudioDeviceIOS::OnGetPlayoutData(AudioUnitRenderActionFlags* flags,
   // Verify 16-bit, noninterleaved mono PCM signal format.
   RTC_DCHECK_EQ(1, io_data->mNumberBuffers);
   AudioBuffer* audio_buffer = &io_data->mBuffers[0];
-  RTC_DCHECK_EQ(1, audio_buffer->mNumberChannels);
+  const size_t playout_channels = playout_parameters_.channels();
+  RTC_DCHECK_EQ(audio_buffer->mNumberChannels,
+                static_cast<UInt32>(playout_channels));
 
   // Produce silence and give audio unit a hint about it if playout is not
   // activated.
   if (!playing_.load(std::memory_order_acquire)) {
     const size_t size_in_bytes = audio_buffer->mDataByteSize;
     RTC_CHECK_EQ(size_in_bytes / VoiceProcessingAudioUnit::kBytesPerSample,
-                 num_frames);
+                 num_frames * playout_channels);
     *flags |= kAudioUnitRenderAction_OutputIsSilence;
     memset(static_cast<int8_t*>(audio_buffer->mData), 0, size_in_bytes);
     return noErr;
@@ -562,11 +566,12 @@ OSStatus AudioDeviceIOS::OnGetPlayoutData(AudioUnitRenderActionFlags* flags,
   // `io_data` destination.
   fine_audio_buffer_->GetPlayoutData(
       webrtc::ArrayView<int16_t>(static_cast<int16_t*>(audio_buffer->mData),
-                                 num_frames),
+                                 num_frames * playout_channels),
       playout_delay_ms);
 
   last_hw_output_latency_update_sample_count_ += num_frames;
-  total_playout_samples_count_.fetch_add(num_frames, std::memory_order_relaxed);
+  total_playout_samples_count_.fetch_add(num_frames * playout_channels,
+                                         std::memory_order_relaxed);
   total_playout_samples_duration_ms_.fetch_add(
       num_frames * 1000 / playout_parameters_.sample_rate(),
       std::memory_order_relaxed);
@@ -848,6 +853,77 @@ void AudioDeviceIOS::UpdateAudioSessionChannelPreferences() {
   [RTC_OBJC_TYPE(RTCAudioSessionConfiguration) setWebRTCConfiguration:config];
 }
 
+bool AudioDeviceIOS::ApplyChannelConfigurationChange() {
+  RTC_DCHECK_RUN_ON(thread_);
+
+  if (!audio_unit_ || !has_configured_session_) {
+    // Nothing active that requires reconfiguration right now.
+    return true;
+  }
+
+  const bool was_started =
+      audio_unit_->GetState() == VoiceProcessingAudioUnit::kStarted;
+  const bool was_initialized =
+      audio_unit_->GetState() >= VoiceProcessingAudioUnit::kInitialized;
+
+  if (was_started) {
+    RTCLog(@"Stopping audio unit to apply updated channel configuration.");
+    if (!audio_unit_->Stop()) {
+      RTCLogError(@"Failed to stop audio unit before channel update.");
+    }
+    PrepareForNewStart();
+  }
+
+  if (was_initialized) {
+    audio_unit_->Uninitialize();
+  }
+
+  UnconfigureAudioSession();
+
+  RTC_OBJC_TYPE(RTCAudioSession)* session =
+      [RTC_OBJC_TYPE(RTCAudioSession) sharedInstance];
+  NSError* error = nil;
+  [session lockForConfiguration];
+  if (![session beginWebRTCSession:&error]) {
+    RTCLogError(@"Failed to begin WebRTC session during channel update: %@",
+                error.localizedDescription);
+    [session unlockForConfiguration];
+    return false;
+  }
+
+  bool configured = ConfigureAudioSessionLocked();
+  if (!configured) {
+    [session endWebRTCSession:nil];
+    [session unlockForConfiguration];
+    RTCLogError(@"Failed to configure audio session for new channel layout.");
+    return false;
+  }
+  [session unlockForConfiguration];
+
+  SetupAudioBuffersForActiveAudioSession();
+
+  if (!audio_unit_->Initialize(playout_parameters_.sample_rate(),
+                               recording_is_initialized_)) {
+    RTCLogError(@"Failed to initialize audio unit with updated channel layout.");
+    return false;
+  }
+
+  if ((playing_.load(std::memory_order_acquire) ||
+       recording_.load(std::memory_order_acquire)) &&
+      audio_unit_->GetState() == VoiceProcessingAudioUnit::kInitialized) {
+    RTCLog(@"Restarting audio unit after channel update.");
+    OSStatus result = audio_unit_->Start();
+    if (result != noErr) {
+      [session notifyAudioUnitStartFailedWithError:result];
+      RTCLogError(@"Failed to restart audio unit after channel update, reason %d",
+                  result);
+      return false;
+    }
+  }
+
+  return true;
+}
+
 void AudioDeviceIOS::UpdateAudioDeviceBuffer() {
   LOGI() << "UpdateAudioDevicebuffer";
   // AttachAudioBuffer() is called at construction by the main class but check
@@ -923,12 +999,15 @@ void AudioDeviceIOS::SetupAudioBuffersForActiveAudioSession() {
   RTC_DCHECK(playout_parameters_.is_complete());
   record_parameters_.reset(sample_rate, input_channels, io_buffer_duration);
   RTC_DCHECK(record_parameters_.is_complete());
+  if (audio_unit_) {
+    audio_unit_->SetStreamChannelConfiguration(output_channels, input_channels);
+  }
   RTC_LOG(LS_INFO) << " frames per I/O buffer: "
                    << playout_parameters_.frames_per_buffer();
-  RTC_LOG(LS_INFO) << " bytes per I/O buffer: "
+  RTC_LOG(LS_INFO) << " playout bytes per I/O buffer: "
                    << playout_parameters_.GetBytesPerBuffer();
-  RTC_DCHECK_EQ(playout_parameters_.GetBytesPerBuffer(),
-                record_parameters_.GetBytesPerBuffer());
+  RTC_LOG(LS_INFO) << " recording bytes per I/O buffer: "
+                   << record_parameters_.GetBytesPerBuffer();
 
   UpdateVoiceProcessingBypassRequirement();
 
@@ -956,6 +1035,9 @@ bool AudioDeviceIOS::CreateAudioUnit() {
     audio_unit_.reset();
     return false;
   }
+
+  audio_unit_->SetStreamChannelConfiguration(desired_playout_channels_,
+                                             desired_record_channels_);
 
   return true;
 }
@@ -1314,6 +1396,10 @@ int32_t AudioDeviceIOS::SetStereoRecording(bool enable) {
   LOGI() << "SetStereoRecording";
   RTC_DCHECK_RUN_ON(thread_);
 
+  const size_t previous_desired_record = desired_record_channels_;
+  const AudioParameters previous_playout_parameters = playout_parameters_;
+  const AudioParameters previous_record_parameters = record_parameters_;
+
   const size_t requested_channels = enable ? 2 : 1;
   if (requested_channels == desired_record_channels_) {
     return 0;
@@ -1327,6 +1413,12 @@ int32_t AudioDeviceIOS::SetStereoRecording(bool enable) {
   }
 
   desired_record_channels_ = requested_channels;
+
+  if (audio_unit_) {
+    audio_unit_->SetStreamChannelConfiguration(
+        static_cast<uint32_t>(desired_playout_channels_),
+        static_cast<uint32_t>(desired_record_channels_));
+  }
 
   if (initialized_) {
     if (record_parameters_.is_complete()) {
@@ -1349,6 +1441,28 @@ int32_t AudioDeviceIOS::SetStereoRecording(bool enable) {
   }
 
   UpdateVoiceProcessingBypassRequirement();
+  if (!ApplyChannelConfigurationChange()) {
+    desired_record_channels_ = previous_desired_record;
+    playout_parameters_ = previous_playout_parameters;
+    record_parameters_ = previous_record_parameters;
+    UpdateAudioSessionChannelPreferences();
+    if (audio_unit_) {
+      audio_unit_->SetStreamChannelConfiguration(
+          static_cast<uint32_t>(desired_playout_channels_),
+          static_cast<uint32_t>(desired_record_channels_));
+    }
+    if (initialized_) {
+      UpdateAudioDeviceBuffer();
+      if (fine_audio_buffer_) {
+        fine_audio_buffer_.reset(new FineAudioBuffer(audio_device_buffer_));
+      }
+    }
+    UpdateVoiceProcessingBypassRequirement();
+    if (!ApplyChannelConfigurationChange()) {
+      RTCLogError(@"Failed to restore previous channel configuration after recording update failure.");
+    }
+    return -1;
+  }
   return 0;
 }
 
@@ -1371,6 +1485,10 @@ int32_t AudioDeviceIOS::SetStereoPlayout(bool enable) {
   LOGI() << "SetStereoPlayout";
   RTC_DCHECK_RUN_ON(thread_);
 
+  const size_t previous_desired_playout = desired_playout_channels_;
+  const AudioParameters previous_playout_parameters = playout_parameters_;
+  const AudioParameters previous_record_parameters = record_parameters_;
+
   const size_t requested_channels = enable ? 2 : 1;
   if (requested_channels == desired_playout_channels_) {
     return 0;
@@ -1384,6 +1502,12 @@ int32_t AudioDeviceIOS::SetStereoPlayout(bool enable) {
   }
 
   desired_playout_channels_ = requested_channels;
+
+  if (audio_unit_) {
+    audio_unit_->SetStreamChannelConfiguration(
+        static_cast<uint32_t>(desired_playout_channels_),
+        static_cast<uint32_t>(desired_record_channels_));
+  }
 
   if (initialized_) {
     if (playout_parameters_.is_complete()) {
@@ -1406,6 +1530,28 @@ int32_t AudioDeviceIOS::SetStereoPlayout(bool enable) {
   }
 
   UpdateVoiceProcessingBypassRequirement();
+  if (!ApplyChannelConfigurationChange()) {
+    desired_playout_channels_ = previous_desired_playout;
+    playout_parameters_ = previous_playout_parameters;
+    record_parameters_ = previous_record_parameters;
+    UpdateAudioSessionChannelPreferences();
+    if (audio_unit_) {
+      audio_unit_->SetStreamChannelConfiguration(
+          static_cast<uint32_t>(desired_playout_channels_),
+          static_cast<uint32_t>(desired_record_channels_));
+    }
+    if (initialized_) {
+      UpdateAudioDeviceBuffer();
+      if (fine_audio_buffer_) {
+        fine_audio_buffer_.reset(new FineAudioBuffer(audio_device_buffer_));
+      }
+    }
+    UpdateVoiceProcessingBypassRequirement();
+    if (!ApplyChannelConfigurationChange()) {
+      RTCLogError(@"Failed to restore previous channel configuration after playout update failure.");
+    }
+    return -1;
+  }
   return 0;
 }
 

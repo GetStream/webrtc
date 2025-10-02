@@ -12,6 +12,7 @@
 #define SDK_OBJC_NATIVE_SRC_AUDIO_VOICE_PROCESSING_AUDIO_UNIT_H_
 
 #include <AudioUnit/AudioUnit.h>
+#include <cstdint>
 
 namespace webrtc {
 namespace ios_adm {
@@ -88,6 +89,13 @@ class VoiceProcessingAudioUnit {
   void SetBypassVoiceProcessing(bool bypass);
   bool bypass_voice_processing() const { return bypass_voice_processing_; }
 
+  // Updates the desired channel counts for each direction. The new
+  // configuration will take effect on the next successful Initialize().
+  void SetStreamChannelConfiguration(uint32_t playout_channels,
+                                     uint32_t record_channels);
+  uint32_t playout_channels() const { return playout_channels_; }
+  uint32_t record_channels() const { return record_channels_; }
+
   // Starts the underlying audio unit.
   OSStatus Start();
 
@@ -139,13 +147,16 @@ class VoiceProcessingAudioUnit {
 
   // Returns the predetermined format with a specific sample rate. See
   // implementation file for details on format.
-  AudioStreamBasicDescription GetFormat(Float64 sample_rate) const;
+  AudioStreamBasicDescription GetFormat(Float64 sample_rate,
+                                        uint32_t channels) const;
 
   // Deletes the underlying audio unit.
   void DisposeAudioUnit();
 
   bool bypass_voice_processing_;
   const bool detect_mute_speech_;
+  uint32_t playout_channels_;
+  uint32_t record_channels_;
   VoiceProcessingAudioUnitObserver* observer_;
   AudioUnit vpio_unit_;
   VoiceProcessingAudioUnit::State state_;

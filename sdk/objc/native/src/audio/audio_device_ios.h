@@ -216,6 +216,11 @@ class AudioDeviceIOS : public AudioDeviceGeneric,
   // the desired layout.
   void UpdateAudioSessionChannelPreferences() RTC_RUN_ON(thread_);
 
+  // Reconfigures the audio session and restarts the audio unit to apply
+  // updated channel counts while streaming. Returns true on success or when no
+  // reconfiguration is required.
+  bool ApplyChannelConfigurationChange() RTC_RUN_ON(thread_);
+
   // Configures the audio session for WebRTC.
   bool ConfigureAudioSession();
 
