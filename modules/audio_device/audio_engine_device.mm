@@ -1423,8 +1423,8 @@ int32_t AudioEngineDevice::ModifyEngineState(
   RTC_DCHECK_RUN_ON(thread_);
 
   EngineState old_state = engine_state_;
-  EngineState new_state = state_transform(old_state);
-  EngineStateUpdate state = {old_state, new_state};
+  EngineStateUpdate state = {old_state, state_transform(old_state)};
+  EngineState& new_state = state.next;
   bool route_forces_mono = false;
   bool route_restore_voice_processing = false;
 
