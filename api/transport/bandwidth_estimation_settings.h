@@ -20,7 +20,7 @@ struct RTC_EXPORT BandwidthEstimationSettings {
   // direction SendOnly or SendRecv that supports RTX. The probe can be sent
   // without first sending media packets in which case Rtp padding packets are
   // used.
-  bool allow_probe_without_media = false;
+  bool allow_probe_without_media = true;
 };
 
 }  // namespace webrtc
