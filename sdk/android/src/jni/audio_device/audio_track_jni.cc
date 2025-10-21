@@ -267,6 +267,24 @@ void AudioTrackJni::GetPlayoutData(JNIEnv* env, size_t length) {
   RTC_DCHECK_EQ(length, bytes_per_frame * samples);
 }
 
+// Native method to get buffer size factor using the same logic as InitPlayout
+static jdouble JNI_WebRtcAudioTrack_GetBufferSizeFactor(JNIEnv* env, jclass) {
+  RTC_LOG(LS_INFO) << "GetBufferSizeFactor";
+  
+  // Use the same logic as AudioTrackJni::InitPlayout
+  double buffer_size_factor =
+      strtod(webrtc::field_trial::FindFullName(
+                 "WebRTC-AudioDevicePlayoutBufferSizeFactor")
+                 .c_str(),
+             nullptr);
+  if (buffer_size_factor == 0) {
+    buffer_size_factor = 1.0;
+  }
+  
+  RTC_LOG(LS_INFO) << "Buffer size factor: " << buffer_size_factor;
+  return static_cast<jdouble>(buffer_size_factor);
+}
+
 }  // namespace jni
 
 }  // namespace webrtc

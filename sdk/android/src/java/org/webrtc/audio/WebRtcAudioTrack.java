@@ -548,12 +548,92 @@ class WebRtcAudioTrack {
   private static native void nativeCacheDirectBufferAddress(
       long nativeAudioTrackJni, ByteBuffer byteBuffer);
   private static native void nativeGetPlayoutData(long nativeAudioTrackJni, int bytes);
+  private static native double nativeGetBufferSizeFactor();
 
   // Sets all samples to be played out to zero if `mute` is true, i.e.,
   // ensures that the speaker is muted.
   public void setSpeakerMute(boolean mute) {
     Logging.w(TAG, "setSpeakerMute(" + mute + ")");
     speakerMute = mute;
+  }
+
+  // ============================================================================
+  // PUBLIC API FOR APP LAYER
+  // ============================================================================
+
+  /**
+   * Changes both the channel configuration and audio usage of the AudioTrack.
+   * This recreates the AudioTrack with the new configuration.
+   * Must be called when playout is not active.
+   * 
+   * @param channels Number of channels: 1 for mono, 2 for stereo
+   * @param usage Audio usage type (AudioAttributes.USAGE_*)
+   * @return true if successful, false if failed or playout is active
+   */
+  public boolean setChannelConfigurationAndUsage(int channels, int usage) {
+    Logging.d(TAG, "setChannelConfigurationAndUsage(channels=" + channels + ", usage=" + usage + ") - called from app layer");
+    return setChannelConfigurationAndUsageInternal(channels, usage);
+  }
+
+  // ============================================================================
+  // INTERNAL IMPLEMENTATION METHODS
+  // ============================================================================
+
+
+  // Internal implementation of setChannelConfigurationAndUsage
+  private boolean setChannelConfigurationAndUsageInternal(int channels, int usage) {
+    threadChecker.checkIsOnValidThread();
+    Logging.d(TAG, "setChannelConfigurationAndUsage(channels=" + channels + ", usage=" + usage + ")");
+    
+    // Check if playout is currently active
+    if (audioThread != null && audioThread.isAlive()) {
+      Logging.e(TAG, "Cannot change channel configuration while playout is active");
+      return false;
+    }
+    
+    // Validate channel count
+    if (channels != 1 && channels != 2) {
+      Logging.e(TAG, "Invalid channel count: " + channels + ". Must be 1 (mono) or 2 (stereo)");
+      return false;
+    }
+    
+    // If AudioTrack exists, release it first
+    if (audioTrack != null) {
+      Logging.d(TAG, "Releasing existing AudioTrack for configuration change");
+      releaseAudioResources();
+    }
+    
+    // Update audio attributes with new usage
+    if (audioAttributes != null) {
+      audioAttributes = new AudioAttributes.Builder()
+          .setUsage(usage)
+          .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+          .build();
+    }
+    
+    // Get current audio parameters using the same logic as native layer
+    // Sample rate: Query Android AudioManager system property, same as native GetAudioParameters
+    int sampleRate = WebRtcAudioManager.getSampleRate(audioManager);
+    
+    // Buffer size factor: Use field trial system, same as native AudioTrackJni::InitPlayout
+    // Get the actual buffer size factor from native layer (same logic as native)
+    double bufferSizeFactor = nativeGetBufferSizeFactor();
+    if (bufferSizeFactor == 0.0) {
+      bufferSizeFactor = 1.0; // Default value, same as native fallback
+    }
+    
+    Logging.d(TAG, "Using sampleRate=" + sampleRate + " and bufferSizeFactor=" + bufferSizeFactor + 
+              " (same logic as native layer)");
+    
+    // Reinitialize with new channel configuration
+    int result = initPlayout(sampleRate, channels, bufferSizeFactor);
+    if (result < 0) {
+      Logging.e(TAG, "Failed to reinitialize AudioTrack with new configuration");
+      return false;
+    }
+    
+    Logging.d(TAG, "Successfully changed configuration to " + channels + " channels, usage=" + usage);
+    return true;
   }
 
   // Releases the native AudioTrack resources.
