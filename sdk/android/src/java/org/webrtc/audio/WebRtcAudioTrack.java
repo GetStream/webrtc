@@ -548,7 +548,6 @@ class WebRtcAudioTrack {
   private static native void nativeCacheDirectBufferAddress(
       long nativeAudioTrackJni, ByteBuffer byteBuffer);
   private static native void nativeGetPlayoutData(long nativeAudioTrackJni, int bytes);
-  private static native double nativeGetBufferSizeFactor();
 
   // Sets all samples to be played out to zero if `mute` is true, i.e.,
   // ensures that the speaker is muted.
@@ -611,19 +610,14 @@ class WebRtcAudioTrack {
           .build();
     }
     
-    // Get current audio parameters using the same logic as native layer
-    // Sample rate: Query Android AudioManager system property, same as native GetAudioParameters
+    // Get current audio parameters
+    // Sample rate: Query Android AudioManager system property
     int sampleRate = WebRtcAudioManager.getSampleRate(audioManager);
     
-    // Buffer size factor: Use field trial system, same as native AudioTrackJni::InitPlayout
-    // Get the actual buffer size factor from native layer (same logic as native)
-    double bufferSizeFactor = nativeGetBufferSizeFactor();
-    if (bufferSizeFactor == 0.0) {
-      bufferSizeFactor = 1.0; // Default value, same as native fallback
-    }
+    // Buffer size factor: Use default value of 1.0
+    double bufferSizeFactor = 1.0;
     
-    Logging.d(TAG, "Using sampleRate=" + sampleRate + " and bufferSizeFactor=" + bufferSizeFactor + 
-              " (same logic as native layer)");
+    Logging.d(TAG, "Using sampleRate=" + sampleRate + " and bufferSizeFactor=" + bufferSizeFactor);
     
     // Reinitialize with new channel configuration
     int result = initPlayout(sampleRate, channels, bufferSizeFactor);
