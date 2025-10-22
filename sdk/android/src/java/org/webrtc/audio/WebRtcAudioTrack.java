@@ -284,6 +284,93 @@ class WebRtcAudioTrack {
     return minBufferSizeInBytes;
   }
 
+  // Thread-safe version of initPlayout for use by public APIs
+  // This method can be called from any thread (app layer)
+  private int initPlayoutThreadSafe(int sampleRate, int channels, double bufferSizeFactor) {
+    Logging.d(TAG,
+        "initPlayoutThreadSafe(sampleRate=" + sampleRate + ", channels=" + channels
+            + ", bufferSizeFactor=" + bufferSizeFactor + ")");
+    final int bytesPerFrame = channels * (BITS_PER_SAMPLE / 8);
+    byteBuffer = ByteBuffer.allocateDirect(bytesPerFrame * (sampleRate / BUFFERS_PER_SECOND));
+    Logging.d(TAG, "byteBuffer.capacity: " + byteBuffer.capacity());
+    emptyBytes = new byte[byteBuffer.capacity()];
+    // Rather than passing the ByteBuffer with every callback (requiring
+    // the potentially expensive GetDirectBufferAddress) we simply have the
+    // the native class cache the address to the memory once.
+    nativeCacheDirectBufferAddress(nativeAudioTrack, byteBuffer);
+
+    // Get the minimum buffer size required for the successful creation of an
+    // AudioTrack object to be created in the MODE_STREAM mode.
+    // Note that this size doesn't guarantee a smooth playback under load.
+    final int channelConfig = channelCountToConfiguration(channels);
+    final int minBufferSizeInBytes = (int) (AudioTrack.getMinBufferSize(sampleRate, channelConfig,
+                                                AudioFormat.ENCODING_PCM_16BIT)
+        * bufferSizeFactor);
+    Logging.d(TAG, "minBufferSizeInBytes: " + minBufferSizeInBytes);
+    // For the streaming mode, data must be written to the audio sink in
+    // chunks of size (given by byteBuffer.capacity()) less than or equal
+    // to the total buffer size `minBufferSizeInBytes`. But, we have seen
+    // reports of "getMinBufferSize(): error querying hardware". Hence, it
+    // can happen that `minBufferSizeInBytes` contains an invalid value.
+    if (minBufferSizeInBytes < byteBuffer.capacity()) {
+      reportWebRtcAudioTrackInitError("AudioTrack.getMinBufferSize returns an invalid value.");
+      return -1;
+    }
+
+    // Don't use low-latency mode when a bufferSizeFactor > 1 is used. When bufferSizeFactor > 1
+    // we want to use a larger buffer to prevent underruns. However, low-latency mode would
+    // decrease the buffer size, which makes the bufferSizeFactor have no effect.
+    if (bufferSizeFactor > 1.0) {
+      useLowLatency = false;
+    }
+
+    // Ensure that prevision audio session was stopped correctly before trying
+    // to create a new AudioTrack.
+    if (audioTrack != null) {
+      reportWebRtcAudioTrackInitError("Conflict with existing AudioTrack.");
+      return -1;
+    }
+    try {
+      // Create an AudioTrack object and initialize its associated audio buffer.
+      // The size of this buffer determines how long an AudioTrack can play
+      // before running out of data.
+      if (useLowLatency && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        // On API level 26 or higher, we can use a low latency mode.
+        audioTrack = createAudioTrackOnOreoOrHigher(
+            sampleRate, channelConfig, minBufferSizeInBytes, audioAttributes);
+      } else {
+        // As we are on API level 21 or higher, it is possible to use a special AudioTrack
+        // constructor that uses AudioAttributes and AudioFormat as input. It allows us to
+        // supersede the notion of stream types for defining the behavior of audio playback,
+        // and to allow certain platforms or routing policies to use this information for more
+        // refined volume or routing decisions.
+        audioTrack = createAudioTrackBeforeOreo(
+            sampleRate, channelConfig, minBufferSizeInBytes, audioAttributes);
+      }
+    } catch (IllegalArgumentException e) {
+      reportWebRtcAudioTrackInitError(e.getMessage());
+      releaseAudioResources();
+      return -1;
+    }
+
+    // It can happen that an AudioTrack is created but it was not successfully
+    // initialized upon creation. Seems to be the case e.g. when the maximum
+    // number of globally available audio tracks is exceeded.
+    if (audioTrack == null || audioTrack.getState() != AudioTrack.STATE_INITIALIZED) {
+      reportWebRtcAudioTrackInitError("Initialization of audio track failed.");
+      releaseAudioResources();
+      return -1;
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+      initialBufferSizeInFrames = audioTrack.getBufferSizeInFrames();
+    } else {
+      initialBufferSizeInFrames = -1;
+    }
+    logMainParameters();
+    logMainParametersExtended();
+    return minBufferSizeInBytes;
+  }
+
   @CalledByNative
   private boolean startPlayout() {
     threadChecker.checkIsOnValidThread();
@@ -565,6 +652,8 @@ class WebRtcAudioTrack {
    * This recreates the AudioTrack with the new configuration.
    * Must be called when playout is not active.
    * 
+   * This method can be called from any thread (app layer).
+   * 
    * @param channels Number of channels: 1 for mono, 2 for stereo
    * @param usage Audio usage type (AudioAttributes.USAGE_*)
    * @return true if successful, false if failed or playout is active
@@ -581,7 +670,6 @@ class WebRtcAudioTrack {
 
   // Internal implementation of setChannelConfigurationAndUsage
   private boolean setChannelConfigurationAndUsageInternal(int channels, int usage) {
-    threadChecker.checkIsOnValidThread();
     Logging.d(TAG, "setChannelConfigurationAndUsage(channels=" + channels + ", usage=" + usage + ")");
     
     // Check if playout is currently active
@@ -620,7 +708,7 @@ class WebRtcAudioTrack {
     Logging.d(TAG, "Using sampleRate=" + sampleRate + " and bufferSizeFactor=" + bufferSizeFactor);
     
     // Reinitialize with new channel configuration
-    int result = initPlayout(sampleRate, channels, bufferSizeFactor);
+    int result = initPlayoutThreadSafe(sampleRate, channels, bufferSizeFactor);
     if (result < 0) {
       Logging.e(TAG, "Failed to reinitialize AudioTrack with new configuration");
       return false;
