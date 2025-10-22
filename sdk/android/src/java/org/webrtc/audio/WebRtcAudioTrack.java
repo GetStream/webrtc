@@ -103,7 +103,7 @@ class WebRtcAudioTrack {
       Logging.d(TAG, "AudioTrackThread" + WebRtcAudioUtils.getThreadInfo());
       
       if (checkPlayState) {
-        assertTrue(audioTrack.getPlayState() == AudioTrack.PLAYSTATE_PLAYING);
+        assertTrue(audioTrack != null && audioTrack.getPlayState() == AudioTrack.PLAYSTATE_PLAYING);
       }
 
       // Audio playout has started and the client is informed about it.
@@ -127,7 +127,7 @@ class WebRtcAudioTrack {
           byteBuffer.put(emptyBytes);
           byteBuffer.position(0);
         }
-        int bytesWritten = audioTrack.write(byteBuffer, sizeInBytes, AudioTrack.WRITE_BLOCKING);
+        int bytesWritten = audioTrack != null ? audioTrack.write(byteBuffer, sizeInBytes, AudioTrack.WRITE_BLOCKING) : -1;
         if (bytesWritten != sizeInBytes) {
           Logging.e(TAG, "AudioTrack.write played invalid number of bytes: " + bytesWritten);
           // If a write() returns a negative value, an error has occurred.
@@ -138,7 +138,7 @@ class WebRtcAudioTrack {
           }
         }
 
-        if (audioSamplesReadyCallback != null && keepAlive) {
+        if (audioSamplesReadyCallback != null && keepAlive && audioTrack != null) {
           // Copy the entire byte buffer array. The start of the byteBuffer is not necessarily
           // at index 0.
           byte[] data = Arrays.copyOfRange(byteBuffer.array(), byteBuffer.arrayOffset(),
@@ -148,7 +148,7 @@ class WebRtcAudioTrack {
                   audioTrack.getChannelCount(), audioTrack.getSampleRate(), data));
         }
 
-        if (useLowLatency) {
+        if (useLowLatency && audioTrack != null) {
           bufferManager.maybeAdjustBufferSize(audioTrack);
         }
         // The byte buffer must be rewinded since byteBuffer.position() is
@@ -669,7 +669,7 @@ class WebRtcAudioTrack {
 
 
   // Internal implementation of setChannelConfigurationAndUsage
-  private boolean setChannelConfigurationAndUsageInternal(int channels, int usage) {
+  private synchronized boolean setChannelConfigurationAndUsageInternal(int channels, int usage) {
     Logging.d(TAG, "setChannelConfigurationAndUsage(channels=" + channels + ", usage=" + usage + ")");
     
     // Check if playout is currently active
