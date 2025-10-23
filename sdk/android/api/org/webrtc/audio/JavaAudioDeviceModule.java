@@ -455,11 +455,12 @@ public class JavaAudioDeviceModule implements AudioDeviceModule {
   /**
    * Sets the stereo mode and audio usage of the AudioTrack.
    * This recreates the AudioTrack with the new configuration.
-   * Must be called when playout is not active.
+   * If playout is currently active, it will be stopped and automatically restarted
+   * with the new configuration.
    * 
    * @param isStereo true for stereo (2 channels), false for mono (1 channel)
    * @param usage Audio usage type (AudioAttributes.USAGE_*)
-   * @return true if successful, false if failed or playout is active
+   * @return true if successful, false if failed
    */
   public boolean setStereoMode(boolean isStereo, int usage) {
     if (audioOutput != null) {

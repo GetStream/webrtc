@@ -650,13 +650,14 @@ class WebRtcAudioTrack {
   /**
    * Changes both the channel configuration and audio usage of the AudioTrack.
    * This recreates the AudioTrack with the new configuration.
-   * Must be called when playout is not active.
+   * If playout is currently active, it will be stopped and automatically restarted
+   * with the new configuration.
    * 
    * This method can be called from any thread (app layer).
    * 
    * @param channels Number of channels: 1 for mono, 2 for stereo
    * @param usage Audio usage type (AudioAttributes.USAGE_*)
-   * @return true if successful, false if failed or playout is active
+   * @return true if successful, false if failed
    */
   public boolean setChannelConfigurationAndUsage(int channels, int usage) {
     Logging.d(TAG, "setChannelConfigurationAndUsage(channels=" + channels + ", usage=" + usage + ") - called from app layer");
@@ -671,17 +672,23 @@ class WebRtcAudioTrack {
   // Internal implementation of setChannelConfigurationAndUsage
   private synchronized boolean setChannelConfigurationAndUsageInternal(int channels, int usage) {
     Logging.d(TAG, "setChannelConfigurationAndUsage(channels=" + channels + ", usage=" + usage + ")");
-    
-    // Check if playout is currently active
-    if (audioThread != null && audioThread.isAlive()) {
-      Logging.e(TAG, "Cannot change channel configuration while playout is active");
-      return false;
-    }
-    
+
     // Validate channel count
     if (channels != 1 && channels != 2) {
       Logging.e(TAG, "Invalid channel count: " + channels + ". Must be 1 (mono) or 2 (stereo)");
       return false;
+    }
+
+    // Check if playout was active before reconfiguration
+    boolean wasPlaying = audioTrack != null && audioTrack.getPlayState() == AudioTrack.PLAYSTATE_PLAYING;
+    
+    // if AudioTrack is currently playing, stop it first
+    if (wasPlaying) {
+      Logging.d(TAG, "Stopping current playout for configuration change");
+      if (!stopPlayoutInternal()) {
+        Logging.w(TAG, "Failed to stop playout before configuration change");
+        return false;
+      }
     }
     
     // If AudioTrack exists, release it first
@@ -715,6 +722,84 @@ class WebRtcAudioTrack {
     }
     
     Logging.d(TAG, "Successfully changed configuration to " + channels + " channels, usage=" + usage);
+    
+    // If playout was active before reconfiguration, restart it automatically
+    if (wasPlaying) {
+      Logging.d(TAG, "Restarting playout with new configuration");
+      if (!startPlayoutInternal()) {
+        Logging.e(TAG, "Failed to restart playout after configuration change");
+        return false;
+      }
+    }
+    
+    return true;
+  }
+
+  // Thread-safe version of startPlayout for use by public APIs
+  // This method can be called from any thread (app layer)
+  private boolean startPlayoutInternal() {
+    if (volumeLogger != null) {
+      volumeLogger.start();
+    }
+    Logging.d(TAG, "startPlayoutInternal");
+    assertTrue(audioTrack != null);
+    assertTrue(audioThread == null);
+
+    // Starts playing an audio track.
+    try {
+      audioTrack.play();
+    } catch (IllegalStateException e) {
+      reportWebRtcAudioTrackStartError(AudioTrackStartErrorCode.AUDIO_TRACK_START_EXCEPTION,
+          "AudioTrack.play failed: " + e.getMessage());
+      releaseAudioResources();
+      return false;
+    }
+    if (audioTrack.getPlayState() != AudioTrack.PLAYSTATE_PLAYING) {
+      reportWebRtcAudioTrackStartError(AudioTrackStartErrorCode.AUDIO_TRACK_START_STATE_MISMATCH,
+          "AudioTrack.play failed - incorrect state :" + audioTrack.getPlayState());
+      releaseAudioResources();
+      return false;
+    }
+
+    // Create and start new high-priority thread which calls AudioTrack.write()
+    // and where we also call the native nativeGetPlayoutData() callback to
+    // request decoded audio from WebRTC.
+    audioThread = new AudioTrackThread("AudioTrackJavaThread");
+    audioThread.start();
+    return true;
+  }
+
+  // Thread-safe version of stopPlayout for use by public APIs
+  // This method can be called from any thread (app layer)
+  private boolean stopPlayoutInternal() {
+    if (volumeLogger != null) {
+      volumeLogger.stop();
+    }
+    Logging.d(TAG, "stopPlayoutInternal");
+    assertTrue(audioThread != null);
+    logUnderrunCount();
+    audioThread.stopThread();
+
+    Logging.d(TAG, "Stopping the AudioTrackThread...");
+    audioThread.interrupt();
+    if (!ThreadUtils.joinUninterruptibly(audioThread, AUDIO_TRACK_THREAD_JOIN_TIMEOUT_MS)) {
+      Logging.e(TAG, "Join of AudioTrackThread timed out.");
+      WebRtcAudioUtils.logAudioState(TAG, context, audioManager);
+    }
+    Logging.d(TAG, "AudioTrackThread has now been stopped.");
+    audioThread = null;
+    if (audioTrack != null) {
+      Logging.d(TAG, "Calling AudioTrack.stop...");
+      try {
+        audioTrack.stop();
+        Logging.d(TAG, "AudioTrack.stop is done.");
+        doAudioTrackStateCallback(AUDIO_TRACK_STOP);
+      } catch (IllegalStateException e) {
+        Logging.e(TAG, "AudioTrack.stop failed: " + e.getMessage());
+      }
+    }
+    // Note: We don't call releaseAudioResources() here because we want to keep the AudioTrack
+    // for reconfiguration. The caller will handle releasing and recreating.
     return true;
   }
 
