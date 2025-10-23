@@ -698,12 +698,10 @@ class WebRtcAudioTrack {
     }
     
     // Update audio attributes with new usage
-    if (audioAttributes != null) {
-      audioAttributes = new AudioAttributes.Builder()
-          .setUsage(usage)
-          .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-          .build();
-    }
+    audioAttributes = new AudioAttributes.Builder()
+            .setUsage(usage)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+            .build();
     
     // Get current audio parameters
     // Sample rate: Query Android AudioManager system property
