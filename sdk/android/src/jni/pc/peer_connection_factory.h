@@ -14,6 +14,7 @@
 #include <jni.h>
 
 #include "api/peer_connection_interface.h"
+#include "modules/audio_device/include/audio_device.h"
 #include "rtc_base/thread.h"
 
 namespace webrtc {
@@ -26,7 +27,8 @@ jobject NativeToJavaPeerConnectionFactory(
     std::unique_ptr<SocketFactory> socket_factory,
     std::unique_ptr<Thread> network_thread,
     std::unique_ptr<Thread> worker_thread,
-    std::unique_ptr<Thread> signaling_thread);
+    std::unique_ptr<Thread> signaling_thread,
+    scoped_refptr<AudioDeviceModule> audio_device_module);
 
 }  // namespace jni
 }  // namespace webrtc

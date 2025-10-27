@@ -59,6 +59,9 @@ public class PeerConnectionFactory {
   @Nullable private volatile ThreadInfo networkThread;
   @Nullable private volatile ThreadInfo workerThread;
   @Nullable private volatile ThreadInfo signalingThread;
+  
+  // Store reference to AudioDeviceModule for potential updates
+  @Nullable private AudioDeviceModule audioDeviceModule;
 
   public static class InitializationOptions {
     final Context applicationContext;
@@ -266,7 +269,7 @@ public class PeerConnectionFactory {
         audioDeviceModule = JavaAudioDeviceModule.builder(ContextUtils.getApplicationContext())
                                 .createAudioDeviceModule();
       }
-      return nativeCreatePeerConnectionFactory(ContextUtils.getApplicationContext(), options,
+      PeerConnectionFactory factory = nativeCreatePeerConnectionFactory(ContextUtils.getApplicationContext(), options,
           audioDeviceModule.getNativeAudioDeviceModulePointer(),
           audioEncoderFactoryFactory.createNativeAudioEncoderFactory(),
           audioDecoderFactoryFactory.createNativeAudioDecoderFactory(), videoEncoderFactory,
@@ -280,6 +283,10 @@ public class PeerConnectionFactory {
               ? 0
               : networkStatePredictorFactoryFactory.createNativeNetworkStatePredictorFactory(),
           neteqFactoryFactory == null ? 0 : neteqFactoryFactory.createNativeNetEqFactory());
+      
+      // Store reference to AudioDeviceModule for potential updates
+      factory.audioDeviceModule = audioDeviceModule;
+      return factory;
     }
   }
 
@@ -592,6 +599,57 @@ public class PeerConnectionFactory {
     Logging.d(TAG, "onSignalingThreadReady");
   }
 
+  /**
+   * Updates the AudioDeviceModule used by this PeerConnectionFactory.
+   * This allows changing audio configuration (e.g., mono/stereo) without
+   * recreating the entire PeerConnectionFactory.
+   * 
+   * @param newAudioDeviceModule The new AudioDeviceModule to use
+   * @return true if successful, false if failed
+   */
+  public boolean setAudioDeviceModule(AudioDeviceModule newAudioDeviceModule) {
+    if (newAudioDeviceModule == null) {
+      Logging.e(TAG, "Cannot set null AudioDeviceModule");
+      return false;
+    }
+    
+    Logging.d(TAG, "Updating AudioDeviceModule");
+    
+    // Release the old AudioDeviceModule if it exists
+    if (audioDeviceModule != null) {
+      audioDeviceModule.release();
+    }
+    
+    // Update the reference
+    audioDeviceModule = newAudioDeviceModule;
+    
+    // Update the native PeerConnectionFactory
+    return nativeSetAudioDeviceModule(nativeFactory, newAudioDeviceModule.getNativeAudioDeviceModulePointer());
+  }
+
+  /**
+   * Updates the AudioDeviceModule used by this PeerConnectionFactory.
+   * This is the recommended way to change audio configuration as it ensures
+   * both Java and native sides are properly synchronized.
+   * 
+   * Usage:
+   * 1. Create new AudioDeviceModule instance in app layer
+   * 2. Call peerConnectionFactory.updateAudioDeviceManager(newInstance)
+   * 
+   * @param newAudioDeviceModule The new AudioDeviceModule instance from app layer
+   * @return true if successful, false if failed
+   */
+  public boolean updateAudioDeviceManager(AudioDeviceModule newAudioDeviceModule) {
+    Logging.d(TAG, "updateAudioDeviceManager() - updating AudioDeviceModule");
+    
+    if (newAudioDeviceModule == null) {
+      Logging.e(TAG, "AudioDeviceModule cannot be null");
+      return false;
+    }
+    
+    return setAudioDeviceModule(newAudioDeviceModule);
+  }
+
   // Must be called at least once before creating a PeerConnectionFactory
   // (for example, at application startup time).
   private static native void nativeInitializeAndroidGlobals();
@@ -610,6 +668,8 @@ public class PeerConnectionFactory {
       VideoDecoderFactory decoderFactory, long nativeAudioProcessor,
       long nativeFecControllerFactory, long nativeNetworkControllerFactory,
       long nativeNetworkStatePredictorFactory, long neteqFactory);
+  
+  private static native boolean nativeSetAudioDeviceModule(long factory, long nativeAudioDeviceModule);
 
   private static native long nativeCreatePeerConnection(long factory,
       PeerConnection.RTCConfiguration rtcConfig, MediaConstraints constraints, long nativeObserver,

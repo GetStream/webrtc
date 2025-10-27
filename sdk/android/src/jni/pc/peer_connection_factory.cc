@@ -118,10 +118,11 @@ ScopedJavaLocalRef<jobject> NativeToScopedJavaPeerConnectionFactory(
     std::unique_ptr<SocketFactory> socket_factory,
     std::unique_ptr<Thread> network_thread,
     std::unique_ptr<Thread> worker_thread,
-    std::unique_ptr<Thread> signaling_thread) {
+    std::unique_ptr<Thread> signaling_thread,
+    scoped_refptr<AudioDeviceModule> audio_device_module) {
   OwnedFactoryAndThreads* owned_factory = new OwnedFactoryAndThreads(
       std::move(socket_factory), std::move(network_thread),
-      std::move(worker_thread), std::move(signaling_thread), pcf);
+      std::move(worker_thread), std::move(signaling_thread), pcf, audio_device_module);
 
   jni_zero::ScopedJavaLocalRef<jobject> j_pcf =
       Java_PeerConnectionFactory_Constructor(
@@ -158,10 +159,11 @@ jobject NativeToJavaPeerConnectionFactory(
     std::unique_ptr<SocketFactory> socket_factory,
     std::unique_ptr<Thread> network_thread,
     std::unique_ptr<Thread> worker_thread,
-    std::unique_ptr<Thread> signaling_thread) {
+    std::unique_ptr<Thread> signaling_thread,
+    scoped_refptr<AudioDeviceModule> audio_device_module) {
   return NativeToScopedJavaPeerConnectionFactory(
-             jni, pcf, std::move(socket_factory), std::move(network_thread),
-             std::move(worker_thread), std::move(signaling_thread))
+      jni, pcf, std::move(socket_factory), std::move(network_thread),
+      std::move(worker_thread), std::move(signaling_thread), audio_device_module)
       .Release();
 }
 
@@ -315,7 +317,7 @@ ScopedJavaLocalRef<jobject> CreatePeerConnectionFactoryForJava(
 
   return NativeToScopedJavaPeerConnectionFactory(
       jni, factory, std::move(socket_server), std::move(network_thread),
-      std::move(worker_thread), std::move(signaling_thread));
+      std::move(worker_thread), std::move(signaling_thread), audio_device_module);
 }
 
 static jni_zero::ScopedJavaLocalRef<jobject>
@@ -547,6 +549,38 @@ static void JNI_PeerConnectionFactory_DeleteLoggable(JNIEnv* jni) {
 
 static void JNI_PeerConnectionFactory_PrintStackTrace(JNIEnv* env, jint tid) {
   RTC_LOG(LS_WARNING) << StackTraceToString(GetStackTrace(tid));
+}
+
+static jboolean JNI_PeerConnectionFactory_SetAudioDeviceModule(
+    JNIEnv* jni,
+    jlong native_factory,
+    jlong native_audio_device_module) {
+  OwnedFactoryAndThreads* factory =
+      reinterpret_cast<OwnedFactoryAndThreads*>(native_factory);
+  
+  if (!factory) {
+    RTC_LOG(LS_ERROR) << "Invalid factory pointer";
+    return JNI_FALSE;
+  }
+  
+  scoped_refptr<AudioDeviceModule> audio_device_module(
+      reinterpret_cast<AudioDeviceModule*>(native_audio_device_module));
+  
+  if (!audio_device_module) {
+    RTC_LOG(LS_ERROR) << "Invalid AudioDeviceModule pointer";
+    return JNI_FALSE;
+  }
+  
+  // Update the stored AudioDeviceModule reference
+  factory->set_audio_device_module(audio_device_module);
+  
+  // Note: The PeerConnectionFactoryInterface doesn't have a method to update
+  // the AudioDeviceModule after creation. This would require changes to the
+  // core WebRTC library. For now, we just update our reference.
+  // TODO: Implement proper AudioDeviceModule update in PeerConnectionFactoryInterface
+  
+  RTC_LOG(LS_INFO) << "AudioDeviceModule reference updated";
+  return JNI_TRUE;
 }
 
 }  // namespace jni

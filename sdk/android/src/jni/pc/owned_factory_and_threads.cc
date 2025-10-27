@@ -20,12 +20,19 @@ OwnedFactoryAndThreads::OwnedFactoryAndThreads(
     std::unique_ptr<Thread> network_thread,
     std::unique_ptr<Thread> worker_thread,
     std::unique_ptr<Thread> signaling_thread,
-    const scoped_refptr<PeerConnectionFactoryInterface>& factory)
+    const scoped_refptr<PeerConnectionFactoryInterface>& factory,
+    const scoped_refptr<AudioDeviceModule>& audio_device_module)
     : socket_factory_(std::move(socket_factory)),
       network_thread_(std::move(network_thread)),
       worker_thread_(std::move(worker_thread)),
       signaling_thread_(std::move(signaling_thread)),
-      factory_(factory) {}
+      factory_(factory),
+      audio_device_module_(audio_device_module) {}
+
+void OwnedFactoryAndThreads::set_audio_device_module(
+    const scoped_refptr<AudioDeviceModule>& audio_device_module) {
+  audio_device_module_ = audio_device_module;
+}
 
 }  // namespace jni
 }  // namespace webrtc
