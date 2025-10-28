@@ -75,6 +75,11 @@ class WebRtcAudioTrack {
   private byte[] emptyBytes;
   private boolean useLowLatency;
   private int initialBufferSizeInFrames;
+  
+  // Cached values from native initPlayout
+  private int cachedSampleRate;
+  private int cachedChannels;
+  private double cachedBufferSizeFactor;
 
   private final @Nullable AudioTrackErrorCallback errorCallback;
   private final @Nullable AudioTrackStateCallback stateCallback;
@@ -198,8 +203,16 @@ class WebRtcAudioTrack {
   }
 
   @CalledByNative
-  private int initPlayout(int sampleRate, int channels, double bufferSizeFactor) {
-    threadChecker.checkIsOnValidThread();
+  private int initPlayout(int sampleRate, int channels, double bufferSizeFactor, boolean checkThread) {
+    if (checkThread) {
+      threadChecker.checkIsOnValidThread();
+    }
+    
+    // Cache the values for reuse from app layer
+    cachedSampleRate = sampleRate;
+    cachedChannels = channels;
+    cachedBufferSizeFactor = bufferSizeFactor;
+    
     Logging.d(TAG,
         "initPlayout(sampleRate=" + sampleRate + ", channels=" + channels
             + ", bufferSizeFactor=" + bufferSizeFactor + ")");
@@ -284,96 +297,11 @@ class WebRtcAudioTrack {
     return minBufferSizeInBytes;
   }
 
-  // Thread-safe version of initPlayout for use by public APIs
-  // This method can be called from any thread (app layer)
-  private int initPlayoutThreadSafe(int sampleRate, int channels, double bufferSizeFactor) {
-    Logging.d(TAG,
-        "initPlayoutThreadSafe(sampleRate=" + sampleRate + ", channels=" + channels
-            + ", bufferSizeFactor=" + bufferSizeFactor + ")");
-    final int bytesPerFrame = channels * (BITS_PER_SAMPLE / 8);
-    byteBuffer = ByteBuffer.allocateDirect(bytesPerFrame * (sampleRate / BUFFERS_PER_SECOND));
-    Logging.d(TAG, "byteBuffer.capacity: " + byteBuffer.capacity());
-    emptyBytes = new byte[byteBuffer.capacity()];
-    // Rather than passing the ByteBuffer with every callback (requiring
-    // the potentially expensive GetDirectBufferAddress) we simply have the
-    // the native class cache the address to the memory once.
-    nativeCacheDirectBufferAddress(nativeAudioTrack, byteBuffer);
-
-    // Get the minimum buffer size required for the successful creation of an
-    // AudioTrack object to be created in the MODE_STREAM mode.
-    // Note that this size doesn't guarantee a smooth playback under load.
-    final int channelConfig = channelCountToConfiguration(channels);
-    final int minBufferSizeInBytes = (int) (AudioTrack.getMinBufferSize(sampleRate, channelConfig,
-                                                AudioFormat.ENCODING_PCM_16BIT)
-        * bufferSizeFactor);
-    Logging.d(TAG, "minBufferSizeInBytes: " + minBufferSizeInBytes);
-    // For the streaming mode, data must be written to the audio sink in
-    // chunks of size (given by byteBuffer.capacity()) less than or equal
-    // to the total buffer size `minBufferSizeInBytes`. But, we have seen
-    // reports of "getMinBufferSize(): error querying hardware". Hence, it
-    // can happen that `minBufferSizeInBytes` contains an invalid value.
-    if (minBufferSizeInBytes < byteBuffer.capacity()) {
-      reportWebRtcAudioTrackInitError("AudioTrack.getMinBufferSize returns an invalid value.");
-      return -1;
-    }
-
-    // Don't use low-latency mode when a bufferSizeFactor > 1 is used. When bufferSizeFactor > 1
-    // we want to use a larger buffer to prevent underruns. However, low-latency mode would
-    // decrease the buffer size, which makes the bufferSizeFactor have no effect.
-    if (bufferSizeFactor > 1.0) {
-      useLowLatency = false;
-    }
-
-    // Ensure that prevision audio session was stopped correctly before trying
-    // to create a new AudioTrack.
-    if (audioTrack != null) {
-      reportWebRtcAudioTrackInitError("Conflict with existing AudioTrack.");
-      return -1;
-    }
-    try {
-      // Create an AudioTrack object and initialize its associated audio buffer.
-      // The size of this buffer determines how long an AudioTrack can play
-      // before running out of data.
-      if (useLowLatency && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        // On API level 26 or higher, we can use a low latency mode.
-        audioTrack = createAudioTrackOnOreoOrHigher(
-            sampleRate, channelConfig, minBufferSizeInBytes, audioAttributes);
-      } else {
-        // As we are on API level 21 or higher, it is possible to use a special AudioTrack
-        // constructor that uses AudioAttributes and AudioFormat as input. It allows us to
-        // supersede the notion of stream types for defining the behavior of audio playback,
-        // and to allow certain platforms or routing policies to use this information for more
-        // refined volume or routing decisions.
-        audioTrack = createAudioTrackBeforeOreo(
-            sampleRate, channelConfig, minBufferSizeInBytes, audioAttributes);
-      }
-    } catch (IllegalArgumentException e) {
-      reportWebRtcAudioTrackInitError(e.getMessage());
-      releaseAudioResources();
-      return -1;
-    }
-
-    // It can happen that an AudioTrack is created but it was not successfully
-    // initialized upon creation. Seems to be the case e.g. when the maximum
-    // number of globally available audio tracks is exceeded.
-    if (audioTrack == null || audioTrack.getState() != AudioTrack.STATE_INITIALIZED) {
-      reportWebRtcAudioTrackInitError("Initialization of audio track failed.");
-      releaseAudioResources();
-      return -1;
-    }
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-      initialBufferSizeInFrames = audioTrack.getBufferSizeInFrames();
-    } else {
-      initialBufferSizeInFrames = -1;
-    }
-    logMainParameters();
-    logMainParametersExtended();
-    return minBufferSizeInBytes;
-  }
-
   @CalledByNative
-  private boolean startPlayout() {
-    threadChecker.checkIsOnValidThread();
+  private boolean startPlayout(boolean checkThread) {
+    if (checkThread) {
+      threadChecker.checkIsOnValidThread();
+    }
     if (volumeLogger != null) {
       volumeLogger.start();
     }
@@ -406,8 +334,10 @@ class WebRtcAudioTrack {
   }
 
   @CalledByNative
-  private boolean stopPlayout() {
-    threadChecker.checkIsOnValidThread();
+  private boolean stopPlayout(boolean checkThread) {
+    if (checkThread) {
+      threadChecker.checkIsOnValidThread();
+    }
     if (volumeLogger != null) {
       volumeLogger.stop();
     }
@@ -648,84 +578,63 @@ class WebRtcAudioTrack {
   // ============================================================================
 
   /**
-   * Changes both the channel configuration and audio usage of the AudioTrack.
-   * This recreates the AudioTrack with the new configuration.
+   * Updates the audio usage of the AudioTrack.
+   * Since the ADM is always initialized in stereo mode, this method only updates the AudioAttributes
+   * to change audio behavior (e.g., voice communication vs media playback).
    * If playout is currently active, it will be stopped and automatically restarted
-   * with the new configuration.
+   * with the new usage.
    * 
    * This method can be called from any thread (app layer).
    * 
-   * @param channels Number of channels: 1 for mono, 2 for stereo
    * @param usage Audio usage type (AudioAttributes.USAGE_*)
    * @return true if successful, false if failed
    */
-  public boolean setChannelConfigurationAndUsage(int channels, int usage) {
-    Logging.d(TAG, "setChannelConfigurationAndUsage(channels=" + channels + ", usage=" + usage + ") - called from app layer");
-    return setChannelConfigurationAndUsageInternal(channels, usage);
-  }
-
-  // ============================================================================
-  // INTERNAL IMPLEMENTATION METHODS
-  // ============================================================================
-
-
-  // Internal implementation of setChannelConfigurationAndUsage
-  private synchronized boolean setChannelConfigurationAndUsageInternal(int channels, int usage) {
-    Logging.d(TAG, "setChannelConfigurationAndUsage(channels=" + channels + ", usage=" + usage + ")");
-
-    // Validate channel count
-    if (channels != 1 && channels != 2) {
-      Logging.e(TAG, "Invalid channel count: " + channels + ". Must be 1 (mono) or 2 (stereo)");
-      return false;
-    }
+  public boolean updateAudioTrackUsage(int usage) {
+    Logging.d(TAG, "updateAudioTrackUsage(usage=" + usage + ")");
 
     // Check if playout was active before reconfiguration
     boolean wasPlaying = audioTrack != null && audioTrack.getPlayState() == AudioTrack.PLAYSTATE_PLAYING;
     
     // if AudioTrack is currently playing, stop it first
     if (wasPlaying) {
-      Logging.d(TAG, "Stopping current playout for configuration change");
-      if (!stopPlayoutInternal()) {
-        Logging.w(TAG, "Failed to stop playout before configuration change");
+      Logging.d(TAG, "Stopping current playout for usage change");
+      if (!stopPlayout(false)) {
+        Logging.w(TAG, "Failed to stop playout before usage change");
         return false;
       }
     }
     
-    // If AudioTrack exists, release it first
-    if (audioTrack != null) {
-      Logging.d(TAG, "Releasing existing AudioTrack for configuration change");
-      releaseAudioResources();
+    // Update audio attributes with new usage (always stereo, only usage changes)
+    int contentType = AudioAttributes.CONTENT_TYPE_SPEECH
+    if (usage == AudioAttributes.USAGE_MEDIA) {
+      contentType = AudioAttributes.CONTENT_TYPE_MUSIC
     }
-    
-    // Update audio attributes with new usage
     audioAttributes = new AudioAttributes.Builder()
             .setUsage(usage)
-            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+            .setContentType(contentType)
             .build();
     
-    // Get current audio parameters
-    // Sample rate: Query Android AudioManager system property
-    int sampleRate = WebRtcAudioManager.getSampleRate(audioManager);
+    // Use cached values from native initPlayout (always stereo)
+    int sampleRate = cachedSampleRate;
+    int channels = cachedChannels;
+    double bufferSizeFactor = cachedBufferSizeFactor;
     
-    // Buffer size factor: Use default value of 1.0
-    double bufferSizeFactor = 1.0;
+    Logging.d(TAG, "Using cached sampleRate=" + sampleRate + ", channels=" + channels + ", usage=" + usage);
     
-    Logging.d(TAG, "Using sampleRate=" + sampleRate + " and bufferSizeFactor=" + bufferSizeFactor);
-    
-    // Reinitialize with new channel configuration
-    int result = initPlayoutThreadSafe(sampleRate, channels, bufferSizeFactor);
+    // Reinitialize with cached parameters but new usage
+    int result = initPlayout(sampleRate, channels, bufferSizeFactor, false);
     if (result < 0) {
-      Logging.e(TAG, "Failed to reinitialize AudioTrack with new configuration");
+      Logging.e(TAG, "Failed to reinitialize AudioTrack with new usage");
       return false;
     }
     
-    Logging.d(TAG, "Successfully changed configuration to " + channels + " channels, usage=" + usage);
+    Logging.d(TAG, "Successfully updated usage to " + usage);
     
     // If playout was active before reconfiguration, restart it automatically
     if (wasPlaying) {
-      Logging.d(TAG, "Restarting playout with new configuration");
-      if (!startPlayoutInternal()) {
-        Logging.e(TAG, "Failed to restart playout after configuration change");
+      Logging.d(TAG, "Restarting playout with new usage");
+      if (!startPlayout(false)) {
+        Logging.e(TAG, "Failed to restart playout after usage change");
         return false;
       }
     }
@@ -733,73 +642,6 @@ class WebRtcAudioTrack {
     return true;
   }
 
-  // Thread-safe version of startPlayout for use by public APIs
-  // This method can be called from any thread (app layer)
-  private boolean startPlayoutInternal() {
-    if (volumeLogger != null) {
-      volumeLogger.start();
-    }
-    Logging.d(TAG, "startPlayoutInternal");
-    assertTrue(audioTrack != null);
-    assertTrue(audioThread == null);
-
-    // Starts playing an audio track.
-    try {
-      audioTrack.play();
-    } catch (IllegalStateException e) {
-      reportWebRtcAudioTrackStartError(AudioTrackStartErrorCode.AUDIO_TRACK_START_EXCEPTION,
-          "AudioTrack.play failed: " + e.getMessage());
-      releaseAudioResources();
-      return false;
-    }
-    if (audioTrack.getPlayState() != AudioTrack.PLAYSTATE_PLAYING) {
-      reportWebRtcAudioTrackStartError(AudioTrackStartErrorCode.AUDIO_TRACK_START_STATE_MISMATCH,
-          "AudioTrack.play failed - incorrect state :" + audioTrack.getPlayState());
-      releaseAudioResources();
-      return false;
-    }
-
-    // Create and start new high-priority thread which calls AudioTrack.write()
-    // and where we also call the native nativeGetPlayoutData() callback to
-    // request decoded audio from WebRTC.
-    audioThread = new AudioTrackThread("AudioTrackJavaThread");
-    audioThread.start();
-    return true;
-  }
-
-  // Thread-safe version of stopPlayout for use by public APIs
-  // This method can be called from any thread (app layer)
-  private boolean stopPlayoutInternal() {
-    if (volumeLogger != null) {
-      volumeLogger.stop();
-    }
-    Logging.d(TAG, "stopPlayoutInternal");
-    assertTrue(audioThread != null);
-    logUnderrunCount();
-    audioThread.stopThread();
-
-    Logging.d(TAG, "Stopping the AudioTrackThread...");
-    audioThread.interrupt();
-    if (!ThreadUtils.joinUninterruptibly(audioThread, AUDIO_TRACK_THREAD_JOIN_TIMEOUT_MS)) {
-      Logging.e(TAG, "Join of AudioTrackThread timed out.");
-      WebRtcAudioUtils.logAudioState(TAG, context, audioManager);
-    }
-    Logging.d(TAG, "AudioTrackThread has now been stopped.");
-    audioThread = null;
-    if (audioTrack != null) {
-      Logging.d(TAG, "Calling AudioTrack.stop...");
-      try {
-        audioTrack.stop();
-        Logging.d(TAG, "AudioTrack.stop is done.");
-        doAudioTrackStateCallback(AUDIO_TRACK_STOP);
-      } catch (IllegalStateException e) {
-        Logging.e(TAG, "AudioTrack.stop failed: " + e.getMessage());
-      }
-    }
-    // Note: We don't call releaseAudioResources() here because we want to keep the AudioTrack
-    // for reconfiguration. The caller will handle releasing and recreating.
-    return true;
-  }
 
   // Releases the native AudioTrack resources.
   private void releaseAudioResources() {

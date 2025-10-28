@@ -453,19 +453,18 @@ public class JavaAudioDeviceModule implements AudioDeviceModule {
   }
 
   /**
-   * Sets the stereo mode and audio usage of the AudioTrack.
-   * This recreates the AudioTrack with the new configuration.
+   * Updates the audio usage of the AudioTrack.
+   * Since the ADM is always initialized in stereo mode, this method only updates the AudioAttributes
+   * to change audio behavior (e.g., voice communication vs media playback).
    * If playout is currently active, it will be stopped and automatically restarted
-   * with the new configuration.
+   * with the new usage.
    * 
-   * @param isStereo true for stereo (2 channels), false for mono (1 channel)
    * @param usage Audio usage type (AudioAttributes.USAGE_*)
    * @return true if successful, false if failed
    */
-  public boolean setStereoMode(boolean isStereo, int usage) {
+  public boolean updateAudioTrackUsage(int usage) {
     if (audioOutput != null) {
-      int channels = isStereo ? 2 : 1;
-      return audioOutput.setChannelConfigurationAndUsage(channels, usage);
+      return audioOutput.updateAudioTrackUsage(usage);
     }
     return false;
   }

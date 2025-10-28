@@ -93,7 +93,7 @@ int32_t AudioTrackJni::InitPlayout() {
     buffer_size_factor = 1.0;
   int requested_buffer_size_bytes = Java_WebRtcAudioTrack_initPlayout(
       env_, j_audio_track_, audio_parameters_.sample_rate(),
-      static_cast<int>(audio_parameters_.channels()), buffer_size_factor);
+      static_cast<int>(audio_parameters_.channels()), buffer_size_factor, true);
   if (requested_buffer_size_bytes < 0) {
     RTC_LOG(LS_ERROR) << "InitPlayout failed";
     return -1;
@@ -138,7 +138,7 @@ int32_t AudioTrackJni::StartPlayout() {
         << "Playout can not start since InitPlayout must succeed first";
     return 0;
   }
-  if (!Java_WebRtcAudioTrack_startPlayout(env_, j_audio_track_)) {
+  if (!Java_WebRtcAudioTrack_startPlayout(env_, j_audio_track_, true)) {
     RTC_LOG(LS_ERROR) << "StartPlayout failed";
     return -1;
   }
@@ -164,7 +164,7 @@ int32_t AudioTrackJni::StopPlayout() {
           sample_rate_hz,
       -500, 100, 100);
 
-  if (!Java_WebRtcAudioTrack_stopPlayout(env_, j_audio_track_)) {
+  if (!Java_WebRtcAudioTrack_stopPlayout(env_, j_audio_track_, true)) {
     RTC_LOG(LS_ERROR) << "StopPlayout failed";
     return -1;
   }
