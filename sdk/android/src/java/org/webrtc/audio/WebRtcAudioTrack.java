@@ -592,6 +592,12 @@ class WebRtcAudioTrack {
   public boolean updateAudioTrackUsage(int usage) {
     Logging.d(TAG, "updateAudioTrackUsage(usage=" + usage + ")");
 
+    // Check if the usage is already the same
+    if (audioAttributes != null && audioAttributes.getUsage() == usage) {
+      Logging.d(TAG, "Usage is already set to " + usage + ", no update needed");
+      return true;
+    }
+
     // Check if playout was active before reconfiguration
     boolean wasPlaying = audioTrack != null && audioTrack.getPlayState() == AudioTrack.PLAYSTATE_PLAYING;
     
@@ -605,9 +611,9 @@ class WebRtcAudioTrack {
     }
     
     // Update audio attributes with new usage (always stereo, only usage changes)
-    int contentType = AudioAttributes.CONTENT_TYPE_SPEECH
+    int contentType = AudioAttributes.CONTENT_TYPE_SPEECH;
     if (usage == AudioAttributes.USAGE_MEDIA) {
-      contentType = AudioAttributes.CONTENT_TYPE_MUSIC
+      contentType = AudioAttributes.CONTENT_TYPE_MUSIC;
     }
     audioAttributes = new AudioAttributes.Builder()
             .setUsage(usage)
