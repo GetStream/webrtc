@@ -108,7 +108,7 @@ class WebRtcAudioTrack {
       Logging.d(TAG, "AudioTrackThread" + WebRtcAudioUtils.getThreadInfo());
       
       if (checkPlayState) {
-        assertTrue(audioTrack != null && audioTrack.getPlayState() == AudioTrack.PLAYSTATE_PLAYING);
+        assertTrue(audioTrack.getPlayState() == AudioTrack.PLAYSTATE_PLAYING);
       }
 
       // Audio playout has started and the client is informed about it.
@@ -132,7 +132,7 @@ class WebRtcAudioTrack {
           byteBuffer.put(emptyBytes);
           byteBuffer.position(0);
         }
-        int bytesWritten = audioTrack != null ? audioTrack.write(byteBuffer, sizeInBytes, AudioTrack.WRITE_BLOCKING) : -1;
+        int bytesWritten = audioTrack.write(byteBuffer, sizeInBytes, AudioTrack.WRITE_BLOCKING);
         if (bytesWritten != sizeInBytes) {
           Logging.e(TAG, "AudioTrack.write played invalid number of bytes: " + bytesWritten);
           // If a write() returns a negative value, an error has occurred.
@@ -143,7 +143,7 @@ class WebRtcAudioTrack {
           }
         }
 
-        if (audioSamplesReadyCallback != null && keepAlive && audioTrack != null) {
+        if (audioSamplesReadyCallback != null && keepAlive) {
           // Copy the entire byte buffer array. The start of the byteBuffer is not necessarily
           // at index 0.
           byte[] data = Arrays.copyOfRange(byteBuffer.array(), byteBuffer.arrayOffset(),
@@ -153,7 +153,7 @@ class WebRtcAudioTrack {
                   audioTrack.getChannelCount(), audioTrack.getSampleRate(), data));
         }
 
-        if (useLowLatency && audioTrack != null) {
+        if (useLowLatency) {
           bufferManager.maybeAdjustBufferSize(audioTrack);
         }
         // The byte buffer must be rewinded since byteBuffer.position() is
@@ -579,8 +579,7 @@ class WebRtcAudioTrack {
 
   /**
    * Updates the audio usage of the AudioTrack.
-   * Since the ADM is always initialized in stereo mode, this method only updates the AudioAttributes
-   * to change audio behavior (e.g., voice communication vs media playback).
+   * This method  updates the AudioAttributes to change audio behavior (e.g., voice communication vs media playback).
    * If playout is currently active, it will be stopped and automatically restarted
    * with the new usage.
    * 
@@ -610,7 +609,7 @@ class WebRtcAudioTrack {
       }
     }
     
-    // Update audio attributes with new usage (always stereo, only usage changes)
+    // Update audio attributes with new usage
     int contentType = AudioAttributes.CONTENT_TYPE_SPEECH;
     if (usage == AudioAttributes.USAGE_MEDIA) {
       contentType = AudioAttributes.CONTENT_TYPE_MUSIC;
@@ -620,7 +619,7 @@ class WebRtcAudioTrack {
             .setContentType(contentType)
             .build();
     
-    // Use cached values from native initPlayout (always stereo)
+    // Use cached values from native initPlayout
     int sampleRate = cachedSampleRate;
     int channels = cachedChannels;
     double bufferSizeFactor = cachedBufferSizeFactor;

@@ -454,8 +454,8 @@ public class JavaAudioDeviceModule implements AudioDeviceModule {
 
   /**
    * Updates the audio usage of the AudioTrack.
-   * Since the ADM is always initialized in stereo mode, this method only updates the AudioAttributes
-   * to change audio behavior (e.g., voice communication vs media playback).
+   * This method updates the AudioAttributes to change audio behavior
+   * (e.g., voice communication vs media playback).
    * If playout is currently active, it will be stopped and automatically restarted
    * with the new usage.
    * 
