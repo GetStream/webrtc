@@ -368,6 +368,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 
   _workerThread->BlockingCall([module, state] {
     webrtc::AudioEngineDevice::EngineState result;
+    if (module->GetEngineState(&result) != 0) {
+      result = webrtc::AudioEngineDevice::EngineState();
+    }
     result.output_enabled = state.outputEnabled;
     result.output_running = state.outputRunning;
     result.input_enabled = state.inputEnabled;
@@ -523,6 +526,40 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 
   _workerThread->BlockingCall(
       [module, enabled] { return module->SetVoiceProcessingAGCEnabled(enabled) == 0; });
+}
+
+- (BOOL)isStereoPlayoutAvailable {
+  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
+  if (module == nullptr) return NO;
+
+  return _workerThread->BlockingCall([module] {
+    bool available = false;
+    return module->StereoPlayoutIsAvailable(&available) == 0 ? (available ? YES : NO) : NO;
+  });
+}
+
+- (BOOL)isStereoPlayoutEnabled {
+  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
+  if (module == nullptr) return NO;
+
+  return _workerThread->BlockingCall([module] {
+    bool enabled = false;
+    return module->StereoPlayout(&enabled) == 0 ? (enabled ? YES : NO) : NO;
+  });
+}
+
+- (void)setStereoPlayoutEnabled:(BOOL)enabled {
+  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
+  if (module == nullptr) return;
+
+  _workerThread->BlockingCall([module, enabled] {
+    const bool stereo_enabled = enabled == YES;
+    int32_t result = module->SetStereoPlayout(stereo_enabled);
+    if (result != 0) {
+      RTCLogError(@"Failed to set stereo playout (%d)", result);
+    }
+    return result;
+  });
 }
 
 #pragma mark - Private

@@ -185,6 +185,15 @@ RTC_OBJC_EXPORT
 /// enabled. Enabled by default when VPIO is enabled.
 @property(nonatomic, assign, getter=isVoiceProcessingAGCEnabled) BOOL voiceProcessingAGCEnabled;
 
+/// Indicates whether stereo playout can currently be enabled. Returns NO when only mono output is
+/// available (for example when Voice-Processing I/O is active or the route exposes a single
+/// channel).
+@property(nonatomic, readonly, getter=isStereoPlayoutAvailable) BOOL stereoPlayoutAvailable;
+
+/// Toggle stereo playout when available. If the underlying engine rejects the request (for example
+/// because the route only exposes a single channel), the property remains unchanged.
+@property(nonatomic, assign, getter=isStereoPlayoutEnabled) BOOL stereoPlayoutEnabled;
+
 @end
 
 NS_ASSUME_NONNULL_END
