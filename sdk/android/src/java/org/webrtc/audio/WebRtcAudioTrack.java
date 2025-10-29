@@ -75,6 +75,11 @@ class WebRtcAudioTrack {
   private byte[] emptyBytes;
   private boolean useLowLatency;
   private int initialBufferSizeInFrames;
+  
+  // Cached values from native initPlayout
+  private int cachedSampleRate;
+  private int cachedChannels;
+  private double cachedBufferSizeFactor;
 
   private final @Nullable AudioTrackErrorCallback errorCallback;
   private final @Nullable AudioTrackStateCallback stateCallback;
@@ -198,8 +203,16 @@ class WebRtcAudioTrack {
   }
 
   @CalledByNative
-  private int initPlayout(int sampleRate, int channels, double bufferSizeFactor) {
-    threadChecker.checkIsOnValidThread();
+  private int initPlayout(int sampleRate, int channels, double bufferSizeFactor, boolean checkThread) {
+    if (checkThread) {
+      threadChecker.checkIsOnValidThread();
+    }
+    
+    // Cache the values for reuse from app layer
+    cachedSampleRate = sampleRate;
+    cachedChannels = channels;
+    cachedBufferSizeFactor = bufferSizeFactor;
+    
     Logging.d(TAG,
         "initPlayout(sampleRate=" + sampleRate + ", channels=" + channels
             + ", bufferSizeFactor=" + bufferSizeFactor + ")");
@@ -285,8 +298,10 @@ class WebRtcAudioTrack {
   }
 
   @CalledByNative
-  private boolean startPlayout() {
-    threadChecker.checkIsOnValidThread();
+  private boolean startPlayout(boolean checkThread) {
+    if (checkThread) {
+      threadChecker.checkIsOnValidThread();
+    }
     if (volumeLogger != null) {
       volumeLogger.start();
     }
@@ -319,8 +334,10 @@ class WebRtcAudioTrack {
   }
 
   @CalledByNative
-  private boolean stopPlayout() {
-    threadChecker.checkIsOnValidThread();
+  private boolean stopPlayout(boolean checkThread) {
+    if (checkThread) {
+      threadChecker.checkIsOnValidThread();
+    }
     if (volumeLogger != null) {
       volumeLogger.stop();
     }
@@ -555,6 +572,81 @@ class WebRtcAudioTrack {
     Logging.w(TAG, "setSpeakerMute(" + mute + ")");
     speakerMute = mute;
   }
+
+  // ============================================================================
+  // PUBLIC API FOR APP LAYER
+  // ============================================================================
+
+  /**
+   * Updates the audio usage of the AudioTrack.
+   * This method  updates the AudioAttributes to change audio behavior (e.g., voice communication vs media playback).
+   * If playout is currently active, it will be stopped and automatically restarted
+   * with the new usage.
+   * 
+   * This method can be called from any thread (app layer).
+   * 
+   * @param usage Audio usage type (AudioAttributes.USAGE_*)
+   * @return true if successful, false if failed
+   */
+  public boolean updateAudioTrackUsage(int usage) {
+    Logging.d(TAG, "updateAudioTrackUsage(usage=" + usage + ")");
+
+    // Check if the usage is already the same
+    if (audioAttributes != null && audioAttributes.getUsage() == usage) {
+      Logging.d(TAG, "Usage is already set to " + usage + ", no update needed");
+      return true;
+    }
+
+    // Check if playout was active before reconfiguration
+    boolean wasPlaying = audioTrack != null && audioTrack.getPlayState() == AudioTrack.PLAYSTATE_PLAYING;
+    
+    // if AudioTrack is currently playing, stop it first
+    if (wasPlaying) {
+      Logging.d(TAG, "Stopping current playout for usage change");
+      if (!stopPlayout(false)) {
+        Logging.w(TAG, "Failed to stop playout before usage change");
+        return false;
+      }
+    }
+    
+    // Update audio attributes with new usage
+    int contentType = AudioAttributes.CONTENT_TYPE_SPEECH;
+    if (usage == AudioAttributes.USAGE_MEDIA) {
+      contentType = AudioAttributes.CONTENT_TYPE_MUSIC;
+    }
+    audioAttributes = new AudioAttributes.Builder()
+            .setUsage(usage)
+            .setContentType(contentType)
+            .build();
+    
+    // Use cached values from native initPlayout
+    int sampleRate = cachedSampleRate;
+    int channels = cachedChannels;
+    double bufferSizeFactor = cachedBufferSizeFactor;
+    
+    Logging.d(TAG, "Using cached sampleRate=" + sampleRate + ", channels=" + channels + ", usage=" + usage);
+    
+    // Reinitialize with cached parameters but new usage
+    int result = initPlayout(sampleRate, channels, bufferSizeFactor, false);
+    if (result < 0) {
+      Logging.e(TAG, "Failed to reinitialize AudioTrack with new usage");
+      return false;
+    }
+    
+    Logging.d(TAG, "Successfully updated usage to " + usage);
+    
+    // If playout was active before reconfiguration, restart it automatically
+    if (wasPlaying) {
+      Logging.d(TAG, "Restarting playout with new usage");
+      if (!startPlayout(false)) {
+        Logging.e(TAG, "Failed to restart playout after usage change");
+        return false;
+      }
+    }
+    
+    return true;
+  }
+
 
   // Releases the native AudioTrack resources.
   private void releaseAudioResources() {

@@ -452,6 +452,23 @@ public class JavaAudioDeviceModule implements AudioDeviceModule {
     }
   }
 
+  /**
+   * Updates the audio usage of the AudioTrack.
+   * This method updates the AudioAttributes to change audio behavior
+   * (e.g., voice communication vs media playback).
+   * If playout is currently active, it will be stopped and automatically restarted
+   * with the new usage.
+   * 
+   * @param usage Audio usage type (AudioAttributes.USAGE_*)
+   * @return true if successful, false if failed
+   */
+  public boolean updateAudioTrackUsage(int usage) {
+    if (audioOutput != null) {
+      return audioOutput.updateAudioTrackUsage(usage);
+    }
+    return false;
+  }
+
   @Override
   public void setSpeakerMute(boolean mute) {
     Logging.d(TAG, "setSpeakerMute: " + mute);
