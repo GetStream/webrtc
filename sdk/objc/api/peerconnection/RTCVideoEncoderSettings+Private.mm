@@ -15,8 +15,10 @@
 @implementation RTC_OBJC_TYPE (RTCVideoEncoderSettings)
 (Private)
 
-    - (instancetype)initWithNativeVideoCodec : (const webrtc::VideoCodec *)videoCodec {
-  if (self = [super init]) {
+    - (instancetype)initWithNativeVideoCodec
+    : (const webrtc::VideoCodec *)videoCodec {
+  self = [super init];
+  if (self) {
     if (videoCodec) {
       const char *codecName = CodecTypeToPayloadString(videoCodec->codecType);
       self.name = [NSString stringWithUTF8String:codecName];
@@ -28,10 +30,9 @@
       self.minBitrate = videoCodec->minBitrate;
       self.maxFramerate = videoCodec->maxFramerate;
       self.qpMax = videoCodec->qpMax;
-      self.mode = (RTCVideoCodecMode)videoCodec->mode;
+      self.mode = (RTC_OBJC_TYPE(RTCVideoCodecMode))videoCodec->mode;
     }
   }
-
   return self;
 }
 

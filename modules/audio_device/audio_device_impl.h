@@ -17,9 +17,9 @@
 
 #include <memory>
 
+#include "api/audio/audio_device.h"
 #include "api/task_queue/task_queue_factory.h"
 #include "modules/audio_device/audio_device_buffer.h"
-#include "modules/audio_device/include/audio_device.h"
 
 namespace webrtc {
 
@@ -54,8 +54,7 @@ class AudioDeviceModuleImpl : public AudioDeviceModuleForTest {
   AudioDeviceModuleImpl(AudioLayer audio_layer,
                         std::unique_ptr<AudioDeviceGeneric> audio_device,
                         TaskQueueFactory* task_queue_factory,
-                        bool bypass_voice_processing = false,
-                        bool create_detached = false);
+                        bool create_detached);
   ~AudioDeviceModuleImpl() override;
 
   // Retrieve the currently utilized audio layer
@@ -157,7 +156,7 @@ class AudioDeviceModuleImpl : public AudioDeviceModuleForTest {
   int GetRecordAudioParameters(AudioParameters* params) const override;
 #endif  // WEBRTC_IOS
 
-  int32_t SetAudioDeviceSink(AudioDeviceSink* sink) const override;
+  int32_t SetObserver(AudioDeviceObserver* observer) override;
   int32_t GetPlayoutDevice() const override;
   int32_t GetRecordingDevice() const override;
 
@@ -165,8 +164,8 @@ class AudioDeviceModuleImpl : public AudioDeviceModuleForTest {
 
   int RestartPlayoutInternally() override { return -1; }
   int RestartRecordingInternally() override { return -1; }
-  int SetPlayoutSampleRate(uint32_t sample_rate) override { return -1; }
-  int SetRecordingSampleRate(uint32_t sample_rate) override { return -1; }
+  int SetPlayoutSampleRate(uint32_t /* sample_rate */) override { return -1; }
+  int SetRecordingSampleRate(uint32_t /* sample_rate */) override { return -1; }
 
  private:
   PlatformType Platform() const;

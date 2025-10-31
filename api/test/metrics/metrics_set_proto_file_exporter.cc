@@ -15,6 +15,8 @@
 #include <string>
 #include <utility>
 
+#include "absl/strings/string_view.h"
+#include "api/array_view.h"
 #include "api/test/metrics/metric.h"
 #include "rtc_base/logging.h"
 #include "test/testsupport/file_utils.h"
@@ -131,7 +133,7 @@ MetricsSetProtoFileExporter::Options::Options(
     std::map<std::string, std::string> metadata)
     : export_file_path(export_file_path), metadata(std::move(metadata)) {}
 
-bool MetricsSetProtoFileExporter::Export(rtc::ArrayView<const Metric> metrics) {
+bool MetricsSetProtoFileExporter::Export(ArrayView<const Metric> metrics) {
 #if WEBRTC_ENABLE_PROTOBUF
   webrtc::test_metrics::MetricsSet metrics_set;
   for (const auto& [key, value] : options_.metadata) {

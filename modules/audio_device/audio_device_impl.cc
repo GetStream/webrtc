@@ -26,6 +26,7 @@
 #endif
 #elif defined(WEBRTC_ANDROID)
 #include <stdlib.h>
+
 #include "sdk/android/native_api/audio_device_module/audio_device_android.h"
 #elif defined(WEBRTC_LINUX)
 #if defined(WEBRTC_ENABLE_LINUX_ALSA)
@@ -61,7 +62,7 @@
 
 namespace webrtc {
 
-rtc::scoped_refptr<AudioDeviceModule> AudioDeviceModule::Create(
+scoped_refptr<AudioDeviceModule> AudioDeviceModule::Create(
     AudioLayer audio_layer,
     TaskQueueFactory* task_queue_factory,
     bool bypass_voice_processing) {
@@ -70,7 +71,7 @@ rtc::scoped_refptr<AudioDeviceModule> AudioDeviceModule::Create(
 }
 
 // static
-rtc::scoped_refptr<AudioDeviceModuleForTest> AudioDeviceModule::CreateForTest(
+scoped_refptr<AudioDeviceModuleForTest> AudioDeviceModule::CreateForTest(
     AudioLayer audio_layer,
     TaskQueueFactory* task_queue_factory,
     bool bypass_voice_processing) {
@@ -84,7 +85,8 @@ rtc::scoped_refptr<AudioDeviceModuleForTest> AudioDeviceModule::CreateForTest(
     return nullptr;
   } else if (audio_layer == AudioDeviceModule::kAndroidJavaAudio ||
              audio_layer == AudioDeviceModule::kAndroidOpenSLESAudio ||
-             audio_layer == AudioDeviceModule::kAndroidJavaInputAndOpenSLESOutputAudio ||
+             audio_layer ==
+                 AudioDeviceModule::kAndroidJavaInputAndOpenSLESOutputAudio ||
              audio_layer == kAndroidAAudioAudio ||
              audio_layer == kAndroidJavaInputAndAAudioOutputAudio) {
     RTC_LOG(LS_ERROR) << "Use the CreateAndroidAudioDeviceModule() "
@@ -93,7 +95,7 @@ rtc::scoped_refptr<AudioDeviceModuleForTest> AudioDeviceModule::CreateForTest(
   }
 
   // Create the generic reference counted (platform independent) implementation.
-  auto audio_device = rtc::make_ref_counted<AudioDeviceModuleImpl>(
+  auto audio_device = webrtc::make_ref_counted<AudioDeviceModuleImpl>(
       audio_layer, task_queue_factory, bypass_voice_processing);
 
   // Ensure that the current platform is supported.
@@ -121,9 +123,9 @@ AudioDeviceModuleImpl::AudioDeviceModuleImpl(
     bool bypass_voice_processing)
     : audio_layer_(audio_layer),
 #if defined(WEBRTC_IOS)
-      bypass_voice_processing_(bypass_voice_processing),
+    bypass_voice_processing_(bypass_voice_processing),
 #endif
-      audio_device_buffer_(task_queue_factory) {
+    audio_device_buffer_(task_queue_factory) {
   RTC_DLOG(LS_INFO) << __FUNCTION__;
 }
 
@@ -131,12 +133,8 @@ AudioDeviceModuleImpl::AudioDeviceModuleImpl(
     AudioLayer audio_layer,
     std::unique_ptr<AudioDeviceGeneric> audio_device,
     TaskQueueFactory* task_queue_factory,
-    bool bypass_voice_processing,
     bool create_detached)
     : audio_layer_(audio_layer),
-#if defined(WEBRTC_IOS)
-      bypass_voice_processing_(bypass_voice_processing),
-#endif
       audio_device_buffer_(task_queue_factory, create_detached),
       audio_device_(std::move(audio_device)) {
   RTC_DLOG(LS_INFO) << __FUNCTION__;
@@ -250,8 +248,10 @@ int32_t AudioDeviceModuleImpl::CreatePlatformSpecificObjects() {
 // iOS ADM implementation.
 #if defined(WEBRTC_IOS)
   if (audio_layer == kPlatformDefaultAudio) {
-    audio_device_.reset(
-        new ios_adm::AudioDeviceIOS(/*bypass_voice_processing=*/bypass_voice_processing_));
+    audio_device_.reset(new ios_adm::AudioDeviceIOS(
+        /*bypass_voice_processing=*/bypass_voice_processing_,
+        /*muted_speech_event_handler=*/nullptr,
+        /*render_error_handler=*/nullptr));
     RTC_LOG(LS_INFO) << "iPhone Audio APIs will be utilized.";
   }
 // END #if defined(WEBRTC_IOS)
@@ -906,9 +906,9 @@ int AudioDeviceModuleImpl::GetRecordAudioParameters(
 }
 #endif  // WEBRTC_IOS
 
-int32_t AudioDeviceModuleImpl::SetAudioDeviceSink(AudioDeviceSink* sink) const {
-  RTC_LOG(LS_INFO) << __FUNCTION__ << "(" << sink << ")";
-  int32_t ok = audio_device_->SetAudioDeviceSink(sink);
+int32_t AudioDeviceModuleImpl::SetObserver(AudioDeviceObserver* observer) {
+  RTC_LOG(LS_INFO) << __FUNCTION__ << "(" << observer << ")";
+  int32_t ok = audio_device_->SetObserver(observer);
   RTC_LOG(LS_INFO) << "output: " << ok;
   return ok;
 }

@@ -11,8 +11,14 @@
 #include "modules/audio_processing/ns/noise_estimator.h"
 
 #include <algorithm>
+#include <array>
+#include <cstddef>
+#include <cstdint>
 
+#include "api/array_view.h"
 #include "modules/audio_processing/ns/fast_math.h"
+#include "modules/audio_processing/ns/ns_common.h"
+#include "modules/audio_processing/ns/suppression_params.h"
 #include "rtc_base/checks.h"
 
 namespace webrtc {
@@ -58,7 +64,7 @@ void NoiseEstimator::PrepareAnalysis() {
 
 void NoiseEstimator::PreUpdate(
     int32_t num_analyzed_frames,
-    rtc::ArrayView<const float, kFftSizeBy2Plus1> signal_spectrum,
+    ArrayView<const float, kFftSizeBy2Plus1> signal_spectrum,
     float signal_spectral_sum) {
   quantile_noise_estimator_.Estimate(signal_spectrum, noise_spectrum_);
 
@@ -129,9 +135,9 @@ void NoiseEstimator::PreUpdate(
       } else {
         // Use pink noise estimate.
         float use_band = i < kStartBand ? kStartBand : i;
-        float denom = PowApproximation(use_band, parametric_exp);
-        RTC_DCHECK_NE(denom, 0.f);
-        parametric_noise_spectrum_[i] = parametric_num / denom;
+        float parametric_denom = PowApproximation(use_band, parametric_exp);
+        RTC_DCHECK_NE(parametric_denom, 0.f);
+        parametric_noise_spectrum_[i] = parametric_num / parametric_denom;
       }
     }
 
@@ -147,8 +153,8 @@ void NoiseEstimator::PreUpdate(
 }
 
 void NoiseEstimator::PostUpdate(
-    rtc::ArrayView<const float> speech_probability,
-    rtc::ArrayView<const float, kFftSizeBy2Plus1> signal_spectrum) {
+    ArrayView<const float> speech_probability,
+    ArrayView<const float, kFftSizeBy2Plus1> signal_spectrum) {
   // Time-avg parameter for noise_spectrum update.
   constexpr float kNoiseUpdate = 0.9f;
 

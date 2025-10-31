@@ -17,6 +17,7 @@
 #import "RTCMacros.h"
 #import "RTCVideoFrame.h"
 #import "RTCVideoRenderer.h"
+#import "sdk/objc/base/RTCMacros.h"
 
 NS_ASSUME_NONNULL_BEGIN
 

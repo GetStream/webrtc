@@ -14,19 +14,19 @@
 
 #include <memory>
 
-NSString *const kRTCMediaConstraintsAudioNetworkAdaptorConfig =
+NSString *const RTC_CONSTANT_TYPE(RTCMediaConstraintsAudioNetworkAdaptorConfig) =
     @(webrtc::MediaConstraints::kAudioNetworkAdaptorConfig);
 
-NSString *const kRTCMediaConstraintsIceRestart = @(webrtc::MediaConstraints::kIceRestart);
-NSString *const kRTCMediaConstraintsOfferToReceiveAudio =
+NSString *const RTC_CONSTANT_TYPE(RTCMediaConstraintsIceRestart) = @(webrtc::MediaConstraints::kIceRestart);
+NSString *const RTC_CONSTANT_TYPE(RTCMediaConstraintsOfferToReceiveAudio) =
     @(webrtc::MediaConstraints::kOfferToReceiveAudio);
-NSString *const kRTCMediaConstraintsOfferToReceiveVideo =
+NSString *const RTC_CONSTANT_TYPE(RTCMediaConstraintsOfferToReceiveVideo) =
     @(webrtc::MediaConstraints::kOfferToReceiveVideo);
-NSString *const kRTCMediaConstraintsVoiceActivityDetection =
+NSString *const RTC_CONSTANT_TYPE(RTCMediaConstraintsVoiceActivityDetection) =
     @(webrtc::MediaConstraints::kVoiceActivityDetection);
 
-NSString *const kRTCMediaConstraintsValueTrue = @(webrtc::MediaConstraints::kValueTrue);
-NSString *const kRTCMediaConstraintsValueFalse = @(webrtc::MediaConstraints::kValueFalse);
+NSString *const RTC_CONSTANT_TYPE(RTCMediaConstraintsValueTrue) = @(webrtc::MediaConstraints::kValueTrue);
+NSString *const RTC_CONSTANT_TYPE(RTCMediaConstraintsValueFalse) = @(webrtc::MediaConstraints::kValueFalse);
 
 @implementation RTC_OBJC_TYPE (RTCMediaConstraints) {
   NSDictionary<NSString *, NSString *> *_mandatory;
@@ -34,10 +34,11 @@ NSString *const kRTCMediaConstraintsValueFalse = @(webrtc::MediaConstraints::kVa
 }
 
 - (instancetype)initWithMandatoryConstraints:
-    (NSDictionary<NSString *, NSString *> *)mandatory
+                    (NSDictionary<NSString *, NSString *> *)mandatory
                          optionalConstraints:
-    (NSDictionary<NSString *, NSString *> *)optional {
-  if (self = [super init]) {
+                             (NSDictionary<NSString *, NSString *> *)optional {
+  self = [super init];
+  if (self) {
     _mandatory = [[NSDictionary alloc] initWithDictionary:mandatory
                                                 copyItems:YES];
     _optional = [[NSDictionary alloc] initWithDictionary:optional
@@ -47,8 +48,10 @@ NSString *const kRTCMediaConstraintsValueFalse = @(webrtc::MediaConstraints::kVa
 }
 
 - (NSString *)description {
-  return [NSString
-      stringWithFormat:@"RTC_OBJC_TYPE(RTCMediaConstraints):\n%@\n%@", _mandatory, _optional];
+  return
+      [NSString stringWithFormat:@"RTC_OBJC_TYPE(RTCMediaConstraints):\n%@\n%@",
+                                 _mandatory,
+                                 _optional];
 }
 
 #pragma mark - Private
@@ -68,17 +71,19 @@ NSString *const kRTCMediaConstraintsValueFalse = @(webrtc::MediaConstraints::kVa
     (NSDictionary<NSString *, NSString *> *)constraints {
   webrtc::MediaConstraints::Constraints nativeConstraints;
   for (NSString *key in constraints) {
-    NSAssert([key isKindOfClass:[NSString class]],
-             @"%@ is not an NSString.", key);
+    NSAssert(
+        [key isKindOfClass:[NSString class]], @"%@ is not an NSString.", key);
     NSString *value = [constraints objectForKey:key];
     NSAssert([value isKindOfClass:[NSString class]],
              @"%@ is not an NSString.", value);
-    if ([kRTCMediaConstraintsAudioNetworkAdaptorConfig isEqualToString:key]) {
+    if ([RTC_CONSTANT_TYPE(RTCMediaConstraintsAudioNetworkAdaptorConfig) isEqualToString:key]) {
       // This value is base64 encoded.
-      NSData *charData = [[NSData alloc] initWithBase64EncodedString:value options:0];
-      std::string configValue =
-          std::string(reinterpret_cast<const char *>(charData.bytes), charData.length);
-      nativeConstraints.push_back(webrtc::MediaConstraints::Constraint(key.stdString, configValue));
+      NSData *charData = [[NSData alloc] initWithBase64EncodedString:value
+                                                             options:0];
+      std::string configValue = std::string(
+          reinterpret_cast<const char *>(charData.bytes), charData.length);
+      nativeConstraints.push_back(
+          webrtc::MediaConstraints::Constraint(key.stdString, configValue));
     } else {
       nativeConstraints.push_back(
           webrtc::MediaConstraints::Constraint(key.stdString, value.stdString));

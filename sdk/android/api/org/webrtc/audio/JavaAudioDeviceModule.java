@@ -286,7 +286,7 @@ public class JavaAudioDeviceModule implements AudioDeviceModule {
       final WebRtcAudioRecord audioInput = new WebRtcAudioRecord(context, executor, audioManager,
           audioSource, audioFormat, audioRecordErrorCallback, audioRecordStateCallback,
           samplesReadyCallback, audioBufferCallback, useHardwareAcousticEchoCanceler,
-          useHardwareNoiseSuppressor);
+          useHardwareNoiseSuppressor, inputSampleRate, useStereoInput ? 2 : 1);
       final WebRtcAudioTrack audioOutput =
           new WebRtcAudioTrack(context, audioManager, audioAttributes, audioTrackErrorCallback,
               audioTrackStateCallback, playbackSamplesReadyCallback, useLowLatency, enableVolumeLogger);
@@ -452,6 +452,23 @@ public class JavaAudioDeviceModule implements AudioDeviceModule {
     }
   }
 
+  /**
+   * Updates the audio usage of the AudioTrack.
+   * This method updates the AudioAttributes to change audio behavior
+   * (e.g., voice communication vs media playback).
+   * If playout is currently active, it will be stopped and automatically restarted
+   * with the new usage.
+   * 
+   * @param usage Audio usage type (AudioAttributes.USAGE_*)
+   * @return true if successful, false if failed
+   */
+  public boolean updateAudioTrackUsage(int usage) {
+    if (audioOutput != null) {
+      return audioOutput.updateAudioTrackUsage(usage);
+    }
+    return false;
+  }
+
   @Override
   public void setSpeakerMute(boolean mute) {
     Logging.d(TAG, "setSpeakerMute: " + mute);
@@ -468,6 +485,21 @@ public class JavaAudioDeviceModule implements AudioDeviceModule {
     audioInput.setUseAudioRecord(enable);
   }
 
+  public void prewarmRecording(){
+    audioInput.initRecordingIfNeeded();
+    audioInput.prewarmRecordingIfNeeded();
+  }
+
+  public void requestStartRecording() {
+    audioInput.initRecordingIfNeeded();
+    audioInput.startRecordingIfNeeded();
+  }
+
+  public void requestStopRecording() {
+    audioInput.initRecordingIfNeeded();
+    audioInput.stopRecordingIfNeeded();
+  }
+
   @Override
   public boolean setNoiseSuppressorEnabled(boolean enabled) {
     Logging.d(TAG, "setNoiseSuppressorEnabled: " + enabled);
@@ -482,7 +514,7 @@ public class JavaAudioDeviceModule implements AudioDeviceModule {
    */
   @RequiresApi(Build.VERSION_CODES.M)
   public void setPreferredInputDevice(AudioDeviceInfo preferredInputDevice) {
-    Logging.d(TAG, "setPreferredInputDevice: " + preferredInputDevice);
+    Logging.d(TAG, "setPreferredInputDevice: " + preferredInputDevice.getId());
     audioInput.setPreferredDevice(preferredInputDevice);
   }
 

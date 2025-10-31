@@ -14,8 +14,10 @@
 #ifndef API_RTP_SENDER_INTERFACE_H_
 #define API_RTP_SENDER_INTERFACE_H_
 
+#include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/functional/any_invocable.h"
@@ -34,28 +36,39 @@
 
 namespace webrtc {
 
+class RtpSenderObserverInterface {
+ public:
+  // The observer is called when the first media packet is sent for the observed
+  // sender. It is called immediately if the first packet was already sent.
+  virtual void OnFirstPacketSent(webrtc::MediaType media_type) = 0;
+
+ protected:
+  virtual ~RtpSenderObserverInterface() {}
+};
+
 using SetParametersCallback = absl::AnyInvocable<void(RTCError) &&>;
 
-class RTC_EXPORT RtpSenderInterface : public webrtc::RefCountInterface {
+class RTC_EXPORT RtpSenderInterface : public webrtc::RefCountInterface,
+                                      public FrameTransformerHost {
  public:
   // Returns true if successful in setting the track.
   // Fails if an audio track is set on a video RtpSender, or vice-versa.
   virtual bool SetTrack(MediaStreamTrackInterface* track) = 0;
-  virtual rtc::scoped_refptr<MediaStreamTrackInterface> track() const = 0;
+  virtual scoped_refptr<MediaStreamTrackInterface> track() const = 0;
 
   // The dtlsTransport attribute exposes the DTLS transport on which the
   // media is sent. It may be null.
   // https://w3c.github.io/webrtc-pc/#dom-rtcrtpsender-transport
-  virtual rtc::scoped_refptr<DtlsTransportInterface> dtls_transport() const = 0;
+  virtual scoped_refptr<DtlsTransportInterface> dtls_transport() const = 0;
 
   // Returns primary SSRC used by this sender for sending media.
   // Returns 0 if not yet determined.
-  // TODO(deadbeef): Change to absl::optional.
+  // TODO(deadbeef): Change to std::optional.
   // TODO(deadbeef): Remove? With GetParameters this should be redundant.
   virtual uint32_t ssrc() const = 0;
 
   // Audio or video sender?
-  virtual cricket::MediaType media_type() const = 0;
+  virtual webrtc::MediaType media_type() const = 0;
 
   // Not to be confused with "mid", this is a field we can temporarily use
   // to uniquely identify a receiver until we implement Unified Plan SDP.
@@ -85,29 +98,43 @@ class RTC_EXPORT RtpSenderInterface : public webrtc::RefCountInterface {
   virtual void SetParametersAsync(const RtpParameters& parameters,
                                   SetParametersCallback callback);
 
+  // Sets an observer which gets a callback when the first media packet is sent
+  // for this sender.
+  // Does not take ownership of observer.
+  // Must call SetObserver(nullptr) before the observer is destroyed.
+  virtual void SetObserver(RtpSenderObserverInterface* /* observer */) {}
+
   // Returns null for a video sender.
-  virtual rtc::scoped_refptr<DtmfSenderInterface> GetDtmfSender() const = 0;
+  virtual scoped_refptr<DtmfSenderInterface> GetDtmfSender() const = 0;
 
   // Sets a user defined frame encryptor that will encrypt the entire frame
   // before it is sent across the network. This will encrypt the entire frame
   // using the user provided encryption mechanism regardless of whether SRTP is
   // enabled or not.
   virtual void SetFrameEncryptor(
-      rtc::scoped_refptr<FrameEncryptorInterface> frame_encryptor) = 0;
+      scoped_refptr<FrameEncryptorInterface> frame_encryptor) = 0;
 
   // Returns a pointer to the frame encryptor set previously by the
   // user. This can be used to update the state of the object.
-  virtual rtc::scoped_refptr<FrameEncryptorInterface> GetFrameEncryptor()
-      const = 0;
+  virtual scoped_refptr<FrameEncryptorInterface> GetFrameEncryptor() const = 0;
 
+  // TODO: bugs.webrtc.org/15929 - add [[deprecated("Use SetFrameTransformer")]]
+  // when usage in Chrome is removed
   virtual void SetEncoderToPacketizerFrameTransformer(
-      rtc::scoped_refptr<FrameTransformerInterface> frame_transformer) = 0;
+      scoped_refptr<FrameTransformerInterface> frame_transformer) {
+    SetFrameTransformer(std::move(frame_transformer));
+  }
 
   // Sets a user defined encoder selector.
   // Overrides selector that is (optionally) provided by VideoEncoderFactory.
   virtual void SetEncoderSelector(
       std::unique_ptr<VideoEncoderFactory::EncoderSelectorInterface>
           encoder_selector) = 0;
+
+  // Default implementation of SetFrameTransformer.
+  // TODO: bugs.webrtc.org/15929 - remove when all implementations are good
+  void SetFrameTransformer(scoped_refptr<FrameTransformerInterface>
+                           /* frame_transformer */) override {}
 
  protected:
   ~RtpSenderInterface() override = default;

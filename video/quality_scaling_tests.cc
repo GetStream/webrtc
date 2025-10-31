@@ -40,15 +40,13 @@ void SetEncoderSpecific(VideoEncoderConfig* encoder_config,
     VideoCodecVP8 vp8 = VideoEncoder::GetDefaultVp8Settings();
     vp8.automaticResizeOn = automatic_resize;
     encoder_config->encoder_specific_settings =
-        rtc::make_ref_counted<VideoEncoderConfig::Vp8EncoderSpecificSettings>(
-            vp8);
+        make_ref_counted<VideoEncoderConfig::Vp8EncoderSpecificSettings>(vp8);
   } else if (type == kVideoCodecVP9) {
     VideoCodecVP9 vp9 = VideoEncoder::GetDefaultVp9Settings();
     vp9.automaticResizeOn = automatic_resize;
     vp9.numberOfSpatialLayers = num_spatial_layers;
     encoder_config->encoder_specific_settings =
-        rtc::make_ref_counted<VideoEncoderConfig::Vp9EncoderSpecificSettings>(
-            vp9);
+        make_ref_counted<VideoEncoderConfig::Vp9EncoderSpecificSettings>(vp9);
   }
 }
 }  // namespace
@@ -57,17 +55,17 @@ class QualityScalingTest : public test::CallTest {
  protected:
   const std::string kPrefix = "WebRTC-Video-QualityScaling/Enabled-";
   const std::string kEnd = ",0,0,0.9995,0.9999,1/";
-  const absl::optional<VideoEncoder::ResolutionBitrateLimits>
+  const std::optional<VideoEncoder::ResolutionBitrateLimits>
       kSinglecastLimits720pVp8 =
           EncoderInfoSettings::GetDefaultSinglecastBitrateLimitsForResolution(
               kVideoCodecVP8,
               1280 * 720);
-  const absl::optional<VideoEncoder::ResolutionBitrateLimits>
+  const std::optional<VideoEncoder::ResolutionBitrateLimits>
       kSinglecastLimits360pVp9 =
           EncoderInfoSettings::GetDefaultSinglecastBitrateLimitsForResolution(
               kVideoCodecVP9,
               640 * 360);
-  const absl::optional<VideoEncoder::ResolutionBitrateLimits>
+  const std::optional<VideoEncoder::ResolutionBitrateLimits>
       kSinglecastLimits720pVp9 =
           EncoderInfoSettings::GetDefaultSinglecastBitrateLimitsForResolution(
               kVideoCodecVP9,
@@ -78,7 +76,7 @@ class ScalingObserver : public test::SendTest {
  protected:
   struct TestParams {
     bool active;
-    absl::optional<ScalabilityMode> scalability_mode;
+    std::optional<ScalabilityMode> scalability_mode;
   };
   ScalingObserver(const std::string& payload_name,
                   const std::vector<TestParams>& test_params,
@@ -125,7 +123,6 @@ class ScalingObserver : public test::SendTest {
       VideoSendStream::Config* send_config,
       std::vector<VideoReceiveStreamInterface::Config>* receive_configs,
       VideoEncoderConfig* encoder_config) override {
-    VideoEncoder::EncoderInfo encoder_info;
     send_config->encoder_settings.encoder_factory = &encoder_factory_;
     send_config->rtp.payload_name = payload_name_;
     send_config->rtp.payload_type =
@@ -133,10 +130,6 @@ class ScalingObserver : public test::SendTest {
     encoder_config->video_format.name = payload_name_;
     const VideoCodecType codec_type = PayloadStringToCodecType(payload_name_);
     encoder_config->codec_type = codec_type;
-    encoder_config->video_stream_factory =
-        rtc::make_ref_counted<cricket::EncoderStreamFactory>(
-            payload_name_, /*max_qp=*/0, /*is_screenshare=*/false,
-            /*conference_mode=*/false, encoder_info);
     encoder_config->max_bitrate_bps =
         std::max(start_bps_, encoder_config->max_bitrate_bps);
     if (payload_name_ == "VP9") {
@@ -158,7 +151,7 @@ class ScalingObserver : public test::SendTest {
                        test_params_.size());
   }
 
-  Action OnSendRtp(rtc::ArrayView<const uint8_t> packet) override {
+  Action OnSendRtp(ArrayView<const uint8_t> packet) override {
     // The tests are expected to send at the configured start bitrate. Do not
     // send any packets to avoid receiving REMB and possibly go down in target
     // bitrate. A low bitrate estimate could result in downgrading due to other
@@ -199,8 +192,8 @@ class DownscalingObserver
     frame_generator_capturer->ChangeResolution(kInitialWidth, kInitialHeight);
   }
 
-  void OnSinkWantsChanged(rtc::VideoSinkInterface<VideoFrame>* sink,
-                          const rtc::VideoSinkWants& wants) override {
+  void OnSinkWantsChanged(VideoSinkInterface<VideoFrame>* sink,
+                          const VideoSinkWants& wants) override {
     if (wants.max_pixel_count < kInitialWidth * kInitialHeight)
       observation_complete_.Set();
   }
@@ -232,8 +225,8 @@ class UpscalingObserver
     frame_generator_capturer->ChangeResolution(kInitialWidth, kInitialHeight);
   }
 
-  void OnSinkWantsChanged(rtc::VideoSinkInterface<VideoFrame>* sink,
-                          const rtc::VideoSinkWants& wants) override {
+  void OnSinkWantsChanged(VideoSinkInterface<VideoFrame>* sink,
+                          const VideoSinkWants& wants) override {
     if (wants.max_pixel_count > last_wants_.max_pixel_count) {
       if (wants.max_pixel_count == std::numeric_limits<int>::max())
         observation_complete_.Set();
@@ -241,7 +234,7 @@ class UpscalingObserver
     last_wants_ = wants;
   }
 
-  rtc::VideoSinkWants last_wants_;
+  VideoSinkWants last_wants_;
 };
 
 TEST_F(QualityScalingTest, AdaptsDownForHighQp_Vp8) {

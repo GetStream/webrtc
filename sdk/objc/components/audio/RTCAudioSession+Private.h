@@ -14,24 +14,13 @@ NS_ASSUME_NONNULL_BEGIN
 
 @class RTC_OBJC_TYPE(RTCAudioSessionConfiguration);
 
-@interface RTC_OBJC_TYPE (RTCAudioSession)
-()
-
-    /** Number of times setActive:YES has succeeded without a balanced call to
-     *  setActive:NO.
-     */
-    @property(nonatomic, readonly) int activationCount;
-
-/** The number of times `beginWebRTCSession` was called without a balanced call
- *  to `endWebRTCSession`.
- */
-@property(nonatomic, readonly) int webRTCSessionCount;
+@interface RTC_OBJC_TYPE (RTCAudioSession) ()
 
 /** Convenience BOOL that checks useManualAudio and isAudioEnebled. */
 @property(readonly) BOOL canPlayOrRecord;
 
-/** Tracks whether we have been sent an interruption event that hasn't been matched by either an
- *  interrupted end event or a foreground event.
+/** Tracks whether we have been sent an interruption event that hasn't been
+ * matched by either an interrupted end event or a foreground event.
  */
 @property(nonatomic, assign) BOOL isInterrupted;
 
@@ -76,14 +65,17 @@ NS_ASSUME_NONNULL_BEGIN
 /** Notifies the receiver that a playout glitch was detected. */
 - (void)notifyDidDetectPlayoutGlitch:(int64_t)totalNumberOfGlitches;
 
-/** Notifies the receiver that there was an error when starting an audio unit. */
+/** Notifies the receiver that there was an error when starting an audio unit.
+ */
 - (void)notifyAudioUnitStartFailedWithError:(OSStatus)error;
 
 // Properties and methods for tests.
 - (void)notifyDidBeginInterruption;
-- (void)notifyDidEndInterruptionWithShouldResumeSession:(BOOL)shouldResumeSession;
+- (void)notifyDidEndInterruptionWithShouldResumeSession:
+    (BOOL)shouldResumeSession;
 - (void)notifyDidChangeRouteWithReason:(AVAudioSessionRouteChangeReason)reason
-                         previousRoute:(AVAudioSessionRouteDescription *)previousRoute;
+                         previousRoute:
+                             (AVAudioSessionRouteDescription *)previousRoute;
 - (void)notifyMediaServicesWereLost;
 - (void)notifyMediaServicesWereReset;
 - (void)notifyDidChangeCanPlayOrRecord:(BOOL)canPlayOrRecord;

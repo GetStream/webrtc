@@ -10,13 +10,30 @@
 
 #include "modules/audio_processing/test/aec_dump_based_simulator.h"
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <fstream>
 #include <iostream>
 #include <memory>
+#include <optional>
+#include <sstream>  // no-presubmit-check TODO(webrtc:8982)
+#include <string>
+#include <utility>
 
+#include "absl/base/nullability.h"
+#include "api/audio/audio_processing.h"
+#include "api/scoped_refptr.h"
+#include "common_audio/channel_buffer.h"
+#include "common_audio/wav_file.h"
+#include "modules/audio_processing/debug.pb.h"
 #include "modules/audio_processing/echo_control_mobile_impl.h"
-#include "modules/audio_processing/logging/apm_data_dumper.h"
 #include "modules/audio_processing/test/aec_dump_based_simulator.h"
+#include "modules/audio_processing/test/audio_processing_simulator.h"
 #include "modules/audio_processing/test/protobuf_utils.h"
+#include "modules/audio_processing/test/test_utils.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/numerics/safe_conversions.h"
@@ -34,7 +51,7 @@ bool VerifyFixedBitExactness(const webrtc::audioproc::Stream& msg,
     return false;
   } else {
     const int16_t* frame_data = frame.data.data();
-    for (int k = 0; k < frame.num_channels * frame.samples_per_channel; ++k) {
+    for (int k = 0; k < frame.num_channels_ * frame.samples_per_channel_; ++k) {
       if (msg.output_data().data()[k] != frame_data[k]) {
         return false;
       }
@@ -80,11 +97,8 @@ bool ReadNextMessage(bool use_dump_file,
 
 AecDumpBasedSimulator::AecDumpBasedSimulator(
     const SimulationSettings& settings,
-    rtc::scoped_refptr<AudioProcessing> audio_processing,
-    std::unique_ptr<AudioProcessingBuilder> ap_builder)
-    : AudioProcessingSimulator(settings,
-                               std::move(audio_processing),
-                               std::move(ap_builder)) {
+    absl_nonnull scoped_refptr<AudioProcessing> audio_processing)
+    : AudioProcessingSimulator(settings, std::move(audio_processing)) {
   MaybeOpenCallOrderFile();
 }
 
@@ -129,7 +143,7 @@ void AecDumpBasedSimulator::PrepareProcessStreamCall(
       if (msg.has_input_data()) {
         int16_t* fwd_frame_data = fwd_frame_.data.data();
         for (size_t k = 0; k < in_buf_->num_frames(); ++k) {
-          fwd_frame_data[k] = rtc::saturated_cast<int16_t>(
+          fwd_frame_data[k] = saturated_cast<int16_t>(
               fwd_frame_data[k] +
               static_cast<int16_t>(32767 *
                                    artificial_nearend_buf_->channels()[0][k]));
@@ -177,8 +191,8 @@ void AecDumpBasedSimulator::PrepareProcessStreamCall(
   // Set the applied input level if available.
   aec_dump_applied_input_level_ =
       msg.has_applied_input_volume()
-          ? absl::optional<int>(msg.applied_input_volume())
-          : absl::nullopt;
+          ? std::optional<int>(msg.applied_input_volume())
+          : std::nullopt;
 }
 
 void AecDumpBasedSimulator::VerifyProcessStreamBitExactness(
@@ -241,7 +255,7 @@ void AecDumpBasedSimulator::Process() {
     artificial_nearend_buffer_reader_.reset(
         new ChannelBufferWavReader(std::move(artificial_nearend_file)));
     artificial_nearend_buf_.reset(new ChannelBuffer<float>(
-        rtc::CheckedDivExact(sample_rate_hz, kChunksPerSecond), 1));
+        CheckedDivExact(sample_rate_hz, kChunksPerSecond), 1));
   }
 
   const bool use_dump_file = !settings_.aec_dump_input_string.has_value();

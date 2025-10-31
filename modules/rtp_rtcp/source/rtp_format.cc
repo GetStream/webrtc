@@ -10,9 +10,13 @@
 
 #include "modules/rtp_rtcp/source/rtp_format.h"
 
+#include <cstdint>
 #include <memory>
+#include <optional>
+#include <vector>
 
-#include "absl/types/variant.h"
+#include "api/array_view.h"
+#include "api/video/video_codec_type.h"
 #include "modules/rtp_rtcp/source/rtp_format_h264.h"
 #include "modules/rtp_rtcp/source/rtp_format_video_generic.h"
 #include "modules/rtp_rtcp/source/rtp_format_vp8.h"
@@ -29,8 +33,8 @@
 namespace webrtc {
 
 std::unique_ptr<RtpPacketizer> RtpPacketizer::Create(
-    absl::optional<VideoCodecType> type,
-    rtc::ArrayView<const uint8_t> payload,
+    std::optional<VideoCodecType> type,
+    ArrayView<const uint8_t> payload,
     PayloadSizeLimits limits,
     // Codec-specific details.
     const RTPVideoHeader& rtp_video_header) {
@@ -42,18 +46,18 @@ std::unique_ptr<RtpPacketizer> RtpPacketizer::Create(
   switch (*type) {
     case kVideoCodecH264: {
       const auto& h264 =
-          absl::get<RTPVideoHeaderH264>(rtp_video_header.video_type_header);
+          std::get<RTPVideoHeaderH264>(rtp_video_header.video_type_header);
       return std::make_unique<RtpPacketizerH264>(payload, limits,
                                                  h264.packetization_mode);
     }
     case kVideoCodecVP8: {
       const auto& vp8 =
-          absl::get<RTPVideoHeaderVP8>(rtp_video_header.video_type_header);
+          std::get<RTPVideoHeaderVP8>(rtp_video_header.video_type_header);
       return std::make_unique<RtpPacketizerVp8>(payload, limits, vp8);
     }
     case kVideoCodecVP9: {
       const auto& vp9 =
-          absl::get<RTPVideoHeaderVP9>(rtp_video_header.video_type_header);
+          std::get<RTPVideoHeaderVP9>(rtp_video_header.video_type_header);
       return std::make_unique<RtpPacketizerVp9>(payload, limits, vp9);
     }
     case kVideoCodecAV1:

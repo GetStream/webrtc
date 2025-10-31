@@ -30,13 +30,13 @@
 // error GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT. -[GLKView display] is
 // the method that will trigger the binding of the render
 // buffer. Because the standard behaviour of -[UIView setNeedsDisplay]
-// is disabled for the reasons above, the RTC_OBJC_TYPE(RTCEAGLVideoView) maintains
-// its own `isDirty` flag.
+// is disabled for the reasons above, the RTC_OBJC_TYPE(RTCEAGLVideoView)
+// maintains its own `isDirty` flag.
 
 @interface RTC_OBJC_TYPE (RTCEAGLVideoView)
 ()<GLKViewDelegate>
-    // `videoFrame` is set when we receive a frame from a worker thread and is read
-    // from the display link callback so atomicity is required.
+    // `videoFrame` is set when we receive a frame from a worker thread and is
+    // read from the display link callback so atomicity is required.
     @property(atomic, strong) RTC_OBJC_TYPE(RTCVideoFrame) * videoFrame;
 @property(nonatomic, readonly) GLKView *glkView;
 @end
@@ -68,8 +68,10 @@
   return [self initWithCoder:aDecoder shader:[[RTC_OBJC_TYPE(RTCDefaultShader) alloc] init]];
 }
 
-- (instancetype)initWithFrame:(CGRect)frame shader:(id<RTC_OBJC_TYPE(RTCVideoViewShading)>)shader {
-  if (self = [super initWithFrame:frame]) {
+- (instancetype)initWithFrame:(CGRect)frame
+                       shader:(id<RTC_OBJC_TYPE(RTCVideoViewShading)>)shader {
+  self = [super initWithFrame:frame];
+  if (self) {
     _shader = shader;
     if (![self configure]) {
       return nil;
@@ -80,7 +82,8 @@
 
 - (instancetype)initWithCoder:(NSCoder *)aDecoder
                        shader:(id<RTC_OBJC_TYPE(RTCVideoViewShading)>)shader {
-  if (self = [super initWithCoder:aDecoder]) {
+  self = [super initWithCoder:aDecoder];
+  if (self) {
     _shader = shader;
     if (![self configure]) {
       return nil;
@@ -90,7 +93,8 @@
 }
 
 - (BOOL)configure {
-  EAGLContext *glContext = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES3];
+  EAGLContext *glContext =
+      [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES3];
   if (!glContext) {
     glContext = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES2];
   }
@@ -131,7 +135,8 @@
     RTC_OBJC_TYPE(RTCEAGLVideoView) *strongSelf = weakSelf;
     [strongSelf displayLinkTimerDidFire];
   }];
-  if ([[UIApplication sharedApplication] applicationState] == UIApplicationStateActive) {
+  if ([[UIApplication sharedApplication] applicationState] ==
+      UIApplicationStateActive) {
     [self setupGL];
   }
   return YES;

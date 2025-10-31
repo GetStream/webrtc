@@ -1,0 +1,18 @@
+skip_docs
+opt_out_usage
+
+require 'json'
+require 'net/http'
+require 'fileutils'
+
+import './lanes/utilities.rb'
+import './lanes/gclient.rb'
+import './lanes/ios.rb'
+
+before_all do
+  if is_ci
+    setup_ci
+    setup_git_config
+  end
+  sh('bundle exec rubocop')
+end

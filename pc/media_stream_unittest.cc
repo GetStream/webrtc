@@ -12,6 +12,8 @@
 
 #include <stddef.h>
 
+#include "api/media_stream_interface.h"
+#include "api/scoped_refptr.h"
 #include "pc/audio_track.h"
 #include "pc/test/fake_video_track_source.h"
 #include "pc/video_track.h"
@@ -23,8 +25,8 @@ static const char kStreamId1[] = "local_stream_1";
 static const char kVideoTrackId[] = "dummy_video_cam_1";
 static const char kAudioTrackId[] = "dummy_microphone_1";
 
-using rtc::scoped_refptr;
 using ::testing::Exactly;
+using webrtc::scoped_refptr;
 
 namespace webrtc {
 
@@ -57,7 +59,7 @@ class MediaStreamTest : public ::testing::Test {
     ASSERT_TRUE(stream_.get() != NULL);
 
     video_track_ = VideoTrack::Create(
-        kVideoTrackId, FakeVideoTrackSource::Create(), rtc::Thread::Current());
+        kVideoTrackId, FakeVideoTrackSource::Create(), Thread::Current());
     ASSERT_TRUE(video_track_.get() != NULL);
     EXPECT_EQ(MediaStreamTrackInterface::kLive, video_track_->state());
 
@@ -80,7 +82,7 @@ class MediaStreamTest : public ::testing::Test {
     EXPECT_FALSE(track->enabled());
   }
 
-  rtc::AutoThread main_thread_;
+  AutoThread main_thread_;
   scoped_refptr<MediaStreamInterface> stream_;
   scoped_refptr<AudioTrackInterface> audio_track_;
   scoped_refptr<VideoTrackInterface> video_track_;
@@ -134,8 +136,8 @@ TEST_F(MediaStreamTest, RemoveTrack) {
   EXPECT_EQ(0u, stream_->GetVideoTracks().size());
   EXPECT_EQ(0u, stream_->GetVideoTracks().size());
 
-  EXPECT_FALSE(stream_->RemoveTrack(rtc::scoped_refptr<AudioTrackInterface>()));
-  EXPECT_FALSE(stream_->RemoveTrack(rtc::scoped_refptr<VideoTrackInterface>()));
+  EXPECT_FALSE(stream_->RemoveTrack(scoped_refptr<AudioTrackInterface>()));
+  EXPECT_FALSE(stream_->RemoveTrack(scoped_refptr<VideoTrackInterface>()));
 }
 
 TEST_F(MediaStreamTest, ChangeVideoTrack) {

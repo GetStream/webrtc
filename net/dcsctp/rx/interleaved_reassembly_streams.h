@@ -35,10 +35,10 @@ class InterleavedReassemblyStreams : public ReassemblyStreams {
 
   size_t HandleForwardTsn(
       UnwrappedTSN new_cumulative_ack_tsn,
-      rtc::ArrayView<const AnyForwardTsnChunk::SkippedStream> skipped_streams)
-      override;
+      webrtc::ArrayView<const AnyForwardTsnChunk::SkippedStream>
+          skipped_streams) override;
 
-  void ResetStreams(rtc::ArrayView<const StreamID> stream_ids) override;
+  void ResetStreams(webrtc::ArrayView<const StreamID> stream_ids) override;
 
   HandoverReadinessStatus GetHandoverReadiness() const override;
   void AddHandoverState(DcSctpSocketHandoverState& state) override;
@@ -81,7 +81,9 @@ class InterleavedReassemblyStreams : public ReassemblyStreams {
     // Try to assemble one message identified by `mid`.
     // Returns the number of bytes assembled if a message was assembled.
     size_t TryToAssembleMessage(UnwrappedMID mid);
-    size_t AssembleMessage(const ChunkMap& tsn_chunks);
+    size_t AssembleMessage(ChunkMap& tsn_chunks);
+    size_t AssembleMessage(UnwrappedTSN tsn, Data data);
+
     // Try to assemble one or several messages in order from the stream.
     // Returns the number of bytes assembled if one or more messages were
     // assembled.

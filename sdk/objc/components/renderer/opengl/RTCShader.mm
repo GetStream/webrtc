@@ -22,19 +22,17 @@
 #include "rtc_base/logging.h"
 
 // Vertex shader doesn't do anything except pass coordinates through.
-const char kRTCVertexShaderSource[] =
-  SHADER_VERSION
-  VERTEX_SHADER_IN " vec2 position;\n"
-  VERTEX_SHADER_IN " vec2 texcoord;\n"
-  VERTEX_SHADER_OUT " vec2 v_texcoord;\n"
-  "void main() {\n"
-  "    gl_Position = vec4(position.x, position.y, 0.0, 1.0);\n"
-  "    v_texcoord = texcoord;\n"
-  "}\n";
+const char RTC_CONSTANT_TYPE(RTCVertexShaderSource)[] = SHADER_VERSION VERTEX_SHADER_IN
+    " vec2 position;\n" VERTEX_SHADER_IN " vec2 texcoord;\n" VERTEX_SHADER_OUT
+    " vec2 v_texcoord;\n"
+    "void main() {\n"
+    "    gl_Position = vec4(position.x, position.y, 0.0, 1.0);\n"
+    "    v_texcoord = texcoord;\n"
+    "}\n";
 
 // Compiles a shader of the given `type` with GLSL source `source` and returns
 // the shader handle or 0 on error.
-GLuint RTCCreateShader(GLenum type, const GLchar *source) {
+GLuint RTC_OBJC_TYPE(RTCCreateShader)(GLenum type, const GLchar *source) {
   GLuint shader = glCreateShader(type);
   if (!shader) {
     return 0;
@@ -61,7 +59,7 @@ GLuint RTCCreateShader(GLenum type, const GLchar *source) {
 
 // Links a shader program with the given vertex and fragment shaders and
 // returns the program handle or 0 on error.
-GLuint RTCCreateProgram(GLuint vertexShader, GLuint fragmentShader) {
+GLuint RTC_OBJC_TYPE(RTCCreateProgram)(GLuint vertexShader, GLuint fragmentShader) {
   if (vertexShader == 0 || fragmentShader == 0) {
     return 0;
   }
@@ -83,8 +81,8 @@ GLuint RTCCreateProgram(GLuint vertexShader, GLuint fragmentShader) {
 
 // Creates and links a shader program with the given fragment shader source and
 // a plain vertex shader. Returns the program handle or 0 on error.
-GLuint RTCCreateProgramFromFragmentSource(const char fragmentShaderSource[]) {
-  GLuint vertexShader = RTCCreateShader(GL_VERTEX_SHADER, kRTCVertexShaderSource);
+GLuint RTC_OBJC_TYPE(RTCCreateProgramFromFragmentSource)(const char fragmentShaderSource[]) {
+  GLuint vertexShader = RTCCreateShader(GL_VERTEX_SHADER, RTC_CONSTANT_TYPE(RTCVertexShaderSource));
   RTC_CHECK(vertexShader) << "failed to create vertex shader";
   GLuint fragmentShader =
       RTCCreateShader(GL_FRAGMENT_SHADER, fragmentShaderSource);
@@ -106,21 +104,28 @@ GLuint RTCCreateProgramFromFragmentSource(const char fragmentShaderSource[]) {
     return 0;
   }
 
-  // Read position attribute with size of 2 and stride of 4 beginning at the start of the array. The
-  // last argument indicates offset of data within the vertex buffer.
-  glVertexAttribPointer(position, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), (void *)0);
+  // Read position attribute with size of 2 and stride of 4 beginning at the
+  // start of the array. The last argument indicates offset of data within the
+  // vertex buffer.
+  glVertexAttribPointer(
+      position, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), (void *)0);
   glEnableVertexAttribArray(position);
 
-  // Read texcoord attribute  with size of 2 and stride of 4 beginning at the first texcoord in the
-  // array. The last argument indicates offset of data within the vertex buffer.
-  glVertexAttribPointer(
-      texcoord, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), (void *)(2 * sizeof(GLfloat)));
+  // Read texcoord attribute  with size of 2 and stride of 4 beginning at the
+  // first texcoord in the array. The last argument indicates offset of data
+  // within the vertex buffer.
+  glVertexAttribPointer(texcoord,
+                        2,
+                        GL_FLOAT,
+                        GL_FALSE,
+                        4 * sizeof(GLfloat),
+                        (void *)(2 * sizeof(GLfloat)));
   glEnableVertexAttribArray(texcoord);
 
   return program;
 }
 
-BOOL RTCCreateVertexBuffer(GLuint *vertexBuffer, GLuint *vertexArray) {
+BOOL RTC_OBJC_TYPE(RTCCreateVertexBuffer)(GLuint *vertexBuffer, GLuint *vertexArray) {
   glGenBuffers(1, vertexBuffer);
   if (*vertexBuffer == 0) {
     glDeleteVertexArrays(1, vertexArray);
@@ -132,7 +137,7 @@ BOOL RTCCreateVertexBuffer(GLuint *vertexBuffer, GLuint *vertexArray) {
 }
 
 // Set vertex data to the currently bound vertex buffer.
-void RTCSetVertexData(RTCVideoRotation rotation) {
+void RTC_OBJC_TYPE(RTCSetVertexData)(RTCVideoRotation rotation) {
   // When modelview and projection matrices are identity (default) the world is
   // contained in the square around origin with unit size 2. Drawing to these
   // coordinates is equivalent to drawing to the entire screen. The texture is
@@ -150,28 +155,40 @@ void RTCSetVertexData(RTCVideoRotation rotation) {
   // Rotate the UV coordinates.
   int rotation_offset;
   switch (rotation) {
-    case RTCVideoRotation_0:
+    case RTC_OBJC_TYPE(RTCVideoRotation_0):
       rotation_offset = 0;
       break;
-    case RTCVideoRotation_90:
+    case RTC_OBJC_TYPE(RTCVideoRotation_90):
       rotation_offset = 1;
       break;
-    case RTCVideoRotation_180:
+    case RTC_OBJC_TYPE(RTCVideoRotation_180):
       rotation_offset = 2;
       break;
-    case RTCVideoRotation_270:
+    case RTC_OBJC_TYPE(RTCVideoRotation_270):
       rotation_offset = 3;
       break;
   }
-  std::rotate(UVCoords.begin(), UVCoords.begin() + rotation_offset,
-              UVCoords.end());
+  std::rotate(
+      UVCoords.begin(), UVCoords.begin() + rotation_offset, UVCoords.end());
 
   const GLfloat gVertices[] = {
       // X, Y, U, V.
-      -1, -1, UVCoords[0][0], UVCoords[0][1],
-       1, -1, UVCoords[1][0], UVCoords[1][1],
-       1,  1, UVCoords[2][0], UVCoords[2][1],
-      -1,  1, UVCoords[3][0], UVCoords[3][1],
+      -1,
+      -1,
+      UVCoords[0][0],
+      UVCoords[0][1],
+      1,
+      -1,
+      UVCoords[1][0],
+      UVCoords[1][1],
+      1,
+      1,
+      UVCoords[2][0],
+      UVCoords[2][1],
+      -1,
+      1,
+      UVCoords[3][0],
+      UVCoords[3][1],
   };
 
   glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(gVertices), gVertices);

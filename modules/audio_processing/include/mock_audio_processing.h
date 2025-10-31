@@ -15,10 +15,12 @@
 
 #include "absl/base/nullability.h"
 #include "absl/strings/string_view.h"
+#include "api/audio/audio_processing.h"
+#include "api/audio/audio_processing_statistics.h"
+#include "api/environment/environment.h"
+#include "api/scoped_refptr.h"
 #include "api/task_queue/task_queue_base.h"
 #include "modules/audio_processing/include/aec_dump.h"
-#include "modules/audio_processing/include/audio_processing.h"
-#include "modules/audio_processing/include/audio_processing_statistics.h"
 #include "test/gmock.h"
 
 namespace webrtc {
@@ -82,11 +84,11 @@ class MockEchoDetector : public EchoDetector {
               (override));
   MOCK_METHOD(void,
               AnalyzeRenderAudio,
-              (rtc::ArrayView<const float> render_audio),
+              (webrtc::ArrayView<const float> render_audio),
               (override));
   MOCK_METHOD(void,
               AnalyzeCaptureAudio,
-              (rtc::ArrayView<const float> capture_audio),
+              (webrtc::ArrayView<const float> capture_audio),
               (override));
   MOCK_METHOD(Metrics, GetMetrics, (), (const, override));
 };
@@ -110,6 +112,7 @@ class MockAudioProcessing : public AudioProcessing {
   MOCK_METHOD(size_t, num_output_channels, (), (const, override));
   MOCK_METHOD(size_t, num_reverse_channels, (), (const, override));
   MOCK_METHOD(void, set_output_will_be_muted, (bool muted), (override));
+  MOCK_METHOD(bool, get_output_will_be_muted, (), (override));
   MOCK_METHOD(void, SetRuntimeSetting, (RuntimeSetting setting), (override));
   MOCK_METHOD(bool, PostRuntimeSetting, (RuntimeSetting setting), (override));
   MOCK_METHOD(int,
@@ -146,7 +149,7 @@ class MockAudioProcessing : public AudioProcessing {
               (override));
   MOCK_METHOD(bool,
               GetLinearAecOutput,
-              ((rtc::ArrayView<std::array<float, 160>> linear_output)),
+              ((webrtc::ArrayView<std::array<float, 160>> linear_output)),
               (const, override));
   MOCK_METHOD(int, set_stream_delay_ms, (int delay), (override));
   MOCK_METHOD(int, stream_delay_ms, (), (const, override));
@@ -157,13 +160,13 @@ class MockAudioProcessing : public AudioProcessing {
               CreateAndAttachAecDump,
               (absl::string_view file_name,
                int64_t max_log_size_bytes,
-               absl::Nonnull<TaskQueueBase*> worker_queue),
+               TaskQueueBase* absl_nonnull worker_queue),
               (override));
   MOCK_METHOD(bool,
               CreateAndAttachAecDump,
               (FILE * handle,
                int64_t max_log_size_bytes,
-               absl::Nonnull<TaskQueueBase*> worker_queue),
+               TaskQueueBase* absl_nonnull worker_queue),
               (override));
   MOCK_METHOD(void, AttachAecDump, (std::unique_ptr<AecDump>), (override));
   MOCK_METHOD(void, DetachAecDump, (), (override));
@@ -172,6 +175,14 @@ class MockAudioProcessing : public AudioProcessing {
   MOCK_METHOD(AudioProcessingStats, GetStatistics, (bool), (override));
 
   MOCK_METHOD(AudioProcessing::Config, GetConfig, (), (const, override));
+};
+
+class MockAudioProcessingBuilder : public AudioProcessingBuilderInterface {
+ public:
+  MOCK_METHOD(scoped_refptr<AudioProcessing>,
+              Build,
+              (const Environment&),
+              (override));
 };
 
 }  // namespace test

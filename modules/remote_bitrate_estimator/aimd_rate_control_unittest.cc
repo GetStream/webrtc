@@ -9,6 +9,10 @@
  */
 #include "modules/remote_bitrate_estimator/aimd_rate_control.h"
 
+#include <optional>
+
+#include "api/transport/bandwidth_usage.h"
+#include "api/transport/network_types.h"
 #include "api/units/data_rate.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
@@ -165,7 +169,7 @@ TEST(AimdRateControlTest, SendingRateBoundedWhenThroughputNotEstimated) {
   now += (kInitializationTime + TimeDelta::Millis(1));
   aimd_rate_control.Update({BandwidthUsage::kBwNormal, kInitialBitrate}, now);
   for (int i = 0; i < 100; ++i) {
-    aimd_rate_control.Update({BandwidthUsage::kBwNormal, absl::nullopt}, now);
+    aimd_rate_control.Update({BandwidthUsage::kBwNormal, std::nullopt}, now);
     now += TimeDelta::Millis(100);
   }
   EXPECT_LE(aimd_rate_control.LatestEstimate(),
@@ -187,7 +191,7 @@ TEST(AimdRateControlTest, EstimateDoesNotIncreaseInAlr) {
   ASSERT_EQ(aimd_rate_control.LatestEstimate(), kInitialBitrate);
 
   for (int i = 0; i < 100; ++i) {
-    aimd_rate_control.Update({BandwidthUsage::kBwNormal, absl::nullopt}, now);
+    aimd_rate_control.Update({BandwidthUsage::kBwNormal, std::nullopt}, now);
     now += TimeDelta::Millis(100);
   }
   EXPECT_EQ(aimd_rate_control.LatestEstimate(), kInitialBitrate);
@@ -287,7 +291,7 @@ TEST(AimdRateControlTest, EstimateIncreaseWhileNotInAlr) {
   aimd_rate_control.SetInApplicationLimitedRegion(false);
   aimd_rate_control.Update({BandwidthUsage::kBwNormal, kInitialBitrate}, now);
   for (int i = 0; i < 100; ++i) {
-    aimd_rate_control.Update({BandwidthUsage::kBwNormal, absl::nullopt}, now);
+    aimd_rate_control.Update({BandwidthUsage::kBwNormal, std::nullopt}, now);
     now += TimeDelta::Millis(100);
   }
   EXPECT_GT(aimd_rate_control.LatestEstimate(), kInitialBitrate);
@@ -306,7 +310,7 @@ TEST(AimdRateControlTest, EstimateNotLimitedByNetworkEstimateIfDisabled) {
   aimd_rate_control.SetNetworkStateEstimate(network_estimate);
 
   for (int i = 0; i < 100; ++i) {
-    aimd_rate_control.Update({BandwidthUsage::kBwNormal, absl::nullopt}, now);
+    aimd_rate_control.Update({BandwidthUsage::kBwNormal, std::nullopt}, now);
     now += TimeDelta::Millis(100);
   }
   EXPECT_GT(aimd_rate_control.LatestEstimate(),

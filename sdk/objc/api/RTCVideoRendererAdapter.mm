@@ -17,7 +17,7 @@
 
 namespace webrtc {
 
-class VideoRendererAdapter : public rtc::VideoSinkInterface<webrtc::VideoFrame> {
+class VideoRendererAdapter : public VideoSinkInterface<webrtc::VideoFrame> {
  public:
   VideoRendererAdapter(RTC_OBJC_TYPE(RTCVideoRendererAdapter) * adapter) {
     adapter_ = adapter;
@@ -25,7 +25,8 @@ class VideoRendererAdapter : public rtc::VideoSinkInterface<webrtc::VideoFrame> 
   }
 
   void OnFrame(const webrtc::VideoFrame& nativeVideoFrame) override {
-    RTC_OBJC_TYPE(RTCVideoFrame)* videoFrame = NativeToObjCVideoFrame(nativeVideoFrame);
+    RTC_OBJC_TYPE(RTCVideoFrame)* videoFrame =
+        NativeToObjCVideoFrame(nativeVideoFrame);
 
     CGSize current_size = (videoFrame.rotation % 180 == 0) ?
         CGSizeMake(videoFrame.width, videoFrame.height) :
@@ -50,16 +51,18 @@ class VideoRendererAdapter : public rtc::VideoSinkInterface<webrtc::VideoFrame> 
 
 @synthesize videoRenderer = _videoRenderer;
 
-- (instancetype)initWithNativeRenderer:(id<RTC_OBJC_TYPE(RTCVideoRenderer)>)videoRenderer {
+- (instancetype)initWithNativeRenderer:
+    (id<RTC_OBJC_TYPE(RTCVideoRenderer)>)videoRenderer {
   NSParameterAssert(videoRenderer);
-  if (self = [super init]) {
+  self = [super init];
+  if (self) {
     _videoRenderer = videoRenderer;
     _adapter.reset(new webrtc::VideoRendererAdapter(self));
   }
   return self;
 }
 
-- (rtc::VideoSinkInterface<webrtc::VideoFrame>*)nativeVideoRenderer {
+- (webrtc::VideoSinkInterface<webrtc::VideoFrame>*)nativeVideoRenderer {
   return _adapter.get();
 }
 

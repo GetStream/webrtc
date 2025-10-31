@@ -32,15 +32,18 @@
 
 - (instancetype)initWithNativeParameters:
     (const webrtc::RtpParameters &)nativeParameters {
-  if (self = [super init]) {
-    _transactionId = [NSString stringForStdString:nativeParameters.transaction_id];
-    _rtcp =
-        [[RTC_OBJC_TYPE(RTCRtcpParameters) alloc] initWithNativeParameters:nativeParameters.rtcp];
+  self = [super init];
+  if (self) {
+    _transactionId =
+        [NSString stringForStdString:nativeParameters.transaction_id];
+    _rtcp = [[RTC_OBJC_TYPE(RTCRtcpParameters) alloc]
+        initWithNativeParameters:nativeParameters.rtcp];
 
     NSMutableArray *headerExtensions = [[NSMutableArray alloc] init];
     for (const auto &headerExtension : nativeParameters.header_extensions) {
-      [headerExtensions addObject:[[RTC_OBJC_TYPE(RTCRtpHeaderExtension) alloc]
-                                      initWithNativeParameters:headerExtension]];
+      [headerExtensions
+          addObject:[[RTC_OBJC_TYPE(RTCRtpHeaderExtension) alloc]
+                        initWithNativeParameters:headerExtension]];
     }
     _headerExtensions = headerExtensions;
 
@@ -53,14 +56,14 @@
 
     NSMutableArray *codecs = [[NSMutableArray alloc] init];
     for (const auto &codec : nativeParameters.codecs) {
-      [codecs
-          addObject:[[RTC_OBJC_TYPE(RTCRtpCodecParameters) alloc] initWithNativeParameters:codec]];
+      [codecs addObject:[[RTC_OBJC_TYPE(RTCRtpCodecParameters) alloc]
+                            initWithNativeParameters:codec]];
     }
     _codecs = codecs;
 
     _degradationPreference = [RTC_OBJC_TYPE(RTCRtpParameters)
-        degradationPreferenceFromNativeDegradationPreference:nativeParameters
-                                                                 .degradation_preference];
+        degradationPreferenceFromNativeDegradationPreference:
+            nativeParameters.degradation_preference];
   }
   return self;
 }
@@ -69,7 +72,8 @@
   webrtc::RtpParameters parameters;
   parameters.transaction_id = [NSString stdStringForString:_transactionId];
   parameters.rtcp = [_rtcp nativeParameters];
-  for (RTC_OBJC_TYPE(RTCRtpHeaderExtension) * headerExtension in _headerExtensions) {
+  for (RTC_OBJC_TYPE(RTCRtpHeaderExtension) *
+       headerExtension in _headerExtensions) {
     parameters.header_extensions.push_back(headerExtension.nativeParameters);
   }
   for (RTC_OBJC_TYPE(RTCRtpEncodingParameters) * encoding in _encodings) {
@@ -80,41 +84,41 @@
   }
   if (_degradationPreference) {
     parameters.degradation_preference = [RTC_OBJC_TYPE(RTCRtpParameters)
-        nativeDegradationPreferenceFromDegradationPreference:(RTCDegradationPreference)
+        nativeDegradationPreferenceFromDegradationPreference:(RTC_OBJC_TYPE(RTCDegradationPreference))
                                                                  _degradationPreference.intValue];
   }
   return parameters;
 }
 
 + (webrtc::DegradationPreference)nativeDegradationPreferenceFromDegradationPreference:
-    (RTCDegradationPreference)degradationPreference {
+    (RTC_OBJC_TYPE(RTCDegradationPreference))degradationPreference {
   switch (degradationPreference) {
-    case RTCDegradationPreferenceDisabled:
+    case RTC_OBJC_TYPE(RTCDegradationPreferenceDisabled):
       return webrtc::DegradationPreference::DISABLED;
-    case RTCDegradationPreferenceMaintainFramerate:
+    case RTC_OBJC_TYPE(RTCDegradationPreferenceMaintainFramerate):
       return webrtc::DegradationPreference::MAINTAIN_FRAMERATE;
-    case RTCDegradationPreferenceMaintainResolution:
+    case RTC_OBJC_TYPE(RTCDegradationPreferenceMaintainResolution):
       return webrtc::DegradationPreference::MAINTAIN_RESOLUTION;
-    case RTCDegradationPreferenceBalanced:
+    case RTC_OBJC_TYPE(RTCDegradationPreferenceBalanced):
       return webrtc::DegradationPreference::BALANCED;
   }
 }
 
 + (NSNumber *)degradationPreferenceFromNativeDegradationPreference:
-    (absl::optional<webrtc::DegradationPreference>)nativeDegradationPreference {
+    (std::optional<webrtc::DegradationPreference>)nativeDegradationPreference {
   if (!nativeDegradationPreference.has_value()) {
     return nil;
   }
 
   switch (*nativeDegradationPreference) {
     case webrtc::DegradationPreference::DISABLED:
-      return @(RTCDegradationPreferenceDisabled);
+      return @(RTC_OBJC_TYPE(RTCDegradationPreferenceDisabled));
     case webrtc::DegradationPreference::MAINTAIN_FRAMERATE:
-      return @(RTCDegradationPreferenceMaintainFramerate);
+      return @(RTC_OBJC_TYPE(RTCDegradationPreferenceMaintainFramerate));
     case webrtc::DegradationPreference::MAINTAIN_RESOLUTION:
-      return @(RTCDegradationPreferenceMaintainResolution);
+      return @(RTC_OBJC_TYPE(RTCDegradationPreferenceMaintainResolution));
     case webrtc::DegradationPreference::BALANCED:
-      return @(RTCDegradationPreferenceBalanced);
+      return @(RTC_OBJC_TYPE(RTCDegradationPreferenceBalanced));
   }
 }
 

@@ -241,8 +241,8 @@ class HardwareVideoEncoder implements VideoEncoder {
 
     try {
       codec = mediaCodecWrapperFactory.createByCodecName(codecName);
-    } catch (IOException | IllegalArgumentException e) {
-      Logging.e(TAG, "Cannot create media encoder " + codecName);
+    } catch (IOException | IllegalArgumentException | IllegalStateException e) {
+      Logging.e(TAG, "Cannot create media encoder " + codecName, e);
       return VideoCodecStatus.FALLBACK_SOFTWARE;
     }
 
@@ -512,6 +512,10 @@ class HardwareVideoEncoder implements VideoEncoder {
         final int kLowH264QpThreshold = 24;
         final int kHighH264QpThreshold = 37;
         return new ScalingSettings(kLowH264QpThreshold, kHighH264QpThreshold);
+      } else if (codecType == VideoCodecMimeType.H265) {
+        final int kLowH265QpThreshold = 24;
+        final int kHighH265QpThreshold = 37;
+        return new ScalingSettings(kLowH265QpThreshold, kHighH265QpThreshold);
       }
     }
     return ScalingSettings.OFF;
@@ -611,6 +615,7 @@ class HardwareVideoEncoder implements VideoEncoder {
           configBuffer = ByteBuffer.allocateDirect(info.size);
           configBuffer.put(outputBuffer);
         }
+        codec.releaseOutputBuffer(index, /* render= */ false);
         return;
       }
 

@@ -13,9 +13,9 @@
 
 #include <stdint.h>
 
+#include "api/audio/audio_device.h"
+#include "api/audio/audio_device_defines.h"
 #include "modules/audio_device/audio_device_buffer.h"
-#include "modules/audio_device/include/audio_device.h"
-#include "modules/audio_device/include/audio_device_defines.h"
 
 namespace webrtc {
 
@@ -135,7 +135,7 @@ class AudioDeviceGeneric {
   virtual int GetRecordAudioParameters(AudioParameters* params) const;
 #endif  // WEBRTC_IOS
 
-  virtual int32_t SetAudioDeviceSink(AudioDeviceSink* sink) { return -1; }
+  virtual int32_t SetObserver(AudioDeviceObserver* observer) { return -1; }
   virtual int32_t GetPlayoutDevice() const { return -1; }
   virtual int32_t GetRecordingDevice() const { return -1; }
 

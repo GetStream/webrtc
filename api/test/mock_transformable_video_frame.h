@@ -11,10 +11,16 @@
 #ifndef API_TEST_MOCK_TRANSFORMABLE_VIDEO_FRAME_H_
 #define API_TEST_MOCK_TRANSFORMABLE_VIDEO_FRAME_H_
 
+#include <cstdint>
+#include <optional>
 #include <string>
-#include <vector>
+#include <type_traits>
 
+#include "api/array_view.h"
 #include "api/frame_transformer_interface.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
+#include "api/video/video_frame_metadata.h"
 #include "test/gmock.h"
 
 namespace webrtc {
@@ -22,8 +28,12 @@ namespace webrtc {
 class MockTransformableVideoFrame
     : public webrtc::TransformableVideoFrameInterface {
  public:
-  MOCK_METHOD(rtc::ArrayView<const uint8_t>, GetData, (), (const, override));
-  MOCK_METHOD(void, SetData, (rtc::ArrayView<const uint8_t> data), (override));
+  MockTransformableVideoFrame() : TransformableVideoFrameInterface(Passkey()) {}
+  MOCK_METHOD(ArrayView<const uint8_t>, GetData, (), (const, override));
+  MOCK_METHOD(void,
+              SetData,
+              (webrtc::ArrayView<const uint8_t> data),
+              (override));
   MOCK_METHOD(uint32_t, GetTimestamp, (), (const, override));
   MOCK_METHOD(void, SetRTPTimestamp, (uint32_t), (override));
   MOCK_METHOD(uint32_t, GetSsrc, (), (const, override));
@@ -39,8 +49,15 @@ class MockTransformableVideoFrame
               (const, override));
   MOCK_METHOD(std::string, GetMimeType, (), (const, override));
   MOCK_METHOD(VideoFrameMetadata, Metadata, (), (const, override));
-  MOCK_METHOD(absl::optional<Timestamp>,
-              GetCaptureTimeIdentifier,
+  MOCK_METHOD(RTPVideoHeader&, header, (), (const, override));
+  MOCK_METHOD(std::optional<Timestamp>,
+              GetPresentationTimestamp,
+              (),
+              (const, override));
+  MOCK_METHOD(std::optional<Timestamp>, ReceiveTime, (), (const, override));
+  MOCK_METHOD(std::optional<Timestamp>, CaptureTime, (), (const, override));
+  MOCK_METHOD(std::optional<TimeDelta>,
+              SenderCaptureTimeOffset,
               (),
               (const, override));
 };

@@ -2,6 +2,8 @@
 
 #include <cstring>
 
+#include "api/audio/builtin_audio_processing_builder.h"
+#include "api/environment/environment_factory.h"
 #include "extensions/android-external-audio-processing/generated_external_jni/NativeExternalAudioProcessingFactory_jni.h"
 #include "external_processing.hpp"
 #include "rtc_base/checks.h"
@@ -38,9 +40,9 @@ static jlong JNI_NativeExternalAudioProcessingFactory_CreateAudioProcessingModul
   env->ReleaseStringUTFChars(libnameRef.obj(), libname);
 
   std::unique_ptr<webrtc::CustomProcessing> external_processing(instance);
-  auto apm = webrtc::AudioProcessingBuilder()
+  auto apm = webrtc::BuiltinAudioProcessingBuilder()
                  .SetCapturePostProcessing(std::move(external_processing))
-                 .Create();
+                 .Build(webrtc::CreateEnvironment());
   webrtc::AudioProcessing::Config config;
   config.echo_canceller.enabled = false;
   config.echo_canceller.mobile_mode = true;

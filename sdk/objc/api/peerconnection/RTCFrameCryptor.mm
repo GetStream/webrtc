@@ -54,37 +54,37 @@ void RTCFrameCryptorDelegateAdapter::OnFrameCryptionStateChanged(const std::stri
       case FrameCryptionState::kNew:
         [frameCryptor.delegate frameCryptor:frameCryptor
             didStateChangeWithParticipantId:[NSString stringForStdString:participant_id]
-                                  withState:FrameCryptionStateNew];
+                                  withState:RTC_OBJC_TYPE(RTCFrameCryptorStateNew)];
         break;
       case FrameCryptionState::kOk:
         [frameCryptor.delegate frameCryptor:frameCryptor
             didStateChangeWithParticipantId:[NSString stringForStdString:participant_id]
-                                  withState:FrameCryptionStateOk];
+                                  withState:RTC_OBJC_TYPE(RTCFrameCryptorStateOk)];
         break;
       case FrameCryptionState::kEncryptionFailed:
         [frameCryptor.delegate frameCryptor:frameCryptor
             didStateChangeWithParticipantId:[NSString stringForStdString:participant_id]
-                                  withState:FrameCryptionStateEncryptionFailed];
+                                  withState:RTC_OBJC_TYPE(RTCFrameCryptorStateEncryptionFailed)];
         break;
       case FrameCryptionState::kDecryptionFailed:
         [frameCryptor.delegate frameCryptor:frameCryptor
             didStateChangeWithParticipantId:[NSString stringForStdString:participant_id]
-                                  withState:FrameCryptionStateDecryptionFailed];
+                                  withState:RTC_OBJC_TYPE(RTCFrameCryptorStateDecryptionFailed)];
         break;
       case FrameCryptionState::kMissingKey:
         [frameCryptor.delegate frameCryptor:frameCryptor
             didStateChangeWithParticipantId:[NSString stringForStdString:participant_id]
-                                  withState:FrameCryptionStateMissingKey];
+                                  withState:RTC_OBJC_TYPE(RTCFrameCryptorStateMissingKey)];
         break;
       case FrameCryptionState::kKeyRatcheted:
         [frameCryptor.delegate frameCryptor:frameCryptor
             didStateChangeWithParticipantId:[NSString stringForStdString:participant_id]
-                                  withState:FrameCryptionStateKeyRatcheted];
+                                  withState:RTC_OBJC_TYPE(RTCFrameCryptorStateKeyRatcheted)];
         break;
       case FrameCryptionState::kInternalError:
         [frameCryptor.delegate frameCryptor:frameCryptor
             didStateChangeWithParticipantId:[NSString stringForStdString:participant_id]
-                                  withState:FrameCryptionStateInternalError];
+                                  withState:RTC_OBJC_TYPE(RTCFrameCryptorStateInternalError)];
         break;
     }
   }
@@ -94,17 +94,17 @@ void RTCFrameCryptorDelegateAdapter::OnFrameCryptionStateChanged(const std::stri
 @implementation RTC_OBJC_TYPE (RTCFrameCryptor) {
   const webrtc::RtpSenderInterface *_sender;
   const webrtc::RtpReceiverInterface *_receiver;
-  rtc::scoped_refptr<webrtc::FrameCryptorTransformer> _frame_crypto_transformer;
-  rtc::scoped_refptr<webrtc::RTCFrameCryptorDelegateAdapter> _observer;
+  webrtc::scoped_refptr<webrtc::FrameCryptorTransformer> _frame_crypto_transformer;
+  webrtc::scoped_refptr<webrtc::RTCFrameCryptorDelegateAdapter> _observer;
   os_unfair_lock _lock;
 }
 
 @synthesize participantId = _participantId;
 @synthesize delegate = _delegate;
 
-- (webrtc::FrameCryptorTransformer::Algorithm)algorithmFromEnum:(RTCCryptorAlgorithm)algorithm {
+- (webrtc::FrameCryptorTransformer::Algorithm)algorithmFromEnum:(RTC_OBJC_TYPE(RTCCryptorAlgorithm))algorithm {
   switch (algorithm) {
-    case RTCCryptorAlgorithmAesGcm:
+    case RTC_OBJC_TYPE(RTCCryptorAlgorithmAesGcm):
       return webrtc::FrameCryptorTransformer::Algorithm::kAesGcm;
     default:
       return webrtc::FrameCryptorTransformer::Algorithm::kAesGcm;
@@ -114,15 +114,16 @@ void RTCFrameCryptorDelegateAdapter::OnFrameCryptionStateChanged(const std::stri
 - (nullable instancetype)initWithFactory:(RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)factory
                                rtpSender:(RTC_OBJC_TYPE(RTCRtpSender) *)sender
                            participantId:(NSString *)participantId
-                               algorithm:(RTCCryptorAlgorithm)algorithm
+                               algorithm:(RTC_OBJC_TYPE(RTCCryptorAlgorithm))algorithm
                              keyProvider:(RTC_OBJC_TYPE(RTCFrameCryptorKeyProvider) *)keyProvider {
-  if (self = [super init]) {
+  self = [super init];
+  if (self) {
     _lock = OS_UNFAIR_LOCK_INIT;
 
-    rtc::scoped_refptr<webrtc::RtpSenderInterface> nativeRtpSender = sender.nativeRtpSender;
+    webrtc::scoped_refptr<webrtc::RtpSenderInterface> nativeRtpSender = sender.nativeRtpSender;
     if (nativeRtpSender == nullptr) return nil;
 
-    rtc::scoped_refptr<webrtc::MediaStreamTrackInterface> nativeTrack = nativeRtpSender->track();
+    webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> nativeTrack = nativeRtpSender->track();
     if (nativeTrack == nullptr) return nil;
 
     webrtc::FrameCryptorTransformer::MediaType mediaType =
@@ -130,16 +131,16 @@ void RTCFrameCryptorDelegateAdapter::OnFrameCryptionStateChanged(const std::stri
                                        : webrtc::FrameCryptorTransformer::MediaType::kVideoFrame;
 
     os_unfair_lock_lock(&_lock);
-    _observer = rtc::make_ref_counted<webrtc::RTCFrameCryptorDelegateAdapter>(self);
+    _observer = webrtc::make_ref_counted<webrtc::RTCFrameCryptorDelegateAdapter>(self);
     _participantId = participantId;
 
     _frame_crypto_transformer =
-        rtc::scoped_refptr<webrtc::FrameCryptorTransformer>(new webrtc::FrameCryptorTransformer(
+        webrtc::scoped_refptr<webrtc::FrameCryptorTransformer>(new webrtc::FrameCryptorTransformer(
             factory.signalingThread, [participantId stdString], mediaType,
             [self algorithmFromEnum:algorithm], keyProvider.nativeKeyProvider));
 
-    factory.workerThread->BlockingCall([self, nativeRtpSender] {
-      // Must be called on Worker thread
+    factory.signalingThread->BlockingCall([self, nativeRtpSender] {
+      // Must be called on signal thread
       nativeRtpSender->SetEncoderToPacketizerFrameTransformer(_frame_crypto_transformer);
     });
 
@@ -154,15 +155,16 @@ void RTCFrameCryptorDelegateAdapter::OnFrameCryptionStateChanged(const std::stri
 - (nullable instancetype)initWithFactory:(RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)factory
                              rtpReceiver:(RTC_OBJC_TYPE(RTCRtpReceiver) *)receiver
                            participantId:(NSString *)participantId
-                               algorithm:(RTCCryptorAlgorithm)algorithm
+                               algorithm:(RTC_OBJC_TYPE(RTCCryptorAlgorithm))algorithm
                              keyProvider:(RTC_OBJC_TYPE(RTCFrameCryptorKeyProvider) *)keyProvider {
-  if (self = [super init]) {
+  self = [super init];
+  if (self) {
     _lock = OS_UNFAIR_LOCK_INIT;
 
-    rtc::scoped_refptr<webrtc::RtpReceiverInterface> nativeRtpReceiver = receiver.nativeRtpReceiver;
+    webrtc::scoped_refptr<webrtc::RtpReceiverInterface> nativeRtpReceiver = receiver.nativeRtpReceiver;
     if (nativeRtpReceiver == nullptr) return nil;
 
-    rtc::scoped_refptr<webrtc::MediaStreamTrackInterface> nativeTrack = nativeRtpReceiver->track();
+    webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> nativeTrack = nativeRtpReceiver->track();
     if (nativeTrack == nullptr) return nil;
 
     webrtc::FrameCryptorTransformer::MediaType mediaType =
@@ -170,16 +172,16 @@ void RTCFrameCryptorDelegateAdapter::OnFrameCryptionStateChanged(const std::stri
                                        : webrtc::FrameCryptorTransformer::MediaType::kVideoFrame;
 
     os_unfair_lock_lock(&_lock);
-    _observer = rtc::make_ref_counted<webrtc::RTCFrameCryptorDelegateAdapter>(self);
+    _observer = webrtc::make_ref_counted<webrtc::RTCFrameCryptorDelegateAdapter>(self);
     _participantId = participantId;
 
     _frame_crypto_transformer =
-        rtc::scoped_refptr<webrtc::FrameCryptorTransformer>(new webrtc::FrameCryptorTransformer(
+        webrtc::scoped_refptr<webrtc::FrameCryptorTransformer>(new webrtc::FrameCryptorTransformer(
             factory.signalingThread, [participantId stdString], mediaType,
             [self algorithmFromEnum:algorithm], keyProvider.nativeKeyProvider));
 
-    factory.workerThread->BlockingCall([self, nativeRtpReceiver] {
-      // Must be called on Worker thread
+    factory.signalingThread->BlockingCall([self, nativeRtpReceiver] {
+      // Must be called on signal thread
       nativeRtpReceiver->SetDepacketizerToDecoderFrameTransformer(_frame_crypto_transformer);
     });
 

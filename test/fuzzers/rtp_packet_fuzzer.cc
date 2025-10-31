@@ -9,10 +9,21 @@
  */
 
 #include <bitset>
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <string>
 #include <vector>
 
-#include "absl/types/optional.h"
-#include "modules/rtp_rtcp/include/rtp_header_extension_map.h"
+#include "api/rtp_headers.h"
+#include "api/transport/rtp/corruption_detection_message.h"
+#include "api/video/color_space.h"
+#include "api/video/video_content_type.h"
+#include "api/video/video_layers_allocation.h"
+#include "api/video/video_timing.h"
+#include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
+#include "modules/rtp_rtcp/source/corruption_detection_extension.h"
+#include "modules/rtp_rtcp/source/rtp_generic_frame_descriptor.h"
 #include "modules/rtp_rtcp/source/rtp_generic_frame_descriptor_extension.h"
 #include "modules/rtp_rtcp/source/rtp_header_extensions.h"
 #include "modules/rtp_rtcp/source/rtp_packet_received.h"
@@ -101,7 +112,7 @@ void FuzzOneInput(const uint8_t* data, size_t size) {
         break;
       case kRtpExtensionTransportSequenceNumber02: {
         uint16_t seqnum;
-        absl::optional<FeedbackRequest> feedback_request;
+        std::optional<FeedbackRequest> feedback_request;
         packet.GetExtension<TransportSequenceNumberV2>(&seqnum,
                                                        &feedback_request);
         break;
@@ -146,7 +157,7 @@ void FuzzOneInput(const uint8_t* data, size_t size) {
         break;
       }
       case kRtpExtensionInbandComfortNoise: {
-        absl::optional<uint8_t> noise_level;
+        std::optional<uint8_t> noise_level;
         packet.GetExtension<InbandComfortNoiseExtension>(&noise_level);
         break;
       }
@@ -164,6 +175,11 @@ void FuzzOneInput(const uint8_t* data, size_t size) {
         // This extension requires state to read and so complicated that
         // deserves own fuzzer.
         break;
+      case kRtpExtensionCorruptionDetection: {
+        CorruptionDetectionMessage message;
+        packet.GetExtension<CorruptionDetectionExtension>(&message);
+        break;
+      }
     }
   }
 

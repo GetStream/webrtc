@@ -10,7 +10,8 @@
 
 #include "video/rtp_streams_synchronizer2.h"
 
-#include "absl/types/optional.h"
+#include <optional>
+
 #include "call/syncable.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
@@ -41,7 +42,7 @@ RtpStreamsSynchronizer::RtpStreamsSynchronizer(TaskQueueBase* main_queue,
                                                Syncable* syncable_video)
     : task_queue_(main_queue),
       syncable_video_(syncable_video),
-      last_stats_log_ms_(rtc::TimeMillis()) {
+      last_stats_log_ms_(TimeMillis()) {
   RTC_DCHECK(syncable_video);
 }
 
@@ -86,7 +87,7 @@ void RtpStreamsSynchronizer::UpdateDelay() {
   RTC_DCHECK(sync_.get());
 
   bool log_stats = false;
-  const int64_t now_ms = rtc::TimeMillis();
+  const int64_t now_ms = TimeMillis();
   if (now_ms - last_stats_log_ms_ > kStatsLogIntervalMs) {
     last_stats_log_ms_ = now_ms;
     log_stats = true;
@@ -94,7 +95,7 @@ void RtpStreamsSynchronizer::UpdateDelay() {
 
   int64_t last_audio_receive_time_ms =
       audio_measurement_.latest_receive_time_ms;
-  absl::optional<Syncable::Info> audio_info = syncable_audio_->GetInfo();
+  std::optional<Syncable::Info> audio_info = syncable_audio_->GetInfo();
   if (!audio_info || !UpdateMeasurements(&audio_measurement_, *audio_info)) {
     return;
   }
@@ -105,7 +106,7 @@ void RtpStreamsSynchronizer::UpdateDelay() {
   }
 
   int64_t last_video_receive_ms = video_measurement_.latest_receive_time_ms;
-  absl::optional<Syncable::Info> video_info = syncable_video_->GetInfo();
+  std::optional<Syncable::Info> video_info = syncable_video_->GetInfo();
   if (!video_info || !UpdateMeasurements(&video_measurement_, *video_info)) {
     return;
   }
@@ -201,7 +202,7 @@ bool RtpStreamsSynchronizer::GetStreamSyncOffsetInMs(
   int64_t latest_video_ntp_ms = latest_video_ntp.ToMs();
 
   // Current audio ntp.
-  int64_t now_ms = rtc::TimeMillis();
+  int64_t now_ms = TimeMillis();
   latest_audio_ntp_ms += (now_ms - time_ms);
 
   // Remove video playout delay.

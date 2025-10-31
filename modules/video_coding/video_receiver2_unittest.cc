@@ -10,14 +10,18 @@
 
 #include "modules/video_coding/video_receiver2.h"
 
+#include <cstdint>
 #include <memory>
 #include <utility>
 
 #include "api/test/mock_video_decoder.h"
 #include "api/units/timestamp.h"
 #include "api/video/encoded_frame.h"
+#include "api/video/video_codec_type.h"
+#include "api/video_codecs/video_decoder.h"
 #include "common_video/test/utilities.h"
-#include "modules/video_coding/decoder_database.h"
+#include "modules/video_coding/include/video_coding_defines.h"
+#include "modules/video_coding/include/video_error_codes.h"
 #include "modules/video_coding/timing/timing.h"
 #include "system_wrappers/include/clock.h"
 #include "test/gmock.h"
@@ -35,14 +39,7 @@ class MockVCMReceiveCallback : public VCMReceiveCallback {
  public:
   MockVCMReceiveCallback() = default;
 
-  MOCK_METHOD(int32_t,
-              FrameToRender,
-              (VideoFrame&,
-               absl::optional<uint8_t>,
-               TimeDelta,
-               VideoContentType,
-               VideoFrameType),
-              (override));
+  MOCK_METHOD(int32_t, OnFrameToRender, (const FrameToRender&), (override));
   MOCK_METHOD(void, OnIncomingPayloadType, (int), (override));
   MOCK_METHOD(void,
               OnDecoderInfoChanged,
@@ -89,7 +86,8 @@ class VideoReceiver2Test : public ::testing::Test {
   SimulatedClock clock_{Timestamp::Millis(1337)};
   VCMTiming timing_{&clock_, field_trials_};
   NiceMock<MockVCMReceiveCallback> receive_callback_;
-  VideoReceiver2 receiver_{&clock_, &timing_, field_trials_};
+  VideoReceiver2 receiver_{&clock_, &timing_, field_trials_,
+                           /*corruption_score_calculator=*/nullptr};
 };
 
 TEST_F(VideoReceiver2Test, RegisterExternalDecoder) {

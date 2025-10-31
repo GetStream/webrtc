@@ -12,10 +12,10 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <type_traits>
 #include <vector>
 
-#include "absl/types/optional.h"
 #include "api/array_view.h"
 #include "api/task_queue/task_queue_base.h"
 #include "net/dcsctp/common/handover_testing.h"
@@ -63,7 +63,8 @@ class TransmissionControlBlockTest : public testing::Test {
   Capabilities capabilities_;
   StrictMock<MockDcSctpSocketCallbacks> callbacks_;
   StrictMock<MockSendQueue> send_queue_;
-  testing::MockFunction<void(rtc::ArrayView<const uint8_t>, SendPacketStatus)>
+  testing::MockFunction<void(webrtc::ArrayView<const uint8_t>,
+                             SendPacketStatus)>
       on_send_fn_;
   testing::MockFunction<bool()> on_connection_established;
   PacketSender sender_;

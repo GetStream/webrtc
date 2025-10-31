@@ -10,8 +10,7 @@
 
 #include "api/video_codecs/sdp_video_format.h"
 
-#include <stdint.h>
-
+#include "api/rtp_parameters.h"
 #include "media/base/media_constants.h"
 #include "test/gtest.h"
 
@@ -93,7 +92,7 @@ TEST(SdpVideoFormatTest, SameCodecNameDifferentParameters) {
   EXPECT_FALSE(Sdp("H265").IsSameCodec(Sdp(
       "H265",
       Params{{"profile-id", "1"}, {"tier-flag", "1"}, {"level-id", "93"}})));
-  EXPECT_FALSE(Sdp("H265").IsSameCodec(Sdp(
+  EXPECT_TRUE(Sdp("H265").IsSameCodec(Sdp(
       "H265",
       Params{{"profile-id", "1"}, {"tier-flag", "0"}, {"level-id", "90"}})));
   EXPECT_FALSE(
@@ -108,7 +107,7 @@ TEST(SdpVideoFormatTest, SameCodecNameDifferentParameters) {
           .IsSameCodec(Sdp("H265", Params{{"profile-id", "1"},
                                           {"tier-flag", "0"},
                                           {"level-id", "120"}})));
-  EXPECT_FALSE(
+  EXPECT_TRUE(
       Sdp("H265",
           Params{{"profile-id", "1"}, {"tier-flag", "0"}, {"level-id", "93"}})
           .IsSameCodec(Sdp("H265", Params{{"profile-id", "1"},
@@ -142,14 +141,13 @@ TEST(SdpVideoFormatTest, DifferentCodecNameSameParameters) {
 
 TEST(SdpVideoFormatTest, H264PacketizationMode) {
   // The default packetization mode is 0.
-  EXPECT_TRUE(Sdp("H264", Params{{cricket::kH264FmtpPacketizationMode, "0"}})
+  EXPECT_TRUE(Sdp("H264", Params{{kH264FmtpPacketizationMode, "0"}})
                   .IsSameCodec(Sdp("H264")));
-  EXPECT_FALSE(Sdp("H264", Params{{cricket::kH264FmtpPacketizationMode, "1"}})
+  EXPECT_FALSE(Sdp("H264", Params{{kH264FmtpPacketizationMode, "1"}})
                    .IsSameCodec(Sdp("H264")));
 
   EXPECT_TRUE(
-      Sdp("H264", Params{{cricket::kH264FmtpPacketizationMode, "1"}})
-          .IsSameCodec(
-              Sdp("H264", Params{{cricket::kH264FmtpPacketizationMode, "1"}})));
+      Sdp("H264", Params{{kH264FmtpPacketizationMode, "1"}})
+          .IsSameCodec(Sdp("H264", Params{{kH264FmtpPacketizationMode, "1"}})));
 }
 }  // namespace webrtc

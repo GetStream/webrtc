@@ -11,10 +11,10 @@
 // Test to verify correct operation when using the decoder-internal PLC.
 
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
-#include "absl/types/optional.h"
 #include "modules/audio_coding/codecs/pcm16b/audio_encoder_pcm16b.h"
 #include "modules/audio_coding/neteq/tools/audio_checksum.h"
 #include "modules/audio_coding/neteq/tools/audio_sink.h"
@@ -61,7 +61,7 @@ class AudioDecoderPlc : public AudioDecoder {
   }
 
   void GeneratePlc(size_t requested_samples_per_channel,
-                   rtc::BufferT<int16_t>* concealment_audio) override {
+                   BufferT<int16_t>* concealment_audio) override {
     // Instead of generating random data for GeneratePlc we use the same data as
     // the input, so we can check that we produce the same result independently
     // of the losses.
@@ -75,7 +75,7 @@ class AudioDecoderPlc : public AudioDecoder {
     int dec_len = DecodeInternal(nullptr, 2 * 10 * sample_rate_hz_ / 1000,
                                  sample_rate_hz_, decoded.data(), &speech_type);
     concealment_audio->AppendData(decoded.data(), dec_len);
-    concealed_samples_ += rtc::checked_cast<size_t>(dec_len);
+    concealed_samples_ += checked_cast<size_t>(dec_len);
 
     if (!last_was_plc) {
       ++concealment_events_;
@@ -97,9 +97,9 @@ class AudioDecoderPlc : public AudioDecoder {
 // An input sample generator which generates only zero-samples.
 class ZeroSampleGenerator : public EncodeNetEqInput::Generator {
  public:
-  rtc::ArrayView<const int16_t> Generate(size_t num_samples) override {
+  ArrayView<const int16_t> Generate(size_t num_samples) override {
     vec.resize(num_samples, 0);
-    rtc::ArrayView<const int16_t> view(vec);
+    ArrayView<const int16_t> view(vec);
     RTC_DCHECK_EQ(view.size(), num_samples);
     return view;
   }
@@ -119,15 +119,15 @@ class LossyInput : public NetEqInput {
         burst_length_(burst_length),
         input_(std::move(input)) {}
 
-  absl::optional<int64_t> NextPacketTime() const override {
+  std::optional<int64_t> NextPacketTime() const override {
     return input_->NextPacketTime();
   }
 
-  absl::optional<int64_t> NextOutputEventTime() const override {
+  std::optional<int64_t> NextOutputEventTime() const override {
     return input_->NextOutputEventTime();
   }
 
-  absl::optional<SetMinimumDelayInfo> NextSetMinimumDelayInfo() const override {
+  std::optional<SetMinimumDelayInfo> NextSetMinimumDelayInfo() const override {
     return input_->NextSetMinimumDelayInfo();
   }
 
@@ -151,7 +151,7 @@ class LossyInput : public NetEqInput {
 
   bool ended() const override { return input_->ended(); }
 
-  absl::optional<RTPHeader> NextHeader() const override {
+  std::optional<RTPHeader> NextHeader() const override {
     return input_->NextHeader();
   }
 
@@ -215,7 +215,7 @@ TestStatistics RunTest(int loss_cadence,
 
   NetEqTest neteq_test(
       config, /*decoder_factory=*/
-      rtc::make_ref_counted<test::AudioDecoderProxyFactory>(&dec),
+      make_ref_counted<test::AudioDecoderProxyFactory>(&dec),
       /*codecs=*/decoders, /*text_log=*/nullptr, /*neteq_factory=*/nullptr,
       /*input=*/std::move(lossy_input), std::move(output), callbacks);
   EXPECT_LE(kRunTimeMs, neteq_test.Run());

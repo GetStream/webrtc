@@ -11,9 +11,9 @@
 #ifndef VIDEO_ADAPTATION_PIXEL_LIMIT_RESOURCE_H_
 #define VIDEO_ADAPTATION_PIXEL_LIMIT_RESOURCE_H_
 
+#include <optional>
 #include <string>
 
-#include "absl/types/optional.h"
 #include "api/adaptation/resource.h"
 #include "api/scoped_refptr.h"
 #include "call/adaptation/video_stream_input_state_provider.h"
@@ -33,7 +33,7 @@ namespace webrtc {
 // purposes.
 class PixelLimitResource : public Resource {
  public:
-  static rtc::scoped_refptr<PixelLimitResource> Create(
+  static scoped_refptr<PixelLimitResource> Create(
       TaskQueueBase* task_queue,
       VideoStreamInputStateProvider* input_state_provider);
 
@@ -50,7 +50,7 @@ class PixelLimitResource : public Resource {
  private:
   TaskQueueBase* const task_queue_;
   VideoStreamInputStateProvider* const input_state_provider_;
-  absl::optional<int> max_pixels_ RTC_GUARDED_BY(task_queue_);
+  std::optional<int> max_pixels_ RTC_GUARDED_BY(task_queue_);
   webrtc::ResourceListener* listener_ RTC_GUARDED_BY(task_queue_);
   RepeatingTaskHandle repeating_task_ RTC_GUARDED_BY(task_queue_);
 };

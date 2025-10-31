@@ -49,7 +49,7 @@ class ControllerManagerImpl final : public ControllerManager {
   static std::unique_ptr<ControllerManager> Create(
       absl::string_view config_string,
       size_t num_encoder_channels,
-      rtc::ArrayView<const int> encoder_frame_lengths_ms,
+      ArrayView<const int> encoder_frame_lengths_ms,
       int min_encoder_bitrate_bps,
       size_t intial_channels_to_encode,
       int initial_frame_length_ms,
@@ -60,7 +60,7 @@ class ControllerManagerImpl final : public ControllerManager {
   static std::unique_ptr<ControllerManager> Create(
       absl::string_view config_string,
       size_t num_encoder_channels,
-      rtc::ArrayView<const int> encoder_frame_lengths_ms,
+      ArrayView<const int> encoder_frame_lengths_ms,
       int min_encoder_bitrate_bps,
       size_t intial_channels_to_encode,
       int initial_frame_length_ms,
@@ -107,7 +107,7 @@ class ControllerManagerImpl final : public ControllerManager {
 
   std::vector<std::unique_ptr<Controller>> controllers_;
 
-  absl::optional<int64_t> last_reordering_time_ms_;
+  std::optional<int64_t> last_reordering_time_ms_;
   ScoringPoint last_scoring_point_;
 
   std::vector<Controller*> default_sorted_controllers_;

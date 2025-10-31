@@ -79,7 +79,7 @@ void AudioEncoderG722Impl::Reset() {
     RTC_CHECK_EQ(0, WebRtcG722_EncoderInit(encoders_[i].encoder));
 }
 
-absl::optional<std::pair<TimeDelta, TimeDelta>>
+std::optional<std::pair<TimeDelta, TimeDelta>>
 AudioEncoderG722Impl::GetFrameLengthRange() const {
   return {{TimeDelta::Millis(num_10ms_frames_per_packet_ * 10),
            TimeDelta::Millis(num_10ms_frames_per_packet_ * 10)}};
@@ -87,8 +87,8 @@ AudioEncoderG722Impl::GetFrameLengthRange() const {
 
 AudioEncoder::EncodedInfo AudioEncoderG722Impl::EncodeImpl(
     uint32_t rtp_timestamp,
-    rtc::ArrayView<const int16_t> audio,
-    rtc::Buffer* encoded) {
+    ArrayView<const int16_t> audio,
+    Buffer* encoded) {
   if (num_10ms_frames_buffered_ == 0)
     first_timestamp_in_buffer_ = rtp_timestamp;
 
@@ -116,8 +116,8 @@ AudioEncoder::EncodedInfo AudioEncoderG722Impl::EncodeImpl(
 
   const size_t bytes_to_encode = samples_per_channel / 2 * num_channels_;
   EncodedInfo info;
-  info.encoded_bytes = encoded->AppendData(
-      bytes_to_encode, [&](rtc::ArrayView<uint8_t> encoded) {
+  info.encoded_bytes =
+      encoded->AppendData(bytes_to_encode, [&](ArrayView<uint8_t> encoded) {
         // Interleave the encoded bytes of the different channels. Each separate
         // channel and the interleaved stream encodes two samples per byte, most
         // significant half first.

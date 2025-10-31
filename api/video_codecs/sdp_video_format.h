@@ -12,10 +12,10 @@
 #define API_VIDEO_CODECS_SDP_VIDEO_FORMAT_H_
 
 #include <map>
+#include <optional>
 #include <string>
 
 #include "absl/container/inlined_vector.h"
-#include "absl/types/optional.h"
 #include "api/array_view.h"
 #include "api/rtp_parameters.h"
 #include "api/video_codecs/scalability_mode.h"
@@ -55,8 +55,7 @@ struct RTC_EXPORT SdpVideoFormat {
   // specific parameters. Please note that two SdpVideoFormats can represent the
   // same codec even though not all parameters are the same.
   bool IsSameCodec(const SdpVideoFormat& other) const;
-  bool IsCodecInList(
-      rtc::ArrayView<const webrtc::SdpVideoFormat> formats) const;
+  bool IsCodecInList(ArrayView<const webrtc::SdpVideoFormat> formats) const;
 
   std::string ToString() const;
 
@@ -74,20 +73,26 @@ struct RTC_EXPORT SdpVideoFormat {
   // Well-known video codecs and their format parameters.
   static const SdpVideoFormat VP8();
   static const SdpVideoFormat H264();
+  static const SdpVideoFormat H265();
   static const SdpVideoFormat VP9Profile0();
   static const SdpVideoFormat VP9Profile1();
   static const SdpVideoFormat VP9Profile2();
   static const SdpVideoFormat VP9Profile3();
   static const SdpVideoFormat AV1Profile0();
   static const SdpVideoFormat AV1Profile1();
+
+  template <typename Sink>
+  friend void AbslStringify(Sink& sink, const SdpVideoFormat& format) {
+    sink.Append(format.ToString());
+  }
 };
 
 // For not so good reasons sometimes additional parameters are added to an
 // SdpVideoFormat, which makes instances that should compare equal to not match
 // anymore. Until we stop misusing SdpVideoFormats provide this convenience
 // function to perform fuzzy matching.
-absl::optional<SdpVideoFormat> FuzzyMatchSdpVideoFormat(
-    rtc::ArrayView<const SdpVideoFormat> supported_formats,
+std::optional<SdpVideoFormat> FuzzyMatchSdpVideoFormat(
+    ArrayView<const SdpVideoFormat> supported_formats,
     const SdpVideoFormat& format);
 
 }  // namespace webrtc

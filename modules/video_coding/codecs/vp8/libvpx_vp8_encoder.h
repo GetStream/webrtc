@@ -11,31 +11,34 @@
 #ifndef MODULES_VIDEO_CODING_CODECS_VP8_LIBVPX_VP8_ENCODER_H_
 #define MODULES_VIDEO_CODING_CODECS_VP8_LIBVPX_VP8_ENCODER_H_
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
-#include <string>
-#include <utility>
+#include <optional>
 #include <vector>
 
-#include "absl/strings/string_view.h"
+#include "api/environment/environment.h"
 #include "api/fec_controller_override.h"
-#include "api/field_trials_view.h"
+#include "api/scoped_refptr.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
 #include "api/video/encoded_image.h"
 #include "api/video/video_frame.h"
+#include "api/video/video_frame_buffer.h"
+#include "api/video/video_frame_type.h"
+#include "api/video_codecs/video_codec.h"
 #include "api/video_codecs/video_encoder.h"
 #include "api/video_codecs/vp8_frame_buffer_controller.h"
 #include "api/video_codecs/vp8_frame_config.h"
 #include "modules/video_coding/codecs/interface/libvpx_interface.h"
 #include "modules/video_coding/codecs/vp8/include/vp8.h"
 #include "modules/video_coding/include/video_codec_interface.h"
+#include "modules/video_coding/utility/corruption_detection_settings_generator.h"
 #include "modules/video_coding/utility/framerate_controller_deprecated.h"
-#include "modules/video_coding/utility/vp8_constants.h"
-#include "rtc_base/experiments/cpu_speed_experiment.h"
 #include "rtc_base/experiments/encoder_info_settings.h"
 #include "rtc_base/experiments/rate_control_settings.h"
-#include "vpx/vp8cx.h"
 #include "vpx/vpx_encoder.h"
+#include "vpx/vpx_image.h"
 
 namespace webrtc {
 
@@ -108,13 +111,12 @@ class LibvpxVp8Encoder : public VideoEncoder {
   // as a result, allowing the caller to keep references to them until after
   // encoding has finished. On failure to convert the buffer, an empty list is
   // returned.
-  std::vector<rtc::scoped_refptr<VideoFrameBuffer>> PrepareBuffers(
-      rtc::scoped_refptr<VideoFrameBuffer> buffer);
+  std::vector<scoped_refptr<VideoFrameBuffer>> PrepareBuffers(
+      scoped_refptr<VideoFrameBuffer> buffer);
 
   const Environment env_;
   const std::unique_ptr<LibvpxInterface> libvpx_;
 
-  const CpuSpeedExperiment experimental_cpu_speed_config_arm_;
   const RateControlSettings rate_control_settings_;
 
   EncodedImageCallback* encoded_complete_callback_ = nullptr;
@@ -140,20 +142,6 @@ class LibvpxVp8Encoder : public VideoEncoder {
   std::vector<vpx_rational_t> downsampling_factors_;
   std::vector<Timestamp> last_encoder_output_time_;
 
-  // Variable frame-rate screencast related fields and methods.
-  const struct VariableFramerateExperiment {
-    bool enabled = false;
-    // Framerate is limited to this value in steady state.
-    float framerate_limit = 5.0;
-    // This qp or below is considered a steady state.
-    int steady_state_qp = kVp8SteadyStateQpThreshold;
-    // Frames of at least this percentage below ideal for configured bitrate are
-    // considered in a steady state.
-    int steady_state_undershoot_percentage = 30;
-  } variable_framerate_experiment_;
-  static VariableFramerateExperiment ParseVariableFramerateConfig(
-      const FieldTrialsView& field_trials,
-      absl::string_view group_name);
   FramerateControllerDeprecated framerate_controller_;
   int num_steady_state_frames_ = 0;
 
@@ -161,9 +149,12 @@ class LibvpxVp8Encoder : public VideoEncoder {
 
   const LibvpxVp8EncoderInfoSettings encoder_info_override_;
 
-  absl::optional<TimeDelta> max_frame_drop_interval_;
+  std::optional<TimeDelta> max_frame_drop_interval_;
 
   bool android_specific_threading_settings_;
+
+  std::unique_ptr<CorruptionDetectionSettingsGenerator>
+      corruption_detection_settings_generator_;
 };
 
 }  // namespace webrtc

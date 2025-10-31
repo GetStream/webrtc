@@ -15,11 +15,11 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "absl/types/optional.h"
 #include "api/audio/audio_mixer.h"
 #include "api/rtp_packet_info.h"
 #include "api/rtp_packet_infos.h"
@@ -61,7 +61,7 @@ void ResetFrame(AudioFrame* frame) {
 std::string ProduceDebugText(int sample_rate_hz,
                              int number_of_channels,
                              int number_of_sources) {
-  rtc::StringBuilder ss;
+  StringBuilder ss;
   ss << "Sample rate: " << sample_rate_hz << " ";
   ss << "Number of channels: " << number_of_channels << " ";
   ss << "Number of sources: " << number_of_sources;
@@ -106,8 +106,7 @@ class MockMixerAudioSource : public ::testing::NiceMock<AudioMixer::Source> {
                                         AudioFrame* audio_frame) {
     audio_frame->CopyFrom(fake_frame_);
     audio_frame->sample_rate_hz_ = sample_rate_hz;
-    audio_frame->samples_per_channel_ =
-        rtc::CheckedDivExact(sample_rate_hz, 100);
+    audio_frame->samples_per_channel_ = CheckedDivExact(sample_rate_hz, 100);
     audio_frame->packet_infos_ = packet_infos_;
     return fake_info();
   }
@@ -121,7 +120,7 @@ class CustomRateCalculator : public OutputRateCalculator {
  public:
   explicit CustomRateCalculator(int rate) : rate_(rate) {}
   int CalculateOutputRateFromRange(
-      rtc::ArrayView<const int> preferred_rates) override {
+      ArrayView<const int> /* preferred_rates */) override {
     return rate_;
   }
 
@@ -131,7 +130,7 @@ class CustomRateCalculator : public OutputRateCalculator {
 
 void MixMonoAtGivenNativeRate(int native_sample_rate,
                               AudioFrame* mix_frame,
-                              rtc::scoped_refptr<AudioMixer> mixer,
+                              scoped_refptr<AudioMixer> mixer,
                               MockMixerAudioSource* audio_source) {
   ON_CALL(*audio_source, PreferredSampleRate())
       .WillByDefault(Return(native_sample_rate));
@@ -298,7 +297,7 @@ TEST(AudioMixer, ParticipantNumberOfChannels) {
 // can be done on a different thread.
 TEST(AudioMixer, ConstructFromOtherThread) {
   TaskQueueForTest init_queue("init");
-  rtc::scoped_refptr<AudioMixer> mixer;
+  scoped_refptr<AudioMixer> mixer;
   init_queue.SendTask([&mixer]() { mixer = AudioMixerImpl::Create(); });
 
   MockMixerAudioSource participant;
@@ -448,7 +447,7 @@ TEST(AudioMixer, ShouldIncludeRtpPacketInfoFromAllMixedSources) {
   const uint32_t kCsrc3 = 23;
   const int kAudioLevel0 = 10;
   const int kAudioLevel1 = 40;
-  const absl::optional<uint32_t> kAudioLevel2 = absl::nullopt;
+  const std::optional<uint32_t> kAudioLevel2 = std::nullopt;
   const uint32_t kRtpTimestamp0 = 300;
   const uint32_t kRtpTimestamp1 = 400;
   const Timestamp kReceiveTime0 = Timestamp::Millis(10);
@@ -483,7 +482,7 @@ class HighOutputRateCalculator : public OutputRateCalculator {
  public:
   static const int kDefaultFrequency = 76000;
   int CalculateOutputRateFromRange(
-      rtc::ArrayView<const int> preferred_sample_rates) override {
+      ArrayView<const int> /* preferred_sample_rates */) override {
     return kDefaultFrequency;
   }
   ~HighOutputRateCalculator() override {}
@@ -517,13 +516,8 @@ TEST(AudioMixerDeathTest, MultipleChannelsAndHighRate) {
   other_frame->samples_per_channel_ = kSamplesPerChannel;
   mixer->AddSource(&other_source);
 
-#if RTC_DCHECK_IS_ON && GTEST_HAS_DEATH_TEST && !defined(WEBRTC_ANDROID)
+#if GTEST_HAS_DEATH_TEST && !defined(WEBRTC_ANDROID)
   EXPECT_DEATH(mixer->Mix(kNumberOfChannels, &frame_for_mixing), "");
-#elif !RTC_DCHECK_IS_ON
-  mixer->Mix(kNumberOfChannels, &frame_for_mixing);
-  EXPECT_EQ(frame_for_mixing.num_channels_, kNumberOfChannels);
-  EXPECT_EQ(frame_for_mixing.sample_rate_hz_,
-            HighOutputRateCalculator::kDefaultFrequency);
 #endif
 }
 

@@ -17,6 +17,7 @@
 #include "api/units/timestamp.h"
 #include "modules/rtp_rtcp/include/report_block_data.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/congestion_control_feedback.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/transport_feedback.h"
 #include "test/gmock.h"
 
@@ -33,13 +34,18 @@ class MockNetworkLinkRtcpObserver : public NetworkLinkRtcpObserver {
               (Timestamp receive_time, const rtcp::TransportFeedback& feedback),
               (override));
   MOCK_METHOD(void,
+              OnCongestionControlFeedback,
+              (Timestamp receive_time,
+               const rtcp::CongestionControlFeedback& feedback),
+              (override));
+  MOCK_METHOD(void,
               OnReceiverEstimatedMaxBitrate,
               (Timestamp receive_time, DataRate bitrate),
               (override));
   MOCK_METHOD(void,
               OnReport,
               (Timestamp receive_time,
-               rtc::ArrayView<const ReportBlockData> report_blocks),
+               ArrayView<const ReportBlockData> report_blocks),
               (override));
 };
 

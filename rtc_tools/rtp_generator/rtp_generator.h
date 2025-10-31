@@ -54,8 +54,8 @@ struct RtpGeneratorOptions {
 };
 
 // Attempts to parse RtpGeneratorOptions from a JSON file. Any failures
-// will result in absl::nullopt.
-absl::optional<RtpGeneratorOptions> ParseRtpGeneratorOptionsFromFile(
+// will result in std::nullopt.
+std::optional<RtpGeneratorOptions> ParseRtpGeneratorOptionsFromFile(
     const std::string& options_file);
 
 // The RtpGenerator allows generating of corpus material intended to be
@@ -91,10 +91,10 @@ class RtpGenerator final : public webrtc::Transport {
   // webrtc::Transport implementation
   // Captured RTP packets are written to the RTPDump file instead of over the
   // network.
-  bool SendRtp(rtc::ArrayView<const uint8_t> packet,
+  bool SendRtp(ArrayView<const uint8_t> packet,
                const webrtc::PacketOptions& options) override;
   // RTCP packets are ignored for now.
-  bool SendRtcp(rtc::ArrayView<const uint8_t> packet) override;
+  bool SendRtcp(ArrayView<const uint8_t> packet) override;
   // Returns the maximum duration
   int GetMaxDuration() const;
   // Waits until all video streams have finished.

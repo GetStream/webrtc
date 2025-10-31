@@ -13,6 +13,8 @@
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "api/audio_codecs/builtin_audio_encoder_factory.h"
 #include "api/call/transport.h"
+#include "api/environment/environment.h"
+#include "api/environment/environment_factory.h"
 #include "api/task_queue/default_task_queue_factory.h"
 #include "api/units/time_delta.h"
 #include "audio/voip/audio_egress.h"
@@ -44,13 +46,12 @@ class AudioIngressTest : public ::testing::Test {
         ReceiveStatistics::Create(time_controller_.GetClock());
 
     RtpRtcpInterface::Configuration rtp_config;
-    rtp_config.clock = time_controller_.GetClock();
     rtp_config.audio = true;
     rtp_config.receive_statistics = receive_statistics_.get();
     rtp_config.rtcp_report_interval_ms = 5000;
     rtp_config.outgoing_transport = &transport_;
     rtp_config.local_media_ssrc = 0xdeadc0de;
-    rtp_rtcp_ = ModuleRtpRtcpImpl2::Create(rtp_config);
+    rtp_rtcp_ = std::make_unique<ModuleRtpRtcpImpl2>(env_, rtp_config);
 
     rtp_rtcp_->SetSendingMediaStatus(false);
     rtp_rtcp_->SetRTCPStatus(RtcpMode::kCompound);
@@ -62,16 +63,13 @@ class AudioIngressTest : public ::testing::Test {
   void SetUp() override {
     constexpr int kPcmuPayload = 0;
     ingress_ = std::make_unique<AudioIngress>(
-        rtp_rtcp_.get(), time_controller_.GetClock(), receive_statistics_.get(),
-        decoder_factory_);
+        env_, rtp_rtcp_.get(), receive_statistics_.get(), decoder_factory_);
     ingress_->SetReceiveCodecs({{kPcmuPayload, kPcmuFormat}});
 
-    egress_ = std::make_unique<AudioEgress>(
-        rtp_rtcp_.get(), time_controller_.GetClock(),
-        time_controller_.GetTaskQueueFactory());
+    egress_ = std::make_unique<AudioEgress>(env_, rtp_rtcp_.get());
     egress_->SetEncoder(kPcmuPayload, kPcmuFormat,
-                        encoder_factory_->MakeAudioEncoder(
-                            kPcmuPayload, kPcmuFormat, absl::nullopt));
+                        encoder_factory_->Create(
+                            env_, kPcmuFormat, {.payload_type = kPcmuPayload}));
     egress_->StartSend();
     ingress_->StartPlay();
     rtp_rtcp_->SetSendingStatus(true);
@@ -96,12 +94,15 @@ class AudioIngressTest : public ::testing::Test {
   }
 
   GlobalSimulatedTimeController time_controller_{Timestamp::Micros(123456789)};
+  const Environment env_ =
+      CreateEnvironment(time_controller_.GetClock(),
+                        time_controller_.GetTaskQueueFactory());
   SineWaveGenerator wave_generator_;
   NiceMock<MockTransport> transport_;
   std::unique_ptr<ReceiveStatistics> receive_statistics_;
   std::unique_ptr<ModuleRtpRtcpImpl2> rtp_rtcp_;
-  rtc::scoped_refptr<AudioEncoderFactory> encoder_factory_;
-  rtc::scoped_refptr<AudioDecoderFactory> decoder_factory_;
+  scoped_refptr<AudioEncoderFactory> encoder_factory_;
+  scoped_refptr<AudioDecoderFactory> decoder_factory_;
   std::unique_ptr<AudioIngress> ingress_;
   std::unique_ptr<AudioEgress> egress_;
 };
@@ -113,8 +114,8 @@ TEST_F(AudioIngressTest, PlayingAfterStartAndStop) {
 }
 
 TEST_F(AudioIngressTest, GetAudioFrameAfterRtpReceived) {
-  rtc::Event event;
-  auto handle_rtp = [&](rtc::ArrayView<const uint8_t> packet, Unused) {
+  Event event;
+  auto handle_rtp = [&](ArrayView<const uint8_t> packet, Unused) {
     ingress_->ReceivedRTPPacket(packet);
     event.Set();
     return true;
@@ -143,8 +144,8 @@ TEST_F(AudioIngressTest, TestSpeechOutputLevelAndEnergyDuration) {
   // get audio level from output source.
   constexpr int kNumRtp = 6;
   int rtp_count = 0;
-  rtc::Event event;
-  auto handle_rtp = [&](rtc::ArrayView<const uint8_t> packet, Unused) {
+  Event event;
+  auto handle_rtp = [&](ArrayView<const uint8_t> packet, Unused) {
     ingress_->ReceivedRTPPacket(packet);
     if (++rtp_count == kNumRtp) {
       event.Set();
@@ -174,8 +175,8 @@ TEST_F(AudioIngressTest, TestSpeechOutputLevelAndEnergyDuration) {
 }
 
 TEST_F(AudioIngressTest, PreferredSampleRate) {
-  rtc::Event event;
-  auto handle_rtp = [&](rtc::ArrayView<const uint8_t> packet, Unused) {
+  Event event;
+  auto handle_rtp = [&](ArrayView<const uint8_t> packet, Unused) {
     ingress_->ReceivedRTPPacket(packet);
     event.Set();
     return true;
@@ -203,8 +204,8 @@ TEST_F(AudioIngressTest, GetMutedAudioFrameAfterRtpReceivedAndStopPlay) {
   // valid speech level.
   constexpr int kNumRtp = 6;
   int rtp_count = 0;
-  rtc::Event event;
-  auto handle_rtp = [&](rtc::ArrayView<const uint8_t> packet, Unused) {
+  Event event;
+  auto handle_rtp = [&](ArrayView<const uint8_t> packet, Unused) {
     ingress_->ReceivedRTPPacket(packet);
     if (++rtp_count == kNumRtp) {
       event.Set();

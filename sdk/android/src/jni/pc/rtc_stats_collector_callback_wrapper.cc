@@ -26,13 +26,8 @@ namespace jni {
 namespace {
 
 ScopedJavaLocalRef<jobject> NativeToJavaBigInteger(JNIEnv* env, uint64_t u) {
-#ifdef RTC_JNI_GENERATOR_LEGACY_SYMBOLS
-  return JNI_BigInteger::Java_BigInteger_ConstructorJMBI_JLS(
-      env, NativeToJavaString(env, rtc::ToString(u)));
-#else
   return JNI_BigInteger::Java_BigInteger_Constructor__String(
-      env, NativeToJavaString(env, rtc::ToString(u)));
-#endif
+      env, NativeToJavaString(env, absl::StrCat(u)));
 }
 
 ScopedJavaLocalRef<jobjectArray> NativeToJavaBigIntegerArray(
@@ -110,7 +105,7 @@ ScopedJavaLocalRef<jobject> NativeToJavaRtcStats(JNIEnv* env,
 
 ScopedJavaLocalRef<jobject> NativeToJavaRtcStatsReport(
     JNIEnv* env,
-    const rtc::scoped_refptr<const RTCStatsReport>& report) {
+    const scoped_refptr<const RTCStatsReport>& report) {
   ScopedJavaLocalRef<jobject> j_stats_map =
       NativeToJavaMap(env, *report, [](JNIEnv* env, const RTCStats& stats) {
         return std::make_pair(NativeToJavaString(env, stats.id()),
@@ -129,7 +124,7 @@ RTCStatsCollectorCallbackWrapper::RTCStatsCollectorCallbackWrapper(
 RTCStatsCollectorCallbackWrapper::~RTCStatsCollectorCallbackWrapper() = default;
 
 void RTCStatsCollectorCallbackWrapper::OnStatsDelivered(
-    const rtc::scoped_refptr<const RTCStatsReport>& report) {
+    const scoped_refptr<const RTCStatsReport>& report) {
   JNIEnv* jni = AttachCurrentThreadIfNeeded();
   Java_RTCStatsCollectorCallback_onStatsDelivered(
       jni, j_callback_global_, NativeToJavaRtcStatsReport(jni, report));

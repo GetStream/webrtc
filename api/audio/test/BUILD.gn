@@ -17,12 +17,15 @@ if (rtc_include_tests) {
     testonly = true
     sources = [
       "audio_frame_unittest.cc",
+      "audio_view_unittest.cc",
       "echo_canceller3_config_unittest.cc",
     ]
     deps = [
       "..:aec3_config",
       "..:audio_frame_api",
+      "../..:array_view",
       "../../../modules/audio_processing:aec3_config_json",
+      "../../../rtc_base:checks",
       "../../../test:test_support",
     ]
   }

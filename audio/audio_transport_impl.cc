@@ -38,8 +38,8 @@ void InitializeCaptureFrame(int input_sample_rate,
   RTC_DCHECK(audio_frame);
   int min_processing_rate_hz = std::min(input_sample_rate, send_sample_rate_hz);
   for (int native_rate_hz : AudioProcessing::kNativeSampleRatesHz) {
-    audio_frame->sample_rate_hz_ = native_rate_hz;
-    if (audio_frame->sample_rate_hz_ >= min_processing_rate_hz) {
+    audio_frame->SetSampleRateAndChannelSize(native_rate_hz);
+    if (native_rate_hz >= min_processing_rate_hz) {
       break;
     }
   }
@@ -70,20 +70,19 @@ void ProcessCaptureFrame(uint32_t delay_ms,
 int Resample(const AudioFrame& frame,
              const int destination_sample_rate,
              PushResampler<int16_t>* resampler,
-             int16_t* destination) {
+             InterleavedView<int16_t> destination) {
   TRACE_EVENT2("webrtc", "Resample", "frame sample rate", frame.sample_rate_hz_,
                "destination_sample_rate", destination_sample_rate);
-  const int number_of_channels = static_cast<int>(frame.num_channels_);
-  const int target_number_of_samples_per_channel =
-      destination_sample_rate / 100;
-  resampler->InitializeIfNeeded(frame.sample_rate_hz_, destination_sample_rate,
-                                number_of_channels);
+  const size_t target_number_of_samples_per_channel =
+      SampleRateToDefaultChannelSize(destination_sample_rate);
+  RTC_DCHECK_EQ(NumChannels(destination), frame.num_channels_);
+  RTC_DCHECK_EQ(SamplesPerChannel(destination),
+                target_number_of_samples_per_channel);
+  RTC_CHECK_EQ(destination.data().size(),
+               frame.num_channels_ * target_number_of_samples_per_channel);
 
-  // TODO(yujo): make resampler take an AudioFrame, and add special case
-  // handling of muted frames.
-  return resampler->Resample(
-      frame.data(), frame.samples_per_channel_ * number_of_channels,
-      destination, number_of_channels * target_number_of_samples_per_channel);
+  // TODO(yujo): Add special case handling of muted frames.
+  return resampler->Resample(frame.data_view(), destination);
 }
 }  // namespace
 
@@ -119,7 +118,7 @@ int32_t AudioTransportImpl::RecordedDataIsAvailable(
   return RecordedDataIsAvailable(
       audio_data, number_of_frames, bytes_per_sample, number_of_channels,
       sample_rate, audio_delay_milliseconds, clock_drift, volume, key_pressed,
-      new_mic_volume, /*estimated_capture_time_ns=*/absl::nullopt);
+      new_mic_volume, /*estimated_capture_time_ns=*/std::nullopt);
 }
 
 // Not used in Chromium. Process captured audio and distribute to all sending
@@ -135,7 +134,7 @@ int32_t AudioTransportImpl::RecordedDataIsAvailable(
     uint32_t /*volume*/,
     bool key_pressed,
     uint32_t& /*new_mic_volume*/,
-    absl::optional<int64_t>
+    std::optional<int64_t>
         estimated_capture_time_ns) {  // NOLINT: to avoid changing APIs
   RTC_DCHECK(audio_data);
   RTC_DCHECK_GE(number_of_channels, 1);
@@ -147,22 +146,28 @@ int32_t AudioTransportImpl::RecordedDataIsAvailable(
   RTC_DCHECK_LE(bytes_per_sample * number_of_frames * number_of_channels,
                 AudioFrame::kMaxDataSizeBytes);
 
+  InterleavedView<const int16_t> source(static_cast<const int16_t*>(audio_data),
+                                        number_of_frames, number_of_channels);
+
   int send_sample_rate_hz = 0;
   size_t send_num_channels = 0;
   bool swap_stereo_channels = false;
   {
     MutexLock lock(&capture_lock_);
-    send_sample_rate_hz = send_sample_rate_hz_;
-    send_num_channels = send_num_channels_;
+    bool has_senders = !audio_senders_.empty();
+    // If no senders attached, use the provided sample rate and channel count to
+    // initialize the AudioFrame so ProcessCaptureFrame will have correct sample
+    // rate.
+    send_sample_rate_hz = has_senders ? send_sample_rate_hz_ : sample_rate;
+    send_num_channels = has_senders ? send_num_channels_ : number_of_channels;
     swap_stereo_channels = swap_stereo_channels_;
   }
 
   std::unique_ptr<AudioFrame> audio_frame(new AudioFrame());
   InitializeCaptureFrame(sample_rate, send_sample_rate_hz, number_of_channels,
                          send_num_channels, audio_frame.get());
-  voe::RemixAndResample(static_cast<const int16_t*>(audio_data),
-                        number_of_frames, number_of_channels, sample_rate,
-                        &capture_resampler_, audio_frame.get());
+  voe::RemixAndResample(source, sample_rate, &capture_resampler_,
+                        audio_frame.get());
   ProcessCaptureFrame(audio_delay_milliseconds, key_pressed,
                       swap_stereo_channels, audio_processing_,
                       audio_frame.get());
@@ -209,7 +214,7 @@ int32_t AudioTransportImpl::NeedMorePlayData(const size_t nSamples,
                                              size_t& nSamplesOut,
                                              int64_t* elapsed_time_ms,
                                              int64_t* ntp_time_ms) {
-  TRACE_EVENT0("webrtc", "AudioTransportImpl::SendProcessedData");
+  TRACE_EVENT0("webrtc", "AudioTransportImpl::NeedMorePlayData");
   RTC_DCHECK_EQ(sizeof(int16_t) * nChannels, nBytesPerSample);
   RTC_DCHECK_GE(nChannels, 1);
   RTC_DCHECK_LE(nChannels, 2);
@@ -232,8 +237,10 @@ int32_t AudioTransportImpl::NeedMorePlayData(const size_t nSamples,
     RTC_DCHECK_EQ(error, AudioProcessing::kNoError);
   }
 
-  nSamplesOut = Resample(mixed_frame_, samplesPerSec, &render_resampler_,
-                         static_cast<int16_t*>(audioSamples));
+  nSamplesOut =
+      Resample(mixed_frame_, samplesPerSec, &render_resampler_,
+               InterleavedView<int16_t>(static_cast<int16_t*>(audioSamples),
+                                        nSamples, nChannels));
   RTC_DCHECK_EQ(nSamplesOut, nChannels * nSamples);
   return 0;
 }
@@ -263,8 +270,10 @@ void AudioTransportImpl::PullRenderData(int bits_per_sample,
   *elapsed_time_ms = mixed_frame_.elapsed_time_ms_;
   *ntp_time_ms = mixed_frame_.ntp_time_ms_;
 
-  auto output_samples = Resample(mixed_frame_, sample_rate, &render_resampler_,
-                                 static_cast<int16_t*>(audio_data));
+  int output_samples =
+      Resample(mixed_frame_, sample_rate, &render_resampler_,
+               InterleavedView<int16_t>(static_cast<int16_t*>(audio_data),
+                                        number_of_frames, number_of_channels));
   RTC_DCHECK_EQ(output_samples, number_of_channels * number_of_frames);
 }
 

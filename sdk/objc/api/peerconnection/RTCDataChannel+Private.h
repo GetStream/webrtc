@@ -17,12 +17,12 @@ NS_ASSUME_NONNULL_BEGIN
 
 @class RTC_OBJC_TYPE(RTCPeerConnectionFactory);
 
-@interface RTC_OBJC_TYPE (RTCDataBuffer)
+@interface RTC_OBJC_TYPE(RTCDataBuffer)
 ()
 
     /**
-     * The native DataBuffer representation of this RTCDatabuffer object. This is
-     * needed to pass to the underlying C++ APIs.
+     * The native DataBuffer representation of this RTCDatabuffer object. This
+     * is needed to pass to the underlying C++ APIs.
      */
     @property(nonatomic, readonly) const webrtc::DataBuffer *nativeDataBuffer;
 
@@ -31,21 +31,22 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
-@interface RTC_OBJC_TYPE (RTCDataChannel)
+@interface RTC_OBJC_TYPE(RTCDataChannel)
 ()
 
     /** Initialize an RTCDataChannel from a native DataChannelInterface. */
     - (instancetype)initWithFactory
     : (RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)factory nativeDataChannel
-    : (rtc::scoped_refptr<webrtc::DataChannelInterface>)nativeDataChannel NS_DESIGNATED_INITIALIZER;
+    : (webrtc::scoped_refptr<webrtc::DataChannelInterface>)
+          nativeDataChannel NS_DESIGNATED_INITIALIZER;
 
 + (webrtc::DataChannelInterface::DataState)nativeDataChannelStateForState:
-    (RTCDataChannelState)state;
+    (RTC_OBJC_TYPE(RTCDataChannelState))state;
 
-+ (RTCDataChannelState)dataChannelStateForNativeState:
++ (RTC_OBJC_TYPE(RTCDataChannelState))dataChannelStateForNativeState:
     (webrtc::DataChannelInterface::DataState)nativeState;
 
-+ (NSString *)stringForState:(RTCDataChannelState)state;
++ (NSString *)stringForState:(RTC_OBJC_TYPE(RTCDataChannelState))state;
 
 @end
 

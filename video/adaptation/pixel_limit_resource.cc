@@ -24,11 +24,10 @@ constexpr TimeDelta kResourceUsageCheckIntervalMs = TimeDelta::Seconds(5);
 }  // namespace
 
 // static
-rtc::scoped_refptr<PixelLimitResource> PixelLimitResource::Create(
+scoped_refptr<PixelLimitResource> PixelLimitResource::Create(
     TaskQueueBase* task_queue,
     VideoStreamInputStateProvider* input_state_provider) {
-  return rtc::make_ref_counted<PixelLimitResource>(task_queue,
-                                                   input_state_provider);
+  return make_ref_counted<PixelLimitResource>(task_queue, input_state_provider);
 }
 
 PixelLimitResource::PixelLimitResource(
@@ -36,7 +35,7 @@ PixelLimitResource::PixelLimitResource(
     VideoStreamInputStateProvider* input_state_provider)
     : task_queue_(task_queue),
       input_state_provider_(input_state_provider),
-      max_pixels_(absl::nullopt) {
+      max_pixels_(std::nullopt) {
   RTC_DCHECK(task_queue_);
   RTC_DCHECK(input_state_provider_);
 }
@@ -67,7 +66,7 @@ void PixelLimitResource::SetResourceListener(ResourceListener* listener) {
         // No pixel limit configured yet, try again later.
         return kResourceUsageCheckIntervalMs;
       }
-      absl::optional<int> frame_size_pixels =
+      std::optional<int> frame_size_pixels =
           input_state_provider_->InputState().frame_size_pixels();
       if (!frame_size_pixels.has_value()) {
         // We haven't observed a frame yet so we don't know if it's going to be
@@ -83,11 +82,11 @@ void PixelLimitResource::SetResourceListener(ResourceListener* listener) {
       int target_pixels_lower_bounds =
           GetLowerResolutionThan(target_pixel_upper_bounds);
       if (current_pixels > target_pixel_upper_bounds) {
-        listener_->OnResourceUsageStateMeasured(
-            rtc::scoped_refptr<Resource>(this), ResourceUsageState::kOveruse);
+        listener_->OnResourceUsageStateMeasured(scoped_refptr<Resource>(this),
+                                                ResourceUsageState::kOveruse);
       } else if (current_pixels < target_pixels_lower_bounds) {
-        listener_->OnResourceUsageStateMeasured(
-            rtc::scoped_refptr<Resource>(this), ResourceUsageState::kUnderuse);
+        listener_->OnResourceUsageStateMeasured(scoped_refptr<Resource>(this),
+                                                ResourceUsageState::kUnderuse);
       }
       return kResourceUsageCheckIntervalMs;
     });

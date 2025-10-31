@@ -36,43 +36,44 @@ static inline void getCubeVertexData(int cropX,
                                      int cropHeight,
                                      size_t frameWidth,
                                      size_t frameHeight,
-                                     RTCVideoRotation rotation,
+                                     RTC_OBJC_TYPE(RTCVideoRotation) rotation,
                                      float *buffer) {
   // The computed values are the adjusted texture coordinates, in [0..1].
-  // For the left and top, 0.0 means no cropping and e.g. 0.2 means we're skipping 20% of the
-  // left/top edge.
-  // For the right and bottom, 1.0 means no cropping and e.g. 0.8 means we're skipping 20% of the
-  // right/bottom edge (i.e. render up to 80% of the width/height).
+  // For the left and top, 0.0 means no cropping and e.g. 0.2 means we're
+  // skipping 20% of the left/top edge. For the right and bottom, 1.0 means no
+  // cropping and e.g. 0.8 means we're skipping 20% of the right/bottom edge
+  // (i.e. render up to 80% of the width/height).
   float cropLeft = cropX / (float)frameWidth;
   float cropRight = (cropX + cropWidth) / (float)frameWidth;
   float cropTop = cropY / (float)frameHeight;
   float cropBottom = (cropY + cropHeight) / (float)frameHeight;
 
-  // These arrays map the view coordinates to texture coordinates, taking cropping and rotation
-  // into account. The first two columns are view coordinates, the last two are texture coordinates.
+  // These arrays map the view coordinates to texture coordinates, taking
+  // cropping and rotation into account. The first two columns are view
+  // coordinates, the last two are texture coordinates.
   switch (rotation) {
-    case RTCVideoRotation_0: {
+    case RTC_OBJC_TYPE(RTCVideoRotation_0): {
       float values[16] = {-1.0, -1.0, cropLeft, cropBottom,
                            1.0, -1.0, cropRight, cropBottom,
                           -1.0,  1.0, cropLeft, cropTop,
                            1.0,  1.0, cropRight, cropTop};
       memcpy(buffer, &values, sizeof(values));
     } break;
-    case RTCVideoRotation_90: {
+    case RTC_OBJC_TYPE(RTCVideoRotation_90): {
       float values[16] = {-1.0, -1.0, cropRight, cropBottom,
                            1.0, -1.0, cropRight, cropTop,
                           -1.0,  1.0, cropLeft, cropBottom,
                            1.0,  1.0, cropLeft, cropTop};
       memcpy(buffer, &values, sizeof(values));
     } break;
-    case RTCVideoRotation_180: {
+    case RTC_OBJC_TYPE(RTCVideoRotation_180): {
       float values[16] = {-1.0, -1.0, cropRight, cropTop,
                            1.0, -1.0, cropLeft, cropTop,
                           -1.0,  1.0, cropRight, cropBottom,
                            1.0,  1.0, cropLeft, cropBottom};
       memcpy(buffer, &values, sizeof(values));
     } break;
-    case RTCVideoRotation_270: {
+    case RTC_OBJC_TYPE(RTCVideoRotation_270): {
       float values[16] = {-1.0, -1.0, cropLeft, cropTop,
                            1.0, -1.0, cropLeft, cropBottom,
                           -1.0, 1.0, cropRight, cropTop,
@@ -102,20 +103,22 @@ static const NSInteger kMaxInflightBuffers = 1;
   // Buffers.
   id<MTLBuffer> _vertexBuffer;
 
-  // Values affecting the vertex buffer. Stored for comparison to avoid unnecessary recreation.
+  // Values affecting the vertex buffer. Stored for comparison to avoid
+  // unnecessary recreation.
   int _oldFrameWidth;
   int _oldFrameHeight;
   int _oldCropWidth;
   int _oldCropHeight;
   int _oldCropX;
   int _oldCropY;
-  RTCVideoRotation _oldRotation;
+  RTC_OBJC_TYPE(RTCVideoRotation) _oldRotation;
 }
 
 @synthesize rotationOverride = _rotationOverride;
 
 - (instancetype)init {
-  if (self = [super init]) {
+  self = [super init];
+  if (self) {
     _inflight_semaphore = dispatch_semaphore_create(kMaxInflightBuffers);
   }
 
@@ -139,9 +142,10 @@ static const NSInteger kMaxInflightBuffers = 1;
     [self loadAssets];
 
     float vertexBufferArray[16] = {0};
-    _vertexBuffer = [_device newBufferWithBytes:vertexBufferArray
-                                         length:sizeof(vertexBufferArray)
-                                        options:MTLResourceCPUCacheModeWriteCombined];
+    _vertexBuffer =
+        [_device newBufferWithBytes:vertexBufferArray
+                             length:sizeof(vertexBufferArray)
+                            options:MTLResourceCPUCacheModeWriteCombined];
     success = YES;
   }
   return success;
@@ -157,7 +161,8 @@ static const NSInteger kMaxInflightBuffers = 1;
   return nil;
 }
 
-- (void)uploadTexturesToRenderEncoder:(id<MTLRenderCommandEncoder>)renderEncoder {
+- (void)uploadTexturesToRenderEncoder:
+    (id<MTLRenderCommandEncoder>)renderEncoder {
   RTC_DCHECK_NOTREACHED() << "Virtual method not implemented in subclass.";
 }
 
@@ -173,7 +178,7 @@ static const NSInteger kMaxInflightBuffers = 1;
 
 - (BOOL)setupTexturesForFrame:(nonnull RTC_OBJC_TYPE(RTCVideoFrame) *)frame {
   // Apply rotation override if set.
-  RTCVideoRotation rotation;
+  RTC_OBJC_TYPE(RTCVideoRotation) rotation;
   NSValue *rotationOverride = self.rotationOverride;
   if (rotationOverride) {
 #if defined(__IPHONE_11_0) && defined(__IPHONE_OS_VERSION_MAX_ALLOWED) && \
@@ -200,8 +205,8 @@ static const NSInteger kMaxInflightBuffers = 1;
 
   // Recompute the texture cropping and recreate vertexBuffer if necessary.
   if (cropX != _oldCropX || cropY != _oldCropY || cropWidth != _oldCropWidth ||
-      cropHeight != _oldCropHeight || rotation != _oldRotation || frameWidth != _oldFrameWidth ||
-      frameHeight != _oldFrameHeight) {
+      cropHeight != _oldCropHeight || rotation != _oldRotation ||
+      frameWidth != _oldFrameWidth || frameHeight != _oldFrameHeight) {
     getCubeVertexData(cropX,
                       cropY,
                       cropWidth,
@@ -238,8 +243,9 @@ static const NSInteger kMaxInflightBuffers = 1;
   NSError *libraryError = nil;
   NSString *shaderSource = [self shaderSource];
 
-  id<MTLLibrary> sourceLibrary =
-      [_device newLibraryWithSource:shaderSource options:NULL error:&libraryError];
+  id<MTLLibrary> sourceLibrary = [_device newLibraryWithSource:shaderSource
+                                                       options:NULL
+                                                         error:&libraryError];
 
   if (libraryError) {
     RTCLogError(@"Metal: Library with source failed\n%@", libraryError);
@@ -256,17 +262,22 @@ static const NSInteger kMaxInflightBuffers = 1;
 }
 
 - (void)loadAssets {
-  id<MTLFunction> vertexFunction = [_defaultLibrary newFunctionWithName:vertexFunctionName];
-  id<MTLFunction> fragmentFunction = [_defaultLibrary newFunctionWithName:fragmentFunctionName];
+  id<MTLFunction> vertexFunction =
+      [_defaultLibrary newFunctionWithName:vertexFunctionName];
+  id<MTLFunction> fragmentFunction =
+      [_defaultLibrary newFunctionWithName:fragmentFunctionName];
 
-  MTLRenderPipelineDescriptor *pipelineDescriptor = [[MTLRenderPipelineDescriptor alloc] init];
+  MTLRenderPipelineDescriptor *pipelineDescriptor =
+      [[MTLRenderPipelineDescriptor alloc] init];
   pipelineDescriptor.label = pipelineDescriptorLabel;
   pipelineDescriptor.vertexFunction = vertexFunction;
   pipelineDescriptor.fragmentFunction = fragmentFunction;
   pipelineDescriptor.colorAttachments[0].pixelFormat = _view.colorPixelFormat;
   pipelineDescriptor.depthAttachmentPixelFormat = MTLPixelFormatInvalid;
   NSError *error = nil;
-  _pipelineState = [_device newRenderPipelineStateWithDescriptor:pipelineDescriptor error:&error];
+  _pipelineState =
+      [_device newRenderPipelineStateWithDescriptor:pipelineDescriptor
+                                              error:&error];
 
   if (!_pipelineState) {
     RTCLogError(@"Metal: Failed to create pipeline state. %@", error);
@@ -283,7 +294,8 @@ static const NSInteger kMaxInflightBuffers = 1;
     dispatch_semaphore_signal(block_semaphore);
   }];
 
-  MTLRenderPassDescriptor *renderPassDescriptor = _view.currentRenderPassDescriptor;
+  MTLRenderPassDescriptor *renderPassDescriptor =
+      _view.currentRenderPassDescriptor;
   if (renderPassDescriptor) {  // Valid drawable.
     id<MTLRenderCommandEncoder> renderEncoder =
         [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];

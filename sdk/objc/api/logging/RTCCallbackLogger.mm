@@ -21,7 +21,7 @@
 
 namespace {
 
-class CallbackLogSink final : public rtc::LogSink {
+class CallbackLogSink final : public webrtc::LogSink {
  public:
   CallbackLogSink(RTCCallbackLoggerMessageHandler callbackHandler)
       : callback_handler_(callbackHandler) {}
@@ -40,48 +40,53 @@ class CallbackLogSink final : public rtc::LogSink {
   RTCCallbackLoggerMessageHandler callback_handler_;
 };
 
-class CallbackWithSeverityLogSink final : public rtc::LogSink {
+class CallbackWithSeverityLogSink final : public webrtc::LogSink {
  public:
-  CallbackWithSeverityLogSink(RTCCallbackLoggerMessageAndSeverityHandler callbackHandler)
+  CallbackWithSeverityLogSink(
+      RTCCallbackLoggerMessageAndSeverityHandler callbackHandler)
       : callback_handler_(callbackHandler) {}
 
-  void OnLogMessage(const std::string& message) override { RTC_DCHECK_NOTREACHED(); }
+  void OnLogMessage(const std::string& message) override {
+    RTC_DCHECK_NOTREACHED();
+  }
 
-  void OnLogMessage(const std::string& message, rtc::LoggingSeverity severity) override {
+  void OnLogMessage(const std::string& message,
+                    webrtc::LoggingSeverity severity) override {
     OnLogMessage(absl::string_view(message), severity);
   }
 
-  void OnLogMessage(absl::string_view message, rtc::LoggingSeverity severity) override {
+  void OnLogMessage(absl::string_view message,
+                    webrtc::LoggingSeverity severity) override {
     if (callback_handler_) {
-      RTCLoggingSeverity loggingSeverity = NativeSeverityToObjcSeverity(severity);
+      RTC_OBJC_TYPE(RTCLoggingSeverity) loggingSeverity = NativeSeverityToObjcSeverity(severity);
       callback_handler_([NSString stringForAbslStringView:message], loggingSeverity);
     }
   }
 
  private:
-  static RTCLoggingSeverity NativeSeverityToObjcSeverity(rtc::LoggingSeverity severity) {
+  static RTC_OBJC_TYPE(RTCLoggingSeverity) NativeSeverityToObjcSeverity(webrtc::LoggingSeverity severity) {
     switch (severity) {
-      case rtc::LS_VERBOSE:
-        return RTCLoggingSeverityVerbose;
-      case rtc::LS_INFO:
-        return RTCLoggingSeverityInfo;
-      case rtc::LS_WARNING:
-        return RTCLoggingSeverityWarning;
-      case rtc::LS_ERROR:
-        return RTCLoggingSeverityError;
-      case rtc::LS_NONE:
-        return RTCLoggingSeverityNone;
+      case webrtc::LS_VERBOSE:
+        return RTC_OBJC_TYPE(RTCLoggingSeverityVerbose);
+      case webrtc::LS_INFO:
+        return RTC_OBJC_TYPE(RTCLoggingSeverityInfo);
+      case webrtc::LS_WARNING:
+        return RTC_OBJC_TYPE(RTCLoggingSeverityWarning);
+      case webrtc::LS_ERROR:
+        return RTC_OBJC_TYPE(RTCLoggingSeverityError);
+      case webrtc::LS_NONE:
+        return RTC_OBJC_TYPE(RTCLoggingSeverityNone);
     }
   }
 
   RTCCallbackLoggerMessageAndSeverityHandler callback_handler_;
 };
 
-}
+}  // namespace
 
 @implementation RTC_OBJC_TYPE (RTCCallbackLogger) {
   BOOL _hasStarted;
-  std::unique_ptr<rtc::LogSink> _logSink;
+  std::unique_ptr<webrtc::LogSink> _logSink;
 }
 
 @synthesize severity = _severity;
@@ -89,7 +94,7 @@ class CallbackWithSeverityLogSink final : public rtc::LogSink {
 - (instancetype)init {
   self = [super init];
   if (self != nil) {
-    _severity = RTCLoggingSeverityInfo;
+    _severity = RTC_OBJC_TYPE(RTCLoggingSeverityInfo);
   }
   return self;
 }
@@ -105,19 +110,19 @@ class CallbackWithSeverityLogSink final : public rtc::LogSink {
 
   _logSink.reset(new CallbackLogSink(handler));
 
-  rtc::LogMessage::AddLogToStream(_logSink.get(), [self rtcSeverity]);
+  webrtc::LogMessage::AddLogToStream(_logSink.get(), [self rtcSeverity]);
   _hasStarted = YES;
 }
 
 - (void)startWithMessageAndSeverityHandler:
-        (nullable RTCCallbackLoggerMessageAndSeverityHandler)handler {
+    (nullable RTCCallbackLoggerMessageAndSeverityHandler)handler {
   if (_hasStarted) {
     return;
   }
 
   _logSink.reset(new CallbackWithSeverityLogSink(handler));
 
-  rtc::LogMessage::AddLogToStream(_logSink.get(), [self rtcSeverity]);
+  webrtc::LogMessage::AddLogToStream(_logSink.get(), [self rtcSeverity]);
   _hasStarted = YES;
 }
 
@@ -126,25 +131,25 @@ class CallbackWithSeverityLogSink final : public rtc::LogSink {
     return;
   }
   RTC_DCHECK(_logSink);
-  rtc::LogMessage::RemoveLogToStream(_logSink.get());
+  webrtc::LogMessage::RemoveLogToStream(_logSink.get());
   _hasStarted = NO;
   _logSink.reset();
 }
 
 #pragma mark - Private
 
-- (rtc::LoggingSeverity)rtcSeverity {
+- (webrtc::LoggingSeverity)rtcSeverity {
   switch (_severity) {
-    case RTCLoggingSeverityVerbose:
-      return rtc::LS_VERBOSE;
-    case RTCLoggingSeverityInfo:
-      return rtc::LS_INFO;
-    case RTCLoggingSeverityWarning:
-      return rtc::LS_WARNING;
-    case RTCLoggingSeverityError:
-      return rtc::LS_ERROR;
-    case RTCLoggingSeverityNone:
-      return rtc::LS_NONE;
+    case RTC_OBJC_TYPE(RTCLoggingSeverityVerbose):
+      return webrtc::LS_VERBOSE;
+    case RTC_OBJC_TYPE(RTCLoggingSeverityInfo):
+      return webrtc::LS_INFO;
+    case RTC_OBJC_TYPE(RTCLoggingSeverityWarning):
+      return webrtc::LS_WARNING;
+    case RTC_OBJC_TYPE(RTCLoggingSeverityError):
+      return webrtc::LS_ERROR;
+    case RTC_OBJC_TYPE(RTCLoggingSeverityNone):
+      return webrtc::LS_NONE;
   }
 }
 

@@ -11,8 +11,8 @@
 #include "test/fake_vp8_encoder.h"
 
 #include <algorithm>
+#include <optional>
 
-#include "absl/types/optional.h"
 #include "api/video_codecs/video_encoder.h"
 #include "api/video_codecs/vp8_temporal_layers.h"
 #include "api/video_codecs/vp8_temporal_layers_factory.h"
@@ -44,10 +44,6 @@ void WriteFakeVp8(unsigned char* payload,
 namespace webrtc {
 
 namespace test {
-
-FakeVp8Encoder::FakeVp8Encoder(Clock* clock) : FakeEncoder(clock) {
-  sequence_checker_.Detach();
-}
 
 FakeVp8Encoder::FakeVp8Encoder(const Environment& env) : FakeEncoder(env) {
   sequence_checker_.Detach();
@@ -96,7 +92,7 @@ CodecSpecificInfo FakeVp8Encoder::PopulateCodecSpecific(
 
 CodecSpecificInfo FakeVp8Encoder::EncodeHook(
     EncodedImage& encoded_image,
-    rtc::scoped_refptr<EncodedImageBuffer> buffer) {
+    scoped_refptr<EncodedImageBuffer> buffer) {
   RTC_DCHECK_RUN_ON(&sequence_checker_);
   uint8_t simulcast_index = encoded_image.SimulcastIndex().value_or(0);
   frame_buffer_controller_->NextFrameConfig(simulcast_index,

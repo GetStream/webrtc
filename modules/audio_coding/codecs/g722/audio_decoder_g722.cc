@@ -51,13 +51,13 @@ void AudioDecoderG722Impl::Reset() {
 }
 
 std::vector<AudioDecoder::ParseResult> AudioDecoderG722Impl::ParsePayload(
-    rtc::Buffer&& payload,
+    Buffer&& payload,
     uint32_t timestamp) {
   return LegacyEncodedAudioFrame::SplitBySamples(this, std::move(payload),
                                                  timestamp, 8, 16);
 }
 
-int AudioDecoderG722Impl::PacketDuration(const uint8_t* encoded,
+int AudioDecoderG722Impl::PacketDuration(const uint8_t* /* encoded */,
                                          size_t encoded_len) const {
   // 1/2 encoded byte per sample per channel.
   return static_cast<int>(2 * encoded_len / Channels());
@@ -125,7 +125,7 @@ int AudioDecoderG722StereoImpl::DecodeInternal(const uint8_t* encoded,
   return static_cast<int>(ret);
 }
 
-int AudioDecoderG722StereoImpl::PacketDuration(const uint8_t* encoded,
+int AudioDecoderG722StereoImpl::PacketDuration(const uint8_t* /* encoded */,
                                                size_t encoded_len) const {
   // 1/2 encoded byte per sample per channel. Make sure the length represents
   // an equal number of bytes per channel. Otherwise, we cannot de-interleave
@@ -147,7 +147,7 @@ void AudioDecoderG722StereoImpl::Reset() {
 }
 
 std::vector<AudioDecoder::ParseResult> AudioDecoderG722StereoImpl::ParsePayload(
-    rtc::Buffer&& payload,
+    Buffer&& payload,
     uint32_t timestamp) {
   return LegacyEncodedAudioFrame::SplitBySamples(this, std::move(payload),
                                                  timestamp, 2 * 8, 16);

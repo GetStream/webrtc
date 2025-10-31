@@ -11,19 +11,37 @@
 #include "modules/video_coding/utility/simulcast_test_fixture_impl.h"
 
 #include <algorithm>
-#include <map>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <memory>
+#include <optional>
 #include <vector>
 
-#include "api/environment/environment.h"
 #include "api/environment/environment_factory.h"
+#include "api/scoped_refptr.h"
+#include "api/test/mock_video_decoder.h"
+#include "api/test/mock_video_encoder.h"
 #include "api/video/encoded_image.h"
+#include "api/video/i420_buffer.h"
+#include "api/video/video_bitrate_allocator.h"
+#include "api/video/video_codec_type.h"
+#include "api/video/video_frame.h"
+#include "api/video/video_frame_buffer.h"
+#include "api/video/video_frame_type.h"
+#include "api/video/video_rotation.h"
 #include "api/video_codecs/sdp_video_format.h"
+#include "api/video_codecs/simulcast_stream.h"
+#include "api/video_codecs/video_codec.h"
+#include "api/video_codecs/video_decoder.h"
+#include "api/video_codecs/video_decoder_factory.h"
 #include "api/video_codecs/video_encoder.h"
-#include "common_video/libyuv/include/webrtc_libyuv.h"
+#include "api/video_codecs/video_encoder_factory.h"
 #include "modules/video_coding/include/video_codec_interface.h"
 #include "modules/video_coding/include/video_coding_defines.h"
+#include "modules/video_coding/utility/simulcast_rate_allocator.h"
 #include "rtc_base/checks.h"
+#include "test/gmock.h"
 #include "test/gtest.h"
 
 using ::testing::_;
@@ -131,7 +149,7 @@ class SimulcastTestFixtureImpl::TestDecodedImageCallback
  public:
   TestDecodedImageCallback() : decoded_frames_(0) {}
   int32_t Decoded(VideoFrame& decoded_image) override {
-    rtc::scoped_refptr<I420BufferInterface> i420_buffer =
+    scoped_refptr<I420BufferInterface> i420_buffer =
         decoded_image.video_frame_buffer()->ToI420();
     for (int i = 0; i < decoded_image.width(); ++i) {
       EXPECT_NEAR(kColorY, i420_buffer->DataY()[i], 1);
@@ -145,13 +163,14 @@ class SimulcastTestFixtureImpl::TestDecodedImageCallback
     decoded_frames_++;
     return 0;
   }
-  int32_t Decoded(VideoFrame& decoded_image, int64_t decode_time_ms) override {
+  int32_t Decoded(VideoFrame& /* decoded_image */,
+                  int64_t /* decode_time_ms */) override {
     RTC_DCHECK_NOTREACHED();
     return -1;
   }
   void Decoded(VideoFrame& decoded_image,
-               absl::optional<int32_t> decode_time_ms,
-               absl::optional<uint8_t> qp) override {
+               std::optional<int32_t> /* decode_time_ms */,
+               std::optional<uint8_t> /* qp */) override {
     Decoded(decoded_image);
   }
   int DecodedFrames() { return decoded_frames_; }
@@ -173,7 +192,7 @@ void SetPlane(uint8_t* data, uint8_t value, int width, int height, int stride) {
 }
 
 // Fills in an I420Buffer from `plane_colors`.
-void CreateImage(const rtc::scoped_refptr<I420Buffer>& buffer,
+void CreateImage(const scoped_refptr<I420Buffer>& buffer,
                  int plane_colors[kNumOfPlanes]) {
   SetPlane(buffer->MutableDataY(), plane_colors[0], buffer->width(),
            buffer->height(), buffer->StrideY());
@@ -246,12 +265,19 @@ void SimulcastTestFixtureImpl::DefaultSettings(
                   &settings->simulcastStream[layer_order[2]],
                   temporal_layer_profile[2]);
   settings->SetFrameDropEnabled(true);
-  if (codec_type == kVideoCodecVP8) {
-    settings->VP8()->denoisingOn = true;
-    settings->VP8()->automaticResizeOn = false;
-    settings->VP8()->keyFrameInterval = 3000;
-  } else {
-    settings->H264()->keyFrameInterval = 3000;
+  switch (codec_type) {
+    case kVideoCodecVP8:
+      settings->VP8()->denoisingOn = true;
+      settings->VP8()->automaticResizeOn = false;
+      settings->VP8()->keyFrameInterval = 3000;
+      break;
+    case kVideoCodecH264:
+      settings->H264()->keyFrameInterval = 3000;
+      break;
+    case kVideoCodecVP9:
+      break;
+    default:
+      RTC_CHECK_NOTREACHED();
   }
 }
 
@@ -259,10 +285,10 @@ SimulcastTestFixtureImpl::SimulcastTestFixtureImpl(
     std::unique_ptr<VideoEncoderFactory> encoder_factory,
     std::unique_ptr<VideoDecoderFactory> decoder_factory,
     SdpVideoFormat video_format)
-    : codec_type_(PayloadStringToCodecType(video_format.name)) {
-  Environment env = CreateEnvironment();
-  encoder_ = encoder_factory->Create(env, video_format);
-  decoder_ = decoder_factory->Create(env, video_format);
+    : env_(CreateEnvironment()),
+      codec_type_(PayloadStringToCodecType(video_format.name)) {
+  encoder_ = encoder_factory->Create(env_, video_format);
+  decoder_ = decoder_factory->Create(env_, video_format);
   SetUpCodec((codec_type_ == kVideoCodecVP8 || codec_type_ == kVideoCodecH264)
                  ? kDefaultTemporalLayerProfile
                  : kNoTemporalLayerProfile);
@@ -294,7 +320,7 @@ void SimulcastTestFixtureImpl::SetUpCodec(const int* temporal_layer_profile) {
 }
 
 void SimulcastTestFixtureImpl::SetUpRateAllocator() {
-  rate_allocator_.reset(new SimulcastRateAllocator(settings_));
+  rate_allocator_ = std::make_unique<SimulcastRateAllocator>(env_, settings_);
 }
 
 void SimulcastTestFixtureImpl::SetRates(uint32_t bitrate_kbps, uint32_t fps) {
@@ -914,9 +940,9 @@ void SimulcastTestFixtureImpl::TestDecodeWidthHeightSet() {
 
   EXPECT_CALL(encoder_callback, OnEncodedImage(_, _))
       .Times(3)
-      .WillRepeatedly(
-          ::testing::Invoke([&](const EncodedImage& encoded_image,
-                                const CodecSpecificInfo* codec_specific_info) {
+      .WillRepeatedly(::testing::Invoke(
+          [&](const EncodedImage& encoded_image,
+              const CodecSpecificInfo* /* codec_specific_info */) {
             EXPECT_EQ(encoded_image._frameType, VideoFrameType::kVideoFrameKey);
 
             size_t index = encoded_image.SimulcastIndex().value_or(0);
@@ -929,30 +955,33 @@ void SimulcastTestFixtureImpl::TestDecodeWidthHeightSet() {
   EXPECT_EQ(0, encoder_->Encode(*input_frame_, NULL));
 
   EXPECT_CALL(decoder_callback, Decoded(_, _, _))
-      .WillOnce(::testing::Invoke([](VideoFrame& decodedImage,
-                                     absl::optional<int32_t> decode_time_ms,
-                                     absl::optional<uint8_t> qp) {
-        EXPECT_EQ(decodedImage.width(), kDefaultWidth / 4);
-        EXPECT_EQ(decodedImage.height(), kDefaultHeight / 4);
-      }));
+      .WillOnce(
+          ::testing::Invoke([](VideoFrame& decodedImage,
+                               std::optional<int32_t> /* decode_time_ms */,
+                               std::optional<uint8_t> /* qp */) {
+            EXPECT_EQ(decodedImage.width(), kDefaultWidth / 4);
+            EXPECT_EQ(decodedImage.height(), kDefaultHeight / 4);
+          }));
   EXPECT_EQ(0, decoder_->Decode(encoded_frame[0], 0));
 
   EXPECT_CALL(decoder_callback, Decoded(_, _, _))
-      .WillOnce(::testing::Invoke([](VideoFrame& decodedImage,
-                                     absl::optional<int32_t> decode_time_ms,
-                                     absl::optional<uint8_t> qp) {
-        EXPECT_EQ(decodedImage.width(), kDefaultWidth / 2);
-        EXPECT_EQ(decodedImage.height(), kDefaultHeight / 2);
-      }));
+      .WillOnce(
+          ::testing::Invoke([](VideoFrame& decodedImage,
+                               std::optional<int32_t> /* decode_time_ms */,
+                               std::optional<uint8_t> /* qp */) {
+            EXPECT_EQ(decodedImage.width(), kDefaultWidth / 2);
+            EXPECT_EQ(decodedImage.height(), kDefaultHeight / 2);
+          }));
   EXPECT_EQ(0, decoder_->Decode(encoded_frame[1], 0));
 
   EXPECT_CALL(decoder_callback, Decoded(_, _, _))
-      .WillOnce(::testing::Invoke([](VideoFrame& decodedImage,
-                                     absl::optional<int32_t> decode_time_ms,
-                                     absl::optional<uint8_t> qp) {
-        EXPECT_EQ(decodedImage.width(), kDefaultWidth);
-        EXPECT_EQ(decodedImage.height(), kDefaultHeight);
-      }));
+      .WillOnce(
+          ::testing::Invoke([](VideoFrame& decodedImage,
+                               std::optional<int32_t> /* decode_time_ms */,
+                               std::optional<uint8_t> /* qp */) {
+            EXPECT_EQ(decodedImage.width(), kDefaultWidth);
+            EXPECT_EQ(decodedImage.height(), kDefaultHeight);
+          }));
   EXPECT_EQ(0, decoder_->Decode(encoded_frame[2], 0));
 }
 

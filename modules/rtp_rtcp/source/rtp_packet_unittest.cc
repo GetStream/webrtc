@@ -7,13 +7,30 @@
  *  in the file PATENTS.  All contributing project authors may
  *  be found in the AUTHORS file in the root of the source tree.
  */
+#include "modules/rtp_rtcp/source/rtp_packet.h"
+
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <optional>
+#include <string>
+#include <type_traits>
+#include <utility>
+
+#include "absl/strings/string_view.h"
+#include "api/array_view.h"
+#include "api/rtp_headers.h"
+#include "api/units/time_delta.h"
+#include "api/video/color_space.h"
+#include "api/video/video_timing.h"
 #include "common_video/test/utilities.h"
 #include "modules/rtp_rtcp/include/rtp_header_extension_map.h"
+#include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/rtp_dependency_descriptor_extension.h"
 #include "modules/rtp_rtcp/source/rtp_header_extensions.h"
 #include "modules/rtp_rtcp/source/rtp_packet_received.h"
 #include "modules/rtp_rtcp/source/rtp_packet_to_send.h"
-#include "rtc_base/random.h"
+#include "rtc_base/copy_on_write_buffer.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 
@@ -325,11 +342,11 @@ TEST(RtpPacketTest, TryToCreateWithEmptyMid) {
 
 TEST(RtpPacketTest, TryToCreateWithLongMid) {
   RtpPacketToSend::ExtensionManager extensions;
-  constexpr char kLongMid[] = "LoooooooooonogMid";
-  ASSERT_EQ(strlen(kLongMid), 17u);
+  constexpr char kOtherLongMid[] = "LoooooooooonogMid";
+  ASSERT_EQ(strlen(kOtherLongMid), 17u);
   extensions.Register<RtpMid>(kRtpMidExtensionId);
   RtpPacketToSend packet(&extensions);
-  EXPECT_FALSE(packet.SetExtension<RtpMid>(kLongMid));
+  EXPECT_FALSE(packet.SetExtension<RtpMid>(kOtherLongMid));
 }
 
 TEST(RtpPacketTest, TryToCreateTwoByteHeaderNotSupported) {
@@ -399,7 +416,7 @@ TEST(RtpPacketTest, FailsToSetUnregisteredExtension) {
   EXPECT_FALSE(packet.SetExtension<TransportSequenceNumber>(42));
 
   EXPECT_FALSE(packet.HasExtension<TransportSequenceNumber>());
-  EXPECT_EQ(packet.GetExtension<TransportSequenceNumber>(), absl::nullopt);
+  EXPECT_EQ(packet.GetExtension<TransportSequenceNumber>(), std::nullopt);
 }
 
 TEST(RtpPacketTest, SetReservedExtensionsAfterPayload) {
@@ -459,8 +476,7 @@ TEST(RtpPacketTest, UsesZerosForPadding) {
   RtpPacket packet;
 
   EXPECT_TRUE(packet.SetPadding(kPaddingSize));
-  EXPECT_THAT(rtc::MakeArrayView(packet.data() + 12, kPaddingSize - 1),
-              Each(0));
+  EXPECT_THAT(MakeArrayView(packet.data() + 12, kPaddingSize - 1), Each(0));
 }
 
 TEST(RtpPacketTest, CreateOneBytePadding) {
@@ -494,7 +510,7 @@ TEST(RtpPacketTest, ParseMinimum) {
 }
 
 TEST(RtpPacketTest, ParseBuffer) {
-  rtc::CopyOnWriteBuffer unparsed(kMinimumPacket);
+  CopyOnWriteBuffer unparsed(kMinimumPacket);
   const uint8_t* raw = unparsed.data();
 
   RtpPacketReceived packet;
@@ -533,7 +549,7 @@ TEST(RtpPacketTest, ParseHeaderOnly) {
   // clang-format on
 
   RtpPacket packet;
-  EXPECT_TRUE(packet.Parse(rtc::CopyOnWriteBuffer(kPaddingHeader)));
+  EXPECT_TRUE(packet.Parse(CopyOnWriteBuffer(kPaddingHeader)));
   EXPECT_EQ(packet.PayloadType(), 0x62u);
   EXPECT_EQ(packet.SequenceNumber(), 0x3579u);
   EXPECT_EQ(packet.Timestamp(), 0x65431278u);
@@ -553,7 +569,7 @@ TEST(RtpPacketTest, ParseHeaderOnlyWithPadding) {
   // clang-format on
 
   RtpPacket packet;
-  EXPECT_TRUE(packet.Parse(rtc::CopyOnWriteBuffer(kPaddingHeader)));
+  EXPECT_TRUE(packet.Parse(CopyOnWriteBuffer(kPaddingHeader)));
 
   EXPECT_TRUE(packet.has_padding());
   EXPECT_EQ(packet.padding_size(), 0u);
@@ -573,7 +589,7 @@ TEST(RtpPacketTest, ParseHeaderOnlyWithExtensionAndPadding) {
   RtpHeaderExtensionMap extensions;
   extensions.Register<TransmissionOffset>(1);
   RtpPacket packet(&extensions);
-  EXPECT_TRUE(packet.Parse(rtc::CopyOnWriteBuffer(kPaddingHeader)));
+  EXPECT_TRUE(packet.Parse(CopyOnWriteBuffer(kPaddingHeader)));
   EXPECT_TRUE(packet.has_padding());
   EXPECT_TRUE(packet.HasExtension<TransmissionOffset>());
   EXPECT_EQ(packet.padding_size(), 0u);
@@ -589,7 +605,7 @@ TEST(RtpPacketTest, ParsePaddingOnlyPacket) {
   // clang-format on
 
   RtpPacket packet;
-  EXPECT_TRUE(packet.Parse(rtc::CopyOnWriteBuffer(kPaddingHeader)));
+  EXPECT_TRUE(packet.Parse(CopyOnWriteBuffer(kPaddingHeader)));
   EXPECT_TRUE(packet.has_padding());
   EXPECT_EQ(packet.padding_size(), 3u);
 }
@@ -605,7 +621,7 @@ TEST(RtpPacketTest, GetExtensionWithoutParametersReturnsOptionalValue) {
   auto time_offset = packet.GetExtension<TransmissionOffset>();
   static_assert(
       std::is_same<decltype(time_offset),
-                   absl::optional<TransmissionOffset::value_type>>::value,
+                   std::optional<TransmissionOffset::value_type>>::value,
       "");
   EXPECT_EQ(time_offset, kTimeOffset);
   EXPECT_FALSE(packet.GetExtension<RtpStreamId>().has_value());
@@ -874,13 +890,13 @@ struct UncopyableExtension {
   static constexpr RTPExtensionType kId = kRtpExtensionDependencyDescriptor;
   static constexpr absl::string_view Uri() { return "uri"; }
 
-  static size_t ValueSize(const UncopyableValue& value) { return 1; }
-  static bool Write(rtc::ArrayView<uint8_t> data,
-                    const UncopyableValue& value) {
+  static size_t ValueSize(const UncopyableValue& /* value */) { return 1; }
+  static bool Write(ArrayView<uint8_t> /* data */,
+                    const UncopyableValue& /* value */) {
     return true;
   }
-  static bool Parse(rtc::ArrayView<const uint8_t> data,
-                    UncopyableValue* value) {
+  static bool Parse(ArrayView<const uint8_t> /* data */,
+                    UncopyableValue* /* value */) {
     return true;
   }
 };
@@ -909,15 +925,15 @@ struct ParseByReferenceExtension {
   static constexpr RTPExtensionType kId = kRtpExtensionDependencyDescriptor;
   static constexpr absl::string_view Uri() { return "uri"; }
 
-  static size_t ValueSize(uint8_t value1, uint8_t value2) { return 2; }
-  static bool Write(rtc::ArrayView<uint8_t> data,
-                    uint8_t value1,
-                    uint8_t value2) {
+  static size_t ValueSize(uint8_t /* value1 */, uint8_t /* value2 */) {
+    return 2;
+  }
+  static bool Write(ArrayView<uint8_t> data, uint8_t value1, uint8_t value2) {
     data[0] = value1;
     data[1] = value2;
     return true;
   }
-  static bool Parse(rtc::ArrayView<const uint8_t> data,
+  static bool Parse(ArrayView<const uint8_t> data,
                     uint8_t& value1,
                     uint8_t& value2) {
     value1 = data[0];
@@ -1043,7 +1059,7 @@ TEST(RtpPacketTest,
 
   constexpr AbsoluteCaptureTime kAbsoluteCaptureTime{
       /*absolute_capture_timestamp=*/9876543210123456789ULL,
-      /*estimated_capture_clock_offset=*/absl::nullopt};
+      /*estimated_capture_clock_offset=*/std::nullopt};
   ASSERT_TRUE(send_packet.SetExtension<AbsoluteCaptureTimeExtension>(
       kAbsoluteCaptureTime));
 
@@ -1099,7 +1115,7 @@ TEST(RtpPacketTest, CreateAndParseTransportSequenceNumberV2) {
 
   constexpr int kTransportSequenceNumber = 12345;
   send_packet.SetExtension<TransportSequenceNumberV2>(kTransportSequenceNumber,
-                                                      absl::nullopt);
+                                                      std::nullopt);
   EXPECT_EQ(send_packet.GetRawExtension<TransportSequenceNumberV2>().size(),
             2u);
 
@@ -1108,7 +1124,7 @@ TEST(RtpPacketTest, CreateAndParseTransportSequenceNumberV2) {
   EXPECT_TRUE(receive_packet.Parse(send_packet.Buffer()));
 
   uint16_t received_transport_sequeunce_number;
-  absl::optional<FeedbackRequest> received_feedback_request;
+  std::optional<FeedbackRequest> received_feedback_request;
   EXPECT_TRUE(receive_packet.GetExtension<TransportSequenceNumberV2>(
       &received_transport_sequeunce_number, &received_feedback_request));
   EXPECT_EQ(received_transport_sequeunce_number, kTransportSequenceNumber);
@@ -1130,7 +1146,7 @@ TEST(RtpPacketTest, CreateAndParseTransportSequenceNumberV2Preallocated) {
   send_packet.SetSsrc(kSsrc);
 
   constexpr int kTransportSequenceNumber = 12345;
-  constexpr absl::optional<FeedbackRequest> kNoFeedbackRequest =
+  constexpr std::optional<FeedbackRequest> kNoFeedbackRequest =
       FeedbackRequest{/*include_timestamps=*/false, /*sequence_count=*/0};
   send_packet.ReserveExtension<TransportSequenceNumberV2>();
   send_packet.SetExtension<TransportSequenceNumberV2>(kTransportSequenceNumber,
@@ -1143,7 +1159,7 @@ TEST(RtpPacketTest, CreateAndParseTransportSequenceNumberV2Preallocated) {
   EXPECT_TRUE(receive_packet.Parse(send_packet.Buffer()));
 
   uint16_t received_transport_sequeunce_number;
-  absl::optional<FeedbackRequest> received_feedback_request;
+  std::optional<FeedbackRequest> received_feedback_request;
   EXPECT_TRUE(receive_packet.GetExtension<TransportSequenceNumberV2>(
       &received_transport_sequeunce_number, &received_feedback_request));
   EXPECT_EQ(received_transport_sequeunce_number, kTransportSequenceNumber);
@@ -1163,7 +1179,7 @@ TEST(RtpPacketTest,
   send_packet.SetSsrc(kSsrc);
 
   constexpr int kTransportSequenceNumber = 12345;
-  constexpr absl::optional<FeedbackRequest> kFeedbackRequest =
+  constexpr std::optional<FeedbackRequest> kFeedbackRequest =
       FeedbackRequest{/*include_timestamps=*/true, /*sequence_count=*/3};
   send_packet.SetExtension<TransportSequenceNumberV2>(kTransportSequenceNumber,
                                                       kFeedbackRequest);
@@ -1174,7 +1190,7 @@ TEST(RtpPacketTest,
 
   // Parse transport sequence number and feedback request.
   uint16_t received_transport_sequeunce_number;
-  absl::optional<FeedbackRequest> received_feedback_request;
+  std::optional<FeedbackRequest> received_feedback_request;
   EXPECT_TRUE(receive_packet.GetExtension<TransportSequenceNumberV2>(
       &received_transport_sequeunce_number, &received_feedback_request));
   EXPECT_EQ(received_transport_sequeunce_number, kTransportSequenceNumber);

@@ -13,6 +13,7 @@
 #include <memory>
 #include <utility>
 
+#include "api/audio/builtin_audio_processing_builder.h"
 #include "api/environment/environment.h"
 #include "api/environment/environment_factory.h"
 #include "api/media_types.h"
@@ -42,14 +43,13 @@ const uint32_t kReceiverLocalAudioSsrc = 0x1234567;
 
 constexpr int kEventLogOutputIntervalMs = 5000;
 
-CallClientFakeAudio InitAudio(TimeController* time_controller) {
+CallClientFakeAudio InitAudio(const Environment& env) {
   CallClientFakeAudio setup;
   auto capturer = TestAudioDeviceModule::CreatePulsedNoiseCapturer(256, 48000);
   auto renderer = TestAudioDeviceModule::CreateDiscardRenderer(48000);
   setup.fake_audio_device = TestAudioDeviceModule::Create(
-      time_controller->GetTaskQueueFactory(), std::move(capturer),
-      std::move(renderer), 1.f);
-  setup.apm = AudioProcessingBuilder().Create();
+      &env.task_queue_factory(), std::move(capturer), std::move(renderer), 1.f);
+  setup.apm = BuiltinAudioProcessingBuilder().Build(env);
   setup.fake_audio_device->Init();
   AudioState::Config audio_state_config;
   audio_state_config.audio_mixer = AudioMixerImpl::Create();
@@ -65,7 +65,7 @@ std::unique_ptr<Call> CreateCall(
     const Environment& env,
     CallClientConfig config,
     LoggingNetworkControllerFactory* network_controller_factory,
-    rtc::scoped_refptr<AudioState> audio_state) {
+    scoped_refptr<AudioState> audio_state) {
   CallConfig call_config(env);
   call_config.bitrate_config.max_bitrate_bps =
       config.transport.rates.max_rate.bps_or(-1);
@@ -75,7 +75,7 @@ std::unique_ptr<Call> CreateCall(
       config.transport.rates.start_rate.bps();
   call_config.network_controller_factory = network_controller_factory;
   call_config.audio_state = audio_state;
-  return Call::Create(call_config);
+  return Call::Create(std::move(call_config));
 }
 
 std::unique_ptr<RtcEventLog> CreateEventLog(
@@ -223,7 +223,7 @@ CallClient::CallClient(
       env_factory.Set(CreateEventLog(env_, *log_writer_factory_));
       env_ = env_factory.Create();
     }
-    fake_audio_setup_ = InitAudio(time_controller_);
+    fake_audio_setup_ = InitAudio(env_);
 
     call_ = CreateCall(env_, config, &network_controller_factory_,
                        fake_audio_setup_.audio_state);
@@ -236,16 +236,16 @@ CallClient::~CallClient() {
   SendTask([&] {
     call_.reset();
     fake_audio_setup_ = {};
-    rtc::Event done;
+    Event done;
     env_.event_log().StopLogging([&done] { done.Set(); });
-    done.Wait(rtc::Event::kForever);
+    done.Wait(Event::kForever);
   });
 }
 
 ColumnPrinter CallClient::StatsPrinter() {
   return ColumnPrinter::Lambda(
       "pacer_delay call_send_bw",
-      [this](rtc::SimpleStringBuilder& sb) {
+      [this](SimpleStringBuilder& sb) {
         Call::Stats call_stats = call_->GetStats();
         sb.AppendFormat("%.3lf %.0lf", call_stats.pacer_delay_ms / 1000.0,
                         call_stats.send_bandwidth_bps / 8.0);
@@ -288,14 +288,14 @@ void CallClient::UpdateBitrateConstraints(
 }
 
 void CallClient::SetAudioReceiveRtpHeaderExtensions(
-    rtc::ArrayView<RtpExtension> extensions) {
+    ArrayView<RtpExtension> extensions) {
   SendTask([this, &extensions]() {
     audio_extensions_ = RtpHeaderExtensionMap(extensions);
   });
 }
 
 void CallClient::SetVideoReceiveRtpHeaderExtensions(
-    rtc::ArrayView<RtpExtension> extensions) {
+    ArrayView<RtpExtension> extensions) {
   SendTask([this, &extensions]() {
     video_extensions_ = RtpHeaderExtensionMap(extensions);
   });
@@ -362,6 +362,10 @@ uint32_t CallClient::GetNextRtxSsrc() {
 
 void CallClient::SendTask(std::function<void()> task) {
   task_queue_.SendTask(std::move(task));
+}
+
+void CallClient::UpdateNetworkAdapterId(int adapter_id) {
+  transport_->UpdateAdapterId(adapter_id);
 }
 
 int16_t CallClient::Bind(EmulatedEndpoint* endpoint) {

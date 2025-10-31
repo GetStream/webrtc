@@ -49,7 +49,7 @@ VideoRenderFrames::~VideoRenderFrames() {
 }
 
 int32_t VideoRenderFrames::AddFrame(VideoFrame&& new_frame) {
-  const int64_t time_now = rtc::TimeMillis();
+  const int64_t time_now = TimeMillis();
 
   // Drop old frames only when there are other frames in the queue, otherwise, a
   // really slow system never renders any frames.
@@ -88,8 +88,8 @@ int32_t VideoRenderFrames::AddFrame(VideoFrame&& new_frame) {
   return static_cast<int32_t>(incoming_frames_.size());
 }
 
-absl::optional<VideoFrame> VideoRenderFrames::FrameToRender() {
-  absl::optional<VideoFrame> render_frame;
+std::optional<VideoFrame> VideoRenderFrames::FrameToRender() {
+  std::optional<VideoFrame> render_frame;
   // Get the newest frame that can be released for rendering.
   while (!incoming_frames_.empty() && TimeToNextFrameRelease() <= 0) {
     if (render_frame) {
@@ -106,7 +106,7 @@ uint32_t VideoRenderFrames::TimeToNextFrameRelease() {
     return kEventMaxWaitTimeMs;
   }
   const int64_t time_to_release = incoming_frames_.front().render_time_ms() -
-                                  render_delay_ms_ - rtc::TimeMillis();
+                                  render_delay_ms_ - TimeMillis();
   return time_to_release < 0 ? 0u : static_cast<uint32_t>(time_to_release);
 }
 

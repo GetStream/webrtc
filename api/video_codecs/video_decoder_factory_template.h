@@ -18,6 +18,7 @@
 #include "absl/algorithm/container.h"
 #include "api/array_view.h"
 #include "api/environment/environment.h"
+#include "api/video_codecs/sdp_video_format.h"
 #include "api/video_codecs/video_decoder.h"
 #include "api/video_codecs/video_decoder_factory.h"
 
@@ -51,9 +52,8 @@ class VideoDecoderFactoryTemplate : public VideoDecoderFactory {
   }
 
  private:
-  bool IsFormatInList(
-      const SdpVideoFormat& format,
-      rtc::ArrayView<const SdpVideoFormat> supported_formats) const {
+  bool IsFormatInList(const SdpVideoFormat& format,
+                      ArrayView<const SdpVideoFormat> supported_formats) const {
     return absl::c_any_of(
         supported_formats, [&](const SdpVideoFormat& supported_format) {
           return supported_format.name == format.name &&

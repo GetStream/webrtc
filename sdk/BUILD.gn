@@ -37,7 +37,6 @@ rtc_library("media_constraints") {
     "../api:audio_options_api",
     "../api:libjingle_peerconnection_api",
   ]
-  absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
 }
 
 rtc_library("sdk_tests") {
@@ -111,6 +110,7 @@ if (is_ios || is_mac) {
       "objc/base/RTCVideoDecoderFactory.h",
       "objc/base/RTCVideoEncoder.h",
       "objc/base/RTCVideoEncoderFactory.h",
+      "objc/base/RTCVideoEncoderFactory.mm",
       "objc/base/RTCVideoEncoderQpThresholds.h",
       "objc/base/RTCVideoEncoderQpThresholds.m",
       "objc/base/RTCVideoEncoderSettings.h",
@@ -152,10 +152,9 @@ if (is_ios || is_mac) {
     deps = [
       ":base_objc",
       "../rtc_base:checks",
+      "//third_party/abseil-cpp/absl/strings:string_view",
       "//third_party/libyuv",
     ]
-
-    absl_deps = [ "//third_party/abseil-cpp/absl/strings" ]
 
     frameworks = [
       "AVFoundation.framework",
@@ -198,14 +197,13 @@ if (is_ios || is_mac) {
         "../rtc_base:checks",
         "../rtc_base:log_sinks",
         "../rtc_base:logging",
+        "//third_party/abseil-cpp/absl/strings:string_view",
       ]
 
       configs += [
         "..:common_objc",
         ":used_from_extension",
       ]
-
-      absl_deps = [ "//third_party/abseil-cpp/absl/strings" ]
     }
 
     rtc_library("file_logger_objc") {
@@ -241,8 +239,9 @@ if (is_ios || is_mac) {
 
         deps = [
           ":audio_device",
+          ":audio_device_module_error_handler",
           "../api:make_ref_counted",
-          "../modules/audio_device:audio_device_api",
+          "../api/audio:audio_device",
           "../modules/audio_device:audio_device_generic",
           "../rtc_base:checks",
           "../rtc_base:logging",
@@ -283,7 +282,7 @@ if (is_ios || is_mac) {
           ":videoframebuffer_objc",
         ]
 
-        if (target_environment != "xrdevice" && target_environment != "xrsimulator") {
+        if (is_ios && (target_environment != "xrdevice" && target_environment != "xrsimulator")) {
           deps += [ ":metal_objc" ]
         }
       }
@@ -303,16 +302,17 @@ if (is_ios || is_mac) {
         ]
 
         deps = [
+          ":audio_device_module_error_handler",
           ":audio_objc",
           ":audio_session_observer",
           ":base_objc",
           "../api:array_view",
           "../api:scoped_refptr",
           "../api:sequence_checker",
+          "../api/audio:audio_device",
           "../api/task_queue",
           "../api/task_queue:default_task_queue_factory",
           "../api/task_queue:pending_task_safety_flag",
-          "../modules/audio_device:audio_device_api",
           "../modules/audio_device:audio_device_buffer",
           "../modules/audio_device:audio_device_config",
           "../modules/audio_device:audio_device_generic",
@@ -326,7 +326,6 @@ if (is_ios || is_mac) {
           "../system_wrappers:field_trial",
           "../system_wrappers:metrics",
         ]
-        absl_deps = [ "//third_party/abseil-cpp/absl/base:core_headers" ]
 
         frameworks = [ "AudioToolbox.framework" ]
         if (is_mac) {
@@ -390,9 +389,8 @@ if (is_ios || is_mac) {
           ":helpers_objc",
           "../rtc_base:checks",
           "../rtc_base/synchronization:mutex",
+          "//third_party/abseil-cpp/absl/base:core_headers",
         ]
-
-        absl_deps = [ "//third_party/abseil-cpp/absl/base:core_headers" ]
       }
 
       rtc_source_set("network_monitor_observer") {
@@ -404,9 +402,8 @@ if (is_ios || is_mac) {
           "../rtc_base:network_constants",
           "../rtc_base:stringutils",
           "../rtc_base:threading",
+          "//third_party/abseil-cpp/absl/strings:string_view",
         ]
-
-        absl_deps = [ "//third_party/abseil-cpp/absl/strings" ]
       }
 
       rtc_library("network_monitor_objc") {
@@ -475,7 +472,6 @@ if (is_ios || is_mac) {
           "../rtc_base:checks",
           "../rtc_base:logging",
         ]
-        absl_deps = [ "//third_party/abseil-cpp/absl/types:optional" ]
 
         configs += [
           "..:common_objc",
@@ -513,9 +509,9 @@ if (is_ios || is_mac) {
         "../api:refcountedbase",
         "../api:scoped_refptr",
         "../api:sequence_checker",
+        "../api/audio:audio_device",
         "../api/task_queue",
         "../api/task_queue:default_task_queue_factory",
-        "../modules/audio_device:audio_device_api",
         "../modules/audio_device:audio_device_buffer",
         "../rtc_base:buffer",
         "../rtc_base:checks",
@@ -527,6 +523,16 @@ if (is_ios || is_mac) {
       if (is_mac) {
         frameworks = [ "AudioUnit.framework" ]
       }
+    }
+
+    rtc_source_set("audio_device_module_error_handler") {
+      visibility = [ ":*" ]
+
+      sources = [ "objc/native/api/audio_device_module_error_handler.h" ]
+
+      public_configs = [ ":common_config_objc" ]
+
+      deps = []
     }
 
     rtc_library("objc_audio_device_module") {
@@ -541,7 +547,7 @@ if (is_ios || is_mac) {
         ":audio_device_api_objc",
         ":audio_device_objc",
         "../api:make_ref_counted",
-        "../modules/audio_device:audio_device_api",
+        "../api/audio:audio_device",
         "../rtc_base:logging",
       ]
       if (is_mac) {
@@ -632,7 +638,7 @@ if (is_ios || is_mac) {
         "Metal.framework",
         "MetalKit.framework",
       ]
-      if ((is_ios || is_mac) && !(target_environment == "xrsimulator" || target_environment == "xrdevice")) {
+      if (is_mac || (is_ios && !(target_environment == "xrsimulator" || target_environment == "xrdevice"))) {
         sources += [
           "objc/components/renderer/metal/RTCMTLVideoView.h",
           "objc/components/renderer/metal/RTCMTLVideoView.m",
@@ -675,7 +681,7 @@ if (is_ios || is_mac) {
         "objc/components/capturer/RTCCameraVideoCapturer.h",
         "objc/components/capturer/RTCCameraVideoCapturer.m",
       ]
-      if (target_environment != "xrdevice" && target_environment != "xrsimulator") {
+      if (is_ios && (target_environment != "xrdevice" && target_environment != "xrsimulator")) {
         sources += [
           "objc/components/capturer/RTCFileVideoCapturer.h",
           "objc/components/capturer/RTCFileVideoCapturer.m",
@@ -753,6 +759,16 @@ if (is_ios || is_mac) {
         ]
       }
 
+      if (rtc_use_h265) {
+        sources += [
+          "objc/components/video_codec/RTCCodecSpecificInfoH265+Private.h",
+          "objc/components/video_codec/RTCCodecSpecificInfoH265.h",
+          "objc/components/video_codec/RTCCodecSpecificInfoH265.mm",
+          "objc/components/video_codec/RTCH265ProfileLevelId.h",
+          "objc/components/video_codec/RTCH265ProfileLevelId.mm",
+        ]
+      }
+
       public_configs = [ ":common_config_objc" ]
       deps = [
         ":base_objc",
@@ -822,8 +838,11 @@ if (is_ios || is_mac) {
 
       deps = [
         ":base_objc",
+        ":helpers_objc",
         ":wrapped_native_codec_objc",
+        "../api/video_codecs:scalability_mode",
         "../modules/video_coding:webrtc_vp8",
+        "../modules/video_coding:webrtc_vp8_scalability",
       ]
     }
 
@@ -839,7 +858,9 @@ if (is_ios || is_mac) {
 
       deps = [
         ":base_objc",
+        ":helpers_objc",
         ":wrapped_native_codec_objc",
+        "../api/video_codecs:scalability_mode",
         "../modules/video_coding:webrtc_vp9",
       ]
     }
@@ -870,7 +891,10 @@ if (is_ios || is_mac) {
 
       deps = [
         ":base_objc",
+        ":helpers_objc",
         ":wrapped_native_codec_objc",
+        "../api/video_codecs:scalability_mode",
+        "../modules/video_coding/codecs/av1:av1_svc_config",
         "../modules/video_coding/codecs/av1:libaom_av1_encoder",
       ]
     }
@@ -996,6 +1020,8 @@ if (is_ios || is_mac) {
         ":base_objc",
         ":helpers_objc",
         "../api/video:encoded_image",
+        "../api/video_codecs:scalability_mode",
+        "../api/video_codecs:scalability_mode_helper",
         "../api/video_codecs:video_codecs_api",
         "../modules/video_coding:video_codec_interface",
         "../rtc_base:refcount",
@@ -1036,6 +1062,8 @@ if (is_ios || is_mac) {
         "objc/api/peerconnection/RTCDataChannelConfiguration+Private.h",
         "objc/api/peerconnection/RTCDataChannelConfiguration.h",
         "objc/api/peerconnection/RTCDataChannelConfiguration.mm",
+        "objc/api/peerconnection/RTCDataPacketCryptor.h",
+        "objc/api/peerconnection/RTCDataPacketCryptor.mm",
         "objc/api/peerconnection/RTCDtmfSender+Private.h",
         "objc/api/peerconnection/RTCDtmfSender.h",
         "objc/api/peerconnection/RTCDtmfSender.mm",
@@ -1118,6 +1146,9 @@ if (is_ios || is_mac) {
         "objc/api/peerconnection/RTCRtpSender+Private.h",
         "objc/api/peerconnection/RTCRtpSender.h",
         "objc/api/peerconnection/RTCRtpSender.mm",
+        "objc/api/peerconnection/RTCRtpSource+Private.h",
+        "objc/api/peerconnection/RTCRtpSource.h",
+        "objc/api/peerconnection/RTCRtpSource.mm",
         "objc/api/peerconnection/RTCRtpTransceiver+Private.h",
         "objc/api/peerconnection/RTCRtpTransceiver.h",
         "objc/api/peerconnection/RTCRtpTransceiver.mm",
@@ -1175,6 +1206,7 @@ if (is_ios || is_mac) {
         "../api/crypto:frame_crypto_transformer",
         "../api:dtmf_sender_interface",
         "../api:enable_media",
+        "../api:field_trials_view",
         "../api:libjingle_peerconnection_api",
         "../api:media_stream_interface",
         "../api:rtc_event_log_output_file",
@@ -1182,6 +1214,9 @@ if (is_ios || is_mac) {
         "../api:rtp_parameters",
         "../api:rtp_sender_interface",
         "../api:scoped_refptr",
+        "../api/audio:audio_device",
+        "../api/audio:audio_processing",
+        "../api/audio:builtin_audio_processing_builder",
         "../api/audio_codecs:audio_codecs_api",
         "../api/audio_codecs:builtin_audio_decoder_factory",
         "../api/audio_codecs:builtin_audio_encoder_factory",
@@ -1190,15 +1225,14 @@ if (is_ios || is_mac) {
         "../api/rtc_event_log:rtc_event_log_factory",
         "../api/task_queue:default_task_queue_factory",
         "../api/transport:field_trial_based_config",
+        "../api/transport:network_control",
+        "../api/transport/rtp:rtp_source",
         "../api/video:video_frame",
         "../api/video:video_rtp_headers",
         "../api/video_codecs:video_codecs_api",
         "../common_video",
         "../media:media_constants",
         "../media:rtc_media_base",
-        "../modules/audio_device:audio_device_api",
-        "../modules/audio_processing",
-        "../modules/audio_processing:api",
         "../modules/video_coding:video_codec_interface",
         "../pc:peer_connection_factory",
         "../pc:webrtc_sdp",
@@ -1209,6 +1243,7 @@ if (is_ios || is_mac) {
         "../rtc_base:rtc_certificate_generator",
         "../rtc_base:safe_conversions",
         "../rtc_base:ssl",
+        "../rtc_base:ssl_adapter",
         "../rtc_base:stringutils",
         "../rtc_base:threading",
         "../rtc_base:timeutils",
@@ -1218,7 +1253,10 @@ if (is_ios || is_mac) {
       ]
 
       if (is_ios) {
-        deps += [ ":native_api_audio_device_module" ]
+        deps += [
+          ":native_api_audio_device_module",
+          "../api/transport:network_control",
+        ]
       }
     }
 
@@ -1283,7 +1321,11 @@ if (is_ios || is_mac) {
             ":videoframebuffer_objc",
             ":videosource_objc",
             ":videotoolbox_objc",
+            "../api:libjingle_peerconnection_api",
+            "../api:rtc_error_matchers",
             "../api:scoped_refptr",
+            "../api/audio:audio_device",
+            "../api/audio:audio_processing",
             "../api/audio_codecs:builtin_audio_decoder_factory",
             "../api/audio_codecs:builtin_audio_encoder_factory",
             "../api/environment:environment_factory",
@@ -1294,8 +1336,6 @@ if (is_ios || is_mac) {
             "../media:codec",
             "../media:rtc_media_base",
             "../media:rtc_media_tests_utils",
-            "../modules/audio_device:audio_device_api",
-            "../modules/audio_processing:api",
             "../modules/video_coding:video_codec_interface",
             "../rtc_base:gunit_helpers",
             "../rtc_base:macromagic",
@@ -1303,6 +1343,8 @@ if (is_ios || is_mac) {
             "../rtc_base:rtc_event",
             "../rtc_base/system:unused",
             "../system_wrappers",
+            "../test:test_support",
+            "../test:wait_until",
             "//third_party/libyuv",
           ]
           if (target_environment != "xrdevice" && target_environment != "xrsimulator") {
@@ -1430,6 +1472,7 @@ if (is_ios || is_mac) {
           "objc/api/peerconnection/RTCConfiguration.h",
           "objc/api/peerconnection/RTCDataChannel.h",
           "objc/api/peerconnection/RTCDataChannelConfiguration.h",
+          "objc/api/peerconnection/RTCDataPacketCryptor.h",
           "objc/api/peerconnection/RTCFrameCryptor.h",
           "objc/api/peerconnection/RTCFrameCryptorKeyProvider.h",
           "objc/api/peerconnection/RTCFieldTrials.h",
@@ -1455,6 +1498,7 @@ if (is_ios || is_mac) {
           "objc/api/peerconnection/RTCRtpHeaderExtensionCapability.h",
           "objc/api/peerconnection/RTCRtpParameters.h",
           "objc/api/peerconnection/RTCRtpReceiver.h",
+          "objc/api/peerconnection/RTCRtpSource.h",
           "objc/api/peerconnection/RTCRtpSender.h",
           "objc/api/peerconnection/RTCRtpTransceiver.h",
           "objc/api/peerconnection/RTCDtmfSender.h",
@@ -1479,11 +1523,20 @@ if (is_ios || is_mac) {
           "objc/components/video_codec/RTCVideoEncoderFactorySimulcast.h",
           "objc/api/video_codec/RTCVideoEncoderSimulcast.h",
           "objc/components/audio/RTCAudioBuffer.h",
-          "objc/components/audio/RTCAudioCustomProcessingDelegate.h",
-          "objc/components/audio/RTCAudioProcessingConfig.h",
           "objc/components/audio/RTCAudioProcessingModule.h",
           "objc/components/audio/RTCDefaultAudioProcessingModule.h",
+          "objc/components/audio/RTCAudioCustomProcessingDelegate.h",
+          "objc/components/audio/RTCAudioProcessingConfig.h",
         ]
+
+        if (rtc_use_h265) {
+          common_objc_headers += [
+            "objc/components/video_codec/RTCCodecSpecificInfoH265.h",
+            "objc/components/video_codec/RTCH265ProfileLevelId.h",
+            "objc/components/video_codec/RTCVideoDecoderH265.h",
+            "objc/components/video_codec/RTCVideoEncoderH265.h",
+          ]
+        }
 
         if (target_environment != "xrdevice" && target_environment != "xrsimulator") {
           common_objc_headers += [
@@ -1568,6 +1621,7 @@ if (is_ios || is_mac) {
           "objc/api/peerconnection/RTCCryptoOptions.h",
           "objc/api/peerconnection/RTCDataChannel.h",
           "objc/api/peerconnection/RTCDataChannelConfiguration.h",
+          "objc/api/peerconnection/RTCDataPacketCryptor.h",
           "objc/api/peerconnection/RTCDtmfSender.h",
           "objc/api/peerconnection/RTCFrameCryptor.h",
           "objc/api/peerconnection/RTCFrameCryptorKeyProvider.h",
@@ -1595,6 +1649,7 @@ if (is_ios || is_mac) {
           "objc/api/peerconnection/RTCRtpParameters.h",
           "objc/api/peerconnection/RTCRtpReceiver.h",
           "objc/api/peerconnection/RTCRtpSender.h",
+          "objc/api/peerconnection/RTCRtpSource.h",
           "objc/api/peerconnection/RTCRtpTransceiver.h",
           "objc/api/peerconnection/RTCSSLAdapter.h",
           "objc/api/peerconnection/RTCSessionDescription.h",
@@ -1654,10 +1709,10 @@ if (is_ios || is_mac) {
           "objc/components/video_codec/RTCVideoEncoderFactorySimulcast.h",
           "objc/api/video_codec/RTCVideoEncoderSimulcast.h",
           "objc/components/audio/RTCAudioBuffer.h",
-          "objc/components/audio/RTCAudioCustomProcessingDelegate.h",
-          "objc/components/audio/RTCAudioProcessingConfig.h",
           "objc/components/audio/RTCAudioProcessingModule.h",
           "objc/components/audio/RTCDefaultAudioProcessingModule.h",
+          "objc/components/audio/RTCAudioCustomProcessingDelegate.h",
+          "objc/components/audio/RTCAudioProcessingConfig.h",
         ]
         if (!build_with_chromium) {
           sources += [
@@ -1669,6 +1724,7 @@ if (is_ios || is_mac) {
         deps = [
           ":base_objc",
           ":default_codec_factory_objc",
+          ":metal_objc",
           ":native_api",
           ":native_video",
           ":peerconnectionfactory_base_objc",
@@ -1678,7 +1734,7 @@ if (is_ios || is_mac) {
           ":videotoolbox_objc",
           ":darwin_privacy_info",
         ]
-        if (target_environment != "xrdevice" && target_environment != "xrsimulator") {
+        if (is_ios && (target_environment != "xrdevice" && target_environment != "xrsimulator")) {
           deps += [ ":metal_objc" ]
         }
         if (!build_with_chromium) {
@@ -1773,12 +1829,13 @@ if (is_ios || is_mac) {
         "../rtc_base:buffer",
         "../rtc_base:logging",
         "../rtc_base:ssl",
+        "../rtc_base:ssl_adapter",
         "../rtc_base:threading",
+        "//third_party/abseil-cpp/absl/memory",
       ]
       if (is_ios) {
         deps += [ ":native_network_monitor" ]
       }
-      absl_deps = [ "//third_party/abseil-cpp/absl/memory" ]
     }
 
     if (is_ios) {
@@ -1800,9 +1857,8 @@ if (is_ios || is_mac) {
           "../rtc_base:macromagic",
           "../rtc_base:stringutils",
           "../rtc_base:threading",
+          "//third_party/abseil-cpp/absl/strings:string_view",
         ]
-
-        absl_deps = [ "//third_party/abseil-cpp/absl/strings" ]
       }
     }
 
@@ -1885,6 +1941,17 @@ if (is_ios || is_mac) {
         "objc/components/video_codec/RTCVideoEncoderH264.h",
         "objc/components/video_codec/RTCVideoEncoderH264.mm",
       ]
+
+      if (rtc_use_h265) {
+        sources += [
+          "objc/components/video_codec/RTCVideoDecoderH265.h",
+          "objc/components/video_codec/RTCVideoDecoderH265.mm",
+          "objc/components/video_codec/RTCVideoEncoderH265.h",
+          "objc/components/video_codec/RTCVideoEncoderH265.mm",
+          "objc/components/video_codec/RTCVideoFrameReorderQueue.h",
+          "objc/components/video_codec/RTCVideoFrameReorderQueue.mm",
+        ]
+      }
 
       configs += [
         "..:common_objc",

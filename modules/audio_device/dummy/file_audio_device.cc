@@ -50,7 +50,7 @@ FileAudioDevice::FileAudioDevice(absl::string_view inputFilename,
 FileAudioDevice::~FileAudioDevice() {}
 
 int32_t FileAudioDevice::ActiveAudioLayer(
-    AudioDeviceModule::AudioLayer& audioLayer) const {
+    AudioDeviceModule::AudioLayer& /* audioLayer */) const {
   return -1;
 }
 
@@ -113,7 +113,7 @@ int32_t FileAudioDevice::SetPlayoutDevice(uint16_t index) {
 }
 
 int32_t FileAudioDevice::SetPlayoutDevice(
-    AudioDeviceModule::WindowsDeviceType device) {
+    AudioDeviceModule::WindowsDeviceType /* device */) {
   return -1;
 }
 
@@ -126,7 +126,7 @@ int32_t FileAudioDevice::SetRecordingDevice(uint16_t index) {
 }
 
 int32_t FileAudioDevice::SetRecordingDevice(
-    AudioDeviceModule::WindowsDeviceType device) {
+    AudioDeviceModule::WindowsDeviceType /* device */) {
   return -1;
 }
 
@@ -217,13 +217,13 @@ int32_t FileAudioDevice::StartPlayout() {
     }
   }
 
-  _ptrThreadPlay = rtc::PlatformThread::SpawnJoinable(
+  _ptrThreadPlay = PlatformThread::SpawnJoinable(
       [this] {
         while (PlayThreadProcess()) {
         }
       },
       "webrtc_audio_module_play_thread",
-      rtc::ThreadAttributes().SetPriority(rtc::ThreadPriority::kRealtime));
+      ThreadAttributes().SetPriority(ThreadPriority::kRealtime));
 
   RTC_LOG(LS_INFO) << "Started playout capture to output file: "
                    << _outputFilename;
@@ -278,13 +278,13 @@ int32_t FileAudioDevice::StartRecording() {
     }
   }
 
-  _ptrThreadRec = rtc::PlatformThread::SpawnJoinable(
+  _ptrThreadRec = PlatformThread::SpawnJoinable(
       [this] {
         while (RecThreadProcess()) {
         }
       },
       "webrtc_audio_module_capture_thread",
-      rtc::ThreadAttributes().SetPriority(rtc::ThreadPriority::kRealtime));
+      ThreadAttributes().SetPriority(ThreadPriority::kRealtime));
 
   RTC_LOG(LS_INFO) << "Started recording from input file: " << _inputFilename;
 
@@ -332,67 +332,67 @@ bool FileAudioDevice::MicrophoneIsInitialized() const {
   return true;
 }
 
-int32_t FileAudioDevice::SpeakerVolumeIsAvailable(bool& available) {
+int32_t FileAudioDevice::SpeakerVolumeIsAvailable(bool& /* available */) {
   return -1;
 }
 
-int32_t FileAudioDevice::SetSpeakerVolume(uint32_t volume) {
+int32_t FileAudioDevice::SetSpeakerVolume(uint32_t /* volume */) {
   return -1;
 }
 
-int32_t FileAudioDevice::SpeakerVolume(uint32_t& volume) const {
+int32_t FileAudioDevice::SpeakerVolume(uint32_t& /* volume */) const {
   return -1;
 }
 
-int32_t FileAudioDevice::MaxSpeakerVolume(uint32_t& maxVolume) const {
+int32_t FileAudioDevice::MaxSpeakerVolume(uint32_t& /* maxVolume */) const {
   return -1;
 }
 
-int32_t FileAudioDevice::MinSpeakerVolume(uint32_t& minVolume) const {
+int32_t FileAudioDevice::MinSpeakerVolume(uint32_t& /* minVolume */) const {
   return -1;
 }
 
-int32_t FileAudioDevice::MicrophoneVolumeIsAvailable(bool& available) {
+int32_t FileAudioDevice::MicrophoneVolumeIsAvailable(bool& /* available */) {
   return -1;
 }
 
-int32_t FileAudioDevice::SetMicrophoneVolume(uint32_t volume) {
+int32_t FileAudioDevice::SetMicrophoneVolume(uint32_t /* volume */) {
   return -1;
 }
 
-int32_t FileAudioDevice::MicrophoneVolume(uint32_t& volume) const {
+int32_t FileAudioDevice::MicrophoneVolume(uint32_t& /* volume */) const {
   return -1;
 }
 
-int32_t FileAudioDevice::MaxMicrophoneVolume(uint32_t& maxVolume) const {
+int32_t FileAudioDevice::MaxMicrophoneVolume(uint32_t& /* maxVolume */) const {
   return -1;
 }
 
-int32_t FileAudioDevice::MinMicrophoneVolume(uint32_t& minVolume) const {
+int32_t FileAudioDevice::MinMicrophoneVolume(uint32_t& /* minVolume */) const {
   return -1;
 }
 
-int32_t FileAudioDevice::SpeakerMuteIsAvailable(bool& available) {
+int32_t FileAudioDevice::SpeakerMuteIsAvailable(bool& /* available */) {
   return -1;
 }
 
-int32_t FileAudioDevice::SetSpeakerMute(bool enable) {
+int32_t FileAudioDevice::SetSpeakerMute(bool /* enable */) {
   return -1;
 }
 
-int32_t FileAudioDevice::SpeakerMute(bool& enabled) const {
+int32_t FileAudioDevice::SpeakerMute(bool& /* enabled */) const {
   return -1;
 }
 
-int32_t FileAudioDevice::MicrophoneMuteIsAvailable(bool& available) {
+int32_t FileAudioDevice::MicrophoneMuteIsAvailable(bool& /* available */) {
   return -1;
 }
 
-int32_t FileAudioDevice::SetMicrophoneMute(bool enable) {
+int32_t FileAudioDevice::SetMicrophoneMute(bool /* enable */) {
   return -1;
 }
 
-int32_t FileAudioDevice::MicrophoneMute(bool& enabled) const {
+int32_t FileAudioDevice::MicrophoneMute(bool& /* enabled */) const {
   return -1;
 }
 
@@ -400,7 +400,7 @@ int32_t FileAudioDevice::StereoPlayoutIsAvailable(bool& available) {
   available = true;
   return 0;
 }
-int32_t FileAudioDevice::SetStereoPlayout(bool enable) {
+int32_t FileAudioDevice::SetStereoPlayout(bool /* enable */) {
   return 0;
 }
 
@@ -414,7 +414,7 @@ int32_t FileAudioDevice::StereoRecordingIsAvailable(bool& available) {
   return 0;
 }
 
-int32_t FileAudioDevice::SetStereoRecording(bool enable) {
+int32_t FileAudioDevice::SetStereoRecording(bool /* enable */) {
   return 0;
 }
 
@@ -423,7 +423,7 @@ int32_t FileAudioDevice::StereoRecording(bool& enabled) const {
   return 0;
 }
 
-int32_t FileAudioDevice::PlayoutDelay(uint16_t& delayMS) const {
+int32_t FileAudioDevice::PlayoutDelay(uint16_t& /* delayMS */) const {
   return 0;
 }
 
@@ -445,7 +445,7 @@ bool FileAudioDevice::PlayThreadProcess() {
   if (!_playing) {
     return false;
   }
-  int64_t currentTime = rtc::TimeMillis();
+  int64_t currentTime = TimeMillis();
   mutex_.Lock();
 
   if (_lastCallPlayoutMillis == 0 ||
@@ -464,7 +464,7 @@ bool FileAudioDevice::PlayThreadProcess() {
   _playoutFramesLeft = 0;
   mutex_.Unlock();
 
-  int64_t deltaTimeMillis = rtc::TimeMillis() - currentTime;
+  int64_t deltaTimeMillis = TimeMillis() - currentTime;
   if (deltaTimeMillis < 10) {
     SleepMs(10 - deltaTimeMillis);
   }
@@ -477,7 +477,7 @@ bool FileAudioDevice::RecThreadProcess() {
     return false;
   }
 
-  int64_t currentTime = rtc::TimeMillis();
+  int64_t currentTime = TimeMillis();
   mutex_.Lock();
 
   if (_lastCallRecordMillis == 0 || currentTime - _lastCallRecordMillis >= 10) {
@@ -497,7 +497,7 @@ bool FileAudioDevice::RecThreadProcess() {
 
   mutex_.Unlock();
 
-  int64_t deltaTimeMillis = rtc::TimeMillis() - currentTime;
+  int64_t deltaTimeMillis = TimeMillis() - currentTime;
   if (deltaTimeMillis < 10) {
     SleepMs(10 - deltaTimeMillis);
   }

@@ -22,7 +22,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface RTC_OBJC_TYPE (RTCDefaultAudioProcessingModule)()
 
-@property(nonatomic, readonly) rtc::scoped_refptr<webrtc::AudioProcessing> nativeAudioProcessingModule;
+@property(nonatomic, readonly) webrtc::scoped_refptr<webrtc::AudioProcessing> nativeAudioProcessingModule;
 
 @end
 

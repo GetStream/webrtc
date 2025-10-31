@@ -10,15 +10,21 @@
 
 #include "modules/audio_coding/include/audio_coding_module.h"
 
-#include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <optional>
+#include <string>
+#include <vector>
 
-#include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
 #include "api/array_view.h"
+#include "api/audio_codecs/audio_encoder.h"
+#include "api/function_view.h"
 #include "modules/audio_coding/acm2/acm_remixing.h"
 #include "modules/audio_coding/acm2/acm_resampler.h"
-#include "modules/include/module_common_types.h"
+#include "modules/audio_coding/include/audio_coding_module_typedefs.h"
 #include "modules/include/module_common_types_public.h"
 #include "rtc_base/buffer.h"
 #include "rtc_base/checks.h"
@@ -43,12 +49,14 @@ class AudioCodingModuleImpl final : public AudioCodingModule {
   explicit AudioCodingModuleImpl();
   ~AudioCodingModuleImpl() override;
 
+  void Reset() override;
+
   /////////////////////////////////////////
   //   Sender
   //
 
-  void ModifyEncoder(rtc::FunctionView<void(std::unique_ptr<AudioEncoder>*)>
-                         modifier) override;
+  void ModifyEncoder(
+      FunctionView<void(std::unique_ptr<AudioEncoder>*)> modifier) override;
 
   // Register a transport callback which will be
   // called to deliver the encoded buffers.
@@ -108,7 +116,7 @@ class AudioCodingModuleImpl final : public AudioCodingModule {
   // TODO(bugs.webrtc.org/10739): change `absolute_capture_timestamp_ms` to
   // int64_t when it always receives a valid value.
   int Encode(const InputData& input_data,
-             absl::optional<int64_t> absolute_capture_timestamp_ms)
+             std::optional<int64_t> absolute_capture_timestamp_ms)
       RTC_EXCLUSIVE_LOCKS_REQUIRED(acm_mutex_);
 
   bool HaveValidEncoder(absl::string_view caller_name) const
@@ -134,7 +142,7 @@ class AudioCodingModuleImpl final : public AudioCodingModule {
   int UpdateUponReceivingCodec(int index);
 
   mutable Mutex acm_mutex_;
-  rtc::Buffer encode_buffer_ RTC_GUARDED_BY(acm_mutex_);
+  Buffer encode_buffer_ RTC_GUARDED_BY(acm_mutex_);
   uint32_t expected_codec_ts_ RTC_GUARDED_BY(acm_mutex_);
   uint32_t expected_in_ts_ RTC_GUARDED_BY(acm_mutex_);
   acm2::ACMResampler resampler_ RTC_GUARDED_BY(acm_mutex_);
@@ -152,6 +160,8 @@ class AudioCodingModuleImpl final : public AudioCodingModule {
   bool first_frame_ RTC_GUARDED_BY(acm_mutex_);
   uint32_t last_timestamp_ RTC_GUARDED_BY(acm_mutex_);
   uint32_t last_rtp_timestamp_ RTC_GUARDED_BY(acm_mutex_);
+  std::optional<int64_t> absolute_capture_timestamp_ms_
+      RTC_GUARDED_BY(acm_mutex_);
 
   Mutex callback_mutex_;
   AudioPacketizationCallback* packetization_callback_
@@ -160,6 +170,10 @@ class AudioCodingModuleImpl final : public AudioCodingModule {
   int codec_histogram_bins_log_[static_cast<size_t>(
       AudioEncoder::CodecType::kMaxLoggedAudioCodecTypes)];
   int number_of_consecutive_empty_packets_;
+
+  mutable Mutex stats_mutex_;
+  ANAStats ana_stats_ RTC_GUARDED_BY(stats_mutex_);
+  int target_bitrate_ RTC_GUARDED_BY(stats_mutex_) = -1;
 };
 
 // Adds a codec usage sample to the histogram.
@@ -196,7 +210,7 @@ AudioCodingModuleImpl::~AudioCodingModuleImpl() = default;
 
 int32_t AudioCodingModuleImpl::Encode(
     const InputData& input_data,
-    absl::optional<int64_t> absolute_capture_timestamp_ms) {
+    std::optional<int64_t> absolute_capture_timestamp_ms) {
   // TODO(bugs.webrtc.org/10739): add dcheck that
   // `audio_frame.absolute_capture_timestamp_ms()` always has a value.
   AudioEncoder::EncodedInfo encoded_info;
@@ -216,7 +230,7 @@ int32_t AudioCodingModuleImpl::Encode(
       first_frame_
           ? input_data.input_timestamp
           : last_rtp_timestamp_ +
-                rtc::dchecked_cast<uint32_t>(rtc::CheckedDivExact(
+                dchecked_cast<uint32_t>(CheckedDivExact(
                     int64_t{input_data.input_timestamp - last_timestamp_} *
                         encoder_stack_->RtpTimestampRateHz(),
                     int64_t{encoder_stack_->SampleRateHz()}));
@@ -225,11 +239,15 @@ int32_t AudioCodingModuleImpl::Encode(
   last_rtp_timestamp_ = rtp_timestamp;
   first_frame_ = false;
 
+  if (!absolute_capture_timestamp_ms_.has_value()) {
+    absolute_capture_timestamp_ms_ = absolute_capture_timestamp_ms;
+  }
+
   // Clear the buffer before reuse - encoded data will get appended.
   encode_buffer_.Clear();
   encoded_info = encoder_stack_->Encode(
       rtp_timestamp,
-      rtc::ArrayView<const int16_t>(
+      ArrayView<const int16_t>(
           input_data.audio,
           input_data.audio_channel * input_data.length_per_channel),
       &encode_buffer_);
@@ -271,10 +289,16 @@ int32_t AudioCodingModuleImpl::Encode(
       packetization_callback_->SendData(
           frame_type, encoded_info.payload_type, encoded_info.encoded_timestamp,
           encode_buffer_.data(), encode_buffer_.size(),
-          absolute_capture_timestamp_ms.value_or(-1));
+          absolute_capture_timestamp_ms_.value_or(-1));
     }
   }
+  absolute_capture_timestamp_ms_.reset();
   previous_pltype_ = encoded_info.payload_type;
+  {
+    MutexLock lock(&stats_mutex_);
+    ana_stats_ = encoder_stack_->GetANAStats();
+    target_bitrate_ = encoder_stack_->GetTargetBitrate();
+  }
   return static_cast<int32_t>(encode_buffer_.size());
 }
 
@@ -282,8 +306,16 @@ int32_t AudioCodingModuleImpl::Encode(
 //   Sender
 //
 
+void AudioCodingModuleImpl::Reset() {
+  MutexLock lock(&acm_mutex_);
+  absolute_capture_timestamp_ms_.reset();
+  if (HaveValidEncoder("Reset")) {
+    encoder_stack_->Reset();
+  }
+}
+
 void AudioCodingModuleImpl::ModifyEncoder(
-    rtc::FunctionView<void(std::unique_ptr<AudioEncoder>*)> modifier) {
+    FunctionView<void(std::unique_ptr<AudioEncoder>*)> modifier) {
   MutexLock lock(&acm_mutex_);
   modifier(&encoder_stack_);
 }
@@ -413,7 +445,7 @@ int AudioCodingModuleImpl::PreprocessToAddData(const AudioFrame& in_frame,
   }
 
   if (!down_mix && !resample) {
-    // No pre-processing is required.
+    // No preprocessing is required.
     if (expected_in_ts_ == expected_codec_ts_) {
       // If we've never resampled, we can use the input frame as-is
       *ptr_out = &in_frame;
@@ -443,8 +475,8 @@ int AudioCodingModuleImpl::PreprocessToAddData(const AudioFrame& in_frame,
     RTC_DCHECK_GE(audio.size(), preprocess_frame_.samples_per_channel_);
     RTC_DCHECK_GE(audio.size(), in_frame.samples_per_channel_);
     DownMixFrame(in_frame,
-                 rtc::ArrayView<int16_t>(
-                     dest_ptr_audio, preprocess_frame_.samples_per_channel_));
+                 ArrayView<int16_t>(dest_ptr_audio,
+                                    preprocess_frame_.samples_per_channel_));
     preprocess_frame_.num_channels_ = 1;
 
     // Set the input of the resampler to the down-mixed signal.
@@ -508,19 +540,13 @@ bool AudioCodingModuleImpl::HaveValidEncoder(
 }
 
 ANAStats AudioCodingModuleImpl::GetANAStats() const {
-  MutexLock lock(&acm_mutex_);
-  if (encoder_stack_)
-    return encoder_stack_->GetANAStats();
-  // If no encoder is set, return default stats.
-  return ANAStats();
+  MutexLock lock(&stats_mutex_);
+  return ana_stats_;
 }
 
 int AudioCodingModuleImpl::GetTargetBitrate() const {
-  MutexLock lock(&acm_mutex_);
-  if (!encoder_stack_) {
-    return -1;
-  }
-  return encoder_stack_->GetTargetBitrate();
+  MutexLock lock(&stats_mutex_);
+  return target_bitrate_;
 }
 
 }  // namespace

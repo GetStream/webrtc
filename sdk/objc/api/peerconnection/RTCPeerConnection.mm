@@ -36,15 +36,17 @@
 #include "rtc_base/numerics/safe_conversions.h"
 #include "sdk/objc/native/api/ssl_certificate_verifier.h"
 
-NSString *const kRTCPeerConnectionErrorDomain = @"org.webrtc.RTC_OBJC_TYPE(RTCPeerConnection)";
-int const kRTCPeerConnnectionSessionDescriptionError = -1;
+NSString *const RTC_CONSTANT_TYPE(RTCPeerConnectionErrorDomain) = @"org.webrtc.RTC_OBJC_TYPE(RTCPeerConnection)";
+int const RTC_CONSTANT_TYPE(RTCPeerConnnectionSessionDescriptionError) = -1;
 
 namespace {
 
-class SetSessionDescriptionObserver : public webrtc::SetLocalDescriptionObserverInterface,
-                                      public webrtc::SetRemoteDescriptionObserverInterface {
+class SetSessionDescriptionObserver
+    : public webrtc::SetLocalDescriptionObserverInterface,
+      public webrtc::SetRemoteDescriptionObserverInterface {
  public:
-  SetSessionDescriptionObserver(RTCSetSessionDescriptionCompletionHandler completionHandler) {
+  SetSessionDescriptionObserver(
+      RTCSetSessionDescriptionCompletionHandler completionHandler) {
     completion_handler_ = completionHandler;
   }
 
@@ -64,8 +66,8 @@ class SetSessionDescriptionObserver : public webrtc::SetLocalDescriptionObserver
     } else {
       // TODO(hta): Add handling of error.type()
       NSString *str = [NSString stringForStdString:error.message()];
-      NSError *err = [NSError errorWithDomain:kRTCPeerConnectionErrorDomain
-                                         code:kRTCPeerConnnectionSessionDescriptionError
+      NSError *err = [NSError errorWithDomain:RTC_CONSTANT_TYPE(RTCPeerConnectionErrorDomain)
+                                         code:RTC_CONSTANT_TYPE(RTCPeerConnnectionSessionDescriptionError)
                                      userInfo:@{NSLocalizedDescriptionKey : str}];
       completion_handler_(err);
     }
@@ -82,18 +84,22 @@ class CreateSessionDescriptionObserverAdapter
     : public CreateSessionDescriptionObserver {
  public:
   CreateSessionDescriptionObserverAdapter(void (^completionHandler)(
-      RTC_OBJC_TYPE(RTCSessionDescription) * sessionDescription, NSError *error)) {
+      RTC_OBJC_TYPE(RTCSessionDescription) * sessionDescription,
+      NSError *error)) {
     completion_handler_ = completionHandler;
   }
 
-  ~CreateSessionDescriptionObserverAdapter() override { completion_handler_ = nil; }
+  ~CreateSessionDescriptionObserverAdapter() override {
+    completion_handler_ = nil;
+  }
 
   void OnSuccess(SessionDescriptionInterface *desc) override {
     RTC_DCHECK(completion_handler_);
     std::unique_ptr<webrtc::SessionDescriptionInterface> description =
         std::unique_ptr<webrtc::SessionDescriptionInterface>(desc);
     RTC_OBJC_TYPE(RTCSessionDescription) *session =
-        [[RTC_OBJC_TYPE(RTCSessionDescription) alloc] initWithNativeDescription:description.get()];
+        [[RTC_OBJC_TYPE(RTCSessionDescription) alloc]
+            initWithNativeDescription:description.get()];
     completion_handler_(session, nil);
     completion_handler_ = nil;
   }
@@ -103,20 +109,21 @@ class CreateSessionDescriptionObserverAdapter
     // TODO(hta): Add handling of error.type()
     NSString *str = [NSString stringForStdString:error.message()];
     NSError* err =
-        [NSError errorWithDomain:kRTCPeerConnectionErrorDomain
-                            code:kRTCPeerConnnectionSessionDescriptionError
+        [NSError errorWithDomain:RTC_CONSTANT_TYPE(RTCPeerConnectionErrorDomain)
+                            code:RTC_CONSTANT_TYPE(RTCPeerConnnectionSessionDescriptionError)
                         userInfo:@{ NSLocalizedDescriptionKey : str }];
     completion_handler_(nil, err);
     completion_handler_ = nil;
   }
 
  private:
-  void (^completion_handler_)(RTC_OBJC_TYPE(RTCSessionDescription) * sessionDescription,
+  void (^completion_handler_)(RTC_OBJC_TYPE(RTCSessionDescription) *
+                                  sessionDescription,
                               NSError *error);
 };
 
-PeerConnectionDelegateAdapter::PeerConnectionDelegateAdapter(RTC_OBJC_TYPE(RTCPeerConnection) *
-                                                             peerConnection) {
+PeerConnectionDelegateAdapter::PeerConnectionDelegateAdapter(
+    RTC_OBJC_TYPE(RTCPeerConnection) * peerConnection) {
   peer_connection_ = peerConnection;
 }
 
@@ -126,196 +133,340 @@ PeerConnectionDelegateAdapter::~PeerConnectionDelegateAdapter() {
 
 void PeerConnectionDelegateAdapter::OnSignalingChange(
     PeerConnectionInterface::SignalingState new_state) {
-  RTCSignalingState state =
+  RTC_OBJC_TYPE(RTCSignalingState) state =
       [[RTC_OBJC_TYPE(RTCPeerConnection) class] signalingStateForNativeState:new_state];
   RTC_OBJC_TYPE(RTCPeerConnection) *peer_connection = peer_connection_;
-  [peer_connection.delegate peerConnection:peer_connection
-                   didChangeSignalingState:state];
+  if (peer_connection == nil) {
+    return;
+  }
+  id<RTC_OBJC_TYPE(RTCPeerConnectionDelegate)> delegate =
+      peer_connection.delegate;
+  if (delegate == nil) {
+    return;
+  }
+  [delegate peerConnection:peer_connection didChangeSignalingState:state];
 }
 
 void PeerConnectionDelegateAdapter::OnAddStream(
-    rtc::scoped_refptr<MediaStreamInterface> stream) {
+    webrtc::scoped_refptr<MediaStreamInterface> stream) {
   RTC_OBJC_TYPE(RTCPeerConnection) *peer_connection = peer_connection_;
-  RTC_OBJC_TYPE(RTCMediaStream) *mediaStream =
-      [[RTC_OBJC_TYPE(RTCMediaStream) alloc] initWithFactory:peer_connection.factory
-                                           nativeMediaStream:stream];
-  [peer_connection.delegate peerConnection:peer_connection
-                              didAddStream:mediaStream];
+  if (peer_connection == nil) {
+    return;
+  }
+  id<RTC_OBJC_TYPE(RTCPeerConnectionDelegate)> delegate =
+      peer_connection.delegate;
+  if (delegate == nil) {
+    return;
+  }
+
+  RTC_OBJC_TYPE(RTCMediaStream) *media_stream = [[RTC_OBJC_TYPE(RTCMediaStream)
+      alloc] initWithFactory:peer_connection.factory nativeMediaStream:stream];
+
+  [delegate peerConnection:peer_connection didAddStream:media_stream];
 }
 
 void PeerConnectionDelegateAdapter::OnRemoveStream(
-    rtc::scoped_refptr<MediaStreamInterface> stream) {
+    webrtc::scoped_refptr<MediaStreamInterface> stream) {
   RTC_OBJC_TYPE(RTCPeerConnection) *peer_connection = peer_connection_;
-  RTC_OBJC_TYPE(RTCMediaStream) *mediaStream =
-      [[RTC_OBJC_TYPE(RTCMediaStream) alloc] initWithFactory:peer_connection.factory
-                                           nativeMediaStream:stream];
+  if (peer_connection == nil) {
+    return;
+  }
+  id<RTC_OBJC_TYPE(RTCPeerConnectionDelegate)> delegate =
+      peer_connection.delegate;
+  if (delegate == nil) {
+    return;
+  }
+  RTC_OBJC_TYPE(RTCMediaStream) *mediaStream = [[RTC_OBJC_TYPE(RTCMediaStream)
+      alloc] initWithFactory:peer_connection.factory nativeMediaStream:stream];
 
-  [peer_connection.delegate peerConnection:peer_connection
-                           didRemoveStream:mediaStream];
+  [delegate peerConnection:peer_connection didRemoveStream:mediaStream];
 }
 
 void PeerConnectionDelegateAdapter::OnTrack(
-    rtc::scoped_refptr<RtpTransceiverInterface> nativeTransceiver) {
+    webrtc::scoped_refptr<RtpTransceiverInterface> nativeTransceiver) {
   RTC_OBJC_TYPE(RTCPeerConnection) *peer_connection = peer_connection_;
+  if (peer_connection == nil) {
+    return;
+  }
+  id<RTC_OBJC_TYPE(RTCPeerConnectionDelegate)> delegate =
+      peer_connection.delegate;
+  if (delegate == nil) {
+    return;
+  }
+
   RTC_OBJC_TYPE(RTCRtpTransceiver) *transceiver =
-      [[RTC_OBJC_TYPE(RTCRtpTransceiver) alloc] initWithFactory:peer_connection.factory
-                                           nativeRtpTransceiver:nativeTransceiver];
-  if ([peer_connection.delegate
-          respondsToSelector:@selector(peerConnection:didStartReceivingOnTransceiver:)]) {
-    [peer_connection.delegate peerConnection:peer_connection
-              didStartReceivingOnTransceiver:transceiver];
+      [[RTC_OBJC_TYPE(RTCRtpTransceiver) alloc]
+               initWithFactory:peer_connection.factory
+          nativeRtpTransceiver:nativeTransceiver];
+  if ([delegate respondsToSelector:@selector(peerConnection:
+                                       didStartReceivingOnTransceiver:)]) {
+    [delegate peerConnection:peer_connection
+        didStartReceivingOnTransceiver:transceiver];
   }
 }
 
 void PeerConnectionDelegateAdapter::OnDataChannel(
-    rtc::scoped_refptr<DataChannelInterface> data_channel) {
+    webrtc::scoped_refptr<DataChannelInterface> data_channel) {
   RTC_OBJC_TYPE(RTCPeerConnection) *peer_connection = peer_connection_;
-  RTC_OBJC_TYPE(RTCDataChannel) *dataChannel =
-      [[RTC_OBJC_TYPE(RTCDataChannel) alloc] initWithFactory:peer_connection.factory
-                                           nativeDataChannel:data_channel];
-  [peer_connection.delegate peerConnection:peer_connection
-                        didOpenDataChannel:dataChannel];
+  if (peer_connection == nil) {
+    return;
+  }
+  id<RTC_OBJC_TYPE(RTCPeerConnectionDelegate)> delegate =
+      peer_connection.delegate;
+  if (delegate == nil) {
+    return;
+  }
+  RTC_OBJC_TYPE(RTCDataChannel) *dataChannel = [[RTC_OBJC_TYPE(RTCDataChannel)
+      alloc] initWithFactory:peer_connection.factory
+           nativeDataChannel:data_channel];
+  [delegate peerConnection:peer_connection didOpenDataChannel:dataChannel];
 }
 
 void PeerConnectionDelegateAdapter::OnRenegotiationNeeded() {
   RTC_OBJC_TYPE(RTCPeerConnection) *peer_connection = peer_connection_;
-  [peer_connection.delegate peerConnectionShouldNegotiate:peer_connection];
+  if (peer_connection == nil) {
+    return;
+  }
+  id<RTC_OBJC_TYPE(RTCPeerConnectionDelegate)> delegate =
+      peer_connection.delegate;
+  if (delegate == nil) {
+    return;
+  }
+  [delegate peerConnectionShouldNegotiate:peer_connection];
 }
 
 void PeerConnectionDelegateAdapter::OnIceConnectionChange(
     PeerConnectionInterface::IceConnectionState new_state) {
-  RTCIceConnectionState state =
-      [RTC_OBJC_TYPE(RTCPeerConnection) iceConnectionStateForNativeState:new_state];
-  [peer_connection_.delegate peerConnection:peer_connection_ didChangeIceConnectionState:state];
+  RTC_OBJC_TYPE(RTCPeerConnection) *peer_connection = peer_connection_;
+  if (peer_connection == nil) {
+    return;
+  }
+  id<RTC_OBJC_TYPE(RTCPeerConnectionDelegate)> delegate =
+      peer_connection.delegate;
+  if (delegate == nil) {
+    return;
+  }
+  RTC_OBJC_TYPE(RTCIceConnectionState) state = [RTC_OBJC_TYPE(RTCPeerConnection)
+      iceConnectionStateForNativeState:new_state];
+  [delegate peerConnection:peer_connection didChangeIceConnectionState:state];
 }
 
 void PeerConnectionDelegateAdapter::OnStandardizedIceConnectionChange(
     PeerConnectionInterface::IceConnectionState new_state) {
-  if ([peer_connection_.delegate
-          respondsToSelector:@selector(peerConnection:didChangeStandardizedIceConnectionState:)]) {
-    RTCIceConnectionState state =
-        [RTC_OBJC_TYPE(RTCPeerConnection) iceConnectionStateForNativeState:new_state];
-    [peer_connection_.delegate peerConnection:peer_connection_
+  RTC_OBJC_TYPE(RTCPeerConnection) *peer_connection = peer_connection_;
+  if (peer_connection == nil) {
+    return;
+  }
+  id<RTC_OBJC_TYPE(RTCPeerConnectionDelegate)> delegate =
+      peer_connection.delegate;
+  if (delegate == nil) {
+    return;
+  }
+  if ([delegate respondsToSelector:@selector
+                (peerConnection:didChangeStandardizedIceConnectionState:)]) {
+    RTC_OBJC_TYPE(RTCIceConnectionState) state = [RTC_OBJC_TYPE(RTCPeerConnection)
+        iceConnectionStateForNativeState:new_state];
+    [delegate peerConnection:peer_connection
         didChangeStandardizedIceConnectionState:state];
   }
 }
 
 void PeerConnectionDelegateAdapter::OnConnectionChange(
     PeerConnectionInterface::PeerConnectionState new_state) {
-  if ([peer_connection_.delegate
-          respondsToSelector:@selector(peerConnection:didChangeConnectionState:)]) {
-    RTCPeerConnectionState state =
-        [RTC_OBJC_TYPE(RTCPeerConnection) connectionStateForNativeState:new_state];
-    [peer_connection_.delegate peerConnection:peer_connection_ didChangeConnectionState:state];
+  RTC_OBJC_TYPE(RTCPeerConnection) *peer_connection = peer_connection_;
+  if (peer_connection == nil) {
+    return;
+  }
+  id<RTC_OBJC_TYPE(RTCPeerConnectionDelegate)> delegate =
+      peer_connection.delegate;
+  if (delegate == nil) {
+    return;
+  }
+  if ([delegate respondsToSelector:@selector(peerConnection:
+                                       didChangeConnectionState:)]) {
+    RTC_OBJC_TYPE(RTCPeerConnectionState) state = [RTC_OBJC_TYPE(RTCPeerConnection)
+        connectionStateForNativeState:new_state];
+    [delegate peerConnection:peer_connection didChangeConnectionState:state];
   }
 }
 
 void PeerConnectionDelegateAdapter::OnIceGatheringChange(
     PeerConnectionInterface::IceGatheringState new_state) {
-  RTCIceGatheringState state =
-      [[RTC_OBJC_TYPE(RTCPeerConnection) class] iceGatheringStateForNativeState:new_state];
   RTC_OBJC_TYPE(RTCPeerConnection) *peer_connection = peer_connection_;
-  [peer_connection.delegate peerConnection:peer_connection
-                didChangeIceGatheringState:state];
+  if (peer_connection == nil) {
+    return;
+  }
+  id<RTC_OBJC_TYPE(RTCPeerConnectionDelegate)> delegate =
+      peer_connection.delegate;
+  if (delegate == nil) {
+    return;
+  }
+  RTC_OBJC_TYPE(RTCIceGatheringState) state = [[RTC_OBJC_TYPE(RTCPeerConnection) class]
+      iceGatheringStateForNativeState:new_state];
+  [delegate peerConnection:peer_connection didChangeIceGatheringState:state];
 }
 
 void PeerConnectionDelegateAdapter::OnIceCandidate(
     const IceCandidateInterface *candidate) {
-  RTC_OBJC_TYPE(RTCIceCandidate) *iceCandidate =
-      [[RTC_OBJC_TYPE(RTCIceCandidate) alloc] initWithNativeCandidate:candidate];
   RTC_OBJC_TYPE(RTCPeerConnection) *peer_connection = peer_connection_;
-  [peer_connection.delegate peerConnection:peer_connection
-                   didGenerateIceCandidate:iceCandidate];
+  if (peer_connection == nil) {
+    return;
+  }
+  id<RTC_OBJC_TYPE(RTCPeerConnectionDelegate)> delegate =
+      peer_connection.delegate;
+  if (delegate == nil) {
+    return;
+  }
+  RTC_OBJC_TYPE(RTCIceCandidate) *iceCandidate =
+      [[RTC_OBJC_TYPE(RTCIceCandidate) alloc]
+          initWithNativeCandidate:candidate];
+  [delegate peerConnection:peer_connection
+      didGenerateIceCandidate:iceCandidate];
 }
 
-void PeerConnectionDelegateAdapter::OnIceCandidateError(const std::string &address,
-                                                        int port,
-                                                        const std::string &url,
-                                                        int error_code,
-                                                        const std::string &error_text) {
+void PeerConnectionDelegateAdapter::OnIceCandidateError(
+    const std::string &address,
+    int port,
+    const std::string &url,
+    int error_code,
+    const std::string &error_text) {
   RTC_OBJC_TYPE(RTCPeerConnection) *peer_connection = peer_connection_;
+  if (peer_connection == nil) {
+    return;
+  }
+  id<RTC_OBJC_TYPE(RTCPeerConnectionDelegate)> delegate =
+      peer_connection.delegate;
+  if (delegate == nil) {
+    return;
+  }
   RTC_OBJC_TYPE(RTCIceCandidateErrorEvent) *event =
-      [[RTC_OBJC_TYPE(RTCIceCandidateErrorEvent) alloc] initWithAddress:address
-                                                                   port:port
-                                                                    url:url
-                                                              errorCode:error_code
-                                                              errorText:error_text];
-  if ([peer_connection.delegate respondsToSelector:@selector(peerConnection:
-                                                             didFailToGatherIceCandidate:)]) {
-    [peer_connection.delegate peerConnection:peer_connection didFailToGatherIceCandidate:event];
+      [[RTC_OBJC_TYPE(RTCIceCandidateErrorEvent) alloc]
+          initWithAddress:address
+                     port:port
+                      url:url
+                errorCode:error_code
+                errorText:error_text];
+  if ([delegate respondsToSelector:@selector(peerConnection:
+                                       didFailToGatherIceCandidate:)]) {
+    [delegate peerConnection:peer_connection didFailToGatherIceCandidate:event];
   }
 }
 
 void PeerConnectionDelegateAdapter::OnIceCandidatesRemoved(
-    const std::vector<cricket::Candidate>& candidates) {
-  NSMutableArray* ice_candidates =
+    const std::vector<webrtc::Candidate> &candidates) {
+  RTC_OBJC_TYPE(RTCPeerConnection) *peer_connection = peer_connection_;
+  if (peer_connection == nil) {
+    return;
+  }
+  id<RTC_OBJC_TYPE(RTCPeerConnectionDelegate)> delegate =
+      peer_connection.delegate;
+  if (delegate == nil) {
+    return;
+  }
+  NSMutableArray *ice_candidates =
       [NSMutableArray arrayWithCapacity:candidates.size()];
-  for (const auto& candidate : candidates) {
-    JsepIceCandidate candidate_wrapper(candidate.transport_name(), -1, candidate);
+  for (const auto &candidate : candidates) {
+    JsepIceCandidate candidate_wrapper(
+        candidate.transport_name(), -1, candidate);
     RTC_OBJC_TYPE(RTCIceCandidate) *ice_candidate =
-        [[RTC_OBJC_TYPE(RTCIceCandidate) alloc] initWithNativeCandidate:&candidate_wrapper];
+        [[RTC_OBJC_TYPE(RTCIceCandidate) alloc]
+            initWithNativeCandidate:&candidate_wrapper];
     [ice_candidates addObject:ice_candidate];
   }
-  RTC_OBJC_TYPE(RTCPeerConnection) *peer_connection = peer_connection_;
-  [peer_connection.delegate peerConnection:peer_connection
-                    didRemoveIceCandidates:ice_candidates];
+  [delegate peerConnection:peer_connection
+      didRemoveIceCandidates:ice_candidates];
 }
 
 void PeerConnectionDelegateAdapter::OnIceSelectedCandidatePairChanged(
-    const cricket::CandidatePairChangeEvent &event) {
+    const webrtc::CandidatePairChangeEvent &event) {
+  RTC_OBJC_TYPE(RTCPeerConnection) *peer_connection = peer_connection_;
+  if (peer_connection == nil) {
+    return;
+  }
+  id<RTC_OBJC_TYPE(RTCPeerConnectionDelegate)> delegate =
+      peer_connection.delegate;
+  if (delegate == nil) {
+    return;
+  }
   const auto &selected_pair = event.selected_candidate_pair;
   JsepIceCandidate local_candidate_wrapper(
-      selected_pair.local_candidate().transport_name(), -1, selected_pair.local_candidate());
+      selected_pair.local_candidate().transport_name(),
+      -1,
+      selected_pair.local_candidate());
   RTC_OBJC_TYPE(RTCIceCandidate) *local_candidate =
-      [[RTC_OBJC_TYPE(RTCIceCandidate) alloc] initWithNativeCandidate:&local_candidate_wrapper];
+      [[RTC_OBJC_TYPE(RTCIceCandidate) alloc]
+          initWithNativeCandidate:&local_candidate_wrapper];
   JsepIceCandidate remote_candidate_wrapper(
-      selected_pair.remote_candidate().transport_name(), -1, selected_pair.remote_candidate());
+      selected_pair.remote_candidate().transport_name(),
+      -1,
+      selected_pair.remote_candidate());
   RTC_OBJC_TYPE(RTCIceCandidate) *remote_candidate =
-      [[RTC_OBJC_TYPE(RTCIceCandidate) alloc] initWithNativeCandidate:&remote_candidate_wrapper];
-  RTC_OBJC_TYPE(RTCPeerConnection) *peer_connection = peer_connection_;
+      [[RTC_OBJC_TYPE(RTCIceCandidate) alloc]
+          initWithNativeCandidate:&remote_candidate_wrapper];
   NSString *nsstr_reason = [NSString stringForStdString:event.reason];
-  if ([peer_connection.delegate
-          respondsToSelector:@selector
-          (peerConnection:didChangeLocalCandidate:remoteCandidate:lastReceivedMs:changeReason:)]) {
-    [peer_connection.delegate peerConnection:peer_connection
-                     didChangeLocalCandidate:local_candidate
-                             remoteCandidate:remote_candidate
-                              lastReceivedMs:event.last_data_received_ms
-                                changeReason:nsstr_reason];
+  if ([delegate respondsToSelector:@selector
+                (peerConnection:
+                    didChangeLocalCandidate:remoteCandidate:lastReceivedMs
+                                           :changeReason:)]) {
+    [delegate peerConnection:peer_connection
+        didChangeLocalCandidate:local_candidate
+                remoteCandidate:remote_candidate
+                 lastReceivedMs:event.last_data_received_ms
+                   changeReason:nsstr_reason];
   }
 }
 
 void PeerConnectionDelegateAdapter::OnAddTrack(
-    rtc::scoped_refptr<RtpReceiverInterface> receiver,
-    const std::vector<rtc::scoped_refptr<MediaStreamInterface>> &streams) {
+    webrtc::scoped_refptr<RtpReceiverInterface> receiver,
+    const std::vector<webrtc::scoped_refptr<MediaStreamInterface>> &streams) {
   RTC_OBJC_TYPE(RTCPeerConnection) *peer_connection = peer_connection_;
-  if ([peer_connection.delegate respondsToSelector:@selector(peerConnection:
-                                                             didAddReceiver:streams:)]) {
-    NSMutableArray *mediaStreams = [NSMutableArray arrayWithCapacity:streams.size()];
+  if (peer_connection == nil) {
+    return;
+  }
+  id<RTC_OBJC_TYPE(RTCPeerConnectionDelegate)> delegate =
+      peer_connection.delegate;
+  if (delegate == nil) {
+    return;
+  }
+
+  if ([delegate respondsToSelector:@selector(peerConnection:
+                                             didAddReceiver:streams:)]) {
+    NSMutableArray *mediaStreams =
+        [NSMutableArray arrayWithCapacity:streams.size()];
     for (const auto &nativeStream : streams) {
       RTC_OBJC_TYPE(RTCMediaStream) *mediaStream =
-          [[RTC_OBJC_TYPE(RTCMediaStream) alloc] initWithFactory:peer_connection.factory
-                                               nativeMediaStream:nativeStream];
+          [[RTC_OBJC_TYPE(RTCMediaStream) alloc]
+                initWithFactory:peer_connection.factory
+              nativeMediaStream:nativeStream];
       [mediaStreams addObject:mediaStream];
     }
-    RTC_OBJC_TYPE(RTCRtpReceiver) *rtpReceiver =
-        [[RTC_OBJC_TYPE(RTCRtpReceiver) alloc] initWithFactory:peer_connection.factory
-                                             nativeRtpReceiver:receiver];
+    RTC_OBJC_TYPE(RTCRtpReceiver) *rtpReceiver = [[RTC_OBJC_TYPE(RTCRtpReceiver)
+        alloc] initWithFactory:peer_connection.factory
+             nativeRtpReceiver:receiver];
 
-    [peer_connection.delegate peerConnection:peer_connection
-                              didAddReceiver:rtpReceiver
-                                     streams:mediaStreams];
+    [delegate peerConnection:peer_connection
+              didAddReceiver:rtpReceiver
+                     streams:mediaStreams];
   }
 }
 
 void PeerConnectionDelegateAdapter::OnRemoveTrack(
-    rtc::scoped_refptr<RtpReceiverInterface> receiver) {
+    webrtc::scoped_refptr<RtpReceiverInterface> receiver) {
   RTC_OBJC_TYPE(RTCPeerConnection) *peer_connection = peer_connection_;
-  if ([peer_connection.delegate respondsToSelector:@selector(peerConnection:didRemoveReceiver:)]) {
-    RTC_OBJC_TYPE(RTCRtpReceiver) *rtpReceiver =
-        [[RTC_OBJC_TYPE(RTCRtpReceiver) alloc] initWithFactory:peer_connection.factory
-                                             nativeRtpReceiver:receiver];
-    [peer_connection.delegate peerConnection:peer_connection didRemoveReceiver:rtpReceiver];
+  if (peer_connection == nil) {
+    return;
+  }
+  id<RTC_OBJC_TYPE(RTCPeerConnectionDelegate)> delegate =
+      peer_connection.delegate;
+  if (delegate == nil) {
+    return;
+  }
+  if ([delegate respondsToSelector:@selector(peerConnection:
+                                          didRemoveReceiver:)]) {
+    RTC_OBJC_TYPE(RTCRtpReceiver) *rtpReceiver = [[RTC_OBJC_TYPE(RTCRtpReceiver)
+        alloc] initWithFactory:peer_connection.factory
+             nativeRtpReceiver:receiver];
+    [delegate peerConnection:peer_connection didRemoveReceiver:rtpReceiver];
   }
 }
 
@@ -325,7 +476,7 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
   RTC_OBJC_TYPE(RTCPeerConnectionFactory) * _factory;
   NSMutableArray<RTC_OBJC_TYPE(RTCMediaStream) *> *_localStreams;
   std::unique_ptr<webrtc::PeerConnectionDelegateAdapter> _observer;
-  rtc::scoped_refptr<webrtc::PeerConnectionInterface> _peerConnection;
+  webrtc::scoped_refptr<webrtc::PeerConnectionInterface> _peerConnection;
   std::unique_ptr<webrtc::MediaConstraints> _nativeConstraints;
   BOOL _hasStartedRtcEventLog;
 }
@@ -333,17 +484,19 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
 @synthesize delegate = _delegate;
 @synthesize factory = _factory;
 
-- (nullable instancetype)initWithFactory:(RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)factory
-                           configuration:(RTC_OBJC_TYPE(RTCConfiguration) *)configuration
-                             constraints:(RTC_OBJC_TYPE(RTCMediaConstraints) *)constraints
-                     certificateVerifier:
-                         (nullable id<RTC_OBJC_TYPE(RTCSSLCertificateVerifier)>)certificateVerifier
-                                delegate:(id<RTC_OBJC_TYPE(RTCPeerConnectionDelegate)>)delegate {
+- (nullable instancetype)
+        initWithFactory:(RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)factory
+          configuration:(RTC_OBJC_TYPE(RTCConfiguration) *)configuration
+            constraints:(RTC_OBJC_TYPE(RTCMediaConstraints) *)constraints
+    certificateVerifier:(nullable id<RTC_OBJC_TYPE(RTCSSLCertificateVerifier)>)
+                            certificateVerifier
+               delegate:(id<RTC_OBJC_TYPE(RTCPeerConnectionDelegate)>)delegate {
   NSParameterAssert(factory);
   std::unique_ptr<webrtc::PeerConnectionDependencies> dependencies =
       std::make_unique<webrtc::PeerConnectionDependencies>(nullptr);
   if (certificateVerifier != nil) {
-    dependencies->tls_cert_verifier = webrtc::ObjCToNativeCertificateVerifier(certificateVerifier);
+    dependencies->tls_cert_verifier =
+        webrtc::ObjCToNativeCertificateVerifier(certificateVerifier);
   }
   return [self initWithDependencies:factory
                       configuration:configuration
@@ -356,8 +509,10 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
     initWithDependencies:(RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)factory
            configuration:(RTC_OBJC_TYPE(RTCConfiguration) *)configuration
              constraints:(RTC_OBJC_TYPE(RTCMediaConstraints) *)constraints
-            dependencies:(std::unique_ptr<webrtc::PeerConnectionDependencies>)dependencies
-                delegate:(id<RTC_OBJC_TYPE(RTCPeerConnectionDelegate)>)delegate {
+            dependencies:(std::unique_ptr<webrtc::PeerConnectionDependencies>)
+                             dependencies
+                delegate:
+                    (id<RTC_OBJC_TYPE(RTCPeerConnectionDelegate)>)delegate {
   NSParameterAssert(factory);
   NSParameterAssert(dependencies.get());
   std::unique_ptr<webrtc::PeerConnectionInterface::RTCConfiguration> config(
@@ -365,14 +520,16 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
   if (!config) {
     return nil;
   }
-  if (self = [super init]) {
+  self = [super init];
+  if (self) {
     _observer.reset(new webrtc::PeerConnectionDelegateAdapter(self));
     _nativeConstraints = constraints.nativeConstraints;
     CopyConstraintsIntoRtcConfiguration(_nativeConstraints.get(), config.get());
 
     webrtc::PeerConnectionDependencies deps = std::move(*dependencies);
     deps.observer = _observer.get();
-    auto result = factory.nativeFactory->CreatePeerConnectionOrError(*config, std::move(deps));
+    auto result = factory.nativeFactory->CreatePeerConnectionOrError(
+        *config, std::move(deps));
 
     if (!result.ok()) {
       return nil;
@@ -390,42 +547,43 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
 }
 
 - (RTC_OBJC_TYPE(RTCSessionDescription) *)localDescription {
-  // It's only safe to operate on SessionDescriptionInterface on the signaling thread.
+  // It's only safe to operate on SessionDescriptionInterface on the signaling
+  // thread.
   return _peerConnection->signaling_thread()->BlockingCall([self] {
-    const webrtc::SessionDescriptionInterface *description = _peerConnection->local_description();
-    return description ?
-        [[RTC_OBJC_TYPE(RTCSessionDescription) alloc] initWithNativeDescription:description] :
-        nil;
+    const webrtc::SessionDescriptionInterface *description =
+        _peerConnection->local_description();
+    return description ? [[RTC_OBJC_TYPE(RTCSessionDescription) alloc]
+                             initWithNativeDescription:description] :
+                         nil;
   });
 }
 
 - (RTC_OBJC_TYPE(RTCSessionDescription) *)remoteDescription {
-  // It's only safe to operate on SessionDescriptionInterface on the signaling thread.
+  // It's only safe to operate on SessionDescriptionInterface on the signaling
+  // thread.
   return _peerConnection->signaling_thread()->BlockingCall([self] {
-    const webrtc::SessionDescriptionInterface *description = _peerConnection->remote_description();
-    return description ?
-        [[RTC_OBJC_TYPE(RTCSessionDescription) alloc] initWithNativeDescription:description] :
-        nil;
+    const webrtc::SessionDescriptionInterface *description =
+        _peerConnection->remote_description();
+    return description ? [[RTC_OBJC_TYPE(RTCSessionDescription) alloc]
+                             initWithNativeDescription:description] :
+                         nil;
   });
 }
 
-- (RTCSignalingState)signalingState {
-  return [[self class]
-      signalingStateForNativeState:_peerConnection->signaling_state()];
+- (RTC_OBJC_TYPE(RTCSignalingState))signalingState {
+  return [[self class] signalingStateForNativeState:self.nativePeerConnection->signaling_state()];
 }
 
-- (RTCIceConnectionState)iceConnectionState {
-  return [[self class] iceConnectionStateForNativeState:
-      _peerConnection->ice_connection_state()];
+- (RTC_OBJC_TYPE(RTCIceConnectionState))iceConnectionState {
+  return [[self class] iceConnectionStateForNativeState:self.nativePeerConnection->ice_connection_state()];
 }
 
-- (RTCPeerConnectionState)connectionState {
-  return [[self class] connectionStateForNativeState:_peerConnection->peer_connection_state()];
+- (RTC_OBJC_TYPE(RTCPeerConnectionState))connectionState {
+  return [[self class] connectionStateForNativeState:self.nativePeerConnection->peer_connection_state()];
 }
 
-- (RTCIceGatheringState)iceGatheringState {
-  return [[self class] iceGatheringStateForNativeState:
-      _peerConnection->ice_gathering_state()];
+- (RTC_OBJC_TYPE(RTCIceGatheringState))iceGatheringState {
+  return [[self class] iceGatheringStateForNativeState:self.nativePeerConnection->ice_gathering_state()];
 }
 
 - (BOOL)setConfiguration:(RTC_OBJC_TYPE(RTCConfiguration) *)configuration {
@@ -434,15 +592,15 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
   if (!config) {
     return NO;
   }
-  CopyConstraintsIntoRtcConfiguration(_nativeConstraints.get(),
-                                      config.get());
+  CopyConstraintsIntoRtcConfiguration(_nativeConstraints.get(), config.get());
   return _peerConnection->SetConfiguration(*config).ok();
 }
 
 - (RTC_OBJC_TYPE(RTCConfiguration) *)configuration {
   webrtc::PeerConnectionInterface::RTCConfiguration config =
-    _peerConnection->GetConfiguration();
-  return [[RTC_OBJC_TYPE(RTCConfiguration) alloc] initWithNativeConfiguration:config];
+      _peerConnection->GetConfiguration();
+  return [[RTC_OBJC_TYPE(RTCConfiguration) alloc]
+      initWithNativeConfiguration:config];
 }
 
 - (void)close {
@@ -463,15 +621,16 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
           completionHandler(nil);
         } else {
           NSString *str = [NSString stringForStdString:error.message()];
-          NSError *err = [NSError errorWithDomain:kRTCPeerConnectionErrorDomain
+          NSError *err = [NSError errorWithDomain:RTC_CONSTANT_TYPE(RTCPeerConnectionErrorDomain)
                                              code:static_cast<NSInteger>(error.type())
                                          userInfo:@{NSLocalizedDescriptionKey : str}];
           completionHandler(err);
         }
       });
 }
-- (void)removeIceCandidates:(NSArray<RTC_OBJC_TYPE(RTCIceCandidate) *> *)iceCandidates {
-  std::vector<cricket::Candidate> candidates;
+- (void)removeIceCandidates:
+    (NSArray<RTC_OBJC_TYPE(RTCIceCandidate) *> *)iceCandidates {
+  std::vector<webrtc::Candidate> candidates;
   for (RTC_OBJC_TYPE(RTCIceCandidate) * iceCandidate in iceCandidates) {
     std::unique_ptr<const webrtc::IceCandidateInterface> candidate(
         iceCandidate.nativeCandidate);
@@ -499,24 +658,30 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
   [_localStreams removeObject:stream];
 }
 
-- (nullable RTC_OBJC_TYPE(RTCRtpSender) *)addTrack:(RTC_OBJC_TYPE(RTCMediaStreamTrack) *)track
-                                         streamIds:(NSArray<NSString *> *)streamIds {
+- (nullable RTC_OBJC_TYPE(RTCRtpSender) *)
+     addTrack:(RTC_OBJC_TYPE(RTCMediaStreamTrack) *)track
+    streamIds:(NSArray<NSString *> *)streamIds {
   std::vector<std::string> nativeStreamIds;
   for (NSString *streamId in streamIds) {
     nativeStreamIds.push_back([streamId UTF8String]);
   }
-  webrtc::RTCErrorOr<rtc::scoped_refptr<webrtc::RtpSenderInterface>> nativeSenderOrError =
-      _peerConnection->AddTrack(track.nativeTrack, nativeStreamIds);
+  webrtc::RTCErrorOr<webrtc::scoped_refptr<webrtc::RtpSenderInterface>>
+      nativeSenderOrError =
+          _peerConnection->AddTrack(track.nativeTrack, nativeStreamIds);
   if (!nativeSenderOrError.ok()) {
-    RTCLogError(@"Failed to add track %@: %s", track, nativeSenderOrError.error().message());
+    RTCLogError(@"Failed to add track %@: %s",
+                track,
+                nativeSenderOrError.error().message());
     return nil;
   }
-  return [[RTC_OBJC_TYPE(RTCRtpSender) alloc] initWithFactory:self.factory
-                                              nativeRtpSender:nativeSenderOrError.MoveValue()];
+  return [[RTC_OBJC_TYPE(RTCRtpSender) alloc]
+      initWithFactory:self.factory
+      nativeRtpSender:nativeSenderOrError.MoveValue()];
 }
 
 - (BOOL)removeTrack:(RTC_OBJC_TYPE(RTCRtpSender) *)sender {
-  bool result = _peerConnection->RemoveTrackOrError(sender.nativeRtpSender).ok();
+  bool result =
+      _peerConnection->RemoveTrackOrError(sender.nativeRtpSender).ok();
   if (!result) {
     RTCLogError(@"Failed to remote track %@", sender);
   }
@@ -526,17 +691,20 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
 - (nullable RTC_OBJC_TYPE(RTCRtpTransceiver) *)addTransceiverWithTrack:
     (RTC_OBJC_TYPE(RTCMediaStreamTrack) *)track {
   return [self addTransceiverWithTrack:track
-                                  init:[[RTC_OBJC_TYPE(RTCRtpTransceiverInit) alloc] init]];
+                                  init:[[RTC_OBJC_TYPE(RTCRtpTransceiverInit)
+                                           alloc] init]];
 }
 
 - (nullable RTC_OBJC_TYPE(RTCRtpTransceiver) *)
     addTransceiverWithTrack:(RTC_OBJC_TYPE(RTCMediaStreamTrack) *)track
                        init:(RTC_OBJC_TYPE(RTCRtpTransceiverInit) *)init {
-  webrtc::RTCErrorOr<rtc::scoped_refptr<webrtc::RtpTransceiverInterface>> nativeTransceiverOrError =
-      _peerConnection->AddTransceiver(track.nativeTrack, init.nativeInit);
+  webrtc::RTCErrorOr<webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>>
+      nativeTransceiverOrError =
+          _peerConnection->AddTransceiver(track.nativeTrack, init.nativeInit);
   if (!nativeTransceiverOrError.ok()) {
-    RTCLogError(
-        @"Failed to add transceiver %@: %s", track, nativeTransceiverOrError.error().message());
+    RTCLogError(@"Failed to add transceiver %@: %s",
+                track,
+                nativeTransceiverOrError.error().message());
     return nil;
   }
   return [[RTC_OBJC_TYPE(RTCRtpTransceiver) alloc]
@@ -544,17 +712,17 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
       nativeRtpTransceiver:nativeTransceiverOrError.MoveValue()];
 }
 
-- (nullable RTC_OBJC_TYPE(RTCRtpTransceiver) *)addTransceiverOfType:(RTCRtpMediaType)mediaType {
-  return [self addTransceiverOfType:mediaType
-                               init:[[RTC_OBJC_TYPE(RTCRtpTransceiverInit) alloc] init]];
+- (nullable RTC_OBJC_TYPE(RTCRtpTransceiver) *)addTransceiverOfType:(RTC_OBJC_TYPE(RTCRtpMediaType))mediaType {
+  return [self addTransceiverOfType:mediaType init:[[RTC_OBJC_TYPE(RTCRtpTransceiverInit) alloc] init]];
 }
 
 - (nullable RTC_OBJC_TYPE(RTCRtpTransceiver) *)
-    addTransceiverOfType:(RTCRtpMediaType)mediaType
+    addTransceiverOfType:(RTC_OBJC_TYPE(RTCRtpMediaType))mediaType
                     init:(RTC_OBJC_TYPE(RTCRtpTransceiverInit) *)init {
-  webrtc::RTCErrorOr<rtc::scoped_refptr<webrtc::RtpTransceiverInterface>> nativeTransceiverOrError =
-      _peerConnection->AddTransceiver(
-          [RTC_OBJC_TYPE(RTCRtpReceiver) nativeMediaTypeForMediaType:mediaType], init.nativeInit);
+  webrtc::RTCErrorOr<webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>>
+      nativeTransceiverOrError = _peerConnection->AddTransceiver(
+          [RTC_OBJC_TYPE(RTCRtpReceiver) nativeMediaTypeForMediaType:mediaType],
+          init.nativeInit);
   if (!nativeTransceiverOrError.ok()) {
     RTCLogError(@"Failed to add transceiver %@: %s",
                 [RTC_OBJC_TYPE(RTCRtpReceiver) stringForMediaType:mediaType],
@@ -571,48 +739,59 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
 }
 
 - (void)offerForConstraints:(RTC_OBJC_TYPE(RTCMediaConstraints) *)constraints
-          completionHandler:(RTCCreateSessionDescriptionCompletionHandler)completionHandler {
+          completionHandler:
+              (RTCCreateSessionDescriptionCompletionHandler)completionHandler {
   RTC_DCHECK(completionHandler != nil);
-  rtc::scoped_refptr<webrtc::CreateSessionDescriptionObserverAdapter> observer =
-      rtc::make_ref_counted<webrtc::CreateSessionDescriptionObserverAdapter>(completionHandler);
+  webrtc::scoped_refptr<webrtc::CreateSessionDescriptionObserverAdapter>
+      observer = webrtc::make_ref_counted<
+          webrtc::CreateSessionDescriptionObserverAdapter>(completionHandler);
   webrtc::PeerConnectionInterface::RTCOfferAnswerOptions options;
-  CopyConstraintsIntoOfferAnswerOptions(constraints.nativeConstraints.get(), &options);
+  CopyConstraintsIntoOfferAnswerOptions(constraints.nativeConstraints.get(),
+                                        &options);
 
   _peerConnection->CreateOffer(observer.get(), options);
 }
 
 - (void)answerForConstraints:(RTC_OBJC_TYPE(RTCMediaConstraints) *)constraints
-           completionHandler:(RTCCreateSessionDescriptionCompletionHandler)completionHandler {
+           completionHandler:
+               (RTCCreateSessionDescriptionCompletionHandler)completionHandler {
   RTC_DCHECK(completionHandler != nil);
-  rtc::scoped_refptr<webrtc::CreateSessionDescriptionObserverAdapter> observer =
-      rtc::make_ref_counted<webrtc::CreateSessionDescriptionObserverAdapter>(completionHandler);
+  webrtc::scoped_refptr<webrtc::CreateSessionDescriptionObserverAdapter>
+      observer = webrtc::make_ref_counted<
+          webrtc::CreateSessionDescriptionObserverAdapter>(completionHandler);
   webrtc::PeerConnectionInterface::RTCOfferAnswerOptions options;
-  CopyConstraintsIntoOfferAnswerOptions(constraints.nativeConstraints.get(), &options);
+  CopyConstraintsIntoOfferAnswerOptions(constraints.nativeConstraints.get(),
+                                        &options);
 
   _peerConnection->CreateAnswer(observer.get(), options);
 }
 
 - (void)setLocalDescription:(RTC_OBJC_TYPE(RTCSessionDescription) *)sdp
-          completionHandler:(RTCSetSessionDescriptionCompletionHandler)completionHandler {
+          completionHandler:
+              (RTCSetSessionDescriptionCompletionHandler)completionHandler {
   RTC_DCHECK(completionHandler != nil);
-  rtc::scoped_refptr<webrtc::SetLocalDescriptionObserverInterface> observer =
-      rtc::make_ref_counted<::SetSessionDescriptionObserver>(completionHandler);
+  webrtc::scoped_refptr<webrtc::SetLocalDescriptionObserverInterface> observer =
+      webrtc::make_ref_counted<::SetSessionDescriptionObserver>(
+          completionHandler);
   _peerConnection->SetLocalDescription(sdp.nativeDescription, observer);
 }
 
 - (void)setLocalDescriptionWithCompletionHandler:
     (RTCSetSessionDescriptionCompletionHandler)completionHandler {
   RTC_DCHECK(completionHandler != nil);
-  rtc::scoped_refptr<webrtc::SetLocalDescriptionObserverInterface> observer =
-      rtc::make_ref_counted<::SetSessionDescriptionObserver>(completionHandler);
+  webrtc::scoped_refptr<webrtc::SetLocalDescriptionObserverInterface> observer =
+      webrtc::make_ref_counted<::SetSessionDescriptionObserver>(
+          completionHandler);
   _peerConnection->SetLocalDescription(observer);
 }
 
 - (void)setRemoteDescription:(RTC_OBJC_TYPE(RTCSessionDescription) *)sdp
-           completionHandler:(RTCSetSessionDescriptionCompletionHandler)completionHandler {
+           completionHandler:
+               (RTCSetSessionDescriptionCompletionHandler)completionHandler {
   RTC_DCHECK(completionHandler != nil);
-  rtc::scoped_refptr<webrtc::SetRemoteDescriptionObserverInterface> observer =
-      rtc::make_ref_counted<::SetSessionDescriptionObserver>(completionHandler);
+  webrtc::scoped_refptr<webrtc::SetRemoteDescriptionObserverInterface>
+      observer = webrtc::make_ref_counted<::SetSessionDescriptionObserver>(
+          completionHandler);
   _peerConnection->SetRemoteDescription(sdp.nativeDescription, observer);
 }
 
@@ -621,13 +800,13 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
               maxBitrateBps:(nullable NSNumber *)maxBitrateBps {
   webrtc::BitrateSettings params;
   if (minBitrateBps != nil) {
-    params.min_bitrate_bps = absl::optional<int>(minBitrateBps.intValue);
+    params.min_bitrate_bps = std::optional<int>(minBitrateBps.intValue);
   }
   if (currentBitrateBps != nil) {
-    params.start_bitrate_bps = absl::optional<int>(currentBitrateBps.intValue);
+    params.start_bitrate_bps = std::optional<int>(currentBitrateBps.intValue);
   }
   if (maxBitrateBps != nil) {
-    params.max_bitrate_bps = absl::optional<int>(maxBitrateBps.intValue);
+    params.max_bitrate_bps = std::optional<int>(maxBitrateBps.intValue);
   }
   return _peerConnection->SetBitrate(params).ok();
 }
@@ -647,8 +826,9 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
     return NO;
   }
   // TODO(eladalon): It would be better to not allow negative values into PC.
-  const size_t max_size = (maxSizeInBytes < 0) ? webrtc::RtcEventLog::kUnlimitedOutput :
-                                                 rtc::saturated_cast<size_t>(maxSizeInBytes);
+  const size_t max_size = (maxSizeInBytes < 0) ?
+      webrtc::RtcEventLog::kUnlimitedOutput :
+      webrtc::saturated_cast<size_t>(maxSizeInBytes);
 
   _hasStartedRtcEventLog = _peerConnection->StartRtcEventLog(
       std::make_unique<webrtc::RtcEventLogOutputFile>(f, max_size));
@@ -660,18 +840,20 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
   _hasStartedRtcEventLog = NO;
 }
 
-- (RTC_OBJC_TYPE(RTCRtpSender) *)senderWithKind:(NSString *)kind streamId:(NSString *)streamId {
+- (RTC_OBJC_TYPE(RTCRtpSender) *)senderWithKind:(NSString *)kind
+                                       streamId:(NSString *)streamId {
   std::string nativeKind = [NSString stdStringForString:kind];
   std::string nativeStreamId = [NSString stdStringForString:streamId];
-  rtc::scoped_refptr<webrtc::RtpSenderInterface> nativeSender(
+  webrtc::scoped_refptr<webrtc::RtpSenderInterface> nativeSender(
       _peerConnection->CreateSender(nativeKind, nativeStreamId));
-  return nativeSender ? [[RTC_OBJC_TYPE(RTCRtpSender) alloc] initWithFactory:self.factory
-                                                             nativeRtpSender:nativeSender] :
-                        nil;
+  return nativeSender ?
+      [[RTC_OBJC_TYPE(RTCRtpSender) alloc] initWithFactory:self.factory
+                                           nativeRtpSender:nativeSender] :
+      nil;
 }
 
 - (NSArray<RTC_OBJC_TYPE(RTCRtpSender) *> *)senders {
-  std::vector<rtc::scoped_refptr<webrtc::RtpSenderInterface>> nativeSenders(
+  std::vector<webrtc::scoped_refptr<webrtc::RtpSenderInterface>> nativeSenders(
       _peerConnection->GetSenders());
   NSMutableArray *senders = [[NSMutableArray alloc] init];
   for (const auto &nativeSender : nativeSenders) {
@@ -684,8 +866,8 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
 }
 
 - (NSArray<RTC_OBJC_TYPE(RTCRtpReceiver) *> *)receivers {
-  std::vector<rtc::scoped_refptr<webrtc::RtpReceiverInterface>> nativeReceivers(
-      _peerConnection->GetReceivers());
+  std::vector<webrtc::scoped_refptr<webrtc::RtpReceiverInterface>>
+      nativeReceivers(_peerConnection->GetReceivers());
   NSMutableArray *receivers = [[NSMutableArray alloc] init];
   for (const auto &nativeReceiver : nativeReceivers) {
     RTC_OBJC_TYPE(RTCRtpReceiver) *receiver =
@@ -697,13 +879,14 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
 }
 
 - (NSArray<RTC_OBJC_TYPE(RTCRtpTransceiver) *> *)transceivers {
-  std::vector<rtc::scoped_refptr<webrtc::RtpTransceiverInterface>> nativeTransceivers(
-      _peerConnection->GetTransceivers());
+  std::vector<webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>>
+      nativeTransceivers(_peerConnection->GetTransceivers());
   NSMutableArray *transceivers = [[NSMutableArray alloc] init];
   for (const auto &nativeTransceiver : nativeTransceivers) {
     RTC_OBJC_TYPE(RTCRtpTransceiver) *transceiver =
-        [[RTC_OBJC_TYPE(RTCRtpTransceiver) alloc] initWithFactory:self.factory
-                                             nativeRtpTransceiver:nativeTransceiver];
+        [[RTC_OBJC_TYPE(RTCRtpTransceiver) alloc]
+                 initWithFactory:self.factory
+            nativeRtpTransceiver:nativeTransceiver];
     [transceivers addObject:transceiver];
   }
   return transceivers;
@@ -712,222 +895,222 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
 #pragma mark - Private
 
 + (webrtc::PeerConnectionInterface::SignalingState)nativeSignalingStateForState:
-    (RTCSignalingState)state {
+    (RTC_OBJC_TYPE(RTCSignalingState))state {
   switch (state) {
-    case RTCSignalingStateStable:
+    case RTC_OBJC_TYPE(RTCSignalingStateStable):
       return webrtc::PeerConnectionInterface::kStable;
-    case RTCSignalingStateHaveLocalOffer:
+    case RTC_OBJC_TYPE(RTCSignalingStateHaveLocalOffer):
       return webrtc::PeerConnectionInterface::kHaveLocalOffer;
-    case RTCSignalingStateHaveLocalPrAnswer:
+    case RTC_OBJC_TYPE(RTCSignalingStateHaveLocalPrAnswer):
       return webrtc::PeerConnectionInterface::kHaveLocalPrAnswer;
-    case RTCSignalingStateHaveRemoteOffer:
+    case RTC_OBJC_TYPE(RTCSignalingStateHaveRemoteOffer):
       return webrtc::PeerConnectionInterface::kHaveRemoteOffer;
-    case RTCSignalingStateHaveRemotePrAnswer:
+    case RTC_OBJC_TYPE(RTCSignalingStateHaveRemotePrAnswer):
       return webrtc::PeerConnectionInterface::kHaveRemotePrAnswer;
-    case RTCSignalingStateClosed:
+    case RTC_OBJC_TYPE(RTCSignalingStateClosed):
       return webrtc::PeerConnectionInterface::kClosed;
   }
 }
 
-+ (RTCSignalingState)signalingStateForNativeState:
++ (RTC_OBJC_TYPE(RTCSignalingState))signalingStateForNativeState:
     (webrtc::PeerConnectionInterface::SignalingState)nativeState {
   switch (nativeState) {
     case webrtc::PeerConnectionInterface::kStable:
-      return RTCSignalingStateStable;
+      return RTC_OBJC_TYPE(RTCSignalingStateStable);
     case webrtc::PeerConnectionInterface::kHaveLocalOffer:
-      return RTCSignalingStateHaveLocalOffer;
+      return RTC_OBJC_TYPE(RTCSignalingStateHaveLocalOffer);
     case webrtc::PeerConnectionInterface::kHaveLocalPrAnswer:
-      return RTCSignalingStateHaveLocalPrAnswer;
+      return RTC_OBJC_TYPE(RTCSignalingStateHaveLocalPrAnswer);
     case webrtc::PeerConnectionInterface::kHaveRemoteOffer:
-      return RTCSignalingStateHaveRemoteOffer;
+      return RTC_OBJC_TYPE(RTCSignalingStateHaveRemoteOffer);
     case webrtc::PeerConnectionInterface::kHaveRemotePrAnswer:
-      return RTCSignalingStateHaveRemotePrAnswer;
+      return RTC_OBJC_TYPE(RTCSignalingStateHaveRemotePrAnswer);
     case webrtc::PeerConnectionInterface::kClosed:
-      return RTCSignalingStateClosed;
+      return RTC_OBJC_TYPE(RTCSignalingStateClosed);
   }
 }
 
-+ (NSString *)stringForSignalingState:(RTCSignalingState)state {
++ (NSString *)stringForSignalingState:(RTC_OBJC_TYPE(RTCSignalingState))state {
   switch (state) {
-    case RTCSignalingStateStable:
+    case RTC_OBJC_TYPE(RTCSignalingStateStable):
       return @"STABLE";
-    case RTCSignalingStateHaveLocalOffer:
+    case RTC_OBJC_TYPE(RTCSignalingStateHaveLocalOffer):
       return @"HAVE_LOCAL_OFFER";
-    case RTCSignalingStateHaveLocalPrAnswer:
+    case RTC_OBJC_TYPE(RTCSignalingStateHaveLocalPrAnswer):
       return @"HAVE_LOCAL_PRANSWER";
-    case RTCSignalingStateHaveRemoteOffer:
+    case RTC_OBJC_TYPE(RTCSignalingStateHaveRemoteOffer):
       return @"HAVE_REMOTE_OFFER";
-    case RTCSignalingStateHaveRemotePrAnswer:
+    case RTC_OBJC_TYPE(RTCSignalingStateHaveRemotePrAnswer):
       return @"HAVE_REMOTE_PRANSWER";
-    case RTCSignalingStateClosed:
+    case RTC_OBJC_TYPE(RTCSignalingStateClosed):
       return @"CLOSED";
   }
 }
 
 + (webrtc::PeerConnectionInterface::PeerConnectionState)nativeConnectionStateForState:
-        (RTCPeerConnectionState)state {
+        (RTC_OBJC_TYPE(RTCPeerConnectionState))state {
   switch (state) {
-    case RTCPeerConnectionStateNew:
+    case RTC_OBJC_TYPE(RTCPeerConnectionStateNew):
       return webrtc::PeerConnectionInterface::PeerConnectionState::kNew;
-    case RTCPeerConnectionStateConnecting:
+    case RTC_OBJC_TYPE(RTCPeerConnectionStateConnecting):
       return webrtc::PeerConnectionInterface::PeerConnectionState::kConnecting;
-    case RTCPeerConnectionStateConnected:
+    case RTC_OBJC_TYPE(RTCPeerConnectionStateConnected):
       return webrtc::PeerConnectionInterface::PeerConnectionState::kConnected;
-    case RTCPeerConnectionStateFailed:
+    case RTC_OBJC_TYPE(RTCPeerConnectionStateFailed):
       return webrtc::PeerConnectionInterface::PeerConnectionState::kFailed;
-    case RTCPeerConnectionStateDisconnected:
+    case RTC_OBJC_TYPE(RTCPeerConnectionStateDisconnected):
       return webrtc::PeerConnectionInterface::PeerConnectionState::kDisconnected;
-    case RTCPeerConnectionStateClosed:
+    case RTC_OBJC_TYPE(RTCPeerConnectionStateClosed):
       return webrtc::PeerConnectionInterface::PeerConnectionState::kClosed;
   }
 }
 
-+ (RTCPeerConnectionState)connectionStateForNativeState:
++ (RTC_OBJC_TYPE(RTCPeerConnectionState))connectionStateForNativeState:
         (webrtc::PeerConnectionInterface::PeerConnectionState)nativeState {
   switch (nativeState) {
     case webrtc::PeerConnectionInterface::PeerConnectionState::kNew:
-      return RTCPeerConnectionStateNew;
+      return RTC_OBJC_TYPE(RTCPeerConnectionStateNew);
     case webrtc::PeerConnectionInterface::PeerConnectionState::kConnecting:
-      return RTCPeerConnectionStateConnecting;
+      return RTC_OBJC_TYPE(RTCPeerConnectionStateConnecting);
     case webrtc::PeerConnectionInterface::PeerConnectionState::kConnected:
-      return RTCPeerConnectionStateConnected;
+      return RTC_OBJC_TYPE(RTCPeerConnectionStateConnected);
     case webrtc::PeerConnectionInterface::PeerConnectionState::kFailed:
-      return RTCPeerConnectionStateFailed;
+      return RTC_OBJC_TYPE(RTCPeerConnectionStateFailed);
     case webrtc::PeerConnectionInterface::PeerConnectionState::kDisconnected:
-      return RTCPeerConnectionStateDisconnected;
+      return RTC_OBJC_TYPE(RTCPeerConnectionStateDisconnected);
     case webrtc::PeerConnectionInterface::PeerConnectionState::kClosed:
-      return RTCPeerConnectionStateClosed;
+      return RTC_OBJC_TYPE(RTCPeerConnectionStateClosed);
   }
 }
 
-+ (NSString *)stringForConnectionState:(RTCPeerConnectionState)state {
++ (NSString *)stringForConnectionState:(RTC_OBJC_TYPE(RTCPeerConnectionState))state {
   switch (state) {
-    case RTCPeerConnectionStateNew:
+    case RTC_OBJC_TYPE(RTCPeerConnectionStateNew):
       return @"NEW";
-    case RTCPeerConnectionStateConnecting:
+    case RTC_OBJC_TYPE(RTCPeerConnectionStateConnecting):
       return @"CONNECTING";
-    case RTCPeerConnectionStateConnected:
+    case RTC_OBJC_TYPE(RTCPeerConnectionStateConnected):
       return @"CONNECTED";
-    case RTCPeerConnectionStateFailed:
+    case RTC_OBJC_TYPE(RTCPeerConnectionStateFailed):
       return @"FAILED";
-    case RTCPeerConnectionStateDisconnected:
+    case RTC_OBJC_TYPE(RTCPeerConnectionStateDisconnected):
       return @"DISCONNECTED";
-    case RTCPeerConnectionStateClosed:
+    case RTC_OBJC_TYPE(RTCPeerConnectionStateClosed):
       return @"CLOSED";
   }
 }
 
 + (webrtc::PeerConnectionInterface::IceConnectionState)
-    nativeIceConnectionStateForState:(RTCIceConnectionState)state {
+    nativeIceConnectionStateForState:(RTC_OBJC_TYPE(RTCIceConnectionState))state {
   switch (state) {
-    case RTCIceConnectionStateNew:
+    case RTC_OBJC_TYPE(RTCIceConnectionStateNew):
       return webrtc::PeerConnectionInterface::kIceConnectionNew;
-    case RTCIceConnectionStateChecking:
+    case RTC_OBJC_TYPE(RTCIceConnectionStateChecking):
       return webrtc::PeerConnectionInterface::kIceConnectionChecking;
-    case RTCIceConnectionStateConnected:
+    case RTC_OBJC_TYPE(RTCIceConnectionStateConnected):
       return webrtc::PeerConnectionInterface::kIceConnectionConnected;
-    case RTCIceConnectionStateCompleted:
+    case RTC_OBJC_TYPE(RTCIceConnectionStateCompleted):
       return webrtc::PeerConnectionInterface::kIceConnectionCompleted;
-    case RTCIceConnectionStateFailed:
+    case RTC_OBJC_TYPE(RTCIceConnectionStateFailed):
       return webrtc::PeerConnectionInterface::kIceConnectionFailed;
-    case RTCIceConnectionStateDisconnected:
+    case RTC_OBJC_TYPE(RTCIceConnectionStateDisconnected):
       return webrtc::PeerConnectionInterface::kIceConnectionDisconnected;
-    case RTCIceConnectionStateClosed:
+    case RTC_OBJC_TYPE(RTCIceConnectionStateClosed):
       return webrtc::PeerConnectionInterface::kIceConnectionClosed;
-    case RTCIceConnectionStateCount:
+    case RTC_OBJC_TYPE(RTCIceConnectionStateCount):
       return webrtc::PeerConnectionInterface::kIceConnectionMax;
   }
 }
 
-+ (RTCIceConnectionState)iceConnectionStateForNativeState:
++ (RTC_OBJC_TYPE(RTCIceConnectionState))iceConnectionStateForNativeState:
     (webrtc::PeerConnectionInterface::IceConnectionState)nativeState {
   switch (nativeState) {
     case webrtc::PeerConnectionInterface::kIceConnectionNew:
-      return RTCIceConnectionStateNew;
+      return RTC_OBJC_TYPE(RTCIceConnectionStateNew);
     case webrtc::PeerConnectionInterface::kIceConnectionChecking:
-      return RTCIceConnectionStateChecking;
+      return RTC_OBJC_TYPE(RTCIceConnectionStateChecking);
     case webrtc::PeerConnectionInterface::kIceConnectionConnected:
-      return RTCIceConnectionStateConnected;
+      return RTC_OBJC_TYPE(RTCIceConnectionStateConnected);
     case webrtc::PeerConnectionInterface::kIceConnectionCompleted:
-      return RTCIceConnectionStateCompleted;
+      return RTC_OBJC_TYPE(RTCIceConnectionStateCompleted);
     case webrtc::PeerConnectionInterface::kIceConnectionFailed:
-      return RTCIceConnectionStateFailed;
+      return RTC_OBJC_TYPE(RTCIceConnectionStateFailed);
     case webrtc::PeerConnectionInterface::kIceConnectionDisconnected:
-      return RTCIceConnectionStateDisconnected;
+      return RTC_OBJC_TYPE(RTCIceConnectionStateDisconnected);
     case webrtc::PeerConnectionInterface::kIceConnectionClosed:
-      return RTCIceConnectionStateClosed;
+      return RTC_OBJC_TYPE(RTCIceConnectionStateClosed);
     case webrtc::PeerConnectionInterface::kIceConnectionMax:
-      return RTCIceConnectionStateCount;
+      return RTC_OBJC_TYPE(RTCIceConnectionStateCount);
   }
 }
 
-+ (NSString *)stringForIceConnectionState:(RTCIceConnectionState)state {
++ (NSString *)stringForIceConnectionState:(RTC_OBJC_TYPE(RTCIceConnectionState))state {
   switch (state) {
-    case RTCIceConnectionStateNew:
+    case RTC_OBJC_TYPE(RTCIceConnectionStateNew):
       return @"NEW";
-    case RTCIceConnectionStateChecking:
+    case RTC_OBJC_TYPE(RTCIceConnectionStateChecking):
       return @"CHECKING";
-    case RTCIceConnectionStateConnected:
+    case RTC_OBJC_TYPE(RTCIceConnectionStateConnected):
       return @"CONNECTED";
-    case RTCIceConnectionStateCompleted:
+    case RTC_OBJC_TYPE(RTCIceConnectionStateCompleted):
       return @"COMPLETED";
-    case RTCIceConnectionStateFailed:
+    case RTC_OBJC_TYPE(RTCIceConnectionStateFailed):
       return @"FAILED";
-    case RTCIceConnectionStateDisconnected:
+    case RTC_OBJC_TYPE(RTCIceConnectionStateDisconnected):
       return @"DISCONNECTED";
-    case RTCIceConnectionStateClosed:
+    case RTC_OBJC_TYPE(RTCIceConnectionStateClosed):
       return @"CLOSED";
-    case RTCIceConnectionStateCount:
+    case RTC_OBJC_TYPE(RTCIceConnectionStateCount):
       return @"COUNT";
   }
 }
 
 + (webrtc::PeerConnectionInterface::IceGatheringState)
-    nativeIceGatheringStateForState:(RTCIceGatheringState)state {
+    nativeIceGatheringStateForState:(RTC_OBJC_TYPE(RTCIceGatheringState))state {
   switch (state) {
-    case RTCIceGatheringStateNew:
+    case RTC_OBJC_TYPE(RTCIceGatheringStateNew):
       return webrtc::PeerConnectionInterface::kIceGatheringNew;
-    case RTCIceGatheringStateGathering:
+    case RTC_OBJC_TYPE(RTCIceGatheringStateGathering):
       return webrtc::PeerConnectionInterface::kIceGatheringGathering;
-    case RTCIceGatheringStateComplete:
+    case RTC_OBJC_TYPE(RTCIceGatheringStateComplete):
       return webrtc::PeerConnectionInterface::kIceGatheringComplete;
   }
 }
 
-+ (RTCIceGatheringState)iceGatheringStateForNativeState:
++ (RTC_OBJC_TYPE(RTCIceGatheringState))iceGatheringStateForNativeState:
     (webrtc::PeerConnectionInterface::IceGatheringState)nativeState {
   switch (nativeState) {
     case webrtc::PeerConnectionInterface::kIceGatheringNew:
-      return RTCIceGatheringStateNew;
+      return RTC_OBJC_TYPE(RTCIceGatheringStateNew);
     case webrtc::PeerConnectionInterface::kIceGatheringGathering:
-      return RTCIceGatheringStateGathering;
+      return RTC_OBJC_TYPE(RTCIceGatheringStateGathering);
     case webrtc::PeerConnectionInterface::kIceGatheringComplete:
-      return RTCIceGatheringStateComplete;
+      return RTC_OBJC_TYPE(RTCIceGatheringStateComplete);
   }
 }
 
-+ (NSString *)stringForIceGatheringState:(RTCIceGatheringState)state {
++ (NSString *)stringForIceGatheringState:(RTC_OBJC_TYPE(RTCIceGatheringState))state {
   switch (state) {
-    case RTCIceGatheringStateNew:
+    case RTC_OBJC_TYPE(RTCIceGatheringStateNew):
       return @"NEW";
-    case RTCIceGatheringStateGathering:
+    case RTC_OBJC_TYPE(RTCIceGatheringStateGathering):
       return @"GATHERING";
-    case RTCIceGatheringStateComplete:
+    case RTC_OBJC_TYPE(RTCIceGatheringStateComplete):
       return @"COMPLETE";
   }
 }
 
 + (webrtc::PeerConnectionInterface::StatsOutputLevel)
-    nativeStatsOutputLevelForLevel:(RTCStatsOutputLevel)level {
+    nativeStatsOutputLevelForLevel:(RTC_OBJC_TYPE(RTCStatsOutputLevel))level {
   switch (level) {
-    case RTCStatsOutputLevelStandard:
+    case RTC_OBJC_TYPE(RTCStatsOutputLevelStandard):
       return webrtc::PeerConnectionInterface::kStatsOutputLevelStandard;
-    case RTCStatsOutputLevelDebug:
+    case RTC_OBJC_TYPE(RTCStatsOutputLevelDebug):
       return webrtc::PeerConnectionInterface::kStatsOutputLevelDebug;
   }
 }
 
-- (rtc::scoped_refptr<webrtc::PeerConnectionInterface>)nativePeerConnection {
+- (webrtc::scoped_refptr<webrtc::PeerConnectionInterface>)nativePeerConnection {
   return _peerConnection;
 }
 

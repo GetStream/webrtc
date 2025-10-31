@@ -9,14 +9,13 @@
  */
 
 #include <memory>
+#include <optional>
 
 #include "absl/algorithm/container.h"
-#include "absl/types/optional.h"
 #include "api/task_queue/task_queue_base.h"
 #include "api/test/simulated_network.h"
 #include "api/test/video/function_video_encoder_factory.h"
 #include "call/fake_network_pipe.h"
-#include "call/simulated_network.h"
 #include "modules/rtp_rtcp/source/rtp_packet.h"
 #include "modules/video_coding/include/video_coding_defines.h"
 #include "rtc_base/strings/string_builder.h"
@@ -27,6 +26,7 @@
 #include "test/call_test.h"
 #include "test/fake_encoder.h"
 #include "test/gtest.h"
+#include "test/network/simulated_network.h"
 #include "test/rtcp_packet_parser.h"
 #include "test/video_test_constants.h"
 
@@ -59,7 +59,7 @@ TEST_F(StatsEndToEndTest, GetStats) {
               }) {}
 
    private:
-    Action OnSendRtp(rtc::ArrayView<const uint8_t> packet) override {
+    Action OnSendRtp(ArrayView<const uint8_t> packet) override {
       // Drop every 25th packet => 4% loss.
       static const int kPacketLossFrac = 25;
       RtpPacket header;
@@ -73,17 +73,17 @@ TEST_F(StatsEndToEndTest, GetStats) {
       return SEND_PACKET;
     }
 
-    Action OnSendRtcp(rtc::ArrayView<const uint8_t> packet) override {
+    Action OnSendRtcp(ArrayView<const uint8_t> packet) override {
       check_stats_event_.Set();
       return SEND_PACKET;
     }
 
-    Action OnReceiveRtp(rtc::ArrayView<const uint8_t> packet) override {
+    Action OnReceiveRtp(ArrayView<const uint8_t> packet) override {
       check_stats_event_.Set();
       return SEND_PACKET;
     }
 
-    Action OnReceiveRtcp(rtc::ArrayView<const uint8_t> packet) override {
+    Action OnReceiveRtcp(ArrayView<const uint8_t> packet) override {
       check_stats_event_.Set();
       return SEND_PACKET;
     }
@@ -229,7 +229,7 @@ TEST_F(StatsEndToEndTest, GetStats) {
     }
 
     std::string CompoundKey(const char* name, uint32_t ssrc) {
-      rtc::StringBuilder oss;
+      StringBuilder oss;
       oss << name << "_" << ssrc;
       return oss.Release();
     }
@@ -356,7 +356,7 @@ TEST_F(StatsEndToEndTest, GetStats) {
     std::vector<uint32_t> expected_receive_ssrcs_;
     std::set<uint32_t> expected_send_ssrcs_;
 
-    rtc::Event check_stats_event_;
+    Event check_stats_event_;
     TaskQueueBase* task_queue_ = nullptr;
   } test;
 
@@ -430,7 +430,7 @@ TEST_F(StatsEndToEndTest, TestReceivedRtpPacketStats) {
 
     void OnStreamsStopped() override { task_safety_flag_->SetNotAlive(); }
 
-    Action OnSendRtp(rtc::ArrayView<const uint8_t> packet) override {
+    Action OnSendRtp(ArrayView<const uint8_t> packet) override {
       if (sent_rtp_ >= kNumRtpPacketsToSend) {
         // Need to check the stats on the correct thread.
         task_queue_->PostTask(SafeTask(task_safety_flag_, [this]() {
@@ -454,7 +454,7 @@ TEST_F(StatsEndToEndTest, TestReceivedRtpPacketStats) {
     VideoReceiveStreamInterface* receive_stream_ = nullptr;
     uint32_t sent_rtp_ = 0;
     TaskQueueBase* const task_queue_;
-    rtc::scoped_refptr<PendingTaskSafetyFlag> task_safety_flag_ =
+    scoped_refptr<PendingTaskSafetyFlag> task_safety_flag_ =
         PendingTaskSafetyFlag::CreateDetached();
   } test(task_queue());
 
@@ -469,7 +469,7 @@ TEST_F(StatsEndToEndTest, TestReceivedRtpPacketStats) {
 #endif
 TEST_F(StatsEndToEndTest, MAYBE_ContentTypeSwitches) {
   class StatsObserver : public test::BaseTest,
-                        public rtc::VideoSinkInterface<VideoFrame> {
+                        public VideoSinkInterface<VideoFrame> {
    public:
     StatsObserver()
         : BaseTest(test::VideoTestConstants::kLongTimeout),
@@ -489,7 +489,7 @@ TEST_F(StatsEndToEndTest, MAYBE_ContentTypeSwitches) {
       }
     }
 
-    Action OnSendRtp(rtc::ArrayView<const uint8_t> packet) override {
+    Action OnSendRtp(ArrayView<const uint8_t> packet) override {
       if (MinNumberOfFramesReceived())
         observation_complete_.Set();
       return SEND_PACKET;
@@ -527,8 +527,8 @@ TEST_F(StatsEndToEndTest, MAYBE_ContentTypeSwitches) {
 
   SendTask(task_queue(), [this, &test, &send_config, &recv_config,
                           &encoder_config_with_screenshare]() {
-    CreateSenderCall(send_config);
-    CreateReceiverCall(recv_config);
+    CreateSenderCall(std::move(send_config));
+    CreateReceiverCall(std::move(recv_config));
     CreateReceiveTransport(test.GetReceiveTransportConfig(), &test);
     CreateSendTransport(test.GetReceiveTransportConfig(), &test);
 
@@ -603,7 +603,7 @@ TEST_F(StatsEndToEndTest, VerifyNackStats) {
           task_queue_(task_queue) {}
 
    private:
-    Action OnSendRtp(rtc::ArrayView<const uint8_t> packet) override {
+    Action OnSendRtp(ArrayView<const uint8_t> packet) override {
       {
         MutexLock lock(&mutex_);
         if (++sent_rtp_packets_ == kPacketNumberToDrop) {
@@ -618,7 +618,7 @@ TEST_F(StatsEndToEndTest, VerifyNackStats) {
       return SEND_PACKET;
     }
 
-    Action OnReceiveRtcp(rtc::ArrayView<const uint8_t> packet) override {
+    Action OnReceiveRtcp(ArrayView<const uint8_t> packet) override {
       MutexLock lock(&mutex_);
       test::RtcpPacketParser rtcp_parser;
       rtcp_parser.Parse(packet);
@@ -642,9 +642,10 @@ TEST_F(StatsEndToEndTest, VerifyNackStats) {
             stream_stats.rtcp_packet_type_counts.nack_packets;
       }
       for (const auto& receive_stream : receive_streams_) {
-        VideoReceiveStreamInterface::Stats stats = receive_stream->GetStats();
+        VideoReceiveStreamInterface::Stats receive_stats =
+            receive_stream->GetStats();
         receive_stream_nack_packets +=
-            stats.rtcp_packet_type_counts.nack_packets;
+            receive_stats.rtcp_packet_type_counts.nack_packets;
       }
       if (send_stream_nack_packets >= 1 && receive_stream_nack_packets >= 1) {
         // NACK packet sent on receive stream and received on sent stream.
@@ -691,9 +692,9 @@ TEST_F(StatsEndToEndTest, VerifyNackStats) {
     bool dropped_rtp_packet_requested_ RTC_GUARDED_BY(&mutex_) = false;
     std::vector<VideoReceiveStreamInterface*> receive_streams_;
     VideoSendStream* send_stream_ = nullptr;
-    absl::optional<int64_t> start_runtime_ms_;
+    std::optional<int64_t> start_runtime_ms_;
     TaskQueueBase* const task_queue_;
-    rtc::scoped_refptr<PendingTaskSafetyFlag> task_safety_flag_ =
+    scoped_refptr<PendingTaskSafetyFlag> task_safety_flag_ =
         PendingTaskSafetyFlag::CreateDetached();
   } test(task_queue());
 

@@ -15,6 +15,9 @@
 #include <string>
 
 #include "absl/strings/match.h"
+#include "api/video/video_codec_type.h"
+#include "api/video_codecs/scalability_mode.h"
+#include "api/video_codecs/simulcast_stream.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/strings/string_builder.h"
 
@@ -75,30 +78,23 @@ VideoCodec::VideoCodec()
 
 std::string VideoCodec::ToString() const {
   char string_buf[2048];
-  rtc::SimpleStringBuilder ss(string_buf);
+  SimpleStringBuilder ss(string_buf);
 
   ss << "VideoCodec {" << "type: " << CodecTypeToPayloadString(codecType)
      << ", mode: "
      << (mode == VideoCodecMode::kRealtimeVideo ? "RealtimeVideo"
                                                 : "Screensharing");
   if (IsSinglecast()) {
-    absl::optional<ScalabilityMode> scalability_mode = GetScalabilityMode();
-    if (scalability_mode.has_value()) {
-      ss << ", Singlecast: {" << width << "x" << height << " "
-         << ScalabilityModeToString(*scalability_mode)
-         << (active ? ", active" : ", inactive") << "}";
-    }
+    ss << ", Singlecast: {" << width << "x" << height << " "
+       << ScalabilityModeToString(GetScalabilityMode())
+       << (active ? ", active" : ", inactive") << "}";
   } else {
     ss << ", Simulcast: {";
     for (size_t i = 0; i < numberOfSimulcastStreams; ++i) {
       const SimulcastStream stream = simulcastStream[i];
-      absl::optional<ScalabilityMode> scalability_mode =
-          stream.GetScalabilityMode();
-      if (scalability_mode.has_value()) {
-        ss << "[" << stream.width << "x" << stream.height << " "
-           << ScalabilityModeToString(*scalability_mode)
-           << (stream.active ? ", active" : ", inactive") << "]";
-      }
+      ss << "[" << stream.width << "x" << stream.height << " "
+         << ScalabilityModeToString(stream.GetScalabilityMode())
+         << (stream.active ? ", active" : ", inactive") << "]";
     }
     ss << "}";
   }

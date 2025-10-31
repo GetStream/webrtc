@@ -15,10 +15,10 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "absl/strings/string_view.h"
-#include "absl/types/variant.h"
 #include "api/array_view.h"
 #include "api/ref_counted_base.h"
 #include "api/scoped_refptr.h"
@@ -62,7 +62,7 @@ class CallbackDeferrer : public DcSctpSocketCallbacks {
 
   // Implementation of DcSctpSocketCallbacks
   SendPacketStatus SendPacketWithStatus(
-      rtc::ArrayView<const uint8_t> data) override;
+      webrtc::ArrayView<const uint8_t> data) override;
   std::unique_ptr<Timeout> CreateTimeout(
       webrtc::TaskQueueBase::DelayPrecision precision) override;
   TimeMs TimeMillis() override;
@@ -74,12 +74,12 @@ class CallbackDeferrer : public DcSctpSocketCallbacks {
   void OnConnected() override;
   void OnClosed() override;
   void OnConnectionRestarted() override;
-  void OnStreamsResetFailed(rtc::ArrayView<const StreamID> outgoing_streams,
+  void OnStreamsResetFailed(webrtc::ArrayView<const StreamID> outgoing_streams,
                             absl::string_view reason) override;
   void OnStreamsResetPerformed(
-      rtc::ArrayView<const StreamID> outgoing_streams) override;
+      webrtc::ArrayView<const StreamID> outgoing_streams) override;
   void OnIncomingStreamsReset(
-      rtc::ArrayView<const StreamID> incoming_streams) override;
+      webrtc::ArrayView<const StreamID> incoming_streams) override;
   void OnBufferedAmountLow(StreamID stream_id) override;
   void OnTotalBufferedAmountLow() override;
 
@@ -100,8 +100,8 @@ class CallbackDeferrer : public DcSctpSocketCallbacks {
   };
   // Use a pre-sized variant for storage to avoid double heap allocation. This
   // variant can hold all cases of stored data.
-  using CallbackData = absl::
-      variant<absl::monostate, DcSctpMessage, Error, StreamReset, StreamID>;
+  using CallbackData =
+      std::variant<std::monostate, DcSctpMessage, Error, StreamReset, StreamID>;
   using Callback = void (*)(CallbackData, DcSctpSocketCallbacks&);
 
   void Prepare();

@@ -22,8 +22,6 @@ rtc_library("video_adaptation") {
     "overuse_frame_detector.h",
     "pixel_limit_resource.cc",
     "pixel_limit_resource.h",
-    "quality_rampup_experiment_helper.cc",
-    "quality_rampup_experiment_helper.h",
     "quality_scaler_resource.cc",
     "quality_scaler_resource.h",
     "video_stream_encoder_resource.cc",
@@ -61,7 +59,6 @@ rtc_library("video_adaptation") {
     "../../rtc_base:timeutils",
     "../../rtc_base/experiments:balanced_degradation_settings",
     "../../rtc_base/experiments:field_trial_parser",
-    "../../rtc_base/experiments:quality_rampup_experiment",
     "../../rtc_base/experiments:quality_scaler_settings",
     "../../rtc_base/synchronization:mutex",
     "../../rtc_base/system:no_unique_address",
@@ -69,11 +66,8 @@ rtc_library("video_adaptation") {
     "../../system_wrappers:system_wrappers",
     "../../video:video_stream_encoder_interface",
     "../../video/config:encoder_config",
-  ]
-  absl_deps = [
     "//third_party/abseil-cpp/absl/algorithm:container",
     "//third_party/abseil-cpp/absl/base:core_headers",
-    "//third_party/abseil-cpp/absl/types:optional",
   ]
 }
 
@@ -116,10 +110,7 @@ if (rtc_include_tests) {
       "../../test:rtc_expect_death",
       "../../test:test_support",
       "../../test/time_controller:time_controller",
-    ]
-    absl_deps = [
       "//third_party/abseil-cpp/absl/functional:any_invocable",
-      "//third_party/abseil-cpp/absl/types:optional",
     ]
   }
 }
