@@ -653,7 +653,7 @@ class WebRtcAudioTrack {
     if (usage == AudioAttributes.USAGE_MEDIA) {
       contentType = AudioAttributes.CONTENT_TYPE_MUSIC;
     }
-    audioAttributes = new AudioAttributes.Builder()
+    return new AudioAttributes.Builder()
             .setUsage(usage)
             .setContentType(contentType)
             .build();
