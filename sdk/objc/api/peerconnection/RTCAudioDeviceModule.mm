@@ -138,6 +138,10 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
   webrtc::Thread *_workerThread;
   webrtc::scoped_refptr<webrtc::AudioDeviceModule> _native;
   AudioDeviceObserver *_observer;
+#if defined(WEBRTC_IOS)
+  BOOL _stereoPlayoutAvailableCached;
+  id _audioRouteChangeObserver;
+#endif
 }
 
 - (id<RTC_OBJC_TYPE(RTCAudioDeviceModuleDelegate)>)observer {
@@ -161,7 +165,28 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 
   _observer = new AudioDeviceObserver(self);
 
+#if defined(WEBRTC_IOS)
+  _stereoPlayoutAvailableCached = [self _computeStereoPlayoutAvailable];
+  __weak RTC_OBJC_TYPE(RTCAudioDeviceModule) *weakSelf = self;
+  _audioRouteChangeObserver = [[NSNotificationCenter defaultCenter]
+      addObserverForName:AVAudioSessionRouteChangeNotification
+                  object:nil
+                   queue:[NSOperationQueue mainQueue]
+              usingBlock:^(__unused NSNotification *notification) {
+                [weakSelf _handleAudioRouteChange];
+              }];
+#endif
+
   return self;
+}
+
+- (void)dealloc {
+#if defined(WEBRTC_IOS)
+  if (_audioRouteChangeObserver != nil) {
+    [[NSNotificationCenter defaultCenter] removeObserver:_audioRouteChangeObserver];
+    _audioRouteChangeObserver = nil;
+  }
+#endif
 }
 
 - (NSArray<RTC_OBJC_TYPE(RTCIODevice) *> *)outputDevices {
@@ -368,6 +393,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 
   _workerThread->BlockingCall([module, state] {
     webrtc::AudioEngineDevice::EngineState result;
+    if (module->GetEngineState(&result) != 0) {
+      result = webrtc::AudioEngineDevice::EngineState();
+    }
     result.output_enabled = state.outputEnabled;
     result.output_running = state.outputRunning;
     result.input_enabled = state.inputEnabled;
@@ -499,12 +527,12 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
   });
 }
 
-- (void)setVoiceProcessingBypassed:(BOOL)enabled {
+- (NSInteger)setVoiceProcessingBypassed:(BOOL)enabled {
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
-  if (module == nullptr) return;
+  if (module == nullptr) return -1;
 
-  _workerThread->BlockingCall(
-      [module, enabled] { return module->SetVoiceProcessingBypassed(enabled) == 0; });
+  return _workerThread->BlockingCall(
+      [module, enabled] { return module->SetVoiceProcessingBypassed(enabled); });
 }
 
 - (BOOL)isVoiceProcessingAGCEnabled {
@@ -517,13 +545,66 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
   });
 }
 
-- (void)setVoiceProcessingAGCEnabled:(BOOL)enabled {
+- (NSInteger)setVoiceProcessingAGCEnabled:(BOOL)enabled {
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
-  if (module == nullptr) return;
+  if (module == nullptr) return -1;
 
-  _workerThread->BlockingCall(
-      [module, enabled] { return module->SetVoiceProcessingAGCEnabled(enabled) == 0; });
+  return _workerThread->BlockingCall(
+      [module, enabled] { return module->SetVoiceProcessingAGCEnabled(enabled); });
 }
+
+- (BOOL)isStereoPlayoutAvailable {
+  return [self _computeStereoPlayoutAvailable];
+}
+
+- (BOOL)isStereoPlayoutEnabled {
+  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
+  if (module == nullptr) return NO;
+
+  return _workerThread->BlockingCall([module] {
+    bool enabled = false;
+    return module->StereoPlayout(&enabled) == 0 ? (enabled ? YES : NO) : NO;
+  });
+}
+
+- (NSInteger)setStereoPlayoutEnabled:(BOOL)enabled {
+  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
+  if (module == nullptr) return -1;
+
+  return _workerThread->BlockingCall([module, enabled] {
+    const bool stereo_enabled = enabled == YES;
+    int32_t result = module->SetStereoPlayout(stereo_enabled);
+    if (result != 0) {
+      RTCLogError(@"Failed to set stereo playout (%d)", result);
+    }
+    return result;
+  });
+}
+
+#pragma mark - Helpers
+
+- (BOOL)_computeStereoPlayoutAvailable {
+  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
+  if (module == nullptr) return NO;
+
+  return _workerThread->BlockingCall([module] {
+    bool available = false;
+    return module->StereoPlayoutIsAvailable(&available) == 0 ? (available ? YES : NO) : NO;
+  });
+}
+
+#if defined(WEBRTC_IOS)
+- (void)_handleAudioRouteChange {
+  BOOL available = [self _computeStereoPlayoutAvailable];
+  if (available == _stereoPlayoutAvailableCached) {
+    return;
+  }
+
+  [self willChangeValueForKey:@"stereoPlayoutAvailable"];
+  _stereoPlayoutAvailableCached = available;
+  [self didChangeValueForKey:@"stereoPlayoutAvailable"];
+}
+#endif
 
 #pragma mark - Private
 

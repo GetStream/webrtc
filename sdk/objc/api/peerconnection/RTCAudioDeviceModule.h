@@ -179,11 +179,23 @@ RTC_OBJC_EXPORT
 
 /// Temporarily bypasses Voice-Processing I/O. Can be toggled at runtime without restarting the
 /// Audio Engine. Defaults to false.
-@property(nonatomic, assign, getter=isVoiceProcessingBypassed) BOOL voiceProcessingBypassed;
+@property(nonatomic, readonly, getter=isVoiceProcessingBypassed) BOOL voiceProcessingBypassed;
+- (NSInteger)setVoiceProcessingBypassed:(BOOL)enabled;
 
 /// Indicates whether Automatic Gain Control (AGC) is enabled. Requires Voice-Processing I/O to be
 /// enabled. Enabled by default when VPIO is enabled.
-@property(nonatomic, assign, getter=isVoiceProcessingAGCEnabled) BOOL voiceProcessingAGCEnabled;
+@property(nonatomic, readonly, getter=isVoiceProcessingAGCEnabled) BOOL voiceProcessingAGCEnabled;
+- (NSInteger)setVoiceProcessingAGCEnabled:(BOOL)enabled;
+
+/// Indicates whether stereo playout can currently be enabled. Returns NO when only mono output is
+/// available (for example when Voice-Processing I/O is active or the route exposes a single
+/// channel).
+@property(nonatomic, readonly, getter=isStereoPlayoutAvailable) BOOL stereoPlayoutAvailable;
+
+/// Toggle stereo playout when available. If the underlying engine rejects the request (for example
+/// because the route only exposes a single channel), the property remains unchanged.
+@property(nonatomic, readonly, getter=isStereoPlayoutEnabled) BOOL stereoPlayoutEnabled;
+- (NSInteger)setStereoPlayoutEnabled:(BOOL)enabled;
 
 @end
 
