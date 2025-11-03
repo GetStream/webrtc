@@ -75,7 +75,7 @@ class WebRtcAudioTrack {
   private byte[] emptyBytes;
   private boolean useLowLatency;
   private int initialBufferSizeInFrames;
-  
+
   // Cached values from native initPlayout
   private int cachedSampleRate;
   private int cachedChannels;
@@ -207,12 +207,12 @@ class WebRtcAudioTrack {
     if (checkThread) {
       threadChecker.checkIsOnValidThread();
     }
-    
+
     // Cache the values for reuse from app layer
     cachedSampleRate = sampleRate;
     cachedChannels = channels;
     cachedBufferSizeFactor = bufferSizeFactor;
-    
+
     Logging.d(TAG,
         "initPlayout(sampleRate=" + sampleRate + ", channels=" + channels
             + ", bufferSizeFactor=" + bufferSizeFactor + ")");
@@ -582,9 +582,9 @@ class WebRtcAudioTrack {
    * This method  updates the AudioAttributes to change audio behavior (e.g., voice communication vs media playback).
    * If playout is currently active, it will be stopped and automatically restarted
    * with the new usage.
-   * 
+   *
    * This method can be called from any thread (app layer).
-   * 
+   *
    * @param usage Audio usage type (AudioAttributes.USAGE_*)
    * @return true if successful, false if failed
    */
@@ -605,7 +605,7 @@ class WebRtcAudioTrack {
 
     // Check if playout was active before reconfiguration
     boolean wasPlaying = audioTrack != null && audioTrack.getPlayState() == AudioTrack.PLAYSTATE_PLAYING;
-    
+
     // if AudioTrack is currently playing, stop it first
     if (wasPlaying) {
       Logging.d(TAG, "Stopping current playout for usage change");
@@ -614,26 +614,26 @@ class WebRtcAudioTrack {
         return false;
       }
     }
-    
+
     // Update audio attributes with new usage
     audioAttributes = getAudioAttributes(usage);
-    
+
     // Use cached values from native initPlayout
     int sampleRate = cachedSampleRate;
     int channels = cachedChannels;
     double bufferSizeFactor = cachedBufferSizeFactor;
-    
+
     Logging.d(TAG, "Using cached sampleRate=" + sampleRate + ", channels=" + channels + ", usage=" + usage);
-    
+
     // Reinitialize with cached parameters but new usage
     int result = initPlayout(sampleRate, channels, bufferSizeFactor, false);
     if (result < 0) {
       Logging.e(TAG, "Failed to reinitialize AudioTrack with new usage");
       return false;
     }
-    
+
     Logging.d(TAG, "Successfully updated usage to " + usage);
-    
+
     // If playout was active before reconfiguration, restart it automatically
     if (wasPlaying) {
       Logging.d(TAG, "Restarting playout with new usage");
@@ -642,7 +642,7 @@ class WebRtcAudioTrack {
         return false;
       }
     }
-    
+
     return true;
   }
 
