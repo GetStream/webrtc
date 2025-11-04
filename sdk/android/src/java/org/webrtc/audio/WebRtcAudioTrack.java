@@ -591,10 +591,18 @@ class WebRtcAudioTrack {
   public boolean updateAudioTrackUsage(int usage) {
     Logging.d(TAG, "updateAudioTrackUsage(usage=" + usage + ")");
 
+    // if audioTrack is not created yet
+    // update the current audioAttributes with audioAttributes which the user has chosen
+    // return true because when native calls initPlayout it will pick the updated audioAttribute
+    if (audioTrack == null) {
+      audioAttributes = getAudioAttributes(usage);
+      return true;
+    }
+
     // Check if the usage is already the same
     if (audioAttributes != null && audioAttributes.getUsage() == usage) {
       Logging.d(TAG, "Usage is already set to " + usage + ", no update needed");
-      return true;
+      return false;
     }
 
     // Check if playout was active before reconfiguration
@@ -610,14 +618,7 @@ class WebRtcAudioTrack {
     }
     
     // Update audio attributes with new usage
-    int contentType = AudioAttributes.CONTENT_TYPE_SPEECH;
-    if (usage == AudioAttributes.USAGE_MEDIA) {
-      contentType = AudioAttributes.CONTENT_TYPE_MUSIC;
-    }
-    audioAttributes = new AudioAttributes.Builder()
-            .setUsage(usage)
-            .setContentType(contentType)
-            .build();
+    audioAttributes = getAudioAttributes(usage);
     
     // Use cached values from native initPlayout
     int sampleRate = cachedSampleRate;
@@ -647,6 +648,16 @@ class WebRtcAudioTrack {
     return true;
   }
 
+  private AudioAttributes getAudioAttributes(int usage) {
+    int contentType = AudioAttributes.CONTENT_TYPE_SPEECH;
+    if (usage == AudioAttributes.USAGE_MEDIA) {
+      contentType = AudioAttributes.CONTENT_TYPE_MUSIC;
+    }
+    return new AudioAttributes.Builder()
+            .setUsage(usage)
+            .setContentType(contentType)
+            .build();
+  }
 
   // Releases the native AudioTrack resources.
   private void releaseAudioResources() {
