@@ -661,6 +661,10 @@ int32_t AudioEngineDevice::StereoPlayoutIsAvailable(bool* available) const {
 
   *available = available_value;
 
+  if (observer_ != nullptr) {
+    observer_->OnStereoUpdatedPlayoutAvailable(available_value);
+  }
+
   LOGI() << "StereoPlayoutIsAvailable: " << *available << " (render mode allows: "
          << render_mode_allows_stereo
          << ", route supports: " << route_supports_stereo << ")";

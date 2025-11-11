@@ -216,6 +216,7 @@ class AudioDeviceObserver {
   // input/output devices updated or default device changed
   virtual void OnDevicesUpdated() {}
   virtual void OnSpeechActivityEvent(AudioDeviceModule::SpeechActivityEvent event) {}
+  virtual void OnStereoUpdatedPlayoutAvailable(bool available) {}
 
   // AVAudioEngine lifecycle
   virtual int32_t OnEngineDidCreate(AVAudioEngine* engine) { return 0; }
