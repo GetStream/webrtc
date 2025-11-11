@@ -1221,6 +1221,17 @@ int32_t AudioEngineDevice::SetVoiceProcessingAGCEnabled(bool enable) {
   return result;
 }
 
+void AudioEngineDevice::SetManualRestoreVoiceProcessingOnMono(bool manual_restore) {
+  RTC_DCHECK_RUN_ON(thread_);
+  LOGI() << "SetManualRestoreVoiceProcessingOnMono: " << manual_restore;
+  manual_restore_voice_processing_on_mono_ = manual_restore;
+}
+
+bool AudioEngineDevice::ManualRestoreVoiceProcessingOnMono() const {
+  RTC_DCHECK_RUN_ON(thread_);
+  return manual_restore_voice_processing_on_mono_;
+}
+
 int32_t AudioEngineDevice::ManualRenderingMode(bool* enabled) {
   LOGI() << "ManualRenderingMode";
   RTC_DCHECK_RUN_ON(thread_);
@@ -1385,8 +1396,12 @@ void AudioEngineDevice::ReconfigureEngine() {
         LOGW() << "Route change removed stereo support, reverting to mono";
         current_state.stereo_playout_enabled = false;
         if (stereo_voice_processing_override_active_) {
-          current_state.voice_processing_enabled = stereo_saved_voice_processing_enabled_;
-          current_state.voice_processing_bypassed = stereo_saved_voice_processing_bypassed_;
+          if (manual_restore_voice_processing_on_mono_) {
+            LOGW() << "Skipping voice processing restore after route change (manual restore enabled)";
+          } else {
+            current_state.voice_processing_enabled = stereo_saved_voice_processing_enabled_;
+            current_state.voice_processing_bypassed = stereo_saved_voice_processing_bypassed_;
+          }
           stereo_voice_processing_override_active_ = false;
         }
       }
@@ -1443,9 +1458,14 @@ int32_t AudioEngineDevice::ModifyEngineState(
     state.next.stereo_playout_enabled = false;
     route_forces_mono = true;
     if (stereo_voice_processing_override_active_) {
-      route_restore_voice_processing = true;
-      state.next.voice_processing_enabled = stereo_saved_voice_processing_enabled_;
-      state.next.voice_processing_bypassed = stereo_saved_voice_processing_bypassed_;
+      if (manual_restore_voice_processing_on_mono_) {
+        LOGW() << "Skipping voice processing restore after stereo fallback (manual restore enabled)";
+        stereo_voice_processing_override_active_ = false;
+      } else {
+        route_restore_voice_processing = true;
+        state.next.voice_processing_enabled = stereo_saved_voice_processing_enabled_;
+        state.next.voice_processing_bypassed = stereo_saved_voice_processing_bypassed_;
+      }
     }
   }
 

@@ -205,6 +205,10 @@ RTC_OBJC_EXPORT
 @property(nonatomic, readonly, getter=isVoiceProcessingAGCEnabled) BOOL voiceProcessingAGCEnabled;
 - (NSInteger)setVoiceProcessingAGCEnabled:(BOOL)enabled;
 
+/// When enabled, the app is responsible for re-enabling Voice-Processing I/O after a mono-only
+/// route forces stereo playout off. Defaults to NO (auto-restore).
+@property(nonatomic, assign) BOOL manualRestoreVoiceProcessingOnMono;
+
 /// Indicates whether stereo playout can currently be enabled. Returns NO when only mono output is
 /// available (for example when Voice-Processing I/O is active or the route exposes a single
 /// channel).

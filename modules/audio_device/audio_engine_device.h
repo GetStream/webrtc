@@ -334,6 +334,9 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
   int32_t SetVoiceProcessingAGCEnabled(bool enable);
   int32_t VoiceProcessingAGCEnabled(bool* enabled);
 
+  void SetManualRestoreVoiceProcessingOnMono(bool manual_restore);
+  bool ManualRestoreVoiceProcessingOnMono() const;
+
   int32_t InitAndStartRecording();
 
  private:
@@ -454,6 +457,7 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
   bool stereo_voice_processing_override_active_ = false;
   bool stereo_saved_voice_processing_enabled_ = true;
   bool stereo_saved_voice_processing_bypassed_ = false;
+  bool manual_restore_voice_processing_on_mono_ = false;
 
   void StartRenderLoop();
   AVAudioEngineManualRenderingBlock render_block_;

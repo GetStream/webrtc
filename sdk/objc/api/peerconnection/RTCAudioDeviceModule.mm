@@ -589,6 +589,25 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
   return result;
 }
 
+- (BOOL)manualRestoreVoiceProcessingOnMono {
+  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
+  if (module == nullptr) return NO;
+
+  return _workerThread->BlockingCall([module] {
+    return module->ManualRestoreVoiceProcessingOnMono() ? YES : NO;
+  });
+}
+
+- (void)setManualRestoreVoiceProcessingOnMono:(BOOL)manualRestore {
+  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
+  if (module == nullptr) return;
+
+  const bool value = manualRestore == YES;
+  _workerThread->BlockingCall([module, value] {
+    module->SetManualRestoreVoiceProcessingOnMono(value);
+  });
+}
+
 - (BOOL)isStereoPlayoutAvailable {
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return NO;
