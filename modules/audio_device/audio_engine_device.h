@@ -137,6 +137,8 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
     bool advanced_ducking = true;
     long ducking_level = 0;  // 0 = Default
 
+    bool stereo_playout_enabled = false;
+
     uint32_t output_device_id = 0;  // kAudioObjectUnknown
     uint32_t input_device_id = 0;   // kAudioObjectUnknown
 
@@ -154,6 +156,7 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
              voice_processing_bypassed == rhs.voice_processing_bypassed &&
              voice_processing_agc_enabled == rhs.voice_processing_agc_enabled &&
              advanced_ducking == rhs.advanced_ducking && ducking_level == rhs.ducking_level &&
+             stereo_playout_enabled == rhs.stereo_playout_enabled &&
              output_device_id == rhs.output_device_id && input_device_id == rhs.input_device_id &&
              default_output_device_update_count == rhs.default_output_device_update_count &&
              default_input_device_update_count == rhs.default_input_device_update_count;
@@ -190,6 +193,8 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
     bool IsAllRunning() const {
       return IsOutputInputLinked() ? input_running : input_running && output_running;
     }
+
+    uint32_t DesiredOutputChannels() const { return stereo_playout_enabled ? 2u : 1u; }
 
     bool IsOutputDefaultDevice() const {
 #if TARGET_OS_OSX
@@ -329,6 +334,9 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
   int32_t SetVoiceProcessingAGCEnabled(bool enable);
   int32_t VoiceProcessingAGCEnabled(bool* enabled);
 
+  void SetManualRestoreVoiceProcessingOnMono(bool manual_restore);
+  bool ManualRestoreVoiceProcessingOnMono() const;
+
   int32_t InitAndStartRecording();
 
  private:
@@ -359,6 +367,10 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
              (prev.IsOutputEnabled() != next.IsOutputEnabled());
     }
 
+    bool DidUpdateOutputChannels() const {
+      return prev.DesiredOutputChannels() != next.DesiredOutputChannels();
+    }
+
     bool DidUpdateVoiceProcessingEnabled() const {
       return prev.voice_processing_enabled != next.voice_processing_enabled;
     }
@@ -378,7 +390,7 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
     bool DidUpdateMuteMode() const { return prev.mute_mode != next.mute_mode; }
 
     bool IsEngineRestartRequired() const {
-      return DidUpdateAudioGraph() ||
+      return DidUpdateAudioGraph() || DidUpdateOutputChannels() ||
              // Voice processing enable state updates
              DidUpdateVoiceProcessingEnabled();
     }
@@ -412,7 +424,9 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
 
   bool IsMicrophonePermissionGranted();
   int32_t ModifyEngineState(std::function<EngineState(EngineState)> state_transform);
-  int32_t ApplyDeviceEngineState(EngineStateUpdate state);
+  int32_t ApplyDeviceEngineState(EngineStateUpdate state,
+                                 bool* stereo_playout_reset = nullptr,
+                                 bool* restore_voice_processing = nullptr);
   int32_t ApplyManualEngineState(EngineStateUpdate state);
 
   // AudioEngine observer methods. May be called from any thread.
@@ -438,6 +452,12 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
 #endif
 
   void DebugAudioEngine();
+  bool RouteSupportsStereo() const;
+
+  bool stereo_voice_processing_override_active_ = false;
+  bool stereo_saved_voice_processing_enabled_ = true;
+  bool stereo_saved_voice_processing_bypassed_ = false;
+  bool manual_restore_voice_processing_on_mono_ = false;
 
   void StartRenderLoop();
   AVAudioEngineManualRenderingBlock render_block_;

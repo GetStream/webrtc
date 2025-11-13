@@ -48,6 +48,14 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
         didReceiveSpeechActivityEvent:ConvertSpeechActivityEvent(event)];
   }
 
+  void OnStereoUpdatedPlayoutAvailable(bool available) override {
+    [delegate_ audioDeviceModule:adm_ isStereoPlayoutAvailable:available ? YES : NO];
+  }
+
+  void OnStereoUpdatedPlayoutEnabled(bool enabled) override {
+    [delegate_ audioDeviceModule:adm_ isStereoPlayoutEnabled:enabled ? YES : NO];
+  }
+
   int32_t OnEngineDidCreate(AVAudioEngine *engine) override {
     if (delegate_ == nil) return 0;
     return [delegate_ audioDeviceModule:adm_ didCreateEngine:engine];
@@ -340,7 +348,18 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (NSInteger)setMicrophoneMuted:(BOOL)muted {
-  return _workerThread->BlockingCall([self, muted] { return _native->SetMicrophoneMute(muted); });
+  BOOL shouldNotify = self.isMicrophoneMuted != muted;
+
+  NSInteger result =
+      _workerThread->BlockingCall([self, muted] { return _native->SetMicrophoneMute(muted); });
+
+  if (shouldNotify && result == 0) {
+    [self _notifyObserverForProperty:RTC_OBJC_TYPE(
+                                       RTCAudioDeviceModuleObservablePropertyMicrophoneMuted)
+                           newValue:muted];
+  }
+
+  return result;
 }
 
 - (RTC_OBJC_TYPE(RTCAudioEngineState))engineState {
@@ -368,6 +387,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 
   _workerThread->BlockingCall([module, state] {
     webrtc::AudioEngineDevice::EngineState result;
+    if (module->GetEngineState(&result) != 0) {
+      result = webrtc::AudioEngineDevice::EngineState();
+    }
     result.output_enabled = state.outputEnabled;
     result.output_running = state.outputRunning;
     result.input_enabled = state.inputEnabled;
@@ -395,8 +417,18 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return -1;
 
-  return _workerThread->BlockingCall(
+  BOOL shouldNotify = self.isRecordingAlwaysPreparedMode != enabled;
+
+  NSInteger result = _workerThread->BlockingCall(
       [module, enabled] { return module->SetInitRecordingPersistentMode(enabled); });
+
+  if (shouldNotify && result == 0) {
+    [self _notifyObserverForProperty:RTC_OBJC_TYPE(
+                                       RTCAudioDeviceModuleObservablePropertyRecordingAlwaysPreparedMode)
+                           newValue:enabled];
+  }
+
+  return result;
 }
 
 - (BOOL)isManualRenderingMode {
@@ -413,8 +445,18 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return -1;
 
-  return _workerThread->BlockingCall(
-      [module, enabled] { return module->SetManualRenderingMode(enabled); });
+  BOOL shouldNotify = self.isManualRenderingMode != enabled;
+
+  NSInteger result =
+      _workerThread->BlockingCall([module, enabled] { return module->SetManualRenderingMode(enabled); });
+
+  if (shouldNotify && result == 0) {
+    [self _notifyObserverForProperty:RTC_OBJC_TYPE(
+                                       RTCAudioDeviceModuleObservablePropertyManualRenderingMode)
+                           newValue:enabled];
+  }
+
+  return result;
 }
 
 - (BOOL)isAdvancedDuckingEnabled {
@@ -485,8 +527,18 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return -1;
 
-  return _workerThread->BlockingCall(
+  BOOL shouldNotify = self.isVoiceProcessingEnabled != enabled;
+
+  NSInteger result = _workerThread->BlockingCall(
       [module, enabled] { return module->SetVoiceProcessingEnabled(enabled); });
+
+  if (shouldNotify && result == 0) {
+    [self _notifyObserverForProperty:RTC_OBJC_TYPE(
+                                       RTCAudioDeviceModuleObservablePropertyVoiceProcessingEnabled)
+                           newValue:enabled];
+  }
+
+  return result;
 }
 
 - (BOOL)isVoiceProcessingBypassed {
@@ -499,12 +551,22 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
   });
 }
 
-- (void)setVoiceProcessingBypassed:(BOOL)enabled {
+- (NSInteger)setVoiceProcessingBypassed:(BOOL)enabled {
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
-  if (module == nullptr) return;
+  if (module == nullptr) return -1;
 
-  _workerThread->BlockingCall(
-      [module, enabled] { return module->SetVoiceProcessingBypassed(enabled) == 0; });
+  BOOL shouldNotify = self.isVoiceProcessingBypassed != enabled;
+
+  NSInteger result = _workerThread->BlockingCall(
+      [module, enabled] { return module->SetVoiceProcessingBypassed(enabled); });
+
+  if (shouldNotify && result == 0) {
+    [self _notifyObserverForProperty:RTC_OBJC_TYPE(
+                                       RTCAudioDeviceModuleObservablePropertyVoiceProcessingBypassed)
+                           newValue:enabled];
+  }
+
+  return result;
 }
 
 - (BOOL)isVoiceProcessingAGCEnabled {
@@ -517,12 +579,101 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
   });
 }
 
-- (void)setVoiceProcessingAGCEnabled:(BOOL)enabled {
+- (NSInteger)setVoiceProcessingAGCEnabled:(BOOL)enabled {
+  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
+  if (module == nullptr) return -1;
+
+  BOOL shouldNotify = self.isVoiceProcessingAGCEnabled != enabled;
+
+  NSInteger result = _workerThread->BlockingCall(
+      [module, enabled] { return module->SetVoiceProcessingAGCEnabled(enabled); });
+
+  if (shouldNotify && result == 0) {
+    [self _notifyObserverForProperty:RTC_OBJC_TYPE(
+                                       RTCAudioDeviceModuleObservablePropertyVoiceProcessingAGCEnabled)
+                           newValue:enabled];
+  }
+
+  return result;
+}
+
+- (BOOL)manualRestoreVoiceProcessingOnMono {
+  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
+  if (module == nullptr) return NO;
+
+  return _workerThread->BlockingCall([module] {
+    return module->ManualRestoreVoiceProcessingOnMono() ? YES : NO;
+  });
+}
+
+- (void)setManualRestoreVoiceProcessingOnMono:(BOOL)manualRestore {
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return;
 
-  _workerThread->BlockingCall(
-      [module, enabled] { return module->SetVoiceProcessingAGCEnabled(enabled) == 0; });
+  const bool value = manualRestore == YES;
+  _workerThread->BlockingCall([module, value] {
+    module->SetManualRestoreVoiceProcessingOnMono(value);
+  });
+}
+
+- (BOOL)isStereoPlayoutAvailable {
+  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
+  if (module == nullptr) return NO;
+
+  return _workerThread->BlockingCall([module] {
+    bool available = false;
+    return module->StereoPlayoutIsAvailable(&available) == 0 ? (available ? YES : NO) : NO;
+  });
+}
+
+- (BOOL)isStereoPlayoutEnabled {
+  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
+  if (module == nullptr) return NO;
+
+  return _workerThread->BlockingCall([module] {
+    bool enabled = false;
+    return module->StereoPlayout(&enabled) == 0 ? (enabled ? YES : NO) : NO;
+  });
+}
+
+- (NSInteger)setStereoPlayoutEnabled:(BOOL)enabled {
+  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
+  if (module == nullptr) return -1;
+
+  BOOL shouldNotify = self.isStereoPlayoutEnabled != enabled;
+
+  NSInteger result = _workerThread->BlockingCall([module, enabled] {
+    const bool stereo_enabled = enabled == YES;
+    int32_t result = module->SetStereoPlayout(stereo_enabled);
+    if (result != 0) {
+      RTCLogError(@"Failed to set stereo playout (%d)", result);
+    }
+    return result;
+  });
+
+  if (shouldNotify && result == 0) {
+    [self _notifyObserverForProperty:RTC_OBJC_TYPE(
+                                       RTCAudioDeviceModuleObservablePropertyStereoPlayoutEnabled)
+                           newValue:enabled];
+  }
+
+  return result;
+}
+
+#pragma mark - Observer notifications
+
+- (void)_notifyObserverForProperty:
+            (RTC_OBJC_TYPE(RTCAudioDeviceModuleObservableProperty))property
+                          newValue:(BOOL)newValue {
+  id<RTC_OBJC_TYPE(RTCAudioDeviceModuleDelegate)> delegate = self.observer;
+  if (delegate == nil) {
+    return;
+  }
+
+  SEL selector = @selector(audioDeviceModule:didChangeProperty:newValue:);
+  if ([delegate respondsToSelector:selector]) {
+    [delegate audioDeviceModule:self didChangeProperty:property newValue:newValue];
+  }
 }
 
 #pragma mark - Private

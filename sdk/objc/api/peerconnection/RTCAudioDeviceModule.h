@@ -49,6 +49,16 @@ typedef struct {
   RTC_OBJC_TYPE(RTCAudioEngineMuteMode) muteMode;
 } RTC_OBJC_TYPE(RTCAudioEngineState);
 
+typedef NS_ENUM(NSInteger, RTC_OBJC_TYPE(RTCAudioDeviceModuleObservableProperty)) {
+  RTC_OBJC_TYPE(RTCAudioDeviceModuleObservablePropertyMicrophoneMuted),
+  RTC_OBJC_TYPE(RTCAudioDeviceModuleObservablePropertyRecordingAlwaysPreparedMode),
+  RTC_OBJC_TYPE(RTCAudioDeviceModuleObservablePropertyManualRenderingMode),
+  RTC_OBJC_TYPE(RTCAudioDeviceModuleObservablePropertyVoiceProcessingEnabled),
+  RTC_OBJC_TYPE(RTCAudioDeviceModuleObservablePropertyVoiceProcessingBypassed),
+  RTC_OBJC_TYPE(RTCAudioDeviceModuleObservablePropertyVoiceProcessingAGCEnabled),
+  RTC_OBJC_TYPE(RTCAudioDeviceModuleObservablePropertyStereoPlayoutEnabled)
+};
+
 RTC_EXTERN NSString *const RTC_CONSTANT_TYPE(RTCAudioEngineInputMixerNodeKey);
 
 @class RTC_OBJC_TYPE(RTCAudioDeviceModule);
@@ -56,9 +66,21 @@ RTC_EXTERN NSString *const RTC_CONSTANT_TYPE(RTCAudioEngineInputMixerNodeKey);
 RTC_OBJC_EXPORT @protocol RTC_OBJC_TYPE
 (RTCAudioDeviceModuleDelegate)<NSObject>
 
+@required
+
     - (void)audioDeviceModule
     : (RTC_OBJC_TYPE(RTCAudioDeviceModule) *)audioDeviceModule didReceiveSpeechActivityEvent
     : (RTC_OBJC_TYPE(RTCSpeechActivityEvent))speechActivityEvent NS_SWIFT_NAME(audioDeviceModule(_:didReceiveSpeechActivityEvent:));
+
+// Stereo
+
+- (void)audioDeviceModule:(RTC_OBJC_TYPE(RTCAudioDeviceModule) *)audioDeviceModule
+      isStereoPlayoutAvailable:(BOOL)isStereoPlayoutAvailable
+    NS_SWIFT_NAME(audioDeviceModule(_:isStereoPlayoutAvailable:));
+
+- (void)audioDeviceModule:(RTC_OBJC_TYPE(RTCAudioDeviceModule) *)audioDeviceModule
+      isStereoPlayoutEnabled:(BOOL)isStereoPlayoutEnabled
+    NS_SWIFT_NAME(audioDeviceModule(_:isStereoPlayoutEnabled:));
 
 // Engine events
 - (NSInteger)audioDeviceModule:(RTC_OBJC_TYPE(RTCAudioDeviceModule) *)audioDeviceModule
@@ -111,6 +133,16 @@ RTC_OBJC_EXPORT @protocol RTC_OBJC_TYPE
 
 - (void)audioDeviceModuleDidUpdateDevices:(RTC_OBJC_TYPE(RTCAudioDeviceModule) *)audioDeviceModule
     NS_SWIFT_NAME(audioDeviceModuleDidUpdateDevices(_:));
+
+@optional
+- (void)audioDeviceModule:(RTC_OBJC_TYPE(RTCAudioDeviceModule) *)audioDeviceModule
+    didChangeProperty:(RTC_OBJC_TYPE(RTCAudioDeviceModuleObservableProperty))property
+             newValue:(BOOL)newValue
+    NS_SWIFT_NAME(audioDeviceModule(_:didChangeProperty:newValue:));
+
+- (void)audioDeviceModule:(RTC_OBJC_TYPE(RTCAudioDeviceModule) *)audioDeviceModule
+    didUpdateStereoPlayoutAvailability:(BOOL)isAvailable
+    NS_SWIFT_NAME(audioDeviceModule(_:didUpdateStereoPlayoutAvailability:));
 
 @end
 
@@ -179,11 +211,29 @@ RTC_OBJC_EXPORT
 
 /// Temporarily bypasses Voice-Processing I/O. Can be toggled at runtime without restarting the
 /// Audio Engine. Defaults to false.
-@property(nonatomic, assign, getter=isVoiceProcessingBypassed) BOOL voiceProcessingBypassed;
+@property(nonatomic, readonly, getter=isVoiceProcessingBypassed) BOOL voiceProcessingBypassed;
+- (NSInteger)setVoiceProcessingBypassed:(BOOL)enabled;
 
 /// Indicates whether Automatic Gain Control (AGC) is enabled. Requires Voice-Processing I/O to be
 /// enabled. Enabled by default when VPIO is enabled.
-@property(nonatomic, assign, getter=isVoiceProcessingAGCEnabled) BOOL voiceProcessingAGCEnabled;
+@property(nonatomic, readonly, getter=isVoiceProcessingAGCEnabled) BOOL voiceProcessingAGCEnabled;
+- (NSInteger)setVoiceProcessingAGCEnabled:(BOOL)enabled;
+
+/// When enabled, the app is responsible for re-enabling Voice-Processing I/O after a mono-only
+/// route forces stereo playout off. Changing `AVAudioSession.mode` alone is not enough—call
+/// `setVoiceProcessingEnabled:YES` (and optionally `setVoiceProcessingBypassed:`) once you want to
+/// bring the VoiceProcessingIO path back. Defaults to NO (auto-restore).
+@property(nonatomic, assign) BOOL manualRestoreVoiceProcessingOnMono;
+
+/// Indicates whether stereo playout can currently be enabled. Returns NO when only mono output is
+/// available (for example when Voice-Processing I/O is active or the route exposes a single
+/// channel).
+@property(nonatomic, readonly, getter=isStereoPlayoutAvailable) BOOL stereoPlayoutAvailable;
+
+/// Toggle stereo playout when available. If the underlying engine rejects the request (for example
+/// because the route only exposes a single channel), the property remains unchanged.
+@property(nonatomic, readonly, getter=isStereoPlayoutEnabled) BOOL stereoPlayoutEnabled;
+- (NSInteger)setStereoPlayoutEnabled:(BOOL)enabled;
 
 @end
 
