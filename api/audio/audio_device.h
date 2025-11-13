@@ -217,6 +217,7 @@ class AudioDeviceObserver {
   virtual void OnDevicesUpdated() {}
   virtual void OnSpeechActivityEvent(AudioDeviceModule::SpeechActivityEvent event) {}
   virtual void OnStereoUpdatedPlayoutAvailable(bool available) {}
+  virtual void OnStereoUpdatedPlayoutEnabled(bool enabled) {}
 
   // AVAudioEngine lifecycle
   virtual int32_t OnEngineDidCreate(AVAudioEngine* engine) { return 0; }

@@ -52,6 +52,10 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
     [delegate_ audioDeviceModule:adm_ isStereoPlayoutAvailable:available ? YES : NO];
   }
 
+  void OnStereoUpdatedPlayoutEnabled(bool enabled) override {
+    [delegate_ audioDeviceModule:adm_ isStereoPlayoutEnabled:enabled ? YES : NO];
+  }
+
   int32_t OnEngineDidCreate(AVAudioEngine *engine) override {
     if (delegate_ == nil) return 0;
     return [delegate_ audioDeviceModule:adm_ didCreateEngine:engine];

@@ -678,6 +678,12 @@ bool AudioEngineDevice::RouteSupportsStereo() const {
 #if defined(WEBRTC_IOS)
   AVAudioSession* session = [AVAudioSession sharedInstance];
   NSString* mode = session.mode;
+  AVAudioSessionRouteDescription* current_route = session.currentRoute;
+  NSString* route_description = current_route.description;
+
+  LOGI() << "RouteSupportsStereo: current_route ("
+         << (route_description ? route_description.UTF8String : "unknown") << ")";
+  LOGI() << "RouteSupportsStereo: mode active (" << [mode UTF8String] << ")";
 
   static NSArray<NSString*>* const kMonoModes = @[
     AVAudioSessionModeVoiceChat,
@@ -767,6 +773,10 @@ int32_t AudioEngineDevice::SetStereoPlayout(bool enable) {
     if (stereo_voice_processing_override_active_) {
       stereo_voice_processing_override_active_ = false;
     }
+  }
+
+  if (observer_ != nullptr) {
+    observer_->OnStereoUpdatedPlayoutEnabled(enable);
   }
 
   return 0;

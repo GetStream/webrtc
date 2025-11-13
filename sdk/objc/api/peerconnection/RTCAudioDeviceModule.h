@@ -78,6 +78,10 @@ RTC_OBJC_EXPORT @protocol RTC_OBJC_TYPE
       isStereoPlayoutAvailable:(BOOL)isStereoPlayoutAvailable
     NS_SWIFT_NAME(audioDeviceModule(_:isStereoPlayoutAvailable:));
 
+- (void)audioDeviceModule:(RTC_OBJC_TYPE(RTCAudioDeviceModule) *)audioDeviceModule
+      isStereoPlayoutEnabled:(BOOL)isStereoPlayoutEnabled
+    NS_SWIFT_NAME(audioDeviceModule(_:isStereoPlayoutEnabled:));
+
 // Engine events
 - (NSInteger)audioDeviceModule:(RTC_OBJC_TYPE(RTCAudioDeviceModule) *)audioDeviceModule
                didCreateEngine:(AVAudioEngine *)engine
