@@ -53,8 +53,8 @@ void Init(AudioDeviceModule* adm) {
     if (adm->StereoPlayoutIsAvailable(&available) != 0) {
       RTC_LOG(LS_ERROR) << "Failed to query stereo playout.";
     }
-    if (adm->SetStereoPlayout(available) != 0) {
-      RTC_LOG(LS_ERROR) << "Failed to set stereo playout mode.";
+    if (available) {
+      RTC_LOG(LS_INFO) << "Stereo playout is available; waiting for client to enable it explicitly.";
     }
   }
 

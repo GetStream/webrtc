@@ -97,9 +97,9 @@ bool VoipCore::InitializeIfNeeded() {
   bool available = false;
   if (audio_device_module_->StereoPlayoutIsAvailable(&available) != 0) {
     RTC_LOG(LS_WARNING) << "Unable to query stereo playout.";
-  }
-  if (audio_device_module_->SetStereoPlayout(available) != 0) {
-    RTC_LOG(LS_WARNING) << "Unable to set mono/stereo playout mode.";
+  } else if (available) {
+    RTC_LOG(LS_INFO)
+        << "Stereo playout is available; waiting for client to enable it explicitly.";
   }
 
   // Set number of channels on recording device.
