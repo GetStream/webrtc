@@ -90,6 +90,7 @@ AudioEngineDevice::AudioEngineDevice(bool voice_processing_bypassed)
   stereo_voice_processing_override_active_ = false;
   stereo_saved_voice_processing_enabled_ = true;
   stereo_saved_voice_processing_bypassed_ = false;
+  stereo_saved_voice_processing_agc_enabled_ = true;
 }
 
 AudioEngineDevice::~AudioEngineDevice() {
@@ -737,6 +738,7 @@ int32_t AudioEngineDevice::SetStereoPlayout(bool enable) {
 
   const bool vp_enabled_before = engine_state_.voice_processing_enabled;
   const bool vp_bypassed_before = engine_state_.voice_processing_bypassed;
+  const bool vp_agc_enabled_before = engine_state_.voice_processing_agc_enabled;
   const bool apply_vp_override = enable && vp_enabled_before;
 
   if (enable && apply_vp_override) {
@@ -749,11 +751,13 @@ int32_t AudioEngineDevice::SetStereoPlayout(bool enable) {
       if (apply_vp_override) {
         state.voice_processing_enabled = false;
         state.voice_processing_bypassed = false;
+        state.voice_processing_agc_enabled = false;
       }
     } else {
       if (stereo_voice_processing_override_active_) {
         state.voice_processing_enabled = stereo_saved_voice_processing_enabled_;
         state.voice_processing_bypassed = stereo_saved_voice_processing_bypassed_;
+        state.voice_processing_agc_enabled = stereo_saved_voice_processing_agc_enabled_;
       }
     }
     return state;
@@ -768,6 +772,7 @@ int32_t AudioEngineDevice::SetStereoPlayout(bool enable) {
       stereo_voice_processing_override_active_ = true;
       stereo_saved_voice_processing_enabled_ = vp_enabled_before;
       stereo_saved_voice_processing_bypassed_ = vp_bypassed_before;
+      stereo_saved_voice_processing_agc_enabled_ = vp_agc_enabled_before;
     }
   } else {
     if (stereo_voice_processing_override_active_) {
@@ -1107,8 +1112,24 @@ int32_t AudioEngineDevice::EnableBuiltInNS(bool enable) { return -1; }
 // Misc
 
 #if defined(WEBRTC_IOS)
-int AudioEngineDevice::GetPlayoutAudioParameters(AudioParameters* params) const { return -1; }
-int AudioEngineDevice::GetRecordAudioParameters(AudioParameters* params) const { return -1; }
+int AudioEngineDevice::GetPlayoutAudioParameters(AudioParameters* params) const {
+  RTC_DCHECK_RUN_ON(thread_);
+  if (params == nullptr) {
+    return -1;
+  }
+
+  *params = playout_parameters_;
+  return params->is_valid() ? 0 : -1;
+}
+int AudioEngineDevice::GetRecordAudioParameters(AudioParameters* params) const {
+  RTC_DCHECK_RUN_ON(thread_);
+  if (params == nullptr) {
+    return -1;
+  }
+
+  *params = record_parameters_;
+  return params->is_valid() ? 0 : -1;
+}
 #endif
 
 int32_t AudioEngineDevice::PlayoutDelay(uint16_t* delayMS) const {
@@ -1415,6 +1436,7 @@ void AudioEngineDevice::ReconfigureEngine() {
           } else {
             current_state.voice_processing_enabled = stereo_saved_voice_processing_enabled_;
             current_state.voice_processing_bypassed = stereo_saved_voice_processing_bypassed_;
+            current_state.voice_processing_agc_enabled = stereo_saved_voice_processing_agc_enabled_;
           }
           stereo_voice_processing_override_active_ = false;
         }
@@ -1479,6 +1501,7 @@ int32_t AudioEngineDevice::ModifyEngineState(
         route_restore_voice_processing = true;
         state.next.voice_processing_enabled = stereo_saved_voice_processing_enabled_;
         state.next.voice_processing_bypassed = stereo_saved_voice_processing_bypassed_;
+        state.next.voice_processing_agc_enabled = stereo_saved_voice_processing_agc_enabled_;
       }
     }
   }
@@ -1576,6 +1599,7 @@ int32_t AudioEngineDevice::ModifyEngineState(
       LOGW() << "Restoring voice processing after stereo fallback";
       new_state.voice_processing_enabled = stereo_saved_voice_processing_enabled_;
       new_state.voice_processing_bypassed = stereo_saved_voice_processing_bypassed_;
+      new_state.voice_processing_agc_enabled = stereo_saved_voice_processing_agc_enabled_;
       stereo_voice_processing_override_active_ = false;
     }
 
@@ -1710,6 +1734,7 @@ int32_t AudioEngineDevice::ApplyManualEngineState(EngineStateUpdate state) {
 
     audio_device_buffer_->SetPlayoutSampleRate(manual_render_rtc_format_.sampleRate);
     audio_device_buffer_->SetPlayoutChannels(manual_render_rtc_format_.channelCount);
+    playout_parameters_.reset(manual_render_rtc_format_.sampleRate, manual_render_rtc_format_.channelCount);
     RTC_DCHECK(audio_device_buffer_ != nullptr);
     fine_audio_buffer_.reset(new FineAudioBuffer(audio_device_buffer_.get()));
 
@@ -1724,6 +1749,7 @@ int32_t AudioEngineDevice::ApplyManualEngineState(EngineStateUpdate state) {
 
     audio_device_buffer_->SetRecordingSampleRate(manual_render_rtc_format_.sampleRate);
     audio_device_buffer_->SetRecordingChannels(manual_render_rtc_format_.channelCount);
+    record_parameters_.reset(manual_render_rtc_format_.sampleRate, manual_render_rtc_format_.channelCount);
     RTC_DCHECK(audio_device_buffer_ != nullptr);
     fine_audio_buffer_.reset(new FineAudioBuffer(audio_device_buffer_.get()));
 
@@ -2082,16 +2108,17 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate state,
       if (stereo_playout_reset && requested_channels < 2 && state.next.stereo_playout_enabled) {
         *stereo_playout_reset = true;
       }
-      if (restore_voice_processing && state.next.stereo_playout_enabled &&
-          stereo_voice_processing_override_active_) {
-        *restore_voice_processing = true;
-        state.next.voice_processing_enabled = stereo_saved_voice_processing_enabled_;
-        state.next.voice_processing_bypassed = stereo_saved_voice_processing_bypassed_;
+        if (restore_voice_processing && state.next.stereo_playout_enabled &&
+            stereo_voice_processing_override_active_) {
+          *restore_voice_processing = true;
+          state.next.voice_processing_enabled = stereo_saved_voice_processing_enabled_;
+          state.next.voice_processing_bypassed = stereo_saved_voice_processing_bypassed_;
+          state.next.voice_processing_agc_enabled = stereo_saved_voice_processing_agc_enabled_;
 #if !TARGET_OS_SIMULATOR
-        if (inputNode().voiceProcessingEnabled != state.next.voice_processing_enabled) {
-          NSError* vp_error = nil;
-          BOOL set_vp = [inputNode() setVoiceProcessingEnabled:state.next.voice_processing_enabled
-                                                        error:&vp_error];
+          if (inputNode().voiceProcessingEnabled != state.next.voice_processing_enabled) {
+            NSError* vp_error = nil;
+            BOOL set_vp = [inputNode() setVoiceProcessingEnabled:state.next.voice_processing_enabled
+                                                          error:&vp_error];
           if (!set_vp) {
             LOGE() << "Failed to restore voice processing: "
                    << (vp_error ? vp_error.localizedDescription.UTF8String : "unknown");
@@ -2114,15 +2141,16 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate state,
     } else if (stereo_playout_reset && requested_channels < 2 && state.next.stereo_playout_enabled) {
       // Handle cases where desired stereo was set but route currently only reports mono channels.
       *stereo_playout_reset = true;
-      if (restore_voice_processing && stereo_voice_processing_override_active_) {
-        *restore_voice_processing = true;
-        state.next.voice_processing_enabled = stereo_saved_voice_processing_enabled_;
-        state.next.voice_processing_bypassed = stereo_saved_voice_processing_bypassed_;
+        if (restore_voice_processing && stereo_voice_processing_override_active_) {
+          *restore_voice_processing = true;
+          state.next.voice_processing_enabled = stereo_saved_voice_processing_enabled_;
+          state.next.voice_processing_bypassed = stereo_saved_voice_processing_bypassed_;
+          state.next.voice_processing_agc_enabled = stereo_saved_voice_processing_agc_enabled_;
 #if !TARGET_OS_SIMULATOR
-        if (inputNode().voiceProcessingEnabled != state.next.voice_processing_enabled) {
-          NSError* vp_error = nil;
-          BOOL set_vp = [inputNode() setVoiceProcessingEnabled:state.next.voice_processing_enabled
-                                                        error:&vp_error];
+          if (inputNode().voiceProcessingEnabled != state.next.voice_processing_enabled) {
+            NSError* vp_error = nil;
+            BOOL set_vp = [inputNode() setVoiceProcessingEnabled:state.next.voice_processing_enabled
+                                                          error:&vp_error];
           if (!set_vp) {
             LOGE() << "Failed to restore voice processing: "
                    << (vp_error ? vp_error.localizedDescription.UTF8String : "unknown");
@@ -2149,9 +2177,13 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate state,
                   sampleRate:output_node_format.sampleRate
                     channels:requested_channels
                  interleaved:output_node_format.interleaved];
+    LOGI() << "Engine output format sampleRate=" << engine_output_format.sampleRate
+           << ", channels=" << engine_output_format.channelCount
+           << ", interleaved=" << (engine_output_format.interleaved ? "YES" : "NO");
 
     audio_device_buffer_->SetPlayoutSampleRate(engine_output_format.sampleRate);
     audio_device_buffer_->SetPlayoutChannels(engine_output_format.channelCount);
+    playout_parameters_.reset(engine_output_format.sampleRate, engine_output_format.channelCount);
     RTC_DCHECK(audio_device_buffer_ != nullptr);
     fine_audio_buffer_.reset(new FineAudioBuffer(audio_device_buffer_.get()));
 
@@ -2160,6 +2192,9 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate state,
                                          sampleRate:engine_output_format.sampleRate
                                            channels:requested_channels
                                         interleaved:YES];
+    LOGI() << "RTC output format sampleRate=" << rtc_output_format.sampleRate
+           << ", channels=" << rtc_output_format.channelCount
+           << ", interleaved=" << (rtc_output_format.interleaved ? "YES" : "NO");
 
     AVAudioSourceNodeRenderBlock source_block =
         ^OSStatus(BOOL* isSilence, const AudioTimeStamp* timestamp, AVAudioFrameCount frameCount,
@@ -2276,6 +2311,7 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate state,
 
     audio_device_buffer_->SetRecordingSampleRate(rtc_input_format.sampleRate);
     audio_device_buffer_->SetRecordingChannels(rtc_input_format.channelCount);
+    record_parameters_.reset(rtc_input_format.sampleRate, rtc_input_format.channelCount);
     RTC_DCHECK(audio_device_buffer_ != nullptr);
     fine_audio_buffer_.reset(new FineAudioBuffer(audio_device_buffer_.get()));
 

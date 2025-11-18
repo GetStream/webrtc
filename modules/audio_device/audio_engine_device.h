@@ -390,12 +390,13 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
     bool DidUpdateMuteMode() const { return prev.mute_mode != next.mute_mode; }
 
     bool IsEngineRestartRequired() const {
-      return DidUpdateAudioGraph() || DidUpdateOutputChannels() ||
+      return DidUpdateAudioGraph() ||
              // Voice processing enable state updates
              DidUpdateVoiceProcessingEnabled();
     }
 
     bool IsEngineRecreateRequired() const {
+      bool didUpdateOutputChannels = DidUpdateOutputChannels();
       // Device id specified
       bool device = DidUpdateOutputDevice() || DidUpdateInputDevice();
 
@@ -408,7 +409,7 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
       bool special_case = (prev.IsOutputEnabled() && next.IsOutputEnabled()) &&
                           (prev.IsInputEnabled() && !next.IsInputEnabled());
 
-      return device || default_device || special_case;
+      return didUpdateOutputChannels || device || default_device || special_case;
     }
 
     bool DidEnableManualRenderingMode() const {
@@ -457,6 +458,7 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
   bool stereo_voice_processing_override_active_ = false;
   bool stereo_saved_voice_processing_enabled_ = true;
   bool stereo_saved_voice_processing_bypassed_ = false;
+  bool stereo_saved_voice_processing_agc_enabled_ = true;
   bool manual_restore_voice_processing_on_mono_ = false;
 
   void StartRenderLoop();

@@ -49,16 +49,6 @@ typedef struct {
   RTC_OBJC_TYPE(RTCAudioEngineMuteMode) muteMode;
 } RTC_OBJC_TYPE(RTCAudioEngineState);
 
-typedef NS_ENUM(NSInteger, RTC_OBJC_TYPE(RTCAudioDeviceModuleObservableProperty)) {
-  RTC_OBJC_TYPE(RTCAudioDeviceModuleObservablePropertyMicrophoneMuted),
-  RTC_OBJC_TYPE(RTCAudioDeviceModuleObservablePropertyRecordingAlwaysPreparedMode),
-  RTC_OBJC_TYPE(RTCAudioDeviceModuleObservablePropertyManualRenderingMode),
-  RTC_OBJC_TYPE(RTCAudioDeviceModuleObservablePropertyVoiceProcessingEnabled),
-  RTC_OBJC_TYPE(RTCAudioDeviceModuleObservablePropertyVoiceProcessingBypassed),
-  RTC_OBJC_TYPE(RTCAudioDeviceModuleObservablePropertyVoiceProcessingAGCEnabled),
-  RTC_OBJC_TYPE(RTCAudioDeviceModuleObservablePropertyStereoPlayoutEnabled)
-};
-
 RTC_EXTERN NSString *const RTC_CONSTANT_TYPE(RTCAudioEngineInputMixerNodeKey);
 
 @class RTC_OBJC_TYPE(RTCAudioDeviceModule);
@@ -135,11 +125,6 @@ RTC_OBJC_EXPORT @protocol RTC_OBJC_TYPE
     NS_SWIFT_NAME(audioDeviceModuleDidUpdateDevices(_:));
 
 @optional
-- (void)audioDeviceModule:(RTC_OBJC_TYPE(RTCAudioDeviceModule) *)audioDeviceModule
-    didChangeProperty:(RTC_OBJC_TYPE(RTCAudioDeviceModuleObservableProperty))property
-             newValue:(BOOL)newValue
-    NS_SWIFT_NAME(audioDeviceModule(_:didChangeProperty:newValue:));
-
 - (void)audioDeviceModule:(RTC_OBJC_TYPE(RTCAudioDeviceModule) *)audioDeviceModule
     didUpdateStereoPlayoutAvailability:(BOOL)isAvailable
     NS_SWIFT_NAME(audioDeviceModule(_:didUpdateStereoPlayoutAvailability:));
