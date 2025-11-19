@@ -650,20 +650,23 @@ int32_t AudioEngineDevice::StereoPlayoutIsAvailable(bool* available) const {
 }
 
 int32_t AudioEngineDevice::SetStereoPlayout(bool enable) {
-  LOGW() << "SetStereoPlayout: Not implemented, value:" << enable;
+  RTC_DCHECK_RUN_ON(thread_);
 
-  audio_device_buffer_->SetPlayoutChannels(1);
-
-  return 0;
+  return ModifyEngineState([enable](EngineState state) {
+    state.prefers_stereo_playout = enable;
+    return state;
+  });
 }
 
 int32_t AudioEngineDevice::StereoPlayout(bool* enabled) const {
-  LOGI() << "StereoPlayout";
+  bool stereo_playout_enabled = engine_state_.stereo_playout_enabled;
+  LOGI() << "StereoPlayout: " << stereo_playout_enabled;
+
   if (enabled == nullptr) {
     return -1;
   }
-
-  *enabled = false;
+  
+  *enabled = stereo_playout_enabled;
 
   return 0;
 }
