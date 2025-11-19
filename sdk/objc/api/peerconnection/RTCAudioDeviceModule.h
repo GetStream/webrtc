@@ -49,6 +49,13 @@ typedef struct {
   RTC_OBJC_TYPE(RTCAudioEngineMuteMode) muteMode;
 } RTC_OBJC_TYPE(RTCAudioEngineState);
 
+typedef struct { 
+  bool voiceProcessingEnabled; 
+  bool voiceProcessingBypassed; 
+  bool voiceProcessingAGCEnabled; 
+  bool stereoPlayoutEnabled; 
+} RTC_OBJC_TYPE(RTCAudioProcessingState);
+
 RTC_EXTERN NSString *const RTC_CONSTANT_TYPE(RTCAudioEngineInputMixerNodeKey);
 
 @class RTC_OBJC_TYPE(RTCAudioDeviceModule);
@@ -111,6 +118,10 @@ RTC_OBJC_EXPORT @protocol RTC_OBJC_TYPE
 
 - (void)audioDeviceModuleDidUpdateDevices:(RTC_OBJC_TYPE(RTCAudioDeviceModule) *)audioDeviceModule
     NS_SWIFT_NAME(audioDeviceModuleDidUpdateDevices(_:));
+
+- (void)audioDeviceModule:(RTCAudioDeviceModule *)module
+    didUpdateAudioProcessingState:(RTCAudioProcessingState)state 
+    NS_SWIFT_NAME(audioDeviceModule(_:didUpdateAudioProcessingState:));
 
 @end
 
@@ -184,6 +195,14 @@ RTC_OBJC_EXPORT
 /// Indicates whether Automatic Gain Control (AGC) is enabled. Requires Voice-Processing I/O to be
 /// enabled. Enabled by default when VPIO is enabled.
 @property(nonatomic, assign, getter=isVoiceProcessingAGCEnabled) BOOL voiceProcessingAGCEnabled;
+
+/// Stereo Playout properties
+@property(nonatomic, readonly, assign, getter=isStereoPlayoutAvailable) BOOL stereoPlayoutAvailable;
+@property(nonatomic, readonly, assign, getter=isStereoPlayoutEnabled) BOOL stereoPlayoutEnabled;
+@property(nonatomic, assign) BOOL prefersStereoPlayout;
+@property(nonatomic, readonly, assign, getter=isManualRestoreVoiceProcessingOnMono) BOOL manualRestoreVoiceProcessingOnMono;
+- (void)setManualRestoreVoiceProcessingOnMono:(BOOL)enabled;
+- (void)refreshStereoPlayoutState;
 
 @end
 

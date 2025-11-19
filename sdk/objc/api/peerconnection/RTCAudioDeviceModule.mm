@@ -116,6 +116,16 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
                                 context:context];
   }
 
+  void OnAudioProcessingStateChanged(const webrtc::AudioProcessingState& state) override {
+    if (delegate_ == nil) return;
+    RTCAudioProcessingState objcState;
+    objcState.voiceProcessingEnabled = state.voice_processing_enabled ? YES : NO;
+    objcState.voiceProcessingBypassed = state.voice_processing_bypassed ? YES : NO;
+    objcState.voiceProcessingAGCEnabled = state.voice_processing_agc_enabled ? YES : NO;
+    objcState.stereoPlayoutEnabled = state.stereo_playout_enabled ? YES : NO;
+    [delegate_ audioDeviceModule:adm_ didUpdateAudioProcessingState:objcState];
+  }
+
   __weak id<RTC_OBJC_TYPE(RTCAudioDeviceModuleDelegate)> delegate_;
 
  private:
@@ -523,6 +533,61 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 
   _workerThread->BlockingCall(
       [module, enabled] { return module->SetVoiceProcessingAGCEnabled(enabled) == 0; });
+}
+
+- (BOOL)isStereoPlayoutAvailable {
+  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
+  if (module == nullptr) return NO;
+
+  return _workerThread->BlockingCall([module] {
+    bool value = false;
+    return module->StereoPlayoutIsAvailable(&value) == 0 ? value : NO;
+  });
+}
+
+- (BOOL)isStereoPlayoutEnabled {
+  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
+  if (module == nullptr) return NO;
+
+  return _workerThread->BlockingCall([module] {
+    bool value = false;
+    return module->StereoPlayout(&value) == 0 ? value : NO;
+  });
+}
+
+- (BOOL)prefersStereoPlayout {
+  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
+  if (module == nullptr) return NO;
+
+  return _workerThread->BlockingCall([module] {
+    webrtc::AudioEngineDevice::EngineState state;
+    if (module->GetEngineState(&state) != 0) {
+      return false;
+    }
+    return state.prefers_stereo_playout;
+  });
+}
+
+- (void)setPrefersStereoPlayout:(BOOL)enabled {
+  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
+  if (module == nullptr) return;
+
+  _workerThread->BlockingCall([module, enabled] { module->SetStereoPlayout(enabled); });
+}
+
+- (void)setManualRestoreVoiceProcessingOnMono:(BOOL)enabled {
+  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
+  if (module == nullptr) return;
+
+  _workerThread->BlockingCall(
+      [module, enabled] { module->SetManualRestoreVoiceProcessingOnMono(enabled); });
+}
+
+- (void)refreshStereoPlayoutState {
+  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
+  if (module == nullptr) return;
+
+  _workerThread->BlockingCall([module] { module->RefreshStereoPlayoutState(); });
 }
 
 #pragma mark - Private

@@ -209,6 +209,13 @@ class AudioDeviceModuleForTest : public AudioDeviceModule {
   virtual int SetRecordingSampleRate(uint32_t sample_rate) = 0;
 };
 
+struct AudioProcessingState {
+  bool voice_processing_enabled = false;
+  bool voice_processing_bypassed = false;
+  bool voice_processing_agc_enabled = false;
+  bool stereo_playout_enabled = false;
+};
+
 class AudioDeviceObserver {
  public:
   virtual ~AudioDeviceObserver() = default;
@@ -257,6 +264,9 @@ class AudioDeviceObserver {
                                             NSDictionary* context) {
     return 0;
   }
+
+  virtual void OnAudioProcessingStateChanged(const AudioProcessingState& state) {}
+
 };
 
 }  // namespace webrtc

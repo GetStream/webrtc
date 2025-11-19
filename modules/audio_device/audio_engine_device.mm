@@ -728,8 +728,8 @@ int32_t AudioEngineDevice::ResolveStereoPlayoutAvailability(const EngineState& s
 
   LOGI() << "ResolveStereoPlayoutAvailability {"
          << "currentRoute: "<< (route_description ? route_description.UTF8String : "unknown")
-         << "mode: " << (mode ? mode.UTF8String : "unknown")
-         << "channelCount: " << channel_count
+         << ", mode: " << (mode ? mode.UTF8String : "unknown")
+         << ", channelCount: " << channel_count
          << " }";
 
   *available = true;
@@ -759,8 +759,8 @@ void AudioEngineDevice::SetManualRestoreVoiceProcessingOnMono(bool manual_restor
 
 void AudioEngineDevice::UpdateVoiceProcessingForStereoState(const EngineState& prev,
                                                             EngineState& next) {
-  const bool enabling_stereo = !prev.stereo_playout_enabled && next.stereo_playout_available;
-  const bool disabling_stereo = prev.stereo_playout_enabled && !next.stereo_playout_available;
+  const bool enabling_stereo = !prev.stereo_playout_enabled && next.stereo_playout_enabled;
+  const bool disabling_stereo = prev.stereo_playout_enabled && !next.stereo_playout_enabled;
 
   if (enabling_stereo) {
     if (!stereo_voice_processing_override_active_) {
@@ -1543,6 +1543,19 @@ int32_t AudioEngineDevice::ModifyEngineState(
         LOGE() << "ModifyEngineState: Buffer should not be recording when input is disabled";
       }
     }
+    
+    AudioProcessingState proc_state;
+    proc_state.voice_processing_enabled = new_state.voice_processing_enabled;
+    proc_state.voice_processing_bypassed = new_state.voice_processing_bypassed;
+    proc_state.voice_processing_agc_enabled = new_state.voice_processing_agc_enabled;
+    proc_state.stereo_playout_enabled = new_state.stereo_playout_enabled;
+
+    if (observer_ && (state.prev.voice_processing_enabled != new_state.voice_processing_enabled ||
+                      state.prev.voice_processing_bypassed != new_state.voice_processing_bypassed ||
+                      state.prev.voice_processing_agc_enabled != new_state.voice_processing_agc_enabled ||
+                      state.prev.stereo_playout_enabled != new_state.stereo_playout_enabled)) {
+      observer_->OnAudioProcessingStateChanged(proc_state);
+    }
 
     // Update engine state if no error
     engine_state_ = new_state;
@@ -1925,11 +1938,6 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate state) {
   }
 
   // --------------------------------------------------------------------------------------------
-  // Step: Configure Voice-Processing I/O
-  //
-  ConfigureVoiceProcessingNode(inputNode(), state);
-
-  // --------------------------------------------------------------------------------------------
   // Step: Enable output
   //
   if (state.next.IsOutputEnabled() &&
@@ -2043,7 +2051,6 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate state) {
     
     LOGI() << "Updating VoiceProcessing state from the updated output configuration...";
     UpdateVoiceProcessingForStereoState(state.prev, state.next);
-    ConfigureVoiceProcessingNode(inputNode(), state);
 
     if (this->observer_ != nullptr) {
       NSDictionary* context = @{};
@@ -2075,6 +2082,11 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate state) {
       source_node_ = nil;
     }
   }
+
+  // --------------------------------------------------------------------------------------------
+  // Step: Configure Voice-Processing I/O
+  //
+  ConfigureVoiceProcessingNode(inputNode(), state);
 
   // --------------------------------------------------------------------------------------------
   // Step: Enable input

@@ -345,6 +345,7 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
   int32_t InitAndStartRecording();
 
   // Stereo Playout helpers
+  bool ManualRestoreVoiceProcessingOnMono() const;
   void SetManualRestoreVoiceProcessingOnMono(bool manual_restore);
   void RefreshStereoPlayoutState();
 
@@ -445,7 +446,6 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
 
   // Stereo Playout helpers
   int32_t ResolveStereoPlayoutAvailability(const EngineState& state, bool* available) const;
-  bool ManualRestoreVoiceProcessingOnMono() const;
   void UpdateVoiceProcessingForStereoState(const EngineState& prev, EngineState& next);
 
   bool stereo_voice_processing_override_active_ = false;
