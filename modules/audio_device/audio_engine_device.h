@@ -144,6 +144,7 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
     uint32_t default_input_device_update_count = 0;
 
     bool prefers_stereo_playout = false;
+    bool stereo_playout_available = false;
     bool stereo_playout_enabled = false;
 
     bool operator==(const EngineState& rhs) const {
@@ -161,6 +162,7 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
              default_output_device_update_count == rhs.default_output_device_update_count &&
              default_input_device_update_count == rhs.default_input_device_update_count &&
              prefers_stereo_playout == rhs.prefers_stereo_playout &&
+             stereo_playout_available == rhs.stereo_playout_available &&
              stereo_playout_enabled == rhs.stereo_playout_enabled;
     }
 
@@ -212,7 +214,11 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
 #endif
     }
 
-    uint32_t DesiredOutputChannels() const { return prefers_stereo_playout ? 2u : 1u; }
+    uint32_t DesiredOutputChannels() const { 
+      return prefers_stereo_playout && stereo_playout_available 
+      ? 2u 
+      : 1u; 
+    }
   };
 
   explicit AudioEngineDevice(bool voice_processing_bypassed);
@@ -338,6 +344,10 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
 
   int32_t InitAndStartRecording();
 
+  // Stereo Playout helpers
+  void SetManualRestoreVoiceProcessingOnMono(bool manual_restore);
+  void RefreshStereoPlayoutState();
+
  private:
   struct EngineStateUpdate {
     EngineState prev;
@@ -403,7 +413,11 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
       bool special_case = (prev.IsOutputEnabled() && next.IsOutputEnabled()) &&
                           (prev.IsInputEnabled() && !next.IsInputEnabled());
 
-      return device || default_device || special_case;
+      // When stereo output channels preference changes or stereo playout becomes
+      // unavailable/available.
+      bool output_channels = DidUpdateDesiredOutputChannels();
+
+      return device || default_device || special_case || output_channels;
     }
 
     bool DidEnableManualRenderingMode() const {
@@ -431,6 +445,14 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
 
   // Stereo Playout helpers
   int32_t ResolveStereoPlayoutAvailability(const EngineState& state, bool* available) const;
+  bool ManualRestoreVoiceProcessingOnMono() const;
+  void UpdateVoiceProcessingForStereoState(const EngineState& prev, EngineState& next);
+
+  bool stereo_voice_processing_override_active_ = false;
+  bool stereo_saved_voice_processing_enabled_ = true;
+  bool stereo_saved_voice_processing_bypassed_ = false;
+  bool stereo_saved_voice_processing_agc_enabled_ = true;
+  bool manual_restore_voice_processing_on_mono_ = false;
 
 // Device related
 #if TARGET_OS_OSX
@@ -455,6 +477,9 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
 
   void StartRenderLoop();
   AVAudioEngineManualRenderingBlock render_block_;
+
+  void ConfigureVoiceProcessingNode(AVAudioInputNode* input_node,
+                                    const EngineStateUpdate& state);
 
   // Thread that this object is created on.
   webrtc::Thread* thread_;
