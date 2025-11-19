@@ -683,6 +683,12 @@ int32_t AudioEngineDevice::ResolveStereoPlayoutAvailability(const EngineState& s
 
   *available = false;
 
+  if (state.input_running && !state.input_muted) {
+    LOGI() << "ResolveStereoPlayoutAvailability: Stereo support isn't available while input is running and not muted.";
+    *available = false;
+    return 0;
+  }
+
   if (state.render_mode == RenderMode::Manual) {
     LOGI() << "ResolveStereoPlayoutAvailability: Manual rendering mode does not support stereo.";
     *available = false;
