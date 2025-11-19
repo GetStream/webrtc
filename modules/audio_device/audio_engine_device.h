@@ -215,7 +215,7 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
     }
 
     uint32_t DesiredOutputChannels() const { 
-      return prefers_stereo_playout && stereo_playout_available 
+      return prefers_stereo_playout && stereo_playout_available && input_muted
       ? 2u 
       : 1u; 
     }
@@ -438,15 +438,15 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
 
   bool IsMicrophonePermissionGranted();
   int32_t ModifyEngineState(std::function<EngineState(EngineState)> state_transform);
-  int32_t ApplyDeviceEngineState(EngineStateUpdate state);
-  int32_t ApplyManualEngineState(EngineStateUpdate state);
+  int32_t ApplyDeviceEngineState(EngineStateUpdate& state);
+  int32_t ApplyManualEngineState(EngineStateUpdate& state);
 
   // AudioEngine observer methods. May be called from any thread.
   void ReconfigureEngine();
 
   // Stereo Playout helpers
   int32_t ResolveStereoPlayoutAvailability(const EngineState& state, bool* available) const;
-  void UpdateVoiceProcessingForStereoState(const EngineState& prev, EngineState& next);
+  void UpdateVoiceProcessingForStereoState(EngineStateUpdate& state);
 
   bool stereo_voice_processing_override_active_ = false;
   bool stereo_saved_voice_processing_enabled_ = true;
@@ -474,12 +474,18 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
 #endif
 
   void DebugAudioEngine();
+  void DebugEngineState(EngineState state);
 
   void StartRenderLoop();
   AVAudioEngineManualRenderingBlock render_block_;
 
   void ConfigureVoiceProcessingNode(AVAudioInputNode* input_node,
-                                    const EngineStateUpdate& state);
+                                    EngineStateUpdate state);
+
+  void ConfigureMutedSpeechActivityEventListener(AVAudioInputNode* input_node, 
+                                                 EngineStateUpdate state);
+
+  void NotifyProcessingStateObserver(EngineStateUpdate state);
 
   // Thread that this object is created on.
   webrtc::Thread* thread_;

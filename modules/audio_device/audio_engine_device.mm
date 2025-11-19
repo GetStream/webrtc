@@ -683,12 +683,6 @@ int32_t AudioEngineDevice::ResolveStereoPlayoutAvailability(const EngineState& s
 
   *available = false;
 
-  if (state.input_running && !state.input_muted) {
-    LOGI() << "ResolveStereoPlayoutAvailability: Stereo support isn't available while input is running and not muted.";
-    *available = false;
-    return 0;
-  }
-
   if (state.render_mode == RenderMode::Manual) {
     LOGI() << "ResolveStereoPlayoutAvailability: Manual rendering mode does not support stereo.";
     *available = false;
@@ -763,31 +757,30 @@ void AudioEngineDevice::SetManualRestoreVoiceProcessingOnMono(bool manual_restor
   ModifyEngineState([](EngineState state) { return state; });
 }
 
-void AudioEngineDevice::UpdateVoiceProcessingForStereoState(const EngineState& prev,
-                                                            EngineState& next) {
-  const bool enabling_stereo = !prev.stereo_playout_enabled && next.stereo_playout_enabled;
-  const bool disabling_stereo = prev.stereo_playout_enabled && !next.stereo_playout_enabled;
+void AudioEngineDevice::UpdateVoiceProcessingForStereoState(EngineStateUpdate& state) {
+  const bool enabling_stereo = !state.prev.stereo_playout_enabled && state.next.stereo_playout_enabled;
+  const bool disabling_stereo = state.prev.stereo_playout_enabled && !state.next.stereo_playout_enabled;
 
   if (enabling_stereo) {
     if (!stereo_voice_processing_override_active_) {
       stereo_voice_processing_override_active_ = true;
-      stereo_saved_voice_processing_enabled_ = prev.voice_processing_enabled;
-      stereo_saved_voice_processing_bypassed_ = prev.voice_processing_bypassed;
-      stereo_saved_voice_processing_agc_enabled_ = prev.voice_processing_agc_enabled;
+      stereo_saved_voice_processing_enabled_ = state.prev.voice_processing_enabled;
+      stereo_saved_voice_processing_bypassed_ = state.prev.voice_processing_bypassed;
+      stereo_saved_voice_processing_agc_enabled_ = state.prev.voice_processing_agc_enabled;
     }
 
     // Force VP/AGC into the disabled state required for stereo
-    next.voice_processing_enabled = false;
-    next.voice_processing_bypassed = true;
-    next.voice_processing_agc_enabled = false;
+    state.next.voice_processing_enabled = false;
+    state.next.voice_processing_bypassed = true;
+    state.next.voice_processing_agc_enabled = false;
     return;
   }
 
   if (disabling_stereo && stereo_voice_processing_override_active_) {
     if (!manual_restore_voice_processing_on_mono_) {
-      next.voice_processing_enabled = stereo_saved_voice_processing_enabled_;
-      next.voice_processing_bypassed = stereo_saved_voice_processing_bypassed_;
-      next.voice_processing_agc_enabled = stereo_saved_voice_processing_agc_enabled_;
+      state.next.voice_processing_enabled = stereo_saved_voice_processing_enabled_;
+      state.next.voice_processing_bypassed = stereo_saved_voice_processing_bypassed_;
+      state.next.voice_processing_agc_enabled = stereo_saved_voice_processing_agc_enabled_;
       stereo_voice_processing_override_active_ = false;
     }
     // If manual_restore_voice_processing_on_mono_ is true, we leave the saved values
@@ -1443,7 +1436,7 @@ bool AudioEngineDevice::IsMicrophonePermissionGranted() {
 int32_t AudioEngineDevice::ModifyEngineState(
     std::function<EngineState(EngineState)> state_transform) {
   RTC_DCHECK_RUN_ON(thread_);
-
+  
   EngineState old_state = engine_state_;
   EngineState new_state = state_transform(old_state);
   EngineStateUpdate state = {old_state, new_state};
@@ -1459,17 +1452,18 @@ int32_t AudioEngineDevice::ModifyEngineState(
 
   // No changes, return immediately.
   if (state.HasNoChanges()) {
+    LOGI() << "ModifyEngineState: No changes";
     return 0;
   }
 
   // Check input should be enabled if running.
-  if (new_state.input_running && !new_state.input_enabled) {
+  if (state.next.input_running && !state.next.input_enabled) {
     LOGE() << "ModifyEngineState: Input must be enabled if running";
     return -1;
   }
 
   // Check output should be enabled if running.
-  if (new_state.output_running && !new_state.output_enabled) {
+  if (state.next.output_running && !state.next.output_enabled) {
     LOGE() << "ModifyEngineState: Output must be enabled if running";
     return -1;
   }
@@ -1506,13 +1500,13 @@ int32_t AudioEngineDevice::ModifyEngineState(
     if (startup_result != 0) {
       LOGE() << "ModifyEngineState: Failed to start device mode, error: " << startup_result;
     }
-  } else if (new_state.render_mode == RenderMode::Device) {
+  } else if (state.next.render_mode == RenderMode::Device) {
     shutdown_result = ApplyDeviceEngineState(state);
     if (shutdown_result != 0) {
       LOGE() << "ModifyEngineState: Failed to update state in device mode, error: "
              << shutdown_result;
     }
-  } else if (new_state.render_mode == RenderMode::Manual) {
+  } else if (state.next.render_mode == RenderMode::Manual) {
     startup_result = ApplyManualEngineState(state);
     if (startup_result != 0) {
       LOGE() << "ModifyEngineState: Failed to update state in manual mode, error: "
@@ -1525,7 +1519,7 @@ int32_t AudioEngineDevice::ModifyEngineState(
   // Additional checks for buffer state.
   if (return_result == 0) {
     // Buffer should be playing if output is running.
-    if (new_state.IsOutputEnabled()) {
+    if (state.next.IsOutputEnabled()) {
       RTC_DCHECK(audio_device_buffer_->IsPlaying());
       if (!audio_device_buffer_->IsPlaying()) {
         LOGE() << "ModifyEngineState: Buffer should be playing when output is enabled";
@@ -1538,7 +1532,7 @@ int32_t AudioEngineDevice::ModifyEngineState(
     }
 
     // Buffer should be recording if input is running.
-    if (new_state.IsInputEnabled()) {
+    if (state.next.IsInputEnabled()) {
       RTC_DCHECK(audio_device_buffer_->IsRecording());
       if (!audio_device_buffer_->IsRecording()) {
         LOGE() << "ModifyEngineState: Buffer should be recording when input is enabled";
@@ -1549,28 +1543,40 @@ int32_t AudioEngineDevice::ModifyEngineState(
         LOGE() << "ModifyEngineState: Buffer should not be recording when input is disabled";
       }
     }
+
+    // Notify observer of processing state changes if any
+    NotifyProcessingStateObserver(state);
     
-    AudioProcessingState proc_state;
-    proc_state.voice_processing_enabled = new_state.voice_processing_enabled;
-    proc_state.voice_processing_bypassed = new_state.voice_processing_bypassed;
-    proc_state.voice_processing_agc_enabled = new_state.voice_processing_agc_enabled;
-    proc_state.stereo_playout_enabled = new_state.stereo_playout_enabled;
-
-    if (observer_ && (state.prev.voice_processing_enabled != new_state.voice_processing_enabled ||
-                      state.prev.voice_processing_bypassed != new_state.voice_processing_bypassed ||
-                      state.prev.voice_processing_agc_enabled != new_state.voice_processing_agc_enabled ||
-                      state.prev.stereo_playout_enabled != new_state.stereo_playout_enabled)) {
-      observer_->OnAudioProcessingStateChanged(proc_state);
-    }
-
     // Update engine state if no error
-    engine_state_ = new_state;
+    engine_state_ = state.next;
+    LOGI() << "ModifyEngineState: "
+           << (state.IsEngineRecreateRequired() ? "Recreated" : state.IsEngineRestartRequired() ? "Restarted" : "Updated");
+    DebugEngineState(state.next);
   }
 
   return return_result;
 }
 
-int32_t AudioEngineDevice::ApplyManualEngineState(EngineStateUpdate state) {
+void AudioEngineDevice::NotifyProcessingStateObserver(EngineStateUpdate state) {
+  RTC_DCHECK_RUN_ON(thread_);
+
+  AudioProcessingState proc_state;
+  proc_state.voice_processing_enabled = state.next.voice_processing_enabled;
+  proc_state.voice_processing_bypassed = state.next.voice_processing_bypassed;
+  proc_state.voice_processing_agc_enabled = state.next.voice_processing_agc_enabled;
+  proc_state.stereo_playout_enabled = state.next.stereo_playout_enabled;
+
+  bool processing_state_updated = state.prev.voice_processing_enabled !=  state.next.voice_processing_enabled ||
+                    state.prev.voice_processing_bypassed != state.next.voice_processing_bypassed ||
+                    state.prev.voice_processing_agc_enabled != state.next.voice_processing_agc_enabled ||
+                    state.prev.stereo_playout_enabled != state.next.stereo_playout_enabled;
+
+  if (observer_ && processing_state_updated) {
+    observer_->OnAudioProcessingStateChanged(proc_state);
+  }
+}
+
+int32_t AudioEngineDevice::ApplyManualEngineState(EngineStateUpdate& state) {
   RTC_DCHECK_RUN_ON(thread_);
   RTC_DCHECK(engine_device_ == nullptr);
 
@@ -1683,7 +1689,7 @@ int32_t AudioEngineDevice::ApplyManualEngineState(EngineStateUpdate state) {
     audio_device_buffer_->SetPlayoutChannels(manual_render_rtc_format_.channelCount);
     fine_audio_buffer_.reset(new FineAudioBuffer(audio_device_buffer_.get()));
 
-    UpdateVoiceProcessingForStereoState(state.prev, state.next);
+    UpdateVoiceProcessingForStereoState(state);
     ConfigureVoiceProcessingNode(engine_manual_input_.inputNode, state);
 
   } else if (state.prev.IsOutputEnabled() && !state.next.IsOutputEnabled()) {
@@ -1808,7 +1814,7 @@ int32_t AudioEngineDevice::ApplyManualEngineState(EngineStateUpdate state) {
   return 0;
 }
 
-int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate state) {
+int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
   RTC_DCHECK_RUN_ON(thread_);
   RTC_DCHECK(engine_manual_input_ == nullptr);
 
@@ -2054,9 +2060,8 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate state) {
     } else {
       LOGI() << "Mixer accepted channel count to " << mixer_format.channelCount;
     }
-    
-    LOGI() << "Updating VoiceProcessing state from the updated output configuration...";
-    UpdateVoiceProcessingForStereoState(state.prev, state.next);
+           
+    UpdateVoiceProcessingForStereoState(state);
 
     if (this->observer_ != nullptr) {
       NSDictionary* context = @{};
@@ -2297,7 +2302,7 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate state) {
   if (state.next.mute_mode == MuteMode::VoiceProcessing && state.next.IsInputEnabled() &&
       inputNode().voiceProcessingEnabled &&
       inputNode().voiceProcessingInputMuted != state.next.input_muted) {
-    LOGI() << "Update mute (voice processing) runtime update" << state.next.input_muted;
+    LOGI() << "Update mute (voice processing) runtime update: " << state.next.input_muted;
     inputNode().voiceProcessingInputMuted = state.next.input_muted;
   }
 
@@ -2309,7 +2314,7 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate state) {
     // Only update if the volume has changed.
     float mixer_volume = state.next.input_muted ? 0.0f : 1.0f;
     if (input_mixer_node_.outputVolume != mixer_volume) {
-      LOGI() << "Update mute (input mixer) runtime update" << state.next.input_muted;
+      LOGI() << "Update mute (input mixer) runtime update: " << state.next.input_muted;
       input_mixer_node_.outputVolume = mixer_volume;
     }
   }
@@ -2532,26 +2537,32 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate state) {
 // Private - EngineState
 
 void AudioEngineDevice::ConfigureVoiceProcessingNode(AVAudioInputNode* input_node,
-                                                     const EngineStateUpdate& state) {
+                                                     EngineStateUpdate state) {
   RTC_DCHECK_RUN_ON(thread_);
 
-  if (state.next.IsInputEnabled() &&
-      input_node.voiceProcessingEnabled != state.next.voice_processing_enabled) {
-#if TARGET_OS_SIMULATOR
-    LOGI() << "setVoiceProcessingEnabled (input): "
-           << (state.next.voice_processing_enabled ? "YES" : "NO") << " (Ignored on Simulator)";
-#else
-    LOGI() << "setVoiceProcessingEnabled (input): " << state.next.voice_processing_enabled ? "YES"
-                                                                                           : "NO";
-    NSError* error = nil;
-    BOOL set_vp_result = [input_node setVoiceProcessingEnabled:state.next.voice_processing_enabled
-                                                          error:&error];
-    if (!set_vp_result) {
-      NSLog(@"AudioEngineDevice setVoiceProcessingEnabled error: %@", error.localizedDescription);
-      RTC_DCHECK(set_vp_result);
-    }
-    LOGI() << "setVoiceProcessingEnabled (input) result: " << set_vp_result ? "YES" : "NO";
-#endif
+  const bool input_active =
+      state.prev.IsInputEnabled() || state.next.IsInputEnabled();
+  if (!input_active || input_node == nil) {
+    LOGW() << "ConfigureVoiceProcessingNode called with input disabled; skipping";
+    return;
+  }
+
+  if (state.next.IsInputEnabled() && input_node.voiceProcessingEnabled != state.next.voice_processing_enabled) {
+    #if TARGET_OS_SIMULATOR
+        LOGI() << "setVoiceProcessingEnabled (input): "
+              << (state.next.voice_processing_enabled ? "YES" : "NO") << " (Ignored on Simulator)";
+    #else
+        LOGI() << "setVoiceProcessingEnabled (input): " << state.next.voice_processing_enabled ? "YES"
+                                                                                              : "NO";
+        NSError* error = nil;
+        BOOL set_vp_result = [input_node setVoiceProcessingEnabled:state.next.voice_processing_enabled
+                                                              error:&error];
+        if (!set_vp_result) {
+          NSLog(@"AudioEngineDevice setVoiceProcessingEnabled error: %@", error.localizedDescription);
+          RTC_DCHECK(set_vp_result);
+        }
+        LOGI() << "setVoiceProcessingEnabled (input) result: " << set_vp_result ? "YES" : "NO";
+    #endif
 
     if (input_node.voiceProcessingEnabled) {
       // Always unmute vp if restart mute mode.
@@ -2561,33 +2572,61 @@ void AudioEngineDevice::ConfigureVoiceProcessingNode(AVAudioInputNode* input_nod
         input_node.voiceProcessingInputMuted = false;
       }
 
-      // Muted talker detection.
-      if (@available(iOS 17.0, macCatalyst 17.0, macOS 14.0, tvOS 17.0, visionOS 1.0, *)) {
-        auto listener_block = ^(AVAudioVoiceProcessingSpeechActivityEvent event) {
-          LOGI() << "AVAudioVoiceProcessingSpeechActivityEvent: " << event;
-          RTC_DCHECK(event == AVAudioVoiceProcessingSpeechActivityStarted ||
-                     event == AVAudioVoiceProcessingSpeechActivityEnded);
-          AudioDeviceModule::SpeechActivityEvent rtc_event =
-              (event == AVAudioVoiceProcessingSpeechActivityStarted
-                   ? AudioDeviceModule::SpeechActivityEvent::kStarted
-                   : AudioDeviceModule::SpeechActivityEvent::kEnded);
+      ConfigureMutedSpeechActivityEventListener(input_node, state);
+    }
+  } 
+}
 
-          thread_->PostTask(SafeTask(safety_, [this, rtc_event] {
-            RTC_DCHECK_RUN_ON(thread_);  // Silence warning.
-            if (this->observer_ != nullptr) {
-              this->observer_->OnSpeechActivityEvent(rtc_event);
-            }
-          }));
-        };
+void AudioEngineDevice::ConfigureMutedSpeechActivityEventListener(AVAudioInputNode* input_node, 
+                                                                  EngineStateUpdate state) {
+  RTC_DCHECK_RUN_ON(thread_);
+  const bool input_active =
+      state.prev.IsInputEnabled() || state.next.IsInputEnabled();
+  if (!input_active || input_node == nil) {
+    LOGW() << "ConfigureMutedSpeechActivityEventListener called with input disabled; skipping";
+    return;
+  }
 
-        BOOL set_listener_result = [input_node setMutedSpeechActivityEventListener:listener_block];
-        if (set_listener_result) {
-          LOGI() << "setMutedSpeechActivityEventListener success";
-        } else {
-          LOGW() << "setMutedSpeechActivityEventListener failed, ensure AVAudioSession.Mode is "
-                    "videoChat or voiceChat.";
-        }
+  if (@available(iOS 17.0, macCatalyst 17.0, macOS 14.0, tvOS 17.0, visionOS 1.0, *)) {
+    // Muted talker detection.
+    AVAudioSession* session = [AVAudioSession sharedInstance];
+    NSString* mode = session.mode;
+    static NSSet<NSString*>* const kMonoModes = [NSSet setWithArray:@[
+      AVAudioSessionModeVoiceChat,
+      AVAudioSessionModeVideoChat
+    ]];
+
+    if ([kMonoModes containsObject:mode]) {
+      LOGI() << "Setting muted speech activity listener for mode: " << mode.UTF8String;
+
+      auto listener_block = ^(AVAudioVoiceProcessingSpeechActivityEvent event) {
+        LOGI() << "AVAudioVoiceProcessingSpeechActivityEvent: " << event;
+        RTC_DCHECK(event == AVAudioVoiceProcessingSpeechActivityStarted ||
+                  event == AVAudioVoiceProcessingSpeechActivityEnded);
+        AudioDeviceModule::SpeechActivityEvent rtc_event =
+            (event == AVAudioVoiceProcessingSpeechActivityStarted
+                ? AudioDeviceModule::SpeechActivityEvent::kStarted
+                : AudioDeviceModule::SpeechActivityEvent::kEnded);
+
+        thread_->PostTask(SafeTask(safety_, [this, rtc_event] {
+          RTC_DCHECK_RUN_ON(thread_);  // Silence warning.
+          if (this->observer_ != nullptr) {
+            this->observer_->OnSpeechActivityEvent(rtc_event);
+          }
+        }));
+      };
+
+      BOOL set_listener_result = [input_node setMutedSpeechActivityEventListener:listener_block];
+      if (set_listener_result) {
+        LOGI() << "setMutedSpeechActivityEventListener: listener installed successfully";
+      } else {
+        LOGW() << "setMutedSpeechActivityEventListener failed, ensure AVAudioSession.Mode is videoChat or voiceChat.";
       }
+    } else {
+      BOOL set_listener_result = [input_node setMutedSpeechActivityEventListener:nil];
+      if (set_listener_result) {
+        LOGI() << "setMutedSpeechActivityEventListener: listener uninstalled successfully";
+      } 
     }
   }
 }
@@ -2695,6 +2734,28 @@ void AudioEngineDevice::UpdateAllDeviceIDs() {
 
 // ----------------------------------------------------------------------------------------------------
 // Private - Debug
+
+void AudioEngineDevice::DebugEngineState(EngineState state) {
+  RTC_DCHECK_RUN_ON(thread_);
+
+  LOGI() << "EngineState {"
+         << "IsOutputEnabled: " << state.IsOutputEnabled()
+         << ", IsInputEnabled: " << state.IsInputEnabled()
+         << ", AdvancedDucking: " << state.advanced_ducking
+         << ", DuckingLevel: " << state.ducking_level
+         << ", MuteMode: " << static_cast<int>(state.mute_mode)
+         << ", InputMuted: " << state.input_muted
+         << ", InputDeviceID: " << state.input_device_id
+         << ", OutputDeviceID: " << state.output_device_id
+         << ", VoiceProcessingEnabled: " << state.voice_processing_enabled
+         << ", VoiceProcessingBypassed: " << state.voice_processing_bypassed
+         << ", VoiceProcessingAGCEnabled: " << state.voice_processing_agc_enabled
+         << ", PrefersStereoPlayout: " << state.prefers_stereo_playout
+         << ", StereoPlayoutAvailable: " << state.stereo_playout_available
+         << ", StereoPlayoutEnabled: " << state.stereo_playout_enabled
+         << ", DesiredOutputChannels: " << state.DesiredOutputChannels()
+         << " }";
+}
 
 void AudioEngineDevice::DebugAudioEngine() {
   RTC_DCHECK_RUN_ON(thread_);
