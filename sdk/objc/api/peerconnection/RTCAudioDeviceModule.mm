@@ -48,14 +48,6 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
         didReceiveSpeechActivityEvent:ConvertSpeechActivityEvent(event)];
   }
 
-  void OnStereoUpdatedPlayoutAvailable(bool available) override {
-    [delegate_ audioDeviceModule:adm_ isStereoPlayoutAvailable:available ? YES : NO];
-  }
-
-  void OnStereoUpdatedPlayoutEnabled(bool enabled) override {
-    [delegate_ audioDeviceModule:adm_ isStereoPlayoutEnabled:enabled ? YES : NO];
-  }
-
   int32_t OnEngineDidCreate(AVAudioEngine *engine) override {
     if (delegate_ == nil) return 0;
     return [delegate_ audioDeviceModule:adm_ didCreateEngine:engine];
@@ -348,9 +340,7 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (NSInteger)setMicrophoneMuted:(BOOL)muted {
-  return _workerThread->BlockingCall([self, muted] { 
-    return _native->SetMicrophoneMute(muted); 
-  });
+  return _workerThread->BlockingCall([self, muted] { return _native->SetMicrophoneMute(muted); });
 }
 
 - (RTC_OBJC_TYPE(RTCAudioEngineState))engineState {
@@ -378,9 +368,6 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 
   _workerThread->BlockingCall([module, state] {
     webrtc::AudioEngineDevice::EngineState result;
-    if (module->GetEngineState(&result) != 0) {
-      result = webrtc::AudioEngineDevice::EngineState();
-    }
     result.output_enabled = state.outputEnabled;
     result.output_running = state.outputRunning;
     result.input_enabled = state.inputEnabled;
@@ -408,9 +395,8 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return -1;
 
-  return _workerThread->BlockingCall([module, enabled] { 
-    return module->SetInitRecordingPersistentMode(enabled); 
-  });
+  return _workerThread->BlockingCall(
+      [module, enabled] { return module->SetInitRecordingPersistentMode(enabled); });
 }
 
 - (BOOL)isManualRenderingMode {
@@ -427,9 +413,8 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return -1;
 
-  return _workerThread->BlockingCall([module, enabled] { 
-    return module->SetManualRenderingMode(enabled); 
-  });
+  return _workerThread->BlockingCall(
+      [module, enabled] { return module->SetManualRenderingMode(enabled); });
 }
 
 - (BOOL)isAdvancedDuckingEnabled {
@@ -500,9 +485,8 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return -1;
 
-  return _workerThread->BlockingCall([module, enabled] { 
-    return module->SetVoiceProcessingEnabled(enabled); 
-  });
+  return _workerThread->BlockingCall(
+      [module, enabled] { return module->SetVoiceProcessingEnabled(enabled); });
 }
 
 - (BOOL)isVoiceProcessingBypassed {
@@ -515,13 +499,12 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
   });
 }
 
-- (NSInteger)setVoiceProcessingBypassed:(BOOL)enabled {
+- (void)setVoiceProcessingBypassed:(BOOL)enabled {
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
-  if (module == nullptr) return -1;
+  if (module == nullptr) return;
 
-  return _workerThread->BlockingCall([module, enabled] { 
-    return module->SetVoiceProcessingBypassed(enabled); 
-  });
+  _workerThread->BlockingCall(
+      [module, enabled] { return module->SetVoiceProcessingBypassed(enabled) == 0; });
 }
 
 - (BOOL)isVoiceProcessingAGCEnabled {
@@ -534,66 +517,12 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
   });
 }
 
-- (NSInteger)setVoiceProcessingAGCEnabled:(BOOL)enabled {
-  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
-  if (module == nullptr) return -1;
-
-  return _workerThread->BlockingCall([module, enabled] { 
-    return module->SetVoiceProcessingAGCEnabled(enabled); 
-  });
-}
-
-- (BOOL)manualRestoreVoiceProcessingOnMono {
-  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
-  if (module == nullptr) return NO;
-
-  return _workerThread->BlockingCall([module] {
-    return module->ManualRestoreVoiceProcessingOnMono() ? YES : NO;
-  });
-}
-
-- (void)setManualRestoreVoiceProcessingOnMono:(BOOL)manualRestore {
+- (void)setVoiceProcessingAGCEnabled:(BOOL)enabled {
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return;
 
-  const bool value = manualRestore == YES;
-  _workerThread->BlockingCall([module, value] {
-    module->SetManualRestoreVoiceProcessingOnMono(value);
-  });
-}
-
-- (BOOL)isStereoPlayoutAvailable {
-  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
-  if (module == nullptr) return NO;
-
-  return _workerThread->BlockingCall([module] {
-    bool available = false;
-    return module->StereoPlayoutIsAvailable(&available) == 0 ? (available ? YES : NO) : NO;
-  });
-}
-
-- (BOOL)isStereoPlayoutEnabled {
-  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
-  if (module == nullptr) return NO;
-
-  return _workerThread->BlockingCall([module] {
-    bool enabled = false;
-    return module->StereoPlayout(&enabled) == 0 ? (enabled ? YES : NO) : NO;
-  });
-}
-
-- (NSInteger)setStereoPlayoutEnabled:(BOOL)enabled {
-  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
-  if (module == nullptr) return -1;
-
-  return _workerThread->BlockingCall([module, enabled] {
-    const bool stereo_enabled = enabled == YES;
-    int32_t result = module->SetStereoPlayout(stereo_enabled);
-    if (result != 0) {
-      RTCLogError(@"Failed to set stereo playout (%d)", result);
-    }
-    return result;
-  });
+  _workerThread->BlockingCall(
+      [module, enabled] { return module->SetVoiceProcessingAGCEnabled(enabled) == 0; });
 }
 
 #pragma mark - Private
