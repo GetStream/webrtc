@@ -418,6 +418,9 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
   // AudioEngine observer methods. May be called from any thread.
   void ReconfigureEngine();
 
+  // Stereo Playout helpers
+  int32_t ResolveStereoPlayoutAvailability(const EngineState& state, bool* available) const;
+
 // Device related
 #if TARGET_OS_OSX
   static OSStatus objectListenerProc(AudioObjectID objectId, UInt32 numberAddresses,

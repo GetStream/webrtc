@@ -644,14 +644,9 @@ int32_t AudioEngineDevice::MicrophoneMute(bool* enabled) const {
 // Stereo Playout
 
 int32_t AudioEngineDevice::StereoPlayoutIsAvailable(bool* available) const {
-  LOGI() << "StereoPlayoutIsAvailable";
-  if (available == nullptr) {
-    return -1;
-  }
+  RTC_DCHECK_RUN_ON(thread_);
 
-  *available = false;
-
-  return 0;
+  return ResolveStereoPlayoutAvailability(engine_state_, available);
 }
 
 int32_t AudioEngineDevice::SetStereoPlayout(bool enable) {
@@ -669,6 +664,71 @@ int32_t AudioEngineDevice::StereoPlayout(bool* enabled) const {
   }
 
   *enabled = false;
+
+  return 0;
+}
+
+int32_t AudioEngineDevice::ResolveStereoPlayoutAvailability(const EngineState& state,
+                                                            bool* available) const {
+  if (available == nullptr) {
+    return -1;
+  }
+
+  *available = false;
+
+  if (state.render_mode == RenderMode::Manual) {
+    LOGI() << "ResolveStereoPlayoutAvailability: Manual rendering mode does not support stereo.";
+    *available = false;
+    return 0;
+  }
+
+#if defined(WEBRTC_IOS)
+  AVAudioSession* session = [AVAudioSession sharedInstance];
+  NSString* mode = session.mode;
+  AVAudioSessionRouteDescription* current_route = session.currentRoute;
+  NSString* route_description = current_route.description;
+
+  LOGI() << "ResolveStereoPlayoutAvailability {"
+         << "currentRoute: "<< (route_description ? route_description.UTF8String : "unknown")
+         << "mode: " << (mode ? mode.UTF8String : "unknown")
+         << " }";
+
+  static NSSet<NSString*>* const kMonoModes = [NSSet setWithArray:@[
+    AVAudioSessionModeVoiceChat,
+    AVAudioSessionModeVideoChat,
+    AVAudioSessionModeGameChat
+  ]];
+
+  if ([kMonoModes containsObject:mode]) {
+    LOGI() << "ResolveStereoPlayoutAvailability: 0 (mode is mono)";
+    *available = false;
+    return 0;
+  }
+
+  NSInteger channel_count = session.outputNumberOfChannels;
+  if (channel_count < 2) {
+    AVAudioSessionRouteDescription* route = session.currentRoute;
+    for (AVAudioSessionPortDescription* port in route.outputs) {
+      channel_count = std::max(channel_count, (NSInteger)port.channels.count);
+    }
+  }
+
+  if (channel_count < 2) {
+    LOGI() << "ResolveStereoPlayoutAvailability: 0 (channel count is mono)";
+    *available = false;
+    return 0;
+  }
+
+  LOGI() << "ResolveStereoPlayoutAvailability {"
+         << "currentRoute: "<< (route_description ? route_description.UTF8String : "unknown")
+         << "mode: " << (mode ? mode.UTF8String : "unknown")
+         << "channelCount: " << channel_count
+         << " }";
+
+  *available = true;
+#else
+  *available = true;
+#endif
 
   return 0;
 }
