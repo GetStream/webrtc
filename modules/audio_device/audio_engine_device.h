@@ -347,8 +347,6 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
   int32_t InitAndStartRecording();
 
   // Stereo Playout helpers
-  bool ManualRestoreVoiceProcessingOnMono() const;
-  void SetManualRestoreVoiceProcessingOnMono(bool manual_restore);
   void RefreshStereoPlayoutState();
 
  private:
@@ -450,12 +448,6 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
   // Stereo Playout helpers
   int32_t ResolveStereoPlayoutAvailability(const EngineState& state, bool* available) const;
   void UpdateVoiceProcessingForStereoState(EngineStateUpdate& state);
-
-  bool stereo_voice_processing_override_active_ = false;
-  bool stereo_saved_voice_processing_enabled_ = true;
-  bool stereo_saved_voice_processing_bypassed_ = false;
-  bool stereo_saved_voice_processing_agc_enabled_ = true;
-  bool manual_restore_voice_processing_on_mono_ = false;
 
 // Device related
 #if TARGET_OS_OSX

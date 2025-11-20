@@ -672,6 +672,10 @@ int32_t AudioEngineDevice::SetStereoPlayout(bool enable) {
 
   return ModifyEngineState([enable](EngineState state) {
     state.prefers_stereo_playout = enable;
+    if (enable) {
+      state.voice_processing_enabled = false;
+      state.voice_processing_agc_enabled = false;
+    }
     return state;
   });
 }
@@ -754,88 +758,6 @@ int32_t AudioEngineDevice::ResolveStereoPlayoutAvailability(const EngineState& s
 #endif
 
   return 0;
-}
-
-bool AudioEngineDevice::ManualRestoreVoiceProcessingOnMono() const {
-  RTC_DCHECK_RUN_ON(thread_);
-  return manual_restore_voice_processing_on_mono_;
-}
-
-void AudioEngineDevice::SetManualRestoreVoiceProcessingOnMono(bool manual_restore) {
-  RTC_DCHECK_RUN_ON(thread_);
-  if (manual_restore_voice_processing_on_mono_ == manual_restore) {
-    return;
-  }
-
-  manual_restore_voice_processing_on_mono_ = manual_restore;
-
-  // Re-run the state machine so the VP override is applied or rolled back
-  ModifyEngineState([](EngineState state) { return state; });
-}
-
-void AudioEngineDevice::UpdateVoiceProcessingForStereoState(EngineStateUpdate& state) {
-  const bool didUpdateStereoPlayoutEnabled = 
-      state.prev.stereo_playout_enabled != state.next.stereo_playout_enabled;
-  const bool enabling_stereo = !state.prev.stereo_playout_enabled && state.next.stereo_playout_enabled;
-  const bool disabling_stereo = state.prev.stereo_playout_enabled && !state.next.stereo_playout_enabled;
-
-  LOGI() << "UpdateVoiceProcessingForStereoState: { "
-         << " didUpdateStereoPlayoutEnabled: " << didUpdateStereoPlayoutEnabled
-         << ", enabling_stereo: " << enabling_stereo
-         << ", disabling_stereo: " << disabling_stereo
-         << ", stereo_voice_processing_override_active_: " << stereo_voice_processing_override_active_
-         << ", manual_restore_voice_processing_on_mono_: " << manual_restore_voice_processing_on_mono_
-         << " }";
-
-  if (state.next.stereo_playout_enabled) {
-    if (!stereo_voice_processing_override_active_) {
-      stereo_voice_processing_override_active_ = true;
-      stereo_saved_voice_processing_enabled_ = state.prev.voice_processing_enabled;
-      stereo_saved_voice_processing_bypassed_ = state.prev.voice_processing_bypassed;
-      stereo_saved_voice_processing_agc_enabled_ = state.prev.voice_processing_agc_enabled;
-      LOGI() << "Saving VP state for stereo override: { "
-              << " voice_processing_enabled: " << stereo_saved_voice_processing_enabled_
-              << ", voice_processing_bypassed: " << stereo_saved_voice_processing_bypassed_
-              << ", voice_processing_agc_enabled: " << stereo_saved_voice_processing_agc_enabled_
-              << " }";
-    }
-
-    if (state.next.voice_processing_enabled || state.next.voice_processing_agc_enabled) {
-      // Force VP/AGC into the disabled state required for stereo
-      state.next.voice_processing_enabled = false;
-      state.next.voice_processing_bypassed = true;
-      state.next.voice_processing_agc_enabled = false;
-      LOGI() << "Disabling VP/AGC for stereo playback";
-    }
-  } else {
-    if (stereo_voice_processing_override_active_) {
-      state.next.voice_processing_enabled = stereo_saved_voice_processing_enabled_;
-      state.next.voice_processing_bypassed = stereo_saved_voice_processing_bypassed_;
-      state.next.voice_processing_agc_enabled = stereo_saved_voice_processing_agc_enabled_;
-      stereo_voice_processing_override_active_ = false;
-      
-      LOGI() << "Restoring VP state from stereo override: { "
-              << " voice_processing_enabled: " << stereo_saved_voice_processing_enabled_
-              << ", voice_processing_bypassed: " << stereo_saved_voice_processing_bypassed_
-              << ", voice_processing_agc_enabled: " << stereo_saved_voice_processing_agc_enabled_
-              << " }";
-    } else {
-      if (!state.next.voice_processing_enabled) {
-        // We recover VP from the default state
-        EngineState initial_state;
-        state.next.voice_processing_enabled = initial_state.voice_processing_enabled;
-        state.next.voice_processing_bypassed = initial_state.voice_processing_bypassed;
-        state.next.voice_processing_agc_enabled = initial_state.voice_processing_agc_enabled;
-        LOGI() << "Restoring VP state from default: { "
-                << " voice_processing_enabled: " << state.next.voice_processing_enabled
-                << ", voice_processing_bypassed: " << state.next.voice_processing_bypassed
-                << ", voice_processing_agc_enabled: " << state.next.voice_processing_agc_enabled
-                << " }";
-      }
-    }
-  }
-
-  DebugEngineState("UpdateVoiceProcessingForStereoState: Completed", state.next);
 }
 
 void AudioEngineDevice::RefreshStereoPlayoutState() {
@@ -1234,6 +1156,11 @@ int32_t AudioEngineDevice::SetVoiceProcessingEnabled(bool enable) {
   RTC_DCHECK_RUN_ON(thread_);
   LOGI() << "SetVoiceProcessingEnabled: " << enable;
 
+  if (enable && engine_state_.prefers_stereo_playout) {
+    LOGI() << "SetVoiceProcessingEnabled: Overriding to false due to stereo playout preference.";
+    enable = false;
+  }
+
   int32_t result = ModifyEngineState([enable](EngineState state) -> EngineState {
     state.voice_processing_enabled = enable;
     return state;
@@ -1283,6 +1210,11 @@ int32_t AudioEngineDevice::VoiceProcessingAGCEnabled(bool* enabled) {
 int32_t AudioEngineDevice::SetVoiceProcessingAGCEnabled(bool enable) {
   RTC_DCHECK_RUN_ON(thread_);
   LOGI() << "SetVoiceProcessingAGCEnabled: " << enable;
+
+  if (enable && engine_state_.prefers_stereo_playout) {
+    LOGI() << "SetVoiceProcessingAGCEnabled: Overriding to false due to stereo playout preference.";
+    enable = false;
+  }
 
   int32_t result = ModifyEngineState([enable](EngineState state) -> EngineState {
     state.voice_processing_agc_enabled = enable;
@@ -1496,14 +1428,6 @@ void AudioEngineDevice::ResetEngineState() {
     LOGE() << "ResetEngineState: failed to reset engine state, error: " << result;
     return;
   }
-
-  // Clear the stereo override bookkeeping; the current engine_state_ has already been
-  // updated by ModifyEngineState so we can seed our caches from it.
-  stereo_voice_processing_override_active_ = false;
-  stereo_saved_voice_processing_enabled_ = engine_state_.voice_processing_enabled;
-  stereo_saved_voice_processing_bypassed_ = engine_state_.voice_processing_bypassed;
-  stereo_saved_voice_processing_agc_enabled_ = engine_state_.voice_processing_agc_enabled;
-  manual_restore_voice_processing_on_mono_ = false;
 }
 
 int32_t AudioEngineDevice::ModifyEngineState(
@@ -1800,7 +1724,6 @@ int32_t AudioEngineDevice::ApplyManualEngineState(EngineStateUpdate& state) {
     audio_device_buffer_->SetPlayoutChannels(manual_render_rtc_format_.channelCount);
     fine_audio_buffer_.reset(new FineAudioBuffer(audio_device_buffer_.get()));
 
-    UpdateVoiceProcessingForStereoState(state);
     ConfigureVoiceProcessingNode(engine_manual_input_.inputNode, state);
 
   } else if (state.prev.IsOutputEnabled() && !state.next.IsOutputEnabled()) {
@@ -2061,6 +1984,13 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
   }
 
   // --------------------------------------------------------------------------------------------
+  // Step: Configure Voice-Processing I/O
+  //
+  // - Note: We configure input VP before output to avoid artifacts playout during configuration.
+  //
+  ConfigureVoiceProcessingNode(inputNode(), state);
+
+  // --------------------------------------------------------------------------------------------
   // Step: Enable output
   //
   if (state.next.IsOutputEnabled() &&
@@ -2200,12 +2130,6 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
       source_node_ = nil;
     }
   }
-
-  // --------------------------------------------------------------------------------------------
-  // Step: Configure Voice-Processing I/O
-  //
-  UpdateVoiceProcessingForStereoState(state);
-  ConfigureVoiceProcessingNode(inputNode(), state);
 
   // --------------------------------------------------------------------------------------------
   // Step: Enable input

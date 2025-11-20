@@ -579,14 +579,6 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
   _workerThread->BlockingCall([module, enabled] { module->SetStereoPlayout(enabled); });
 }
 
-- (void)setManualRestoreVoiceProcessingOnMono:(BOOL)enabled {
-  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
-  if (module == nullptr) return;
-
-  _workerThread->BlockingCall(
-      [module, enabled] { module->SetManualRestoreVoiceProcessingOnMono(enabled); });
-}
-
 - (void)refreshStereoPlayoutState {
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return;

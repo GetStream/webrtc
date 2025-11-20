@@ -200,9 +200,9 @@ RTC_OBJC_EXPORT
 /// Stereo Playout properties
 @property(nonatomic, readonly, assign, getter=isStereoPlayoutAvailable) BOOL stereoPlayoutAvailable;
 @property(nonatomic, readonly, assign, getter=isStereoPlayoutEnabled) BOOL stereoPlayoutEnabled;
+// By setting this to true, Voice Processing will be disabled and won't be able to toggle while
+// this is true.
 @property(nonatomic, assign) BOOL prefersStereoPlayout;
-@property(nonatomic, readonly, assign, getter=isManualRestoreVoiceProcessingOnMono) BOOL manualRestoreVoiceProcessingOnMono;
-- (void)setManualRestoreVoiceProcessingOnMono:(BOOL)enabled;
 - (void)refreshStereoPlayoutState;
 
 @end
