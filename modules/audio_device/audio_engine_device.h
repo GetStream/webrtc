@@ -19,6 +19,7 @@
 
 #include <atomic>
 #include <memory>
+#include <string>
 
 #include "api/scoped_refptr.h"
 #include "api/sequence_checker.h"
@@ -474,7 +475,7 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
 #endif
 
   void DebugAudioEngine();
-  void DebugEngineState(EngineState state);
+  void DebugEngineState(const std::string& prefix, EngineState state);
 
   void StartRenderLoop();
   AVAudioEngineManualRenderingBlock render_block_;

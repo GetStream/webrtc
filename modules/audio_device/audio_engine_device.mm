@@ -484,7 +484,9 @@ void AudioEngineDevice::OnValidRouteChange() {
   LOGI() << "OnValidRouteChange";
   RTC_DCHECK(thread_);
 
-  RefreshStereoPlayoutState();
+  thread_->PostTask(SafeTask(safety_, [this] {
+    this->RefreshStereoPlayoutState();
+  }));
 }
 
 void AudioEngineDevice::OnCanPlayOrRecordChange(bool can_play_or_record) {
@@ -1436,6 +1438,8 @@ bool AudioEngineDevice::IsMicrophonePermissionGranted() {
 int32_t AudioEngineDevice::ModifyEngineState(
     std::function<EngineState(EngineState)> state_transform) {
   RTC_DCHECK_RUN_ON(thread_);
+
+  LOGI() << "ModifyEngineState [Begin] --------------------------------";
   
   EngineState old_state = engine_state_;
   EngineState new_state = state_transform(old_state);
@@ -1467,21 +1471,53 @@ int32_t AudioEngineDevice::ModifyEngineState(
 
   UpdateVoiceProcessingForStereoState(state);
 
+  // --------------------------------------------------------------------------------------------
+  // Step: Debugging Output
+  //
+  LOGI() << "ModifyEngineState: Plan {"
+         << " HasNoChanges: " << state.HasNoChanges()
+         << ", DidEnableOutput: " << state.DidEnableOutput()
+         << ", DidEnableInput: " << state.DidEnableInput()
+         << ", DidDisableOutput: " << state.DidDisableOutput()
+         << ", DidDisableInput: " << state.DidDisableInput()
+         << ", DidAnyEnable: " << state.DidAnyEnable()
+         << ", DidAnyDisable: " << state.DidAnyDisable()
+         << ", DidBeginInterruption: " << state.DidBeginInterruption()
+         << ", DidEndInterruption: " << state.DidEndInterruption()
+         << ", DidUpdateAudioGraph: " << state.DidUpdateAudioGraph()
+         << ", DidUpdateVoiceProcessingEnabled: " << state.DidUpdateVoiceProcessingEnabled()
+         << ", DidUpdateOutputDevice: " << state.DidUpdateOutputDevice()
+         << ", DidUpdateInputDevice: " << state.DidUpdateInputDevice()
+         << ", DidUpdateDefaultOutputDevice: " << state.DidUpdateDefaultOutputDevice()
+         << ", DidUpdateDefaultInputDevice: " << state.DidUpdateDefaultInputDevice()
+         << ", DidUpdateMuteMode: " << state.DidUpdateMuteMode()
+         << ", IsEngineRestartRequired: " << state.IsEngineRestartRequired()
+         << ", IsEngineRecreateRequired: " << state.IsEngineRecreateRequired()
+         << ", DidEnableManualRenderingMode: " << state.DidEnableManualRenderingMode()
+         << ", DidEnableDeviceRenderingMode: " << state.DidEnableDeviceRenderingMode()
+         << ", DidUpdateDesiredOutputChannels: " << state.DidUpdateDesiredOutputChannels()
+         << " }";
+  DebugEngineState("ModifyEngineState: Old State", state.prev);
+  DebugEngineState("ModifyEngineState: Next State", state.next);
+
   // No changes, return immediately.
   if (state.HasNoChanges()) {
     LOGI() << "ModifyEngineState: No changes";
+    LOGI() << "ModifyEngineState [End] --------------------------------";
     return 0;
   }
 
   // Check input should be enabled if running.
   if (state.next.input_running && !state.next.input_enabled) {
     LOGE() << "ModifyEngineState: Input must be enabled if running";
+    LOGI() << "ModifyEngineState [End] --------------------------------";
     return -1;
   }
 
   // Check output should be enabled if running.
   if (state.next.output_running && !state.next.output_enabled) {
     LOGE() << "ModifyEngineState: Output must be enabled if running";
+    LOGI() << "ModifyEngineState [End] --------------------------------";
     return -1;
   }
 
@@ -1566,9 +1602,13 @@ int32_t AudioEngineDevice::ModifyEngineState(
     
     // Update engine state if no error
     engine_state_ = state.next;
-    LOGI() << "ModifyEngineState: "
-           << (state.IsEngineRecreateRequired() ? "Recreated" : state.IsEngineRestartRequired() ? "Restarted" : "Updated");
-    DebugEngineState(state.next);
+    const char* update_state =
+        state.IsEngineRecreateRequired()
+            ? "Recreated"
+            : (state.IsEngineRestartRequired() ? "Restarted" : "Updated");
+    std::string prefix = std::string("ModifyEngineState: ") + update_state;
+    DebugEngineState(prefix, state.next);
+    LOGI() << "ModifyEngineState [End] --------------------------------";
   }
 
   return return_result;
@@ -2825,12 +2865,20 @@ void AudioEngineDevice::UpdateAllDeviceIDs() {
 // ----------------------------------------------------------------------------------------------------
 // Private - Debug
 
-void AudioEngineDevice::DebugEngineState(EngineState state) {
+void AudioEngineDevice::DebugEngineState(const std::string& prefix,
+                                         EngineState state) {
   RTC_DCHECK_RUN_ON(thread_);
 
-  LOGI() << "EngineState {"
+  LOGI() << prefix << " {"
          << "IsOutputEnabled: " << state.IsOutputEnabled()
          << ", IsInputEnabled: " << state.IsInputEnabled()
+         << ", IsOutputInputLinked: " << state.IsOutputInputLinked()
+         << ", IsOutputRunning: " << state.IsOutputRunning()
+         << ", IsInputRunning: " << state.IsInputRunning()
+         << ", IsAnyEnabled: " << state.IsAnyEnabled()
+         << ", IsAnyRunning: " << state.IsAnyRunning()
+         << ", IsAllEnabled: " << state.IsAllEnabled()
+         << ", IsAllRunning: " << state.IsAllRunning()
          << ", AdvancedDucking: " << state.advanced_ducking
          << ", DuckingLevel: " << state.ducking_level
          << ", MuteMode: " << static_cast<int>(state.mute_mode)
