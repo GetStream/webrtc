@@ -1450,6 +1450,23 @@ int32_t AudioEngineDevice::ModifyEngineState(
     state.next.stereo_playout_available = false;
   }
 
+  // --------------------------------------------------------------------------------------------
+  // Step: Configure Stereo Playout
+  //
+
+  if (state.next.IsOutputEnabled() &&
+        (!state.prev.IsOutputEnabled() || state.IsEngineRecreateRequired())) {
+    RTC_DCHECK(!engine_device_.running);
+    
+    const uint32_t desired_channels = state.next.DesiredOutputChannels();
+    const bool applied_stereo = desired_channels >= 2;
+
+    state.next.stereo_playout_enabled = applied_stereo;
+    LOGI() << "Stereo playout optimistic update: " << applied_stereo;
+  }
+
+  UpdateVoiceProcessingForStereoState(state);
+
   // No changes, return immediately.
   if (state.HasNoChanges()) {
     LOGI() << "ModifyEngineState: No changes";
@@ -1950,6 +1967,81 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
   }
 
   // --------------------------------------------------------------------------------------------
+  // Step: Configure Voice-Processing I/O
+  //
+  if (state.next.IsInputEnabled() &&
+      inputNode().voiceProcessingEnabled != state.next.voice_processing_enabled) {
+#if TARGET_OS_SIMULATOR
+    LOGI() << "setVoiceProcessingEnabled (input): "
+           << (state.next.voice_processing_enabled ? "YES" : "NO") << " (Ignored on Simulator)";
+#else
+    LOGI() << "setVoiceProcessingEnabled (input): " << state.next.voice_processing_enabled ? "YES"
+                                                                                           : "NO";
+    NSError* error = nil;
+    BOOL set_vp_result = [inputNode() setVoiceProcessingEnabled:state.next.voice_processing_enabled
+                                                          error:&error];
+    if (!set_vp_result) {
+      NSLog(@"AudioEngineDevice setVoiceProcessingEnabled error: %@", error.localizedDescription);
+      RTC_DCHECK(set_vp_result);
+    }
+    LOGI() << "setVoiceProcessingEnabled (input) result: " << set_vp_result ? "YES" : "NO";
+#endif
+
+    if (inputNode().voiceProcessingEnabled) {
+      // Always unmute vp if restart mute mode.
+      if (state.next.mute_mode == MuteMode::RestartEngine &&
+          inputNode().voiceProcessingInputMuted) {
+        LOGI() << "Update mute (voice processing) unmuting vp for restart engine mode";
+        inputNode().voiceProcessingInputMuted = false;
+      }
+
+      if (@available(iOS 17.0, macCatalyst 17.0, macOS 14.0, tvOS 17.0, visionOS 1.0, *)) {
+        // Muted talker detection.
+        AVAudioSession* session = [AVAudioSession sharedInstance];
+        NSString* mode = session.mode;
+        static NSSet<NSString*>* const kMonoModes = [NSSet setWithArray:@[
+          AVAudioSessionModeVoiceChat,
+          AVAudioSessionModeVideoChat
+        ]];
+
+        if ([kMonoModes containsObject:mode]) {
+          LOGI() << "Setting muted speech activity listener for mode: " << mode.UTF8String;
+
+          auto listener_block = ^(AVAudioVoiceProcessingSpeechActivityEvent event) {
+            LOGI() << "AVAudioVoiceProcessingSpeechActivityEvent: " << event;
+            RTC_DCHECK(event == AVAudioVoiceProcessingSpeechActivityStarted ||
+                      event == AVAudioVoiceProcessingSpeechActivityEnded);
+            AudioDeviceModule::SpeechActivityEvent rtc_event =
+                (event == AVAudioVoiceProcessingSpeechActivityStarted
+                    ? AudioDeviceModule::SpeechActivityEvent::kStarted
+                    : AudioDeviceModule::SpeechActivityEvent::kEnded);
+
+            thread_->PostTask(SafeTask(safety_, [this, rtc_event] {
+              RTC_DCHECK_RUN_ON(thread_);  // Silence warning.
+              if (this->observer_ != nullptr) {
+                this->observer_->OnSpeechActivityEvent(rtc_event);
+              }
+            }));
+          };
+
+          BOOL set_listener_result = [inputNode() setMutedSpeechActivityEventListener:listener_block];
+          if (set_listener_result) {
+            LOGI() << "setMutedSpeechActivityEventListener: listener installed successfully";
+          } else {
+            LOGW() << "setMutedSpeechActivityEventListener failed, ensure AVAudioSession.Mode is videoChat or voiceChat.";
+          }
+        } else {
+          BOOL set_listener_result = [inputNode() setMutedSpeechActivityEventListener:nil];
+          if (set_listener_result) {
+            LOGI() << "setMutedSpeechActivityEventListener: listener uninstalled successfully";
+          } 
+        }
+      }
+    }
+  }
+
+
+  // --------------------------------------------------------------------------------------------
   // Step: Enable output
   //
   if (state.next.IsOutputEnabled() &&
@@ -1958,6 +2050,12 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
     RTC_DCHECK(!engine_device_.running);
 
     AVAudioFormat* output_node_format = [outputNode() outputFormatForBus:0];
+
+    // Duplicate from the Configure StereoPlayout step above to get correct format after engine recreate.
+    const uint32_t desired_channels = state.next.DesiredOutputChannels();
+    const uint32_t hardware_channels =
+        static_cast<uint32_t>(std::max<NSInteger>(1, output_node_format.channelCount));
+    const uint32_t applied_channels = std::min(desired_channels, hardware_channels);
 
     LOGI() << "Output format sampleRate: " << output_node_format.sampleRate
            << " channels: " << output_node_format.channelCount
@@ -1973,21 +2071,6 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
       LOGE() << "Output device not available, sampleRate=" << output_node_format.sampleRate
              << ", channelCount=" << output_node_format.channelCount;
       return rollback(kAudioEnginePlayoutDeviceNotAvailableError);
-    }
-
-    const uint32_t desired_channels = state.next.DesiredOutputChannels();
-    const uint32_t hardware_channels =
-        static_cast<uint32_t>(std::max<NSInteger>(1, output_node_format.channelCount));
-    const uint32_t applied_channels = std::min(desired_channels, hardware_channels);
-    const bool applied_stereo = applied_channels >= 2;
-
-    state.next.stereo_playout_enabled = applied_stereo;
-    if (desired_channels >= 2 && !applied_stereo) {
-      LOGW() << "Stereo requested but hardware is mono; falling back to 1 channel.";
-    } else {
-      LOGI() << "Applied output channel count: " << applied_channels 
-             << " (desired: " << desired_channels
-             << ", hardware: " << hardware_channels << ")";
     }
 
     AVAudioFormat* engine_output_format = [[AVAudioFormat alloc]
@@ -2060,12 +2143,9 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
     AVAudioFormat* mixer_format = [engine_device_.mainMixerNode outputFormatForBus:0];
     if (mixer_format.channelCount < applied_channels) {
       LOGW() << "Mixer forced channel count to " << mixer_format.channelCount;
-      state.next.stereo_playout_enabled = mixer_format.channelCount >= 2;
     } else {
       LOGI() << "Mixer accepted channel count to " << mixer_format.channelCount;
     }
-           
-    UpdateVoiceProcessingForStereoState(state);
 
     if (this->observer_ != nullptr) {
       NSDictionary* context = @{};
@@ -2097,11 +2177,6 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
       source_node_ = nil;
     }
   }
-
-  // --------------------------------------------------------------------------------------------
-  // Step: Configure Voice-Processing I/O
-  //
-  ConfigureVoiceProcessingNode(inputNode(), state);
 
   // --------------------------------------------------------------------------------------------
   // Step: Enable input
