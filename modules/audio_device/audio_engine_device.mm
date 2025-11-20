@@ -2542,12 +2542,23 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
 
 void AudioEngineDevice::ConfigureVoiceProcessingNode(AVAudioInputNode* input_node,
                                                      EngineStateUpdate state) {
-  RTC_DCHECK_RUN_ON(thread_);
+  RTC_DCHECK(engine_device_ != nil);
+  RTC_DCHECK(state.prev.IsInputEnabled() || state.next.IsInputEnabled());
 
   const bool input_active =
       state.prev.IsInputEnabled() || state.next.IsInputEnabled();
   if (!input_active || input_node == nil) {
     LOGW() << "ConfigureVoiceProcessingNode called with input disabled; skipping";
+    return;
+  }
+
+  if ([input_node respondsToSelector:NSSelectorFromString(@"voiceProcessingEnabled")] == NO) {
+    LOGW() << "AVAudioInputNode does not support voice processing; skipping configuration";
+    return;
+  }
+
+  if ([input_node respondsToSelector:NSSelectorFromString(@"voiceProcessingInputMuted")] == NO) {
+    LOGW() << "AVAudioInputNode does not support voice processing; skipping configuration";
     return;
   }
 
