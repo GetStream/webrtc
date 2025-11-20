@@ -774,34 +774,68 @@ void AudioEngineDevice::SetManualRestoreVoiceProcessingOnMono(bool manual_restor
 }
 
 void AudioEngineDevice::UpdateVoiceProcessingForStereoState(EngineStateUpdate& state) {
+  const bool didUpdateStereoPlayoutEnabled = 
+      state.prev.stereo_playout_enabled != state.next.stereo_playout_enabled;
   const bool enabling_stereo = !state.prev.stereo_playout_enabled && state.next.stereo_playout_enabled;
   const bool disabling_stereo = state.prev.stereo_playout_enabled && !state.next.stereo_playout_enabled;
 
-  if (enabling_stereo) {
+  LOGI() << "UpdateVoiceProcessingForStereoState: { "
+         << " didUpdateStereoPlayoutEnabled: " << didUpdateStereoPlayoutEnabled
+         << ", enabling_stereo: " << enabling_stereo
+         << ", disabling_stereo: " << disabling_stereo
+         << ", stereo_voice_processing_override_active_: " << stereo_voice_processing_override_active_
+         << ", manual_restore_voice_processing_on_mono_: " << manual_restore_voice_processing_on_mono_
+         << " }";
+
+  if (state.next.stereo_playout_enabled) {
     if (!stereo_voice_processing_override_active_) {
       stereo_voice_processing_override_active_ = true;
       stereo_saved_voice_processing_enabled_ = state.prev.voice_processing_enabled;
       stereo_saved_voice_processing_bypassed_ = state.prev.voice_processing_bypassed;
       stereo_saved_voice_processing_agc_enabled_ = state.prev.voice_processing_agc_enabled;
+      LOGI() << "Saving VP state for stereo override: { "
+              << " voice_processing_enabled: " << stereo_saved_voice_processing_enabled_
+              << ", voice_processing_bypassed: " << stereo_saved_voice_processing_bypassed_
+              << ", voice_processing_agc_enabled: " << stereo_saved_voice_processing_agc_enabled_
+              << " }";
     }
 
-    // Force VP/AGC into the disabled state required for stereo
-    state.next.voice_processing_enabled = false;
-    state.next.voice_processing_bypassed = true;
-    state.next.voice_processing_agc_enabled = false;
-    return;
-  }
-
-  if (disabling_stereo && stereo_voice_processing_override_active_) {
-    if (!manual_restore_voice_processing_on_mono_) {
+    if (state.next.voice_processing_enabled || state.next.voice_processing_agc_enabled) {
+      // Force VP/AGC into the disabled state required for stereo
+      state.next.voice_processing_enabled = false;
+      state.next.voice_processing_bypassed = true;
+      state.next.voice_processing_agc_enabled = false;
+      LOGI() << "Disabling VP/AGC for stereo playback";
+    }
+  } else {
+    if (stereo_voice_processing_override_active_) {
       state.next.voice_processing_enabled = stereo_saved_voice_processing_enabled_;
       state.next.voice_processing_bypassed = stereo_saved_voice_processing_bypassed_;
       state.next.voice_processing_agc_enabled = stereo_saved_voice_processing_agc_enabled_;
       stereo_voice_processing_override_active_ = false;
+      
+      LOGI() << "Restoring VP state from stereo override: { "
+              << " voice_processing_enabled: " << stereo_saved_voice_processing_enabled_
+              << ", voice_processing_bypassed: " << stereo_saved_voice_processing_bypassed_
+              << ", voice_processing_agc_enabled: " << stereo_saved_voice_processing_agc_enabled_
+              << " }";
+    } else {
+      if (!state.next.voice_processing_enabled) {
+        // We recover VP from the default state
+        EngineState initial_state;
+        state.next.voice_processing_enabled = initial_state.voice_processing_enabled;
+        state.next.voice_processing_bypassed = initial_state.voice_processing_bypassed;
+        state.next.voice_processing_agc_enabled = initial_state.voice_processing_agc_enabled;
+        LOGI() << "Restoring VP state from default: { "
+                << " voice_processing_enabled: " << state.next.voice_processing_enabled
+                << ", voice_processing_bypassed: " << state.next.voice_processing_bypassed
+                << ", voice_processing_agc_enabled: " << state.next.voice_processing_agc_enabled
+                << " }";
+      }
     }
-    // If manual_restore_voice_processing_on_mono_ is true, we leave the saved values
-    // untouched so the user can decide when to re-enable VP/AGC.
   }
+
+  DebugEngineState("UpdateVoiceProcessingForStereoState: Completed", state.next);
 }
 
 void AudioEngineDevice::RefreshStereoPlayoutState() {
