@@ -1984,6 +1984,10 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
     state.next.stereo_playout_enabled = applied_stereo;
     if (desired_channels >= 2 && !applied_stereo) {
       LOGW() << "Stereo requested but hardware is mono; falling back to 1 channel.";
+    } else {
+      LOGI() << "Applied output channel count: " << applied_channels 
+             << " (desired: " << desired_channels
+             << ", hardware: " << hardware_channels << ")";
     }
 
     AVAudioFormat* engine_output_format = [[AVAudioFormat alloc]
