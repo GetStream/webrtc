@@ -143,7 +143,7 @@ RTC_OBJC_EXPORT
 - (BOOL)trySetOutputDevice:(nullable RTC_OBJC_TYPE(RTCIODevice) *)device;
 - (BOOL)trySetInputDevice:(nullable RTC_OBJC_TYPE(RTCIODevice) *)device;
 
-- (NSInteger)terminate;
+- (NSInteger)reset;
 - (NSInteger)startPlayout;
 - (NSInteger)stopPlayout;
 - (NSInteger)initPlayout;

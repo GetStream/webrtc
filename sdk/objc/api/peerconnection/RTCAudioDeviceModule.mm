@@ -282,8 +282,8 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 
 #pragma mark - Low-level access
 
-- (NSInteger)terminate {
-  return _workerThread->BlockingCall([self] { return _native->Terminate(); });
+- (NSInteger)reset {
+  return _workerThread->BlockingCall([self] { return _native->Reset(); });
 }
 
 - (NSInteger)startPlayout {

@@ -121,6 +121,9 @@ class AudioDeviceModule : public webrtc::RefCountInterface {
   virtual int32_t StartRecording() = 0;
   virtual int32_t StopRecording() = 0;
   virtual bool Recording() const = 0;
+  // Optional convenience hook for implementations that expose a combined reset.
+  // Defaults to -1 for modules that don't support it.
+  virtual int32_t Reset() { return -1; }
 
   // Audio mixer initialization
   virtual int32_t InitSpeaker() = 0;

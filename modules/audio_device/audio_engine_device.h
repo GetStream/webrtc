@@ -227,6 +227,7 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
 
   int32_t Init() override;
   int32_t Terminate() override;
+  int32_t Reset() override;
   bool Initialized() const override;
 
   int32_t InitPlayout() override;
@@ -438,6 +439,7 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
   EngineState engine_state_ RTC_GUARDED_BY(thread_);
 
   bool IsMicrophonePermissionGranted();
+  void ResetEngineState();
   int32_t ModifyEngineState(std::function<EngineState(EngineState)> state_transform);
   int32_t ApplyDeviceEngineState(EngineStateUpdate& state);
   int32_t ApplyManualEngineState(EngineStateUpdate& state);
