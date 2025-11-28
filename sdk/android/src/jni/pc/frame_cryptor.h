@@ -25,6 +25,8 @@
 namespace webrtc {
 namespace jni {
 
+webrtc::FrameCryptorTransformer::Algorithm AlgorithmFromIndex(int index);
+
 ScopedJavaLocalRef<jobject> NativeToJavaFrameCryptor(
     JNIEnv* env,
     rtc::scoped_refptr<FrameCryptorTransformer> cryptor);

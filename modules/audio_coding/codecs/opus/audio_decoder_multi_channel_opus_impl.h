@@ -36,7 +36,7 @@ class AudioDecoderMultiChannelOpusImpl final : public AudioDecoder {
   AudioDecoderMultiChannelOpusImpl& operator=(
       const AudioDecoderMultiChannelOpusImpl&) = delete;
 
-  std::vector<ParseResult> ParsePayload(rtc::Buffer&& payload,
+  std::vector<ParseResult> ParsePayload(Buffer&& payload,
                                         uint32_t timestamp) override;
   void Reset() override;
   int PacketDuration(const uint8_t* encoded, size_t encoded_len) const override;
@@ -46,7 +46,7 @@ class AudioDecoderMultiChannelOpusImpl final : public AudioDecoder {
   int SampleRateHz() const override;
   size_t Channels() const override;
 
-  static absl::optional<AudioDecoderMultiChannelOpusConfig> SdpToConfig(
+  static std::optional<AudioDecoderMultiChannelOpusConfig> SdpToConfig(
       const SdpAudioFormat& format);
 
  protected:

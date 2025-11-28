@@ -20,6 +20,8 @@
 #include <unordered_map>
 
 #include "api/frame_transformer_interface.h"
+#include "api/make_ref_counted.h"
+#include "api/rtc_error.h"
 #include "api/task_queue/pending_task_safety_flag.h"
 #include "api/task_queue/task_queue_base.h"
 #include "rtc_base/buffer.h"
@@ -50,10 +52,10 @@ struct KeyProviderOptions {
   bool discard_frame_when_cryptor_not_ready;
   KeyProviderOptions()
       : shared_key(false),
-      ratchet_window_size(0),
-      failure_tolerance(-1),
-      key_ring_size(DEFAULT_KEYRING_SIZE),
-      discard_frame_when_cryptor_not_ready(false) {}
+        ratchet_window_size(0),
+        failure_tolerance(-1),
+        key_ring_size(DEFAULT_KEYRING_SIZE),
+        discard_frame_when_cryptor_not_ready(false) {}
   KeyProviderOptions(KeyProviderOptions& copy)
       : shared_key(copy.shared_key),
         ratchet_salt(copy.ratchet_salt),
@@ -63,11 +65,11 @@ struct KeyProviderOptions {
         key_ring_size(copy.key_ring_size) {}
 };
 
-class KeyProvider : public rtc::RefCountInterface {
+class KeyProvider : public webrtc::RefCountInterface {
  public:
   virtual bool SetSharedKey(int key_index, std::vector<uint8_t> key) = 0;
 
-  virtual const rtc::scoped_refptr<ParticipantKeyHandler> GetSharedKey(
+  virtual const webrtc::scoped_refptr<ParticipantKeyHandler> GetSharedKey(
       const std::string participant_id) = 0;
 
   virtual const std::vector<uint8_t> RatchetSharedKey(int key_index) = 0;
@@ -78,7 +80,7 @@ class KeyProvider : public rtc::RefCountInterface {
                       int key_index,
                       std::vector<uint8_t> key) = 0;
 
-  virtual const rtc::scoped_refptr<ParticipantKeyHandler> GetKey(
+  virtual const webrtc::scoped_refptr<ParticipantKeyHandler> GetKey(
       const std::string participant_id) const = 0;
 
   virtual const std::vector<uint8_t> RatchetKey(
@@ -96,9 +98,9 @@ class KeyProvider : public rtc::RefCountInterface {
   virtual ~KeyProvider() {}
 };
 
-class ParticipantKeyHandler : public rtc::RefCountInterface {
+class ParticipantKeyHandler : public webrtc::RefCountInterface {
  public:
-  struct KeySet : public rtc::RefCountInterface {
+  struct KeySet : public webrtc::RefCountInterface {
     std::vector<uint8_t> material;
     std::vector<uint8_t> encryption_key;
     KeySet(std::vector<uint8_t> material, std::vector<uint8_t> encryptionKey)
@@ -109,7 +111,7 @@ class ParticipantKeyHandler : public rtc::RefCountInterface {
   ParticipantKeyHandler(KeyProvider* key_provider)
       : key_provider_(key_provider) {
     int key_ring_size = key_provider_->options().key_ring_size;
-    if(key_ring_size <= 0) {
+    if (key_ring_size <= 0) {
       key_ring_size = DEFAULT_KEYRING_SIZE;
     } else if (key_ring_size > (int)MAX_KEYRING_SIZE) {
       // Keyring size needs to be between 1 and 256
@@ -120,8 +122,8 @@ class ParticipantKeyHandler : public rtc::RefCountInterface {
 
   virtual ~ParticipantKeyHandler() = default;
 
-  rtc::scoped_refptr<ParticipantKeyHandler> Clone() {
-    auto clone = rtc::make_ref_counted<ParticipantKeyHandler>(key_provider_);
+  webrtc::scoped_refptr<ParticipantKeyHandler> Clone() {
+    auto clone = webrtc::make_ref_counted<ParticipantKeyHandler>(key_provider_);
     clone->crypto_key_ring_ = crypto_key_ring_;
     clone->current_key_index_ = current_key_index_;
     clone->has_valid_key_ = has_valid_key_;
@@ -146,7 +148,7 @@ class ParticipantKeyHandler : public rtc::RefCountInterface {
     return new_material;
   }
 
-  virtual rtc::scoped_refptr<KeySet> GetKeySet(int key_index) {
+  virtual webrtc::scoped_refptr<KeySet> GetKeySet(int key_index) {
     webrtc::MutexLock lock(&mutex_);
     return crypto_key_ring_[key_index != -1 ? key_index : current_key_index_];
   }
@@ -167,13 +169,13 @@ class ParticipantKeyHandler : public rtc::RefCountInterface {
     return new_material;
   }
 
-  rtc::scoped_refptr<KeySet> DeriveKeys(std::vector<uint8_t> password,
-                                        std::vector<uint8_t> ratchet_salt,
-                                        unsigned int optional_length_bits) {
+  webrtc::scoped_refptr<KeySet> DeriveKeys(std::vector<uint8_t> password,
+                                           std::vector<uint8_t> ratchet_salt,
+                                           unsigned int optional_length_bits) {
     std::vector<uint8_t> derived_key;
     if (DerivePBKDF2KeyFromRawKey(password, ratchet_salt, optional_length_bits,
                                   &derived_key) == 0) {
-      return rtc::make_ref_counted<KeySet>(password, derived_key);
+      return webrtc::make_ref_counted<KeySet>(password, derived_key);
     }
     return nullptr;
   }
@@ -232,7 +234,7 @@ class DefaultKeyProviderImpl : public KeyProvider {
     webrtc::MutexLock lock(&mutex_);
     if (options_.shared_key) {
       if (keys_.find("shared") == keys_.end()) {
-        keys_["shared"] = rtc::make_ref_counted<ParticipantKeyHandler>(this);
+        keys_["shared"] = webrtc::make_ref_counted<ParticipantKeyHandler>(this);
       }
 
       auto key_handler = keys_["shared"];
@@ -278,7 +280,7 @@ class DefaultKeyProviderImpl : public KeyProvider {
     return std::vector<uint8_t>();
   }
 
-  const rtc::scoped_refptr<ParticipantKeyHandler> GetSharedKey(
+  const webrtc::scoped_refptr<ParticipantKeyHandler> GetSharedKey(
       const std::string participant_id) override {
     webrtc::MutexLock lock(&mutex_);
     if (options_.shared_key && keys_.find("shared") != keys_.end()) {
@@ -302,7 +304,7 @@ class DefaultKeyProviderImpl : public KeyProvider {
 
     if (keys_.find(participant_id) == keys_.end()) {
       keys_[participant_id] =
-          rtc::make_ref_counted<ParticipantKeyHandler>(this);
+          webrtc::make_ref_counted<ParticipantKeyHandler>(this);
     }
 
     auto key_handler = keys_[participant_id];
@@ -310,7 +312,7 @@ class DefaultKeyProviderImpl : public KeyProvider {
     return true;
   }
 
-  const rtc::scoped_refptr<ParticipantKeyHandler> GetKey(
+  const webrtc::scoped_refptr<ParticipantKeyHandler> GetKey(
       const std::string participant_id) const override {
     webrtc::MutexLock lock(&mutex_);
 
@@ -352,7 +354,7 @@ class DefaultKeyProviderImpl : public KeyProvider {
  private:
   mutable webrtc::Mutex mutex_;
   KeyProviderOptions options_;
-  std::unordered_map<std::string, rtc::scoped_refptr<ParticipantKeyHandler>>
+  std::unordered_map<std::string, webrtc::scoped_refptr<ParticipantKeyHandler>>
       keys_;
 };
 
@@ -366,7 +368,7 @@ enum FrameCryptionState {
   kInternalError,
 };
 
-class FrameCryptorTransformerObserver : public rtc::RefCountInterface {
+class FrameCryptorTransformerObserver : public webrtc::RefCountInterface {
  public:
   virtual void OnFrameCryptionStateChanged(const std::string participant_id,
                                            FrameCryptionState error) = 0;
@@ -376,7 +378,7 @@ class FrameCryptorTransformerObserver : public rtc::RefCountInterface {
 };
 
 class RTC_EXPORT FrameCryptorTransformer
-    : public rtc::RefCountedObject<webrtc::FrameTransformerInterface> {
+    : public webrtc::RefCountedObject<webrtc::FrameTransformerInterface> {
  public:
   enum class MediaType {
     kAudioFrame = 0,
@@ -393,10 +395,10 @@ class RTC_EXPORT FrameCryptorTransformer
       const std::string participant_id,
       MediaType type,
       Algorithm algorithm,
-      rtc::scoped_refptr<KeyProvider> key_provider);
+      webrtc::scoped_refptr<KeyProvider> key_provider);
   ~FrameCryptorTransformer();
   virtual void RegisterFrameCryptorTransformerObserver(
-      rtc::scoped_refptr<FrameCryptorTransformerObserver> observer) {
+      webrtc::scoped_refptr<FrameCryptorTransformerObserver> observer) {
     webrtc::MutexLock lock(&mutex_);
     observer_ = observer;
   }
@@ -425,7 +427,8 @@ class RTC_EXPORT FrameCryptorTransformer
 
  protected:
   virtual void RegisterTransformedFrameCallback(
-      rtc::scoped_refptr<webrtc::TransformedFrameCallback> callback) override {
+      webrtc::scoped_refptr<webrtc::TransformedFrameCallback> callback)
+      override {
     webrtc::MutexLock lock(&sink_mutex_);
     sink_callback_ = callback;
   }
@@ -434,7 +437,7 @@ class RTC_EXPORT FrameCryptorTransformer
     sink_callback_ = nullptr;
   }
   virtual void RegisterTransformedFrameSinkCallback(
-      rtc::scoped_refptr<webrtc::TransformedFrameCallback> callback,
+      webrtc::scoped_refptr<webrtc::TransformedFrameCallback> callback,
       uint32_t ssrc) override {
     webrtc::MutexLock lock(&sink_mutex_);
     sink_callbacks_[ssrc] = callback;
@@ -466,15 +469,54 @@ class RTC_EXPORT FrameCryptorTransformer
   bool enabled_cryption_ RTC_GUARDED_BY(mutex_) = false;
   MediaType type_;
   Algorithm algorithm_;
-  rtc::scoped_refptr<webrtc::TransformedFrameCallback> sink_callback_;
-  std::map<uint32_t, rtc::scoped_refptr<webrtc::TransformedFrameCallback>>
+  webrtc::scoped_refptr<webrtc::TransformedFrameCallback> sink_callback_;
+  std::map<uint32_t, webrtc::scoped_refptr<webrtc::TransformedFrameCallback>>
       sink_callbacks_;
   int key_index_ = 0;
   std::map<uint32_t, uint32_t> send_counts_;
-  rtc::scoped_refptr<KeyProvider> key_provider_;
-  rtc::scoped_refptr<FrameCryptorTransformerObserver> observer_;
+  webrtc::scoped_refptr<KeyProvider> key_provider_;
+  webrtc::scoped_refptr<FrameCryptorTransformerObserver> observer_;
   FrameCryptionState last_enc_error_ = FrameCryptionState::kNew;
   FrameCryptionState last_dec_error_ = FrameCryptionState::kNew;
+};
+
+class RTC_EXPORT EncryptedPacket : public webrtc::RefCountInterface {
+ public:
+  EncryptedPacket() = default;
+  EncryptedPacket(std::vector<uint8_t> data,
+                  std::vector<uint8_t> iv,
+                  uint8_t key_index)
+      : data(data), iv(iv), key_index(key_index) {}
+  ~EncryptedPacket() = default;
+
+  std::vector<uint8_t> data;
+  std::vector<uint8_t> iv;
+  uint8_t key_index = 0;
+};
+
+class RTC_EXPORT DataPacketCryptor : public webrtc::RefCountInterface {
+ public:
+  DataPacketCryptor(FrameCryptorTransformer::Algorithm algorithm,
+                    webrtc::scoped_refptr<KeyProvider> key_provider);
+  ~DataPacketCryptor();
+
+  virtual RTCErrorOr<webrtc::scoped_refptr<EncryptedPacket>> Encrypt(
+      const std::string participant_id,
+      int key_index,
+      const std::vector<uint8_t>& data);
+
+  virtual RTCErrorOr<std::vector<uint8_t>> Decrypt(
+      const std::string participant_id,
+      const webrtc::scoped_refptr<EncryptedPacket> encryptedPacket);
+
+ private:
+  rtc::Buffer makeIv(uint32_t timestamp);
+
+ private:
+  FrameCryptorTransformer::Algorithm algorithm_;
+  webrtc::scoped_refptr<KeyProvider> key_provider_;
+  uint32_t send_count_ = 0;
+  mutable webrtc::Mutex mutex_;
 };
 
 }  // namespace webrtc

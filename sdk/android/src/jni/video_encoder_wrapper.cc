@@ -32,6 +32,8 @@
 namespace webrtc {
 namespace jni {
 
+constexpr int kBadFrame = -2;
+
 VideoEncoderWrapper::VideoEncoderWrapper(JNIEnv* jni,
                                          const JavaRef<jobject>& j_encoder)
     : encoder_(jni, j_encoder), int_array_class_(GetClass(jni, "[I")) {
@@ -163,7 +165,7 @@ int32_t VideoEncoderWrapper::Encode(
       Java_EncodeInfo_Constructor(jni, j_frame_types);
 
   FrameExtraInfo info;
-  info.capture_time_ns = frame.timestamp_us() * rtc::kNumNanosecsPerMicrosec;
+  info.capture_time_ns = frame.timestamp_us() * kNumNanosecsPerMicrosec;
   info.timestamp_rtp = frame.rtp_timestamp();
   {
     MutexLock lock(&frame_extra_infos_lock_);
@@ -201,10 +203,10 @@ VideoEncoderWrapper::GetScalingSettingsInternal(JNIEnv* jni) const {
   if (!isOn)
     return ScalingSettings::kOff;
 
-  absl::optional<int> low = JavaToNativeOptionalInt(
+  std::optional<int> low = JavaToNativeOptionalInt(
       jni,
       Java_VideoEncoderWrapper_getScalingSettingsLow(jni, j_scaling_settings));
-  absl::optional<int> high = JavaToNativeOptionalInt(
+  std::optional<int> high = JavaToNativeOptionalInt(
       jni,
       Java_VideoEncoderWrapper_getScalingSettingsHigh(jni, j_scaling_settings));
 
@@ -307,10 +309,18 @@ void VideoEncoderWrapper::OnEncodedFrame(
   EncodedImage frame_copy = frame;
 
   frame_copy.SetRtpTimestamp(frame_extra_info.timestamp_rtp);
-  frame_copy.capture_time_ms_ = capture_time_ns / rtc::kNumNanosecsPerMillisec;
+  frame_copy.capture_time_ms_ = capture_time_ns / kNumNanosecsPerMillisec;
 
-  if (frame_copy.qp_ < 0)
-    frame_copy.qp_ = ParseQp(frame);
+  if (frame_copy.qp_ < 0) {
+    int qp = ParseQp(frame);
+#ifdef RTC_ENABLE_H265
+    if (qp == kBadFrame && codec_settings_.codecType == kVideoCodecH265) {
+      RTC_LOG(LS_WARNING) << "Bad frame detected for h265 frame. Skipping.";
+      return;
+    }
+#endif
+    frame_copy.qp_ = qp;
+  }
 
   CodecSpecificInfo info(ParseCodecSpecificInfo(frame));
 
@@ -343,7 +353,7 @@ int32_t VideoEncoderWrapper::HandleReturnCode(JNIEnv* jni,
   return WEBRTC_VIDEO_CODEC_FALLBACK_SOFTWARE;
 }
 
-int VideoEncoderWrapper::ParseQp(rtc::ArrayView<const uint8_t> buffer) {
+int VideoEncoderWrapper::ParseQp(ArrayView<const uint8_t> buffer) {
   int qp;
   bool success;
   switch (codec_settings_.codecType) {
@@ -363,6 +373,10 @@ int VideoEncoderWrapper::ParseQp(rtc::ArrayView<const uint8_t> buffer) {
       h265_bitstream_parser_.ParseBitstream(buffer);
       qp = h265_bitstream_parser_.GetLastSliceQp().value_or(-1);
       success = (qp >= 0);
+
+      if (!success && h265_bitstream_parser_.GetLastHasBadRbsp()) {
+        return kBadFrame;
+      }
       break;
 #endif
     default:  // Default is to not provide QP.

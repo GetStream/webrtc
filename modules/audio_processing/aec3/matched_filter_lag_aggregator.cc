@@ -62,8 +62,8 @@ void MatchedFilterLagAggregator::Reset(bool hard_reset) {
   }
 }
 
-absl::optional<DelayEstimate> MatchedFilterLagAggregator::Aggregate(
-    const absl::optional<const MatchedFilter::LagEstimate>& lag_estimate) {
+std::optional<DelayEstimate> MatchedFilterLagAggregator::Aggregate(
+    const std::optional<const MatchedFilter::LagEstimate>& lag_estimate) {
   if (lag_estimate && pre_echo_lag_aggregator_) {
     pre_echo_lag_aggregator_->Dump(data_dumper_);
     pre_echo_lag_aggregator_->Aggregate(
@@ -73,7 +73,7 @@ absl::optional<DelayEstimate> MatchedFilterLagAggregator::Aggregate(
   if (lag_estimate) {
     highest_peak_aggregator_.Aggregate(
         std::max(0, static_cast<int>(lag_estimate->lag) - headroom_));
-    rtc::ArrayView<const int> histogram = highest_peak_aggregator_.histogram();
+    ArrayView<const int> histogram = highest_peak_aggregator_.histogram();
     int candidate = highest_peak_aggregator_.candidate();
     significant_candidate_found_ = significant_candidate_found_ ||
                                    histogram[candidate] > thresholds_.converged;
@@ -90,7 +90,7 @@ absl::optional<DelayEstimate> MatchedFilterLagAggregator::Aggregate(
     }
   }
 
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 MatchedFilterLagAggregator::HighestPeakAggregator::HighestPeakAggregator(
@@ -142,7 +142,7 @@ void MatchedFilterLagAggregator::PreEchoLagAggregator::Aggregate(
   RTC_DCHECK(pre_echo_block_size >= 0 &&
              pre_echo_block_size < static_cast<int>(histogram_.size()));
   pre_echo_block_size =
-      rtc::SafeClamp(pre_echo_block_size, 0, histogram_.size() - 1);
+      SafeClamp(pre_echo_block_size, 0, histogram_.size() - 1);
   // Remove the oldest point from the `histogram_`, it ignores the initial
   // points where no updates have been done to the `histogram_data_` array.
   if (histogram_data_[histogram_data_index_] !=

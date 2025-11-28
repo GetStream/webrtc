@@ -1,0 +1,64 @@
+require 'fileutils'
+
+private_lane :configure_gclient do |options|
+  log_debug(
+    message: 'Configuring gclient...',
+    verbose: options[:verbose]
+  )
+
+  base_root = File.expand_path('../../../', __dir__)
+  root = if options[:output]
+           File.expand_path(options[:output], base_root)
+         else
+           File.join(base_root, '.output')
+         end
+  FileUtils.mkdir_p(root)
+
+  Dir.chdir(root) do
+    # Set gclient root
+    execute_command(command: 'gclient root', verbose: options[:verbose])
+
+    # Configure gclient with the spec
+    target_oses = Array(options[:target_os]).compact.map(&:to_s)
+    target_os_entries = target_oses.map { |os| "\"#{os}\"" }.join(', ')
+    gclient_spec = <<~SPEC
+      solutions = [
+      {
+          "name": "src",
+          "url": "git@github.com:GetStream/webrtc.git",
+          "deps_file": "DEPS",
+          "managed": False,
+          "custom_deps": {},
+      },
+      ]
+      target_os = [#{target_os_entries}]
+    SPEC
+
+    # Write spec to temporary file and configure
+    execute_command(
+      command: "gclient config --spec '#{gclient_spec.gsub("'", "'\"'\"'")}'",
+      verbose: options[:verbose]
+    )
+
+    UI.success('gclient configured successfully')
+
+    sync_dependencies(
+      number_of_jobs: options[:number_of_jobs],
+      verbose: options[:verbose]
+    )
+  end
+end
+
+private_lane :sync_dependencies do |options|
+  jobs = options[:number_of_jobs] || 8
+  log_debug(
+    message: 'Syncing dependencies...',
+    verbose: options[:verbose]
+  )
+
+  command = "gclient sync -j#{jobs}"
+  command += ' -v' if options[:verbose]
+
+  execute_command(command: command, verbose: options[:verbose])
+  UI.success('Dependencies synced successfully')
+end

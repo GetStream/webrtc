@@ -11,12 +11,15 @@
 
 #import <Foundation/Foundation.h>
 
-#import "RTCMacros.h"
 #import "RTCNativeVideoEncoder.h"
 #import "RTCNativeVideoEncoderBuilder+Native.h"
 #import "RTCVideoEncoderVP8.h"
+#import "helpers/NSString+StdString.h"
+#import "sdk/objc/base/RTCMacros.h"
 
+#include "api/video_codecs/scalability_mode.h"
 #include "modules/video_coding/codecs/vp8/include/vp8.h"
+#include "modules/video_coding/codecs/vp8/vp8_scalability.h"
 
 @interface RTC_OBJC_TYPE (RTCVideoEncoderVP8Builder)
     : RTC_OBJC_TYPE(RTCNativeVideoEncoder) <RTC_OBJC_TYPE (RTCNativeVideoEncoderBuilder)>
@@ -24,7 +27,8 @@
 
     @implementation RTC_OBJC_TYPE (RTCVideoEncoderVP8Builder)
 
-    - (std::unique_ptr<webrtc::VideoEncoder>)build:(const webrtc::Environment&)env {
+    - (std::unique_ptr<webrtc::VideoEncoder>)build:
+        (const webrtc::Environment&)env {
       return webrtc::CreateVp8Encoder(env);
     }
 
@@ -34,6 +38,17 @@
 
     + (id<RTC_OBJC_TYPE(RTCVideoEncoder)>)vp8Encoder {
       return [[RTC_OBJC_TYPE(RTCVideoEncoderVP8Builder) alloc] init];
+    }
+
+    + (NSArray<NSString*>*)supportedScalabilityModes {
+      NSMutableArray<NSString*>* result = [NSMutableArray
+          arrayWithCapacity:std::size(webrtc::kVP8SupportedScalabilityModes)];
+      for (webrtc::ScalabilityMode mode :
+           webrtc::kVP8SupportedScalabilityModes) {
+        [result addObject:[NSString stringForAbslStringView:
+                                        webrtc::ScalabilityModeToString(mode)]];
+      }
+      return result;
     }
 
     @end

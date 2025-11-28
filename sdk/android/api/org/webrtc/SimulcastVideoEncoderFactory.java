@@ -15,6 +15,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
  
 public class SimulcastVideoEncoderFactory implements VideoEncoderFactory {
  
@@ -44,6 +46,35 @@ public class SimulcastVideoEncoderFactory implements VideoEncoderFactory {
         }
         codecs.addAll(nativeVP9Codecs());
         codecs.add(nativeAV1Codec());
+        
+        // Sort codecs: first by codec type (name), then by scalability mode presence
+        // Codecs with scalability modes come first within the same type
+        // This is needed because webrtc_video_engine.cc removes duplicate encoders from the list before sending them
+        // So send the enncoders that have scalability mode ahead
+        Collections.sort(codecs, new Comparator<VideoCodecInfo>() {
+            @Override
+            public int compare(VideoCodecInfo a, VideoCodecInfo b) {
+                // First compare by codec name (type)
+                int nameComparison = a.name.compareToIgnoreCase(b.name);
+                if (nameComparison != 0) {
+                    return nameComparison;
+                }
+                
+                // If same codec type, compare by scalability mode presence
+                boolean aHasScalabilityModes = a.scalabilityModes != null && !a.scalabilityModes.isEmpty();
+                boolean bHasScalabilityModes = b.scalabilityModes != null && !b.scalabilityModes.isEmpty();
+                
+                // Codecs with scalability modes come first (return negative for a to come before b)
+                if (aHasScalabilityModes && !bHasScalabilityModes) {
+                    return -1;
+                } else if (!aHasScalabilityModes && bHasScalabilityModes) {
+                    return 1;
+                } else {
+                    return 0; // Both have same scalability mode status
+                }
+            }
+        });
+        
         return codecs.toArray(new VideoCodecInfo[codecs.size()]);
     }
 

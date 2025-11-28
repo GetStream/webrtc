@@ -35,7 +35,7 @@ namespace webrtc {
 
 class VideoAnalyzer : public PacketReceiver,
                       public Transport,
-                      public rtc::VideoSinkInterface<VideoFrame> {
+                      public VideoSinkInterface<VideoFrame> {
  public:
   VideoAnalyzer(test::LayerFilteringTransport* transport,
                 const std::string& test_label,
@@ -57,17 +57,17 @@ class VideoAnalyzer : public PacketReceiver,
   ~VideoAnalyzer();
 
   virtual void SetReceiver(PacketReceiver* receiver);
-  void SetSource(rtc::VideoSourceInterface<VideoFrame>* video_source,
+  void SetSource(VideoSourceInterface<VideoFrame>* video_source,
                  bool respect_sink_wants);
   void SetCall(Call* call);
   void SetSendStream(VideoSendStream* stream);
   void SetReceiveStream(VideoReceiveStreamInterface* stream);
   void SetAudioReceiveStream(AudioReceiveStreamInterface* recv_stream);
 
-  rtc::VideoSinkInterface<VideoFrame>* InputInterface();
-  rtc::VideoSourceInterface<VideoFrame>* OutputInterface();
+  VideoSinkInterface<VideoFrame>* InputInterface();
+  VideoSourceInterface<VideoFrame>* OutputInterface();
 
-  void DeliverRtcpPacket(rtc::CopyOnWriteBuffer packet) override;
+  void DeliverRtcpPacket(CopyOnWriteBuffer packet) override;
   void DeliverRtpPacket(MediaType media_type,
                         RtpPacketReceived packet,
                         PacketReceiver::OnUndemuxablePacketHandler
@@ -76,10 +76,10 @@ class VideoAnalyzer : public PacketReceiver,
   void PreEncodeOnFrame(const VideoFrame& video_frame);
   void PostEncodeOnFrame(size_t stream_id, uint32_t timestamp);
 
-  bool SendRtp(rtc::ArrayView<const uint8_t> packet,
+  bool SendRtp(ArrayView<const uint8_t> packet,
                const PacketOptions& options) override;
 
-  bool SendRtcp(rtc::ArrayView<const uint8_t> packet) override;
+  bool SendRtcp(ArrayView<const uint8_t> packet) override;
   void OnFrame(const VideoFrame& video_frame) override;
   void Wait();
 
@@ -110,8 +110,8 @@ class VideoAnalyzer : public PacketReceiver,
                     int64_t render_time_ms,
                     size_t encoded_frame_size);
 
-    absl::optional<VideoFrame> reference;
-    absl::optional<VideoFrame> render;
+    std::optional<VideoFrame> reference;
+    std::optional<VideoFrame> render;
     bool dropped;
     int64_t input_time_ms;
     int64_t send_time_ms;
@@ -145,32 +145,31 @@ class VideoAnalyzer : public PacketReceiver,
   // as a source to VideoSendStream.
   // It forwards all input frames to the VideoAnalyzer for later comparison and
   // forwards the captured frames to the VideoSendStream.
-  class CapturedFrameForwarder : public rtc::VideoSinkInterface<VideoFrame>,
-                                 public rtc::VideoSourceInterface<VideoFrame> {
+  class CapturedFrameForwarder : public VideoSinkInterface<VideoFrame>,
+                                 public VideoSourceInterface<VideoFrame> {
    public:
     CapturedFrameForwarder(VideoAnalyzer* analyzer,
                            Clock* clock,
                            int frames_to_capture,
                            TimeDelta test_duration);
-    void SetSource(rtc::VideoSourceInterface<VideoFrame>* video_source);
+    void SetSource(VideoSourceInterface<VideoFrame>* video_source);
 
    private:
     void OnFrame(const VideoFrame& video_frame)
         RTC_LOCKS_EXCLUDED(lock_) override;
 
     // Called when `send_stream_.SetSource()` is called.
-    void AddOrUpdateSink(rtc::VideoSinkInterface<VideoFrame>* sink,
-                         const rtc::VideoSinkWants& wants)
+    void AddOrUpdateSink(VideoSinkInterface<VideoFrame>* sink,
+                         const VideoSinkWants& wants)
         RTC_LOCKS_EXCLUDED(lock_) override;
 
     // Called by `send_stream_` when `send_stream_.SetSource()` is called.
-    void RemoveSink(rtc::VideoSinkInterface<VideoFrame>* sink)
+    void RemoveSink(VideoSinkInterface<VideoFrame>* sink)
         RTC_LOCKS_EXCLUDED(lock_) override;
 
     VideoAnalyzer* const analyzer_;
     Mutex lock_;
-    rtc::VideoSinkInterface<VideoFrame>* send_stream_input_
-        RTC_GUARDED_BY(lock_);
+    VideoSinkInterface<VideoFrame>* send_stream_input_ RTC_GUARDED_BY(lock_);
     VideoSourceInterface<VideoFrame>* video_source_;
     Clock* clock_;
     int captured_frames_ RTC_GUARDED_BY(lock_);
@@ -259,7 +258,7 @@ class VideoAnalyzer : public PacketReceiver,
   SamplesStatsCounter audio_jitter_buffer_ms_ RTC_GUARDED_BY(comparison_lock_);
   SamplesStatsCounter pixels_ RTC_GUARDED_BY(comparison_lock_);
   // Rendered frame with worst PSNR is saved for further analysis.
-  absl::optional<FrameWithPsnr> worst_frame_ RTC_GUARDED_BY(comparison_lock_);
+  std::optional<FrameWithPsnr> worst_frame_ RTC_GUARDED_BY(comparison_lock_);
   // Freeze metrics.
   SamplesStatsCounter time_between_freezes_ RTC_GUARDED_BY(comparison_lock_);
   uint32_t freeze_count_ RTC_GUARDED_BY(comparison_lock_);
@@ -292,22 +291,22 @@ class VideoAnalyzer : public PacketReceiver,
   int64_t wallclock_time_ RTC_GUARDED_BY(cpu_measurement_lock_);
 
   std::deque<VideoFrame> frames_ RTC_GUARDED_BY(lock_);
-  absl::optional<VideoFrame> last_rendered_frame_ RTC_GUARDED_BY(lock_);
+  std::optional<VideoFrame> last_rendered_frame_ RTC_GUARDED_BY(lock_);
   RtpTimestampUnwrapper wrap_handler_ RTC_GUARDED_BY(lock_);
   std::map<int64_t, int64_t> send_times_ RTC_GUARDED_BY(lock_);
   std::map<int64_t, int64_t> recv_times_ RTC_GUARDED_BY(lock_);
   std::map<int64_t, size_t> encoded_frame_sizes_ RTC_GUARDED_BY(lock_);
-  absl::optional<uint32_t> first_encoded_timestamp_ RTC_GUARDED_BY(lock_);
-  absl::optional<uint32_t> first_sent_timestamp_ RTC_GUARDED_BY(lock_);
+  std::optional<uint32_t> first_encoded_timestamp_ RTC_GUARDED_BY(lock_);
+  std::optional<uint32_t> first_sent_timestamp_ RTC_GUARDED_BY(lock_);
   const double avg_psnr_threshold_;
   const double avg_ssim_threshold_;
   bool is_quick_test_enabled_;
 
-  std::vector<rtc::PlatformThread> comparison_thread_pool_;
-  rtc::Event comparison_available_event_;
+  std::vector<PlatformThread> comparison_thread_pool_;
+  Event comparison_available_event_;
   std::deque<FrameComparison> comparisons_ RTC_GUARDED_BY(comparison_lock_);
   bool quit_ RTC_GUARDED_BY(comparison_lock_);
-  rtc::Event done_;
+  Event done_;
 
   std::unique_ptr<VideoRtpDepacketizer> vp8_depacketizer_;
   std::unique_ptr<VideoRtpDepacketizer> vp9_depacketizer_;

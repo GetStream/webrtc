@@ -9,11 +9,13 @@
  */
 
 #include <cstdint>
+#include <optional>
 
-#include "absl/types/optional.h"
+#include "api/transport/network_types.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/rtp_header_extensions.h"
 #include "modules/rtp_rtcp/source/rtp_packet_to_send.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 
@@ -24,7 +26,7 @@ RtpPacketSendInfo RtpPacketSendInfo::From(const RtpPacketToSend& packet,
     packet_info.transport_sequence_number =
         *packet.transport_sequence_number() & 0xFFFF;
   } else {
-    absl::optional<uint16_t> packet_id =
+    std::optional<uint16_t> packet_id =
         packet.GetExtension<TransportSequenceNumber>();
     if (packet_id) {
       packet_info.transport_sequence_number = *packet_id;

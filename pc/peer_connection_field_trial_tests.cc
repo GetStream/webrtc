@@ -11,49 +11,35 @@
 // This file contains tests that verify that field trials do what they're
 // supposed to do.
 
+#include <memory>
 #include <set>
+#include <utility>
 
-#include "api/audio_codecs/builtin_audio_decoder_factory.h"
-#include "api/audio_codecs/builtin_audio_encoder_factory.h"
-#include "api/create_peerconnection_factory.h"
+#include "absl/algorithm/container.h"
 #include "api/enable_media_with_defaults.h"
+#include "api/field_trials.h"
+#include "api/field_trials_view.h"
+#include "api/media_types.h"
 #include "api/peer_connection_interface.h"
-#include "api/stats/rtcstats_objects.h"
+#include "api/rtp_parameters.h"
+#include "api/scoped_refptr.h"
 #include "api/task_queue/default_task_queue_factory.h"
-#include "api/video_codecs/builtin_video_decoder_factory.h"
-#include "api/video_codecs/builtin_video_encoder_factory.h"
-#include "media/engine/webrtc_media_engine.h"
 #include "pc/peer_connection_wrapper.h"
 #include "pc/session_description.h"
 #include "pc/test/fake_audio_capture_module.h"
-#include "pc/test/frame_generator_capturer_video_track_source.h"
-#include "pc/test/peer_connection_test_wrapper.h"
-#include "rtc_base/gunit.h"
+#include "pc/test/mock_peer_connection_observers.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/internal/default_socket_server.h"
-#include "rtc_base/physical_socket_server.h"
+#include "rtc_base/socket_server.h"
 #include "rtc_base/thread.h"
+#include "system_wrappers/include/clock.h"
 #include "test/gtest.h"
-#include "test/scoped_key_value_config.h"
 
 #ifdef WEBRTC_ANDROID
 #include "pc/test/android_test_initializer.h"
 #endif
 
 namespace webrtc {
-
-namespace {
-static const int kDefaultTimeoutMs = 5000;
-
-bool AddIceCandidates(PeerConnectionWrapper* peer,
-                      std::vector<const IceCandidateInterface*> candidates) {
-  for (const auto candidate : candidates) {
-    if (!peer->pc()->AddIceCandidate(candidate)) {
-      return false;
-    }
-  }
-  return true;
-}
-}  // namespace
 
 using RTCConfiguration = PeerConnectionInterface::RTCConfiguration;
 
@@ -63,7 +49,7 @@ class PeerConnectionFieldTrialTest : public ::testing::Test {
 
   PeerConnectionFieldTrialTest()
       : clock_(Clock::GetRealTimeClock()),
-        socket_server_(rtc::CreateDefaultSocketServer()),
+        socket_server_(CreateDefaultSocketServer()),
         main_thread_(socket_server_.get()) {
 #ifdef WEBRTC_ANDROID
     InitializeAndroidObjects();
@@ -78,7 +64,7 @@ class PeerConnectionFieldTrialTest : public ::testing::Test {
 
   void CreatePCFactory(std::unique_ptr<FieldTrialsView> field_trials) {
     PeerConnectionFactoryDependencies pcf_deps;
-    pcf_deps.signaling_thread = rtc::Thread::Current();
+    pcf_deps.signaling_thread = Thread::Current();
     pcf_deps.trials = std::move(field_trials);
     pcf_deps.task_queue_factory = CreateDefaultTaskQueueFactory();
     pcf_deps.adm = FakeAudioCaptureModule::Create();
@@ -105,38 +91,36 @@ class PeerConnectionFieldTrialTest : public ::testing::Test {
   }
 
   Clock* const clock_;
-  std::unique_ptr<rtc::SocketServer> socket_server_;
-  rtc::AutoSocketServerThread main_thread_;
-  rtc::scoped_refptr<PeerConnectionFactoryInterface> pc_factory_ = nullptr;
+  std::unique_ptr<SocketServer> socket_server_;
+  AutoSocketServerThread main_thread_;
+  scoped_refptr<PeerConnectionFactoryInterface> pc_factory_ = nullptr;
   PeerConnectionInterface::RTCConfiguration config_;
 };
 
 // Tests for the dependency descriptor field trial. The dependency descriptor
 // field trial is implemented in media/engine/webrtc_video_engine.cc.
 TEST_F(PeerConnectionFieldTrialTest, EnableDependencyDescriptorAdvertised) {
-  std::unique_ptr<test::ScopedKeyValueConfig> field_trials =
-      std::make_unique<test::ScopedKeyValueConfig>(
-          "WebRTC-DependencyDescriptorAdvertised/Enabled/");
-  CreatePCFactory(std::move(field_trials));
+  CreatePCFactory(FieldTrials::CreateNoGlobal(
+      "WebRTC-DependencyDescriptorAdvertised/Enabled/"));
 
   WrapperPtr caller = CreatePeerConnection();
-  caller->AddTransceiver(cricket::MEDIA_TYPE_VIDEO);
+  caller->AddTransceiver(webrtc::MediaType::VIDEO);
 
   auto offer = caller->CreateOffer();
   auto contents1 = offer->description()->contents();
   ASSERT_EQ(1u, contents1.size());
 
-  const cricket::MediaContentDescription* media_description1 =
+  const MediaContentDescription* media_description1 =
       contents1[0].media_description();
-  EXPECT_EQ(cricket::MEDIA_TYPE_VIDEO, media_description1->type());
-  const cricket::RtpHeaderExtensions& rtp_header_extensions1 =
+  EXPECT_EQ(webrtc::MediaType::VIDEO, media_description1->type());
+  const RtpHeaderExtensions& rtp_header_extensions1 =
       media_description1->rtp_header_extensions();
 
-  bool found = absl::c_find_if(rtp_header_extensions1,
-                               [](const RtpExtension& rtp_extension) {
-                                 return rtp_extension.uri ==
-                                        RtpExtension::kDependencyDescriptorUri;
-                               }) != rtp_header_extensions1.end();
+  bool found =
+      absl::c_find_if(
+          rtp_header_extensions1, [](const RtpExtension& rtp_extension) {
+            return rtp_extension.uri == RtpExtension::kDependencyDescriptorUri;
+          }) != rtp_header_extensions1.end();
   EXPECT_TRUE(found);
 }
 
@@ -149,30 +133,28 @@ TEST_F(PeerConnectionFieldTrialTest, EnableDependencyDescriptorAdvertised) {
 #define MAYBE_InjectDependencyDescriptor InjectDependencyDescriptor
 #endif
 TEST_F(PeerConnectionFieldTrialTest, MAYBE_InjectDependencyDescriptor) {
-  std::unique_ptr<test::ScopedKeyValueConfig> field_trials =
-      std::make_unique<test::ScopedKeyValueConfig>(
-          "WebRTC-DependencyDescriptorAdvertised/Disabled/");
-  CreatePCFactory(std::move(field_trials));
+  CreatePCFactory(FieldTrials::CreateNoGlobal(
+      "WebRTC-DependencyDescriptorAdvertised/Disabled/"));
 
   WrapperPtr caller = CreatePeerConnection();
   WrapperPtr callee = CreatePeerConnection();
-  caller->AddTransceiver(cricket::MEDIA_TYPE_VIDEO);
+  caller->AddTransceiver(webrtc::MediaType::VIDEO);
 
   auto offer = caller->CreateOffer();
-  cricket::ContentInfos& contents1 = offer->description()->contents();
+  ContentInfos& contents1 = offer->description()->contents();
   ASSERT_EQ(1u, contents1.size());
 
-  cricket::MediaContentDescription* media_description1 =
+  MediaContentDescription* media_description1 =
       contents1[0].media_description();
-  EXPECT_EQ(cricket::MEDIA_TYPE_VIDEO, media_description1->type());
-  cricket::RtpHeaderExtensions rtp_header_extensions1 =
+  EXPECT_EQ(webrtc::MediaType::VIDEO, media_description1->type());
+  RtpHeaderExtensions rtp_header_extensions1 =
       media_description1->rtp_header_extensions();
 
-  bool found1 = absl::c_find_if(rtp_header_extensions1,
-                                [](const RtpExtension& rtp_extension) {
-                                  return rtp_extension.uri ==
-                                         RtpExtension::kDependencyDescriptorUri;
-                                }) != rtp_header_extensions1.end();
+  bool found1 =
+      absl::c_find_if(
+          rtp_header_extensions1, [](const RtpExtension& rtp_extension) {
+            return rtp_extension.uri == RtpExtension::kDependencyDescriptorUri;
+          }) != rtp_header_extensions1.end();
   EXPECT_FALSE(found1);
 
   std::set<int> existing_ids;
@@ -203,76 +185,21 @@ TEST_F(PeerConnectionFieldTrialTest, MAYBE_InjectDependencyDescriptor) {
   ASSERT_TRUE(callee->SetRemoteDescription(std::move(offer)));
   auto answer = callee->CreateAnswer();
 
-  cricket::ContentInfos& contents2 = answer->description()->contents();
+  ContentInfos& contents2 = answer->description()->contents();
   ASSERT_EQ(1u, contents2.size());
 
-  cricket::MediaContentDescription* media_description2 =
+  MediaContentDescription* media_description2 =
       contents2[0].media_description();
-  EXPECT_EQ(cricket::MEDIA_TYPE_VIDEO, media_description2->type());
-  cricket::RtpHeaderExtensions rtp_header_extensions2 =
+  EXPECT_EQ(webrtc::MediaType::VIDEO, media_description2->type());
+  RtpHeaderExtensions rtp_header_extensions2 =
       media_description2->rtp_header_extensions();
 
-  bool found2 = absl::c_find_if(rtp_header_extensions2,
-                                [](const RtpExtension& rtp_extension) {
-                                  return rtp_extension.uri ==
-                                         RtpExtension::kDependencyDescriptorUri;
-                                }) != rtp_header_extensions2.end();
+  bool found2 =
+      absl::c_find_if(
+          rtp_header_extensions2, [](const RtpExtension& rtp_extension) {
+            return rtp_extension.uri == RtpExtension::kDependencyDescriptorUri;
+          }) != rtp_header_extensions2.end();
   EXPECT_TRUE(found2);
-}
-
-// Test that the ability to emulate degraded networks works without crashing.
-TEST_F(PeerConnectionFieldTrialTest, ApplyFakeNetworkConfig) {
-  std::unique_ptr<test::ScopedKeyValueConfig> field_trials =
-      std::make_unique<test::ScopedKeyValueConfig>(
-          "WebRTC-FakeNetworkSendConfig/link_capacity_kbps:500/"
-          "WebRTC-FakeNetworkReceiveConfig/loss_percent:1/");
-
-  CreatePCFactory(std::move(field_trials));
-
-  WrapperPtr caller = CreatePeerConnection();
-  BitrateSettings bitrate_settings;
-  bitrate_settings.start_bitrate_bps = 1'000'000;
-  bitrate_settings.max_bitrate_bps = 1'000'000;
-  caller->pc()->SetBitrate(bitrate_settings);
-  FrameGeneratorCapturerVideoTrackSource::Config config;
-  auto video_track_source =
-      rtc::make_ref_counted<FrameGeneratorCapturerVideoTrackSource>(
-          config, clock_, /*is_screencast=*/false);
-  video_track_source->Start();
-  caller->AddTrack(pc_factory_->CreateVideoTrack(video_track_source, "v"));
-  WrapperPtr callee = CreatePeerConnection();
-
-  ASSERT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
-  ASSERT_TRUE(
-      caller->SetRemoteDescription(callee->CreateAnswerAndSetAsLocal()));
-
-  // Do the SDP negotiation, and also exchange ice candidates.
-  ASSERT_TRUE(caller->ExchangeOfferAnswerWith(callee.get()));
-  ASSERT_TRUE_WAIT(
-      caller->signaling_state() == PeerConnectionInterface::kStable,
-      kDefaultTimeoutMs);
-  ASSERT_TRUE_WAIT(caller->IsIceGatheringDone(), kDefaultTimeoutMs);
-  ASSERT_TRUE_WAIT(callee->IsIceGatheringDone(), kDefaultTimeoutMs);
-
-  // Connect an ICE candidate pairs.
-  ASSERT_TRUE(
-      AddIceCandidates(callee.get(), caller->observer()->GetAllCandidates()));
-  ASSERT_TRUE(
-      AddIceCandidates(caller.get(), callee->observer()->GetAllCandidates()));
-
-  // This means that ICE and DTLS are connected.
-  ASSERT_TRUE_WAIT(callee->IsIceConnected(), kDefaultTimeoutMs);
-  ASSERT_TRUE_WAIT(caller->IsIceConnected(), kDefaultTimeoutMs);
-
-  // Send packets for kDefaultTimeoutMs
-  WAIT(false, kDefaultTimeoutMs);
-
-  std::vector<const RTCOutboundRtpStreamStats*> outbound_rtp_stats =
-      caller->GetStats()->GetStatsOfType<RTCOutboundRtpStreamStats>();
-  ASSERT_GE(outbound_rtp_stats.size(), 1u);
-  ASSERT_TRUE(outbound_rtp_stats[0]->target_bitrate.has_value());
-  // Link capacity is limited to 500k, so BWE is expected to be close to 500k.
-  ASSERT_LE(*outbound_rtp_stats[0]->target_bitrate, 500'000 * 1.1);
 }
 
 }  // namespace webrtc

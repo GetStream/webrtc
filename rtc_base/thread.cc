@@ -10,14 +10,28 @@
 
 #include "rtc_base/thread.h"
 
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <deque>
+#include <functional>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
+#include "api/function_view.h"
+#include "api/location.h"
 #include "api/task_queue/task_queue_base.h"
 #include "api/units/time_delta.h"
+#include "rtc_base/platform_thread_types.h"
 #include "rtc_base/socket_server.h"
 
 #if defined(WEBRTC_WIN)
 #include <comdef.h>
 #elif defined(WEBRTC_POSIX)
+#include <pthread.h>
 #include <time.h>
 #else
 #error "Either WEBRTC_WIN or WEBRTC_POSIX needs to be defined."
@@ -72,7 +86,7 @@ class ScopedAutoReleasePool {
 }  // namespace
 #endif
 
-namespace rtc {
+namespace webrtc {
 
 using ::webrtc::MutexLock;
 using ::webrtc::TimeDelta;
@@ -179,7 +193,7 @@ void ThreadManager::ProcessAllMessageQueuesInternal() {
     }
   }
 
-  rtc::Thread* current = rtc::Thread::Current();
+  Thread* current = Thread::Current();
   // Note: One of the message queues may have been on this thread, which is
   // why we can't synchronously wait for queues_not_done to go to 0; we need
   // to process messages as well.
@@ -251,7 +265,7 @@ void ThreadManager::SetCurrentThread(Thread* thread) {
   SetCurrentThreadInternal(thread);
 }
 
-void rtc::ThreadManager::ChangeCurrentThreadForTest(rtc::Thread* thread) {
+void ThreadManager::ChangeCurrentThreadForTest(Thread* thread) {
   SetCurrentThreadInternal(thread);
 }
 
@@ -415,7 +429,7 @@ absl::AnyInvocable<void() &&> Thread::Get(int cmsWait) {
       }
       // Pull a message off the message queue, if available.
       if (!messages_.empty()) {
-        absl::AnyInvocable<void()&&> task = std::move(messages_.front());
+        absl::AnyInvocable<void() &&> task = std::move(messages_.front());
         messages_.pop();
         return task;
       }
@@ -438,7 +452,7 @@ absl::AnyInvocable<void() &&> Thread::Get(int cmsWait) {
     {
       // Wait and multiplex in the meantime
       if (!ss_->Wait(cmsNext == kForever ? SocketServer::kForever
-                                         : webrtc::TimeDelta::Millis(cmsNext),
+                                         : TimeDelta::Millis(cmsNext),
                      /*process_io=*/true))
         return nullptr;
     }
@@ -456,8 +470,8 @@ absl::AnyInvocable<void() &&> Thread::Get(int cmsWait) {
 }
 
 void Thread::PostTaskImpl(absl::AnyInvocable<void() &&> task,
-                          const PostTaskTraits& traits,
-                          const webrtc::Location& location) {
+                          const PostTaskTraits& /* traits */,
+                          const Location& /* location */) {
   if (IsQuitting()) {
     return;
   }
@@ -474,9 +488,9 @@ void Thread::PostTaskImpl(absl::AnyInvocable<void() &&> task,
 }
 
 void Thread::PostDelayedTaskImpl(absl::AnyInvocable<void() &&> task,
-                                 webrtc::TimeDelta delay,
-                                 const PostDelayedTaskTraits& traits,
-                                 const webrtc::Location& location) {
+                                 TimeDelta delay,
+                                 const PostDelayedTaskTraits& /* traits */,
+                                 const Location& /* location */) {
   if (IsQuitting()) {
     return;
   }
@@ -509,7 +523,7 @@ int Thread::GetDelay() {
     return 0;
 
   if (!delayed_messages_.empty()) {
-    int delay = TimeUntil(delayed_messages_.top().run_time_ms);
+    int delay = webrtc::TimeUntil(delayed_messages_.top().run_time_ms);
     if (delay < 0)
       delay = 0;
     return delay;
@@ -521,10 +535,10 @@ int Thread::GetDelay() {
 void Thread::Dispatch(absl::AnyInvocable<void() &&> task) {
   TRACE_EVENT0("webrtc", "Thread::Dispatch");
   RTC_DCHECK_RUN_ON(this);
-  int64_t start_time = TimeMillis();
+  int64_t start_time = webrtc::TimeMillis();
   std::move(task)();
-  int64_t end_time = TimeMillis();
-  int64_t diff = TimeDiff(end_time, start_time);
+  int64_t end_time = webrtc::TimeMillis();
+  int64_t diff = webrtc::TimeDiff(end_time, start_time);
   if (diff >= dispatch_warning_ms_) {
     RTC_LOG(LS_INFO) << "Message to " << name() << " took " << diff
                      << "ms to dispatch.";
@@ -695,7 +709,7 @@ void* Thread::PreRun(void* pv) {
 #endif
   Thread* thread = static_cast<Thread*>(pv);
   ThreadManager::Instance()->SetCurrentThread(thread);
-  rtc::SetCurrentThreadName(thread->name_.c_str());
+  SetCurrentThreadName(thread->name_.c_str());
 #if defined(WEBRTC_MAC)
   ScopedAutoReleasePool pool;
 #endif
@@ -707,7 +721,7 @@ void* Thread::PreRun(void* pv) {
 #else
   return nullptr;
 #endif
-}  // namespace rtc
+}
 
 void Thread::Run() {
   ProcessMessages(kForever);
@@ -723,8 +737,8 @@ void Thread::Stop() {
   Join();
 }
 
-void Thread::BlockingCallImpl(rtc::FunctionView<void()> functor,
-                              const webrtc::Location& location) {
+void Thread::BlockingCallImpl(FunctionView<void()> functor,
+                              const Location& /* location */) {
   TRACE_EVENT0("webrtc", "Thread::BlockingCall");
 
   RTC_DCHECK(!IsQuitting());
@@ -806,7 +820,7 @@ uint32_t Thread::GetCouldBeBlockingCallCount() const {
 
 // Returns true if no policies added or if there is at least one policy
 // that permits invocation to `target` thread.
-bool Thread::IsInvokeToThreadAllowed(rtc::Thread* target) {
+bool Thread::IsInvokeToThreadAllowed(Thread* target) {
 #if (!defined(NDEBUG) || RTC_DCHECK_IS_ON)
   RTC_DCHECK_RUN_ON(this);
   if (!invoke_policy_enabled_) {
@@ -836,30 +850,31 @@ bool Thread::ProcessMessages(int cmsLoop) {
   // Using ProcessMessages with a custom clock for testing and a time greater
   // than 0 doesn't work, since it's not guaranteed to advance the custom
   // clock's time, and may get stuck in an infinite loop.
-  RTC_DCHECK(GetClockForTesting() == nullptr || cmsLoop == 0 ||
+  RTC_DCHECK(webrtc::GetClockForTesting() == nullptr || cmsLoop == 0 ||
              cmsLoop == kForever);
-  int64_t msEnd = (kForever == cmsLoop) ? 0 : TimeAfter(cmsLoop);
+  int64_t msEnd = (kForever == cmsLoop) ? 0 : webrtc::TimeAfter(cmsLoop);
   int cmsNext = cmsLoop;
 
   while (true) {
 #if defined(WEBRTC_MAC)
     ScopedAutoReleasePool pool;
 #endif
-    absl::AnyInvocable<void()&&> task = Get(cmsNext);
+    absl::AnyInvocable<void() &&> task = Get(cmsNext);
     if (!task)
       return !IsQuitting();
     Dispatch(std::move(task));
 
     if (cmsLoop != kForever) {
-      cmsNext = static_cast<int>(TimeUntil(msEnd));
+      cmsNext = static_cast<int>(webrtc::TimeUntil(msEnd));
       if (cmsNext < 0)
         return true;
     }
   }
 }
 
-bool Thread::WrapCurrentWithThreadManager(ThreadManager* thread_manager,
-                                          bool need_synchronize_access) {
+bool Thread::WrapCurrentWithThreadManager(
+    ThreadManager* thread_manager,
+    [[maybe_unused]] bool need_synchronize_access) {
   RTC_DCHECK(!IsRunning());
 
 #if defined(WEBRTC_WIN)
@@ -893,8 +908,8 @@ AutoThread::AutoThread()
     : Thread(CreateDefaultSocketServer(), /*do_init=*/false) {
   if (!ThreadManager::Instance()->CurrentThread()) {
     // DoInit registers with ThreadManager. Do that only if we intend to
-    // be rtc::Thread::Current(), otherwise ProcessAllMessageQueuesInternal will
-    // post a message to a queue that no running thread is serving.
+    // be webrtc::Thread::Current(), otherwise ProcessAllMessageQueuesInternal
+    // will post a message to a queue that no running thread is serving.
     DoInit();
     ThreadManager::Instance()->SetCurrentThread(this);
   }
@@ -914,8 +929,8 @@ AutoSocketServerThread::AutoSocketServerThread(SocketServer* ss)
   old_thread_ = ThreadManager::Instance()->CurrentThread();
   // Temporarily set the current thread to nullptr so that we can keep checks
   // around that catch unintentional pointer overwrites.
-  rtc::ThreadManager::Instance()->SetCurrentThread(nullptr);
-  rtc::ThreadManager::Instance()->SetCurrentThread(this);
+  ThreadManager::Instance()->SetCurrentThread(nullptr);
+  ThreadManager::Instance()->SetCurrentThread(this);
   if (old_thread_) {
     ThreadManager::Remove(old_thread_);
   }
@@ -929,11 +944,11 @@ AutoSocketServerThread::~AutoSocketServerThread() {
   // its contents rely on this thread still being set as the current thread.
   Stop();
   DoDestroy();
-  rtc::ThreadManager::Instance()->SetCurrentThread(nullptr);
-  rtc::ThreadManager::Instance()->SetCurrentThread(old_thread_);
+  ThreadManager::Instance()->SetCurrentThread(nullptr);
+  ThreadManager::Instance()->SetCurrentThread(old_thread_);
   if (old_thread_) {
     ThreadManager::Add(old_thread_);
   }
 }
 
-}  // namespace rtc
+}  // namespace webrtc

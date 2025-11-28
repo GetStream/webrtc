@@ -24,7 +24,7 @@ NS_ASSUME_NONNULL_BEGIN
 @interface RTC_OBJC_TYPE (RTCFrameCryptorKeyProvider)
 ()
 
-    @property(nonatomic, readonly) rtc::scoped_refptr<webrtc::KeyProvider> nativeKeyProvider;
+    @property(nonatomic, readonly) webrtc::scoped_refptr<webrtc::KeyProvider> nativeKeyProvider;
 
 @end
 

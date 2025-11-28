@@ -23,7 +23,7 @@
 #import "helpers/NSString+StdString.h"
 
 @implementation RTC_OBJC_TYPE (RTCFrameCryptorKeyProvider) {
-  rtc::scoped_refptr<webrtc::DefaultKeyProviderImpl> _nativeKeyProvider;
+  webrtc::scoped_refptr<webrtc::DefaultKeyProviderImpl> _nativeKeyProvider;
 }
 
 - (rtc::scoped_refptr<webrtc::KeyProvider>)nativeKeyProvider {
@@ -64,7 +64,8 @@
                    failureTolerance:(int)failureTolerance
                         keyRingSize:(int)keyRingSize
     discardFrameWhenCryptorNotReady:(BOOL)discardFrameWhenCryptorNotReady {
-  if (self = [super init]) {
+  self = [super init];
+  if (self) {
     webrtc::KeyProviderOptions options;
     options.ratchet_salt = std::vector<uint8_t>((const uint8_t *)salt.bytes,
                                                 ((const uint8_t *)salt.bytes) + salt.length);
@@ -77,7 +78,7 @@
       options.uncrypted_magic_bytes = std::vector<uint8_t>((const uint8_t *)uncryptedMagicBytes.bytes,
                                                           ((const uint8_t *)uncryptedMagicBytes.bytes) + uncryptedMagicBytes.length);
     }
-    _nativeKeyProvider = rtc::make_ref_counted<webrtc::DefaultKeyProviderImpl>(options);
+    _nativeKeyProvider = webrtc::make_ref_counted<webrtc::DefaultKeyProviderImpl>(options);
   }
   return self;
 }

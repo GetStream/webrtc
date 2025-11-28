@@ -11,13 +11,14 @@
 #ifndef MODULES_VIDEO_CODING_VIDEO_RECEIVER2_H_
 #define MODULES_VIDEO_CODING_VIDEO_RECEIVER2_H_
 
+#include <cstdint>
 #include <memory>
-#include <vector>
 
 #include "api/field_trials_view.h"
 #include "api/sequence_checker.h"
 #include "api/video/encoded_frame.h"
 #include "api/video_codecs/video_decoder.h"
+#include "common_video/include/corruption_score_calculator.h"
 #include "modules/video_coding/decoder_database.h"
 #include "modules/video_coding/generic_decoder.h"
 #include "modules/video_coding/timing/timing.h"
@@ -35,7 +36,8 @@ class VideoReceiver2 {
  public:
   VideoReceiver2(Clock* clock,
                  VCMTiming* timing,
-                 const FieldTrialsView& field_trials);
+                 const FieldTrialsView& field_trials,
+                 CorruptionScoreCalculator* corruption_score_calculator);
   ~VideoReceiver2();
 
   void RegisterReceiveCodec(uint8_t payload_type,

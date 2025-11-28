@@ -12,18 +12,22 @@
 #define RTC_BASE_FAKE_NETWORK_H_
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "absl/memory/memory.h"
+#include "absl/strings/string_view.h"
+#include "rtc_base/ip_address.h"
 #include "rtc_base/mdns_responder_interface.h"
+#include "rtc_base/net_helpers.h"
 #include "rtc_base/network.h"
+#include "rtc_base/network_constants.h"
 #include "rtc_base/socket_address.h"
 #include "rtc_base/string_encode.h"
 #include "rtc_base/thread.h"
 
-namespace rtc {
+namespace webrtc {
 
 const int kFakeIPv4NetworkPrefixLength = 24;
 const int kFakeIPv6NetworkPrefixLength = 64;
@@ -36,13 +40,13 @@ class FakeNetworkManager : public NetworkManagerBase {
   struct Iface {
     SocketAddress socket_address;
     AdapterType adapter_type;
-    absl::optional<AdapterType> underlying_vpn_adapter_type;
+    std::optional<AdapterType> underlying_vpn_adapter_type;
   };
   typedef std::vector<Iface> IfaceList;
 
   void AddInterface(const SocketAddress& iface) {
     // Ensure a unique name for the interface if its name is not given.
-    AddInterface(iface, "test" + rtc::ToString(next_index_++));
+    AddInterface(iface, "test" + absl::StrCat(next_index_++));
   }
 
   void AddInterface(const SocketAddress& iface, absl::string_view if_name) {
@@ -53,7 +57,7 @@ class FakeNetworkManager : public NetworkManagerBase {
       const SocketAddress& iface,
       absl::string_view if_name,
       AdapterType type,
-      absl::optional<AdapterType> underlying_vpn_adapter_type = absl::nullopt) {
+      std::optional<AdapterType> underlying_vpn_adapter_type = std::nullopt) {
     SocketAddress address(if_name, 0);
     address.SetResolvedIP(iface.ipaddr());
     ifaces_.push_back({address, type, underlying_vpn_adapter_type});
@@ -85,13 +89,13 @@ class FakeNetworkManager : public NetworkManagerBase {
   using NetworkManagerBase::set_default_local_addresses;
   using NetworkManagerBase::set_enumeration_permission;
 
-  // rtc::NetworkManager override.
-  webrtc::MdnsResponderInterface* GetMdnsResponder() const override {
+  // webrtc::NetworkManager override.
+  MdnsResponderInterface* GetMdnsResponder() const override {
     return mdns_responder_.get();
   }
 
   void set_mdns_responder(
-      std::unique_ptr<webrtc::MdnsResponderInterface> mdns_responder) {
+      std::unique_ptr<MdnsResponderInterface> mdns_responder) {
     mdns_responder_ = std::move(mdns_responder);
   }
 
@@ -107,7 +111,8 @@ class FakeNetworkManager : public NetworkManagerBase {
       } else if (it->socket_address.ipaddr().family() == AF_INET6) {
         prefix_length = kFakeIPv6NetworkPrefixLength;
       }
-      IPAddress prefix = TruncateIP(it->socket_address.ipaddr(), prefix_length);
+      IPAddress prefix =
+          webrtc::TruncateIP(it->socket_address.ipaddr(), prefix_length);
       auto net = std::make_unique<Network>(
           it->socket_address.hostname(), it->socket_address.hostname(), prefix,
           prefix_length, it->adapter_type);
@@ -131,9 +136,19 @@ class FakeNetworkManager : public NetworkManagerBase {
   int start_count_ = 0;
   bool sent_first_update_ = false;
 
-  std::unique_ptr<webrtc::MdnsResponderInterface> mdns_responder_;
+  std::unique_ptr<MdnsResponderInterface> mdns_responder_;
 };
 
+}  //  namespace webrtc
+
+// Re-export symbols from the webrtc namespace for backwards compatibility.
+// TODO(bugs.webrtc.org/4222596): Remove once all references are updated.
+#ifdef WEBRTC_ALLOW_DEPRECATED_NAMESPACES
+namespace rtc {
+using ::webrtc::FakeNetworkManager;
+using ::webrtc::kFakeIPv4NetworkPrefixLength;
+using ::webrtc::kFakeIPv6NetworkPrefixLength;
 }  // namespace rtc
+#endif  // WEBRTC_ALLOW_DEPRECATED_NAMESPACES
 
 #endif  // RTC_BASE_FAKE_NETWORK_H_

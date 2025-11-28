@@ -12,21 +12,27 @@
 
 #include <stddef.h>
 
+#include <cstdint>
+#include <memory>
 #include <string>
 
 #include "absl/memory/memory.h"
 #include "api/async_dns_resolver.h"
+#include "api/packet_socket_factory.h"
 #include "p2p/base/async_stun_tcp_socket.h"
 #include "rtc_base/async_dns_resolver.h"
+#include "rtc_base/async_packet_socket.h"
 #include "rtc_base/async_tcp_socket.h"
 #include "rtc_base/async_udp_socket.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/socket.h"
 #include "rtc_base/socket_adapters.h"
+#include "rtc_base/socket_address.h"
+#include "rtc_base/socket_factory.h"
 #include "rtc_base/ssl_adapter.h"
 
-namespace rtc {
+namespace webrtc {
 
 BasicPacketSocketFactory::BasicPacketSocketFactory(
     SocketFactory* socket_factory)
@@ -86,8 +92,6 @@ AsyncListenSocket* BasicPacketSocketFactory::CreateServerTcpSocket(
 AsyncPacketSocket* BasicPacketSocketFactory::CreateClientTcpSocket(
     const SocketAddress& local_address,
     const SocketAddress& remote_address,
-    const ProxyInfo& proxy_info,
-    const std::string& user_agent,
     const PacketSocketTcpOptions& tcp_options) {
   Socket* socket =
       socket_factory_->CreateSocket(local_address.family(), SOCK_STREAM);
@@ -162,7 +166,7 @@ AsyncPacketSocket* BasicPacketSocketFactory::CreateClientTcpSocket(
   // Finally, wrap that socket in a TCP or STUN TCP packet socket.
   AsyncPacketSocket* tcp_socket;
   if (tcp_options.opts & PacketSocketFactory::OPT_STUN) {
-    tcp_socket = new cricket::AsyncStunTCPSocket(socket);
+    tcp_socket = new AsyncStunTCPSocket(socket);
   } else {
     tcp_socket = new AsyncTCPSocket(socket);
   }
@@ -170,9 +174,9 @@ AsyncPacketSocket* BasicPacketSocketFactory::CreateClientTcpSocket(
   return tcp_socket;
 }
 
-std::unique_ptr<webrtc::AsyncDnsResolverInterface>
+std::unique_ptr<AsyncDnsResolverInterface>
 BasicPacketSocketFactory::CreateAsyncDnsResolver() {
-  return std::make_unique<webrtc::AsyncDnsResolver>();
+  return std::make_unique<AsyncDnsResolver>();
 }
 
 int BasicPacketSocketFactory::BindSocket(Socket* socket,
@@ -192,4 +196,4 @@ int BasicPacketSocketFactory::BindSocket(Socket* socket,
   return ret;
 }
 
-}  // namespace rtc
+}  // namespace webrtc

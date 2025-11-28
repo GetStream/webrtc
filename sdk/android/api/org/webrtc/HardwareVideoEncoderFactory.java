@@ -155,14 +155,8 @@ public class HardwareVideoEncoderFactory implements VideoEncoderFactory {
   }
 
   private @Nullable MediaCodecInfo findCodecForType(VideoCodecMimeType type) {
-    for (int i = 0; i < MediaCodecList.getCodecCount(); ++i) {
-      MediaCodecInfo info = null;
-      try {
-        info = MediaCodecList.getCodecInfoAt(i);
-      } catch (IllegalArgumentException e) {
-        Logging.e(TAG, "Cannot retrieve encoder codec info", e);
-      }
-
+    final MediaCodecList mediaCodecList = new MediaCodecList(MediaCodecList.ALL_CODECS);
+    for (MediaCodecInfo info : mediaCodecList.getCodecInfos()) {
       if (info == null || !info.isEncoder()) {
         continue;
       }
@@ -203,6 +197,7 @@ public class HardwareVideoEncoderFactory implements VideoEncoderFactory {
       case H264:
         return isHardwareSupportedInCurrentSdkH264(info);
       case H265:
+        return isHardwareSupportedInCurrentSdkH265(info);
       case AV1:
         return false;
     }
@@ -234,6 +229,10 @@ public class HardwareVideoEncoderFactory implements VideoEncoderFactory {
     String name = info.getName();
     // QCOM and Exynos H264 encoders are always supported.
     return name.startsWith(QCOM_PREFIX) || name.startsWith(EXYNOS_PREFIX);
+  }
+
+  private boolean isHardwareSupportedInCurrentSdkH265(MediaCodecInfo unusedInfo) {
+    return true;
   }
 
   private boolean isMediaCodecAllowed(MediaCodecInfo info) {

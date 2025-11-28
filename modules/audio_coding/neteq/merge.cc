@@ -61,7 +61,7 @@ size_t Merge::Process(int16_t* input,
   // Transfer input signal to an AudioMultiVector.
   AudioMultiVector input_vector(num_channels_);
   input_vector.PushBackInterleaved(
-      rtc::ArrayView<const int16_t>(input, input_length));
+      ArrayView<const int16_t>(input, input_length));
   size_t input_length_per_channel = input_vector.Size();
   RTC_DCHECK_EQ(input_length_per_channel, input_length / num_channels_);
 
@@ -211,8 +211,8 @@ int16_t Merge::SignalScaling(const int16_t* input,
                              size_t input_length,
                              const int16_t* expanded_signal) const {
   // Adjust muting factor if new vector is more or less of the BGN energy.
-  const auto mod_input_length = rtc::SafeMin<size_t>(
-      64 * rtc::dchecked_cast<size_t>(fs_mult_), input_length);
+  const auto mod_input_length =
+      SafeMin<size_t>(64 * dchecked_cast<size_t>(fs_mult_), input_length);
   const int16_t expanded_max =
       WebRtcSpl_MaxAbsValueW16(expanded_signal, mod_input_length);
   int32_t factor =

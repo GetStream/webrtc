@@ -10,23 +10,31 @@
 
 #include "call/rtp_payload_params.h"
 
-#include <string.h>
-
+#include <cstdint>
 #include <map>
+#include <optional>
 #include <set>
+#include <variant>
+#include <vector>
 
 #include "absl/container/inlined_vector.h"
-#include "absl/types/optional.h"
-#include "absl/types/variant.h"
 #include "api/transport/field_trial_based_config.h"
+#include "api/transport/rtp/dependency_descriptor.h"
+#include "api/video/color_space.h"
+#include "api/video/encoded_image.h"
+#include "api/video/video_codec_constants.h"
+#include "api/video/video_codec_type.h"
 #include "api/video/video_content_type.h"
+#include "api/video/video_frame_type.h"
 #include "api/video/video_rotation.h"
-#include "modules/video_coding/codecs/h264/include/h264_globals.h"
+#include "call/rtp_config.h"
+#include "common_video/generic_frame_descriptor/generic_frame_info.h"
+#include "modules/rtp_rtcp/source/rtp_generic_frame_descriptor.h"
+#include "modules/rtp_rtcp/source/rtp_video_header.h"
 #include "modules/video_coding/codecs/interface/common_constants.h"
 #include "modules/video_coding/codecs/vp8/include/vp8_globals.h"
 #include "modules/video_coding/codecs/vp9/include/vp9_globals.h"
 #include "modules/video_coding/include/video_codec_interface.h"
-#include "test/explicit_key_value_config.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 #include "test/scoped_key_value_config.h"
@@ -37,6 +45,7 @@ namespace {
 using ::testing::AllOf;
 using ::testing::Each;
 using ::testing::ElementsAre;
+using ::testing::ElementsAreArray;
 using ::testing::Eq;
 using ::testing::Field;
 using ::testing::IsEmpty;
@@ -87,7 +96,7 @@ TEST(RtpPayloadParamsTest, InfoMappedToRtpVideoHeader_Vp8) {
   EXPECT_EQ(1, header.simulcastIdx);
   EXPECT_EQ(kVideoCodecVP8, header.codec);
   const auto& vp8_header =
-      absl::get<RTPVideoHeaderVP8>(header.video_type_header);
+      std::get<RTPVideoHeaderVP8>(header.video_type_header);
   EXPECT_EQ(kPictureId + 2, vp8_header.pictureId);
   EXPECT_EQ(kTemporalIdx, vp8_header.temporalIdx);
   EXPECT_EQ(kTl0PicIdx + 1, vp8_header.tl0PicIdx);
@@ -121,7 +130,7 @@ TEST(RtpPayloadParamsTest, InfoMappedToRtpVideoHeader_Vp9) {
   EXPECT_EQ(kVideoCodecVP9, header.codec);
   EXPECT_FALSE(header.color_space);
   const auto& vp9_header =
-      absl::get<RTPVideoHeaderVP9>(header.video_type_header);
+      std::get<RTPVideoHeaderVP9>(header.video_type_header);
   EXPECT_EQ(kPictureId + 1, vp9_header.picture_id);
   EXPECT_EQ(kTl0PicIdx, vp9_header.tl0_pic_idx);
   EXPECT_EQ(vp9_header.temporal_idx, codec_info.codecSpecific.VP9.temporal_idx);
@@ -144,7 +153,7 @@ TEST(RtpPayloadParamsTest, InfoMappedToRtpVideoHeader_Vp9) {
   EXPECT_EQ(kVideoRotation_90, header.rotation);
   EXPECT_EQ(VideoContentType::SCREENSHARE, header.content_type);
   EXPECT_EQ(kVideoCodecVP9, header.codec);
-  EXPECT_EQ(absl::make_optional(color_space), header.color_space);
+  EXPECT_EQ(std::make_optional(color_space), header.color_space);
   EXPECT_EQ(kPictureId + 1, vp9_header.picture_id);
   EXPECT_EQ(kTl0PicIdx, vp9_header.tl0_pic_idx);
   EXPECT_EQ(vp9_header.temporal_idx, codec_info.codecSpecific.VP9.temporal_idx);
@@ -168,7 +177,7 @@ TEST(RtpPayloadParamsTest, PictureIdIsSetForVp8) {
       params.GetRtpVideoHeader(encoded_image, &codec_info, kDontCare);
   EXPECT_EQ(kVideoCodecVP8, header.codec);
   EXPECT_EQ(kInitialPictureId1 + 1,
-            absl::get<RTPVideoHeaderVP8>(header.video_type_header).pictureId);
+            std::get<RTPVideoHeaderVP8>(header.video_type_header).pictureId);
 
   // State should hold latest used picture id and tl0_pic_idx.
   state = params.state();
@@ -190,8 +199,7 @@ TEST(RtpPayloadParamsTest, PictureIdWraps) {
   RTPVideoHeader header =
       params.GetRtpVideoHeader(encoded_image, &codec_info, kDontCare);
   EXPECT_EQ(kVideoCodecVP8, header.codec);
-  EXPECT_EQ(0,
-            absl::get<RTPVideoHeaderVP8>(header.video_type_header).pictureId);
+  EXPECT_EQ(0, std::get<RTPVideoHeaderVP8>(header.video_type_header).pictureId);
 
   // State should hold latest used picture id and tl0_pic_idx.
   EXPECT_EQ(0, params.state().picture_id);  // Wrapped.
@@ -297,7 +305,7 @@ TEST(RtpPayloadParamsTest, Tl0PicIdxUpdatedForVp8) {
 
   EXPECT_EQ(kVideoCodecVP8, header.codec);
   const auto& vp8_header =
-      absl::get<RTPVideoHeaderVP8>(header.video_type_header);
+      std::get<RTPVideoHeaderVP8>(header.video_type_header);
   EXPECT_EQ(kInitialPictureId1 + 1, vp8_header.pictureId);
   EXPECT_EQ(kInitialTl0PicIdx1, vp8_header.tl0PicIdx);
 
@@ -333,7 +341,7 @@ TEST(RtpPayloadParamsTest, Tl0PicIdxUpdatedForVp9) {
 
   EXPECT_EQ(kVideoCodecVP9, header.codec);
   const auto& vp9_header =
-      absl::get<RTPVideoHeaderVP9>(header.video_type_header);
+      std::get<RTPVideoHeaderVP9>(header.video_type_header);
   EXPECT_EQ(kInitialPictureId1 + 1, vp9_header.picture_id);
   EXPECT_EQ(kInitialTl0PicIdx1, vp9_header.tl0_pic_idx);
 
@@ -371,7 +379,7 @@ TEST(RtpPayloadParamsTest, GenerateFrameIdWhenExternalFrameIdsAreNotProvided) {
 
   RtpPayloadParams params(kSsrc1, &state, FieldTrialBasedConfig());
   RTPVideoHeader header =
-      params.GetRtpVideoHeader(encoded_image, &codec_info, absl::nullopt);
+      params.GetRtpVideoHeader(encoded_image, &codec_info, std::nullopt);
 
   EXPECT_THAT(header.codec, Eq(kVideoCodecGeneric));
 
@@ -379,7 +387,7 @@ TEST(RtpPayloadParamsTest, GenerateFrameIdWhenExternalFrameIdsAreNotProvided) {
   EXPECT_THAT(header.generic->frame_id, Eq(123));
 
   encoded_image._frameType = VideoFrameType::kVideoFrameDelta;
-  header = params.GetRtpVideoHeader(encoded_image, &codec_info, absl::nullopt);
+  header = params.GetRtpVideoHeader(encoded_image, &codec_info, std::nullopt);
   ASSERT_TRUE(header.generic);
   EXPECT_THAT(header.generic->frame_id, Eq(124));
 }
@@ -399,14 +407,13 @@ TEST(RtpPayloadParamsTest, PictureIdForOldGenericFormat) {
 
   EXPECT_EQ(kVideoCodecGeneric, header.codec);
   const auto* generic =
-      absl::get_if<RTPVideoHeaderLegacyGeneric>(&header.video_type_header);
+      std::get_if<RTPVideoHeaderLegacyGeneric>(&header.video_type_header);
   ASSERT_TRUE(generic);
   EXPECT_EQ(0, generic->picture_id);
 
   encoded_image._frameType = VideoFrameType::kVideoFrameDelta;
   header = params.GetRtpVideoHeader(encoded_image, &codec_info, 20);
-  generic =
-      absl::get_if<RTPVideoHeaderLegacyGeneric>(&header.video_type_header);
+  generic = std::get_if<RTPVideoHeaderLegacyGeneric>(&header.video_type_header);
   ASSERT_TRUE(generic);
   EXPECT_EQ(1, generic->picture_id);
 }
@@ -1337,7 +1344,13 @@ class RtpPayloadParamsH264ToGenericTest : public ::testing::Test {
                        LayerSync layer_sync,
                        const std::set<int64_t>& expected_deps,
                        uint16_t width = 0,
-                       uint16_t height = 0) {
+                       uint16_t height = 0,
+                       const std::vector<DecodeTargetIndication>&
+                           expected_decode_target_indication = {
+                               DecodeTargetIndication::kSwitch,
+                               DecodeTargetIndication::kSwitch,
+                               DecodeTargetIndication::kSwitch,
+                               DecodeTargetIndication::kSwitch}) {
     EncodedImage encoded_image;
     encoded_image._frameType = frame_type;
     encoded_image._encodedWidth = width;
@@ -1362,6 +1375,9 @@ class RtpPayloadParamsH264ToGenericTest : public ::testing::Test {
 
     EXPECT_EQ(header.width, width);
     EXPECT_EQ(header.height, height);
+
+    EXPECT_THAT(header.generic->decode_target_indications,
+                ElementsAreArray(expected_decode_target_indication));
   }
 
  protected:
@@ -1393,29 +1409,42 @@ TEST_F(RtpPayloadParamsH264ToGenericTest, TooHighTemporalIndex) {
 }
 
 TEST_F(RtpPayloadParamsH264ToGenericTest, LayerSync) {
+  constexpr auto kSwitch = DecodeTargetIndication::kSwitch;
+  constexpr auto kNotPresent = DecodeTargetIndication::kNotPresent;
+
   // 02120212 pattern
   ConvertAndCheck(0, 0, VideoFrameType::kVideoFrameKey, kNoSync, {}, 480, 360);
-  ConvertAndCheck(2, 1, VideoFrameType::kVideoFrameDelta, kNoSync, {0});
-  ConvertAndCheck(1, 2, VideoFrameType::kVideoFrameDelta, kNoSync, {0});
-  ConvertAndCheck(2, 3, VideoFrameType::kVideoFrameDelta, kNoSync, {0, 1, 2});
-
-  ConvertAndCheck(0, 4, VideoFrameType::kVideoFrameDelta, kNoSync, {0});
-  ConvertAndCheck(2, 5, VideoFrameType::kVideoFrameDelta, kNoSync, {2, 3, 4});
-  ConvertAndCheck(1, 6, VideoFrameType::kVideoFrameDelta, kSync,
-                  {4});  // layer sync
-  ConvertAndCheck(2, 7, VideoFrameType::kVideoFrameDelta, kNoSync, {4, 5, 6});
+  ConvertAndCheck(2, 1, VideoFrameType::kVideoFrameDelta, kNoSync, {0}, 0, 0,
+                  {kNotPresent, kNotPresent, kSwitch, kSwitch});
+  ConvertAndCheck(1, 2, VideoFrameType::kVideoFrameDelta, kNoSync, {0}, 0, 0,
+                  {kNotPresent, kSwitch, kSwitch, kSwitch});
+  ConvertAndCheck(2, 3, VideoFrameType::kVideoFrameDelta, kNoSync, {0, 1, 2}, 0,
+                  0, {kNotPresent, kNotPresent, kSwitch, kSwitch});
+  ConvertAndCheck(0, 4, VideoFrameType::kVideoFrameDelta, kNoSync, {0}, 0, 0);
+  ConvertAndCheck(2, 5, VideoFrameType::kVideoFrameDelta, kNoSync, {2, 3, 4}, 0,
+                  0, {kNotPresent, kNotPresent, kSwitch, kSwitch});
+  ConvertAndCheck(1, 6, VideoFrameType::kVideoFrameDelta, kSync, {4}, 0, 0,
+                  {kNotPresent, kSwitch, kSwitch, kSwitch});  // layer sync
+  ConvertAndCheck(2, 7, VideoFrameType::kVideoFrameDelta, kNoSync, {4, 5, 6}, 0,
+                  0, {kNotPresent, kNotPresent, kSwitch, kSwitch});
 }
 
 TEST_F(RtpPayloadParamsH264ToGenericTest, FrameIdGaps) {
+  constexpr auto kSwitch = DecodeTargetIndication::kSwitch;
+  constexpr auto kNotPresent = DecodeTargetIndication::kNotPresent;
+
   // 0101 pattern
   ConvertAndCheck(0, 0, VideoFrameType::kVideoFrameKey, kNoSync, {}, 480, 360);
-  ConvertAndCheck(1, 1, VideoFrameType::kVideoFrameDelta, kNoSync, {0});
+  ConvertAndCheck(1, 1, VideoFrameType::kVideoFrameDelta, kNoSync, {0}, 0, 0,
+                  {kNotPresent, kSwitch, kSwitch, kSwitch});
 
   ConvertAndCheck(0, 5, VideoFrameType::kVideoFrameDelta, kNoSync, {0});
-  ConvertAndCheck(1, 10, VideoFrameType::kVideoFrameDelta, kNoSync, {1, 5});
+  ConvertAndCheck(1, 10, VideoFrameType::kVideoFrameDelta, kNoSync, {1, 5}, 0,
+                  0, {kNotPresent, kSwitch, kSwitch, kSwitch});
 
   ConvertAndCheck(0, 15, VideoFrameType::kVideoFrameDelta, kNoSync, {5});
-  ConvertAndCheck(1, 20, VideoFrameType::kVideoFrameDelta, kNoSync, {10, 15});
+  ConvertAndCheck(1, 20, VideoFrameType::kVideoFrameDelta, kNoSync, {10, 15}, 0,
+                  0, {kNotPresent, kSwitch, kSwitch, kSwitch});
 }
 
 }  // namespace

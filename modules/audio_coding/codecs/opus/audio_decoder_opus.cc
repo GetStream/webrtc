@@ -11,21 +11,22 @@
 #include "modules/audio_coding/codecs/opus/audio_decoder_opus.h"
 
 #include <memory>
+#include <optional>
 #include <utility>
 
-#include "absl/types/optional.h"
 #include "api/array_view.h"
+#include "api/field_trials_view.h"
 #include "modules/audio_coding/codecs/opus/audio_coder_opus_common.h"
 #include "rtc_base/checks.h"
-#include "system_wrappers/include/field_trial.h"
 
 namespace webrtc {
 
-AudioDecoderOpusImpl::AudioDecoderOpusImpl(size_t num_channels,
+AudioDecoderOpusImpl::AudioDecoderOpusImpl(const FieldTrialsView& field_trials,
+                                           size_t num_channels,
                                            int sample_rate_hz)
     : channels_(num_channels),
       sample_rate_hz_(sample_rate_hz),
-      generate_plc_(field_trial::IsEnabled("WebRTC-Audio-OpusGeneratePlc")) {
+      generate_plc_(field_trials.IsEnabled("WebRTC-Audio-OpusGeneratePlc")) {
   RTC_DCHECK(num_channels == 1 || num_channels == 2);
   RTC_DCHECK(sample_rate_hz == 16000 || sample_rate_hz == 48000);
   const int error =
@@ -39,7 +40,7 @@ AudioDecoderOpusImpl::~AudioDecoderOpusImpl() {
 }
 
 std::vector<AudioDecoder::ParseResult> AudioDecoderOpusImpl::ParsePayload(
-    rtc::Buffer&& payload,
+    Buffer&& payload,
     uint32_t timestamp) {
   std::vector<ParseResult> results;
 
@@ -47,7 +48,7 @@ std::vector<AudioDecoder::ParseResult> AudioDecoderOpusImpl::ParsePayload(
     const int duration =
         PacketDurationRedundant(payload.data(), payload.size());
     RTC_DCHECK_GE(duration, 0);
-    rtc::Buffer payload_copy(payload.data(), payload.size());
+    Buffer payload_copy(payload.data(), payload.size());
     std::unique_ptr<EncodedAudioFrame> fec_frame(
         new OpusFrame(this, std::move(payload_copy), false));
     results.emplace_back(timestamp - duration, 1, std::move(fec_frame));
@@ -129,13 +130,13 @@ size_t AudioDecoderOpusImpl::Channels() const {
 }
 
 void AudioDecoderOpusImpl::GeneratePlc(
-    size_t requested_samples_per_channel,
-    rtc::BufferT<int16_t>* concealment_audio) {
+    size_t /* requested_samples_per_channel */,
+    BufferT<int16_t>* concealment_audio) {
   if (!generate_plc_) {
     return;
   }
   int plc_size = WebRtcOpus_PlcDuration(dec_state_) * channels_;
-  concealment_audio->AppendData(plc_size, [&](rtc::ArrayView<int16_t> decoded) {
+  concealment_audio->AppendData(plc_size, [&](ArrayView<int16_t> decoded) {
     int16_t temp_type = 1;
     int ret =
         WebRtcOpus_Decode(dec_state_, nullptr, 0, decoded.data(), &temp_type);

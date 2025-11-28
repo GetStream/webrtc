@@ -55,18 +55,20 @@
   }
   _captureSession = captureSession;
   [RTC_OBJC_TYPE(RTCDispatcher)
-      dispatchAsyncOnType:RTCDispatcherTypeMain
+      dispatchAsyncOnType:RTC_OBJC_TYPE(RTCDispatcherTypeMain)
                     block:^{
-                      AVCaptureVideoPreviewLayer *previewLayer = [self previewLayer];
+                      AVCaptureVideoPreviewLayer *previewLayer =
+                          [self previewLayer];
                       [RTC_OBJC_TYPE(RTCDispatcher)
-                          dispatchAsyncOnType:RTCDispatcherTypeCaptureSession
+                          dispatchAsyncOnType:RTC_OBJC_TYPE(RTCDispatcherTypeCaptureSession)
                                         block:^{
                                           previewLayer.session = captureSession;
 #if !TARGET_OS_TV
                                           [RTC_OBJC_TYPE(RTCDispatcher)
-                                              dispatchAsyncOnType:RTCDispatcherTypeMain
+                                              dispatchAsyncOnType:RTC_OBJC_TYPE(RTCDispatcherTypeMain)
                                                             block:^{
-                                                              [self setCorrectVideoOrientation];
+                                                              [self
+                                                                  setCorrectVideoOrientation];
                                                             }];
 #endif
                                         }];
@@ -102,23 +104,26 @@
     } else if (deviceOrientation == UIDeviceOrientationPortrait) {
       previewLayer.connection.videoOrientation = AVCaptureVideoOrientationPortrait;
     }
-    // If device orientation switches to FaceUp or FaceDown, don't change video orientation.
+    // If device orientation switches to FaceUp or FaceDown, don't change video
+    // orientation.
   }
 }
 
 #pragma mark - Private
 
 - (void)addOrientationObserver {
-  [[NSNotificationCenter defaultCenter] addObserver:self
-                                           selector:@selector(orientationChanged:)
-                                               name:UIDeviceOrientationDidChangeNotification
-                                             object:nil];
+  [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(orientationChanged:)
+             name:UIDeviceOrientationDidChangeNotification
+           object:nil];
 }
 
 - (void)removeOrientationObserver {
-  [[NSNotificationCenter defaultCenter] removeObserver:self
-                                                  name:UIDeviceOrientationDidChangeNotification
-                                                object:nil];
+  [[NSNotificationCenter defaultCenter]
+      removeObserver:self
+                name:UIDeviceOrientationDidChangeNotification
+              object:nil];
 }
 
 #endif

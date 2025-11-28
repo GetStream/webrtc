@@ -13,12 +13,15 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
+#include <variant>
 #include <vector>
 
+#include "absl/base/macros.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/variant.h"
 #include "api/async_dns_resolver.h"
 #include "api/audio/audio_mixer.h"
+#include "api/audio/audio_processing.h"
 #include "api/audio_codecs/audio_decoder_factory.h"
 #include "api/audio_codecs/audio_encoder_factory.h"
 #include "api/fec_controller.h"
@@ -36,7 +39,6 @@
 #include "api/transport/network_control.h"
 #include "api/video_codecs/video_decoder_factory.h"
 #include "api/video_codecs/video_encoder_factory.h"
-#include "modules/audio_processing/include/audio_processing.h"
 #include "rtc_base/rtc_certificate_generator.h"
 #include "rtc_base/ssl_certificate.h"
 
@@ -47,10 +49,10 @@ namespace webrtc_pc_e2e {
 class PeerConfigurer {
  public:
   using VideoSource =
-      absl::variant<std::unique_ptr<test::FrameGeneratorInterface>,
-                    CapturingDeviceIndex>;
+      std::variant<std::unique_ptr<test::FrameGeneratorInterface>,
+                   CapturingDeviceIndex>;
 
-  explicit PeerConfigurer(const PeerNetworkDependencies& network_dependencies);
+  explicit PeerConfigurer(PeerNetworkDependencies& network);
 
   // Sets peer name that will be used to report metrics related to this peer.
   // If not set, some default name will be assigned. All names have to be
@@ -72,15 +74,20 @@ class PeerConfigurer {
   PeerConfigurer* SetVideoDecoderFactory(
       std::unique_ptr<VideoDecoderFactory> video_decoder_factory);
   PeerConfigurer* SetAudioEncoderFactory(
-      rtc::scoped_refptr<webrtc::AudioEncoderFactory> audio_encoder_factory);
+      scoped_refptr<webrtc::AudioEncoderFactory> audio_encoder_factory);
   PeerConfigurer* SetAudioDecoderFactory(
-      rtc::scoped_refptr<webrtc::AudioDecoderFactory> audio_decoder_factory);
+      scoped_refptr<webrtc::AudioDecoderFactory> audio_decoder_factory);
   // Set a custom NetEqFactory to be used in the call.
   PeerConfigurer* SetNetEqFactory(std::unique_ptr<NetEqFactory> neteq_factory);
   PeerConfigurer* SetAudioProcessing(
-      rtc::scoped_refptr<webrtc::AudioProcessing> audio_processing);
-  PeerConfigurer* SetAudioMixer(
-      rtc::scoped_refptr<webrtc::AudioMixer> audio_mixer);
+      std::unique_ptr<AudioProcessingBuilderInterface> audio_processing);
+  ABSL_DEPRECATE_AND_INLINE()
+  PeerConfigurer* SetAudioProcessing(
+      scoped_refptr<webrtc::AudioProcessing> audio_processing) {
+    return SetAudioProcessing(
+        CustomAudioProcessing(std::move(audio_processing)));
+  }
+  PeerConfigurer* SetAudioMixer(scoped_refptr<webrtc::AudioMixer> audio_mixer);
 
   // Forces the Peerconnection to use the network thread as the worker thread.
   // Ie, worker thread and the network thread is the same thread.
@@ -93,15 +100,25 @@ class PeerConfigurer {
       std::unique_ptr<webrtc::AsyncDnsResolverFactoryInterface>
           async_dns_resolver_factory);
   PeerConfigurer* SetRTCCertificateGenerator(
-      std::unique_ptr<rtc::RTCCertificateGeneratorInterface> cert_generator);
+      std::unique_ptr<RTCCertificateGeneratorInterface> cert_generator);
   PeerConfigurer* SetSSLCertificateVerifier(
-      std::unique_ptr<rtc::SSLCertificateVerifier> tls_cert_verifier);
+      std::unique_ptr<SSLCertificateVerifier> tls_cert_verifier);
   PeerConfigurer* SetIceTransportFactory(
       std::unique_ptr<IceTransportFactory> factory);
-  // Flags to set on `cricket::PortAllocator`. These flags will be added
-  // to the default ones that are presented on the port allocator.
-  // For possible values check p2p/base/port_allocator.h.
+  // Flags to set on `webrtc::PortAllocator`. These flags will be added
+  // to the webrtc::kDefaultPortAllocatorFlags with
+  // webrtc::PORTALLOCATOR_DISABLE_TCP disabled. For possible values check
+  // p2p/base/port_allocator.h.
   PeerConfigurer* SetPortAllocatorExtraFlags(uint32_t extra_flags);
+  // Flags to set on `webrtc::PortAllocator`. These flags will override
+  // the default ones that are presented on the port allocator.
+  //
+  // For possible values check p2p/base/port_allocator.h.
+  //
+  // IMPORTANT: if you use WebRTC Network Emulation
+  // (api/test/network_emulation_manager.h) and set this field, remember to set
+  // webrtc::PORTALLOCATOR_DISABLE_TCP to 0.
+  PeerConfigurer* SetPortAllocatorFlags(uint32_t flags);
 
   // Add new video stream to the call that will be sent from this peer.
   // Default implementation of video frames generator will be used.

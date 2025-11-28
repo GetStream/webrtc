@@ -22,7 +22,7 @@ int32_t Channel::SendData(AudioFrameType frameType,
                           uint32_t timeStamp,
                           const uint8_t* payloadData,
                           size_t payloadSize,
-                          int64_t absolute_capture_timestamp_ms) {
+                          int64_t /* absolute_capture_timestamp_ms */) {
   RTPHeader rtp_header;
   int32_t status;
   size_t payloadDataSize = payloadSize;
@@ -82,8 +82,9 @@ int32_t Channel::SendData(AudioFrameType frameType,
     return 0;
   }
 
-  status = _receiverACM->InsertPacket(
-      rtp_header, rtc::ArrayView<const uint8_t>(_payloadData, payloadDataSize));
+  status = _neteq->InsertPacket(
+      rtp_header, ArrayView<const uint8_t>(_payloadData, payloadDataSize),
+      /*receive_time=*/Timestamp::MinusInfinity());
 
   return status;
 }
@@ -186,7 +187,7 @@ void Channel::CalcStatistics(const RTPHeader& rtp_header, size_t payloadSize) {
 }
 
 Channel::Channel(int16_t chID)
-    : _receiverACM(NULL),
+    : _neteq(NULL),
       _seqNo(0),
       _bitStreamFile(NULL),
       _saveBitStream(false),
@@ -198,7 +199,7 @@ Channel::Channel(int16_t chID)
       _lastFrameSizeSample(0),
       _packetLoss(0),
       _useFECTestWithPacketLoss(false),
-      _beginTime(rtc::TimeMillis()),
+      _beginTime(TimeMillis()),
       _totalBytes(0),
       external_send_timestamp_(-1),
       external_sequence_number_(-1),
@@ -218,7 +219,7 @@ Channel::Channel(int16_t chID)
   }
   if (chID >= 0) {
     _saveBitStream = true;
-    rtc::StringBuilder ss;
+    StringBuilder ss;
     ss.AppendFormat("bitStream_%d.dat", chID);
     _bitStreamFile = fopen(ss.str().c_str(), "wb");
   } else {
@@ -228,8 +229,8 @@ Channel::Channel(int16_t chID)
 
 Channel::~Channel() {}
 
-void Channel::RegisterReceiverACM(acm2::AcmReceiver* acm_receiver) {
-  _receiverACM = acm_receiver;
+void Channel::RegisterReceiverNetEq(NetEq* neteq) {
+  _neteq = neteq;
   return;
 }
 
@@ -249,7 +250,7 @@ void Channel::ResetStats() {
       _payloadStats[n].frameSizeStats[k].totalEncodedSamples = 0;
     }
   }
-  _beginTime = rtc::TimeMillis();
+  _beginTime = TimeMillis();
   _totalBytes = 0;
   _channelCritSect.Unlock();
 }
@@ -264,7 +265,7 @@ uint32_t Channel::LastInTimestamp() {
 
 double Channel::BitRate() {
   double rate;
-  uint64_t currTime = rtc::TimeMillis();
+  uint64_t currTime = TimeMillis();
   _channelCritSect.Lock();
   rate = ((double)_totalBytes * 8.0) / (double)(currTime - _beginTime);
   _channelCritSect.Unlock();

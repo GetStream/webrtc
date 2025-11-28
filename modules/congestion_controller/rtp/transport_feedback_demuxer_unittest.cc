@@ -9,6 +9,11 @@
  */
 #include "modules/congestion_controller/rtp/transport_feedback_demuxer.h"
 
+#include <cstdint>
+#include <vector>
+
+#include "api/units/timestamp.h"
+#include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/transport_feedback.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
@@ -53,12 +58,13 @@ TEST(TransportFeedbackDemuxerTest, ObserverSanity) {
   const uint16_t kRtpStartSeq = 55;
   const int64_t kTransportStartSeq = 1;
   demuxer.AddPacket(CreatePacket(kSsrc, kRtpStartSeq, kTransportStartSeq,
-                                 /*is_retransmit=*/false));
+                                 /*is_retransmission=*/false));
   demuxer.AddPacket(CreatePacket(kSsrc, kRtpStartSeq + 1,
                                  kTransportStartSeq + 1,
-                                 /*is_retransmit=*/false));
-  demuxer.AddPacket(CreatePacket(
-      kSsrc, kRtpStartSeq + 2, kTransportStartSeq + 2, /*is_retransmit=*/true));
+                                 /*is_retransmission=*/false));
+  demuxer.AddPacket(CreatePacket(kSsrc, kRtpStartSeq + 2,
+                                 kTransportStartSeq + 2,
+                                 /*is_retransmission=*/true));
 
   rtcp::TransportFeedback feedback;
   feedback.SetBase(kTransportStartSeq, Timestamp::Millis(1));

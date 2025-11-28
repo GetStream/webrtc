@@ -14,15 +14,16 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <optional>
 #include <string>
 
-#include "absl/types/optional.h"
-#include "api/array_view.h"
 #include "api/units/timestamp.h"
 #include "api/video/color_space.h"
 #include "api/video/video_content_type.h"
 #include "api/video/video_rotation.h"
 #include "api/video/video_timing.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/system/rtc_export.h"
 
 namespace webrtc {
 
@@ -74,7 +75,7 @@ struct AbsoluteCaptureTime {
   // system’s NTP clock:
   //
   //   Capture NTP Clock = Sender NTP Clock + Capture Clock Offset
-  absl::optional<int64_t> estimated_capture_clock_offset;
+  std::optional<int64_t> estimated_capture_clock_offset;
 };
 
 // The audio level extension is used to indicate the voice activity and the
@@ -130,22 +131,18 @@ struct RTPHeaderExtension {
   int32_t transmissionTimeOffset;
   bool hasAbsoluteSendTime;
   uint32_t absoluteSendTime;
-  absl::optional<AbsoluteCaptureTime> absolute_capture_time;
+  std::optional<AbsoluteCaptureTime> absolute_capture_time;
   bool hasTransportSequenceNumber;
   uint16_t transportSequenceNumber;
-  absl::optional<FeedbackRequest> feedback_request;
+  std::optional<FeedbackRequest> feedback_request;
 
   // Audio Level includes both level in dBov and voiced/unvoiced bit. See:
   // https://tools.ietf.org/html/rfc6464#section-3
-  absl::optional<AudioLevel> audio_level() const;
+  std::optional<AudioLevel> audio_level() const { return audio_level_; }
 
-  void set_audio_level(absl::optional<AudioLevel> audio_level);
-
-  // Direct use of the following members is discouraged and will be removed
-  // once downstream projects have been updated.
-  bool hasAudioLevel;
-  bool voiceActivity;
-  uint8_t audioLevel;
+  void set_audio_level(std::optional<AudioLevel> audio_level) {
+    audio_level_ = audio_level;
+  }
 
   // For Coordination of Video Orientation. See
   // http://www.etsi.org/deliver/etsi_ts/126100_126199/126114/12.07.00_60/
@@ -153,7 +150,7 @@ struct RTPHeaderExtension {
   bool hasVideoRotation;
   VideoRotation videoRotation;
 
-  // TODO(ilnik): Refactor this and one above to be absl::optional() and remove
+  // TODO(ilnik): Refactor this and one above to be std::optional() and remove
   // a corresponding bool flag.
   bool hasVideoContentType;
   VideoContentType videoContentType;
@@ -172,7 +169,10 @@ struct RTPHeaderExtension {
   // https://tools.ietf.org/html/rfc8843
   std::string mid;
 
-  absl::optional<ColorSpace> color_space;
+  std::optional<ColorSpace> color_space;
+
+ private:
+  std::optional<AudioLevel> audio_level_;
 };
 
 enum { kRtpCsrcSize = 15 };  // RFC 3550 page 13

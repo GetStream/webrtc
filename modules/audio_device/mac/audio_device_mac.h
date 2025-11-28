@@ -154,8 +154,8 @@ class AudioDeviceMac : public AudioDeviceGeneric {
   virtual void AttachAudioBuffer(AudioDeviceBuffer* audioBuffer)
       RTC_LOCKS_EXCLUDED(mutex_);
 
-  virtual int32_t SetAudioDeviceSink(AudioDeviceSink* sink) RTC_LOCKS_EXCLUDED(mutex_) {
-    audio_device_module_sink_ = sink;
+  virtual int32_t SetObserver(AudioDeviceObserver* observer) RTC_LOCKS_EXCLUDED(mutex_) {
+    audio_device_module_sink_ = observer;
     return 0;
   }
   virtual int32_t GetPlayoutDevice() const;
@@ -177,7 +177,7 @@ class AudioDeviceMac : public AudioDeviceGeneric {
   static void AtomicSet32(int32_t* theValue, int32_t newValue);
   static int32_t AtomicGet32(int32_t* theValue);
 
-  static void logCAMsg(rtc::LoggingSeverity sev,
+  static void logCAMsg(webrtc::LoggingSeverity sev,
                        const char* msg,
                        const char* err);
 
@@ -187,8 +187,8 @@ class AudioDeviceMac : public AudioDeviceGeneric {
 
   int32_t GetDeviceName(AudioObjectPropertyScope scope,
                         uint16_t index,
-                        rtc::ArrayView<char> name,
-                        rtc::ArrayView<char> guid);
+                        webrtc::ArrayView<char> name,
+                        webrtc::ArrayView<char> guid);
 
   int32_t InitDevice(uint16_t userDeviceIndex,
                      AudioDeviceID& deviceId,
@@ -277,14 +277,14 @@ class AudioDeviceMac : public AudioDeviceGeneric {
 
   Mutex mutex_;
 
-  rtc::Event _stopEventRec;
-  rtc::Event _stopEvent;
+  webrtc::Event _stopEventRec;
+  webrtc::Event _stopEvent;
 
   // Only valid/running between calls to StartRecording and StopRecording.
-  rtc::PlatformThread capture_worker_thread_;
+  webrtc::PlatformThread capture_worker_thread_;
 
   // Only valid/running between calls to StartPlayout and StopPlayout.
-  rtc::PlatformThread render_worker_thread_;
+  webrtc::PlatformThread render_worker_thread_;
 
   AudioMixerManagerMac _mixerManager;
 
@@ -292,10 +292,8 @@ class AudioDeviceMac : public AudioDeviceGeneric {
   uint16_t _outputDeviceIndex;
   AudioDeviceID _inputDeviceID;
   AudioDeviceID _outputDeviceID;
-#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 1050
   AudioDeviceIOProcID _inDeviceIOProcID;
   AudioDeviceIOProcID _deviceIOProcID;
-#endif
   bool _inputDeviceIsSpecified;
   bool _outputDeviceIsSpecified;
 
@@ -354,7 +352,7 @@ class AudioDeviceMac : public AudioDeviceGeneric {
   // 0x5c is key "9", after that comes function keys.
   bool prev_key_state_[0x5d];
 
-  AudioDeviceSink *audio_device_module_sink_ = nullptr;
+  AudioDeviceObserver *audio_device_module_sink_ = nullptr;
 };
 
 }  // namespace webrtc

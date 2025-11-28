@@ -10,27 +10,48 @@
 
 #include "modules/rtp_rtcp/source/rtcp_transceiver_impl.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
-#include "absl/memory/memory.h"
+#include "api/array_view.h"
 #include "api/rtp_headers.h"
+#include "api/task_queue/task_queue_base.h"
+#include "api/task_queue/task_queue_factory.h"
 #include "api/test/create_time_controller.h"
 #include "api/test/time_controller.h"
 #include "api/units/data_rate.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
 #include "api/video/video_bitrate_allocation.h"
+#include "api/video/video_codec_constants.h"
 #include "modules/rtp_rtcp/include/receive_statistics.h"
 #include "modules/rtp_rtcp/include/report_block_data.h"
 #include "modules/rtp_rtcp/mocks/mock_network_link_rtcp_observer.h"
-#include "modules/rtp_rtcp/mocks/mock_rtcp_rtt_stats.h"
+#include "modules/rtp_rtcp/source/ntp_time_util.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/app.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/bye.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/compound_packet.h"
-#include "modules/rtp_rtcp/source/time_util.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/congestion_control_feedback.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/dlrr.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/extended_reports.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/fir.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/nack.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/pli.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/receiver_report.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/remb.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/report_block.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/rrtr.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/sender_report.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/target_bitrate.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/transport_feedback.h"
+#include "modules/rtp_rtcp/source/rtcp_transceiver_config.h"
 #include "system_wrappers/include/clock.h"
+#include "system_wrappers/include/ntp_time.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 #include "test/rtcp_packet_parser.h"
@@ -87,7 +108,7 @@ class MockRtpStreamRtcpHandler : public RtpStreamRtcpHandler {
   MOCK_METHOD(RtpStats, SentStats, (), (override));
   MOCK_METHOD(void,
               OnNack,
-              (uint32_t, rtc::ArrayView<const uint16_t>),
+              (uint32_t, ArrayView<const uint16_t>),
               (override));
   MOCK_METHOD(void, OnFir, (uint32_t), (override));
   MOCK_METHOD(void, OnPli, (uint32_t), (override));
@@ -110,8 +131,8 @@ class FakeRtcpTransport {
  public:
   explicit FakeRtcpTransport(TimeController& time) : time_(time) {}
 
-  std::function<void(rtc::ArrayView<const uint8_t>)> AsStdFunction() {
-    return [this](rtc::ArrayView<const uint8_t>) { sent_rtcp_ = true; };
+  std::function<void(ArrayView<const uint8_t>)> AsStdFunction() {
+    return [this](ArrayView<const uint8_t>) { sent_rtcp_ = true; };
   }
 
   // Returns true when packet was received by the transport.
@@ -127,9 +148,9 @@ class FakeRtcpTransport {
   bool sent_rtcp_ = false;
 };
 
-std::function<void(rtc::ArrayView<const uint8_t>)> RtcpParserTransport(
+std::function<void(ArrayView<const uint8_t>)> RtcpParserTransport(
     RtcpPacketParser& parser) {
-  return [&parser](rtc::ArrayView<const uint8_t> packet) {
+  return [&parser](ArrayView<const uint8_t> packet) {
     return parser.Parse(packet);
   };
 }
@@ -221,7 +242,7 @@ TEST_F(RtcpTransceiverImplTest, DelaysSendingFirstCompondPacket) {
   config.rtcp_transport = transport.AsStdFunction();
   config.initial_report_delay = TimeDelta::Millis(10);
   config.task_queue = queue.get();
-  absl::optional<RtcpTransceiverImpl> rtcp_transceiver;
+  std::optional<RtcpTransceiverImpl> rtcp_transceiver;
 
   Timestamp started = CurrentTime();
   queue->PostTask([&] { rtcp_transceiver.emplace(config); });
@@ -248,7 +269,7 @@ TEST_F(RtcpTransceiverImplTest, PeriodicallySendsPackets) {
   config.initial_report_delay = TimeDelta::Zero();
   config.report_period = kReportPeriod;
   config.task_queue = queue.get();
-  absl::optional<RtcpTransceiverImpl> rtcp_transceiver;
+  std::optional<RtcpTransceiverImpl> rtcp_transceiver;
   Timestamp time_just_before_1st_packet = Timestamp::MinusInfinity();
   queue->PostTask([&] {
     // Because initial_report_delay_ms is set to 0, time_just_before_the_packet
@@ -283,7 +304,7 @@ TEST_F(RtcpTransceiverImplTest, SendCompoundPacketDelaysPeriodicSendPackets) {
   config.initial_report_delay = TimeDelta::Zero();
   config.report_period = kReportPeriod;
   config.task_queue = queue.get();
-  absl::optional<RtcpTransceiverImpl> rtcp_transceiver;
+  std::optional<RtcpTransceiverImpl> rtcp_transceiver;
   queue->PostTask([&] { rtcp_transceiver.emplace(config); });
 
   // Wait for the first packet.
@@ -322,7 +343,7 @@ TEST_F(RtcpTransceiverImplTest, SendCompoundPacketDelaysPeriodicSendPackets) {
 }
 
 TEST_F(RtcpTransceiverImplTest, SendsNoRtcpWhenNetworkStateIsDown) {
-  MockFunction<void(rtc::ArrayView<const uint8_t>)> mock_transport;
+  MockFunction<void(ArrayView<const uint8_t>)> mock_transport;
   RtcpTransceiverConfig config = DefaultTestConfig();
   config.initial_ready_to_send = false;
   config.rtcp_transport = mock_transport.AsStdFunction();
@@ -339,7 +360,7 @@ TEST_F(RtcpTransceiverImplTest, SendsNoRtcpWhenNetworkStateIsDown) {
 }
 
 TEST_F(RtcpTransceiverImplTest, SendsRtcpWhenNetworkStateIsUp) {
-  MockFunction<void(rtc::ArrayView<const uint8_t>)> mock_transport;
+  MockFunction<void(ArrayView<const uint8_t>)> mock_transport;
   RtcpTransceiverConfig config = DefaultTestConfig();
   config.initial_ready_to_send = false;
   config.rtcp_transport = mock_transport.AsStdFunction();
@@ -365,7 +386,7 @@ TEST_F(RtcpTransceiverImplTest, SendsPeriodicRtcpWhenNetworkStateIsUp) {
   config.initial_ready_to_send = false;
   config.rtcp_transport = transport.AsStdFunction();
   config.task_queue = queue.get();
-  absl::optional<RtcpTransceiverImpl> rtcp_transceiver;
+  std::optional<RtcpTransceiverImpl> rtcp_transceiver;
   rtcp_transceiver.emplace(config);
 
   queue->PostTask([&] { rtcp_transceiver->SetReadyToSend(true); });
@@ -405,7 +426,7 @@ TEST_F(RtcpTransceiverImplTest, SendsMinimalCompoundPacket) {
 }
 
 TEST_F(RtcpTransceiverImplTest, AvoidsEmptyPacketsInReducedMode) {
-  MockFunction<void(rtc::ArrayView<const uint8_t>)> transport;
+  MockFunction<void(ArrayView<const uint8_t>)> transport;
   EXPECT_CALL(transport, Call).Times(0);
   NiceMock<MockReceiveStatisticsProvider> receive_statistics;
 
@@ -1403,6 +1424,31 @@ TEST_F(RtcpTransceiverImplTest, ParsesTransportFeedback) {
   rtcp_transceiver.ReceivePacket(tb.Build(), receive_time);
 }
 
+TEST_F(RtcpTransceiverImplTest, ParsesCongestionControlFeedback) {
+  MockNetworkLinkRtcpObserver link_observer;
+  RtcpTransceiverConfig config = DefaultTestConfig();
+  config.network_link_observer = &link_observer;
+  const uint32_t receive_time_ntp = 5678;
+  Timestamp receive_time = Timestamp::Seconds(9843);
+  RtcpTransceiverImpl rtcp_transceiver(config);
+
+  EXPECT_CALL(link_observer, OnCongestionControlFeedback(receive_time, _))
+      .WillOnce(WithArg<1>([](const rtcp::CongestionControlFeedback& message) {
+        EXPECT_EQ(message.report_timestamp_compact_ntp(), 5678u);
+        EXPECT_THAT(message.packets(), SizeIs(2));
+      }));
+
+  std::vector<rtcp::CongestionControlFeedback::PacketInfo> packets = {
+      {.ssrc = 1,
+       .sequence_number = 321,
+       .arrival_time_offset = TimeDelta::Millis(15)},
+      {.ssrc = 1,
+       .sequence_number = 322,
+       .arrival_time_offset = TimeDelta::Millis(17)}};
+  rtcp::CongestionControlFeedback ccfb(std::move(packets), receive_time_ntp);
+  rtcp_transceiver.ReceivePacket(ccfb.Build(), receive_time);
+}
+
 TEST_F(RtcpTransceiverImplTest, ParsesRemb) {
   MockNetworkLinkRtcpObserver link_observer;
   RtcpTransceiverConfig config = DefaultTestConfig();
@@ -1586,10 +1632,10 @@ TEST_F(RtcpTransceiverImplTest, RotatesSendersWhenAllSenderReportDoNotFit) {
     rtcp_receiver.AddMediaReceiverRtcpObserver(kSenderSsrc[i], &receiver[i]);
   }
 
-  MockFunction<void(rtc::ArrayView<const uint8_t>)> transport;
+  MockFunction<void(ArrayView<const uint8_t>)> transport;
   EXPECT_CALL(transport, Call)
       .Times(kNumSenders)
-      .WillRepeatedly([&](rtc::ArrayView<const uint8_t> packet) {
+      .WillRepeatedly([&](ArrayView<const uint8_t> packet) {
         rtcp_receiver.ReceivePacket(packet, CurrentTime());
         return true;
       });

@@ -16,14 +16,13 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "api/candidate.h"
 #include "api/rtc_error.h"
 #include "api/sequence_checker.h"
@@ -38,6 +37,7 @@
 #include "p2p/base/port_interface.h"
 #include "p2p/base/stun_request.h"
 #include "p2p/base/transport_description.h"
+#include "p2p/dtls/dtls_stun_piggyback_callbacks.h"
 #include "rtc_base/async_packet_socket.h"
 #include "rtc_base/network.h"
 #include "rtc_base/network/received_packet.h"
@@ -48,11 +48,13 @@
 #include "rtc_base/thread_annotations.h"
 #include "rtc_base/weak_ptr.h"
 
-namespace cricket {
+namespace webrtc {
 
 // Version number for GOOG_PING, this is added to have the option of
 // adding other flavors in the future.
 constexpr int kGoogPingVersion = 1;
+// 1200 is the "commonly used" MTU. Subtract M-I attribute (20+4) and FP (4+4).
+constexpr int kMaxStunBindingLength = 1200 - 24 - 8;
 
 // Forward declaration so that a ConnectionRequest can contain a Connection.
 class Connection;
@@ -75,7 +77,7 @@ class RTC_EXPORT Connection : public CandidatePairInterface {
   // A unique ID assigned when the connection is created.
   uint32_t id() const { return id_; }
 
-  webrtc::TaskQueueBase* network_thread() const;
+  TaskQueueBase* network_thread() const;
 
   // Implementation of virtual methods in CandidatePairInterface.
   // Returns the description of the local port
@@ -84,7 +86,7 @@ class RTC_EXPORT Connection : public CandidatePairInterface {
   const Candidate& remote_candidate() const override;
 
   // Return local network for this connection.
-  virtual const rtc::Network* network() const;
+  virtual const Network* network() const;
   // Return generation for this connection.
   virtual int generation() const;
 
@@ -121,11 +123,11 @@ class RTC_EXPORT Connection : public CandidatePairInterface {
   int rtt() const;
 
   int unwritable_timeout() const;
-  void set_unwritable_timeout(const absl::optional<int>& value_ms);
+  void set_unwritable_timeout(const std::optional<int>& value_ms);
   int unwritable_min_checks() const;
-  void set_unwritable_min_checks(const absl::optional<int>& value);
+  void set_unwritable_min_checks(const std::optional<int>& value);
   int inactive_timeout() const;
-  void set_inactive_timeout(const absl::optional<int>& value);
+  void set_inactive_timeout(const std::optional<int>& value);
 
   // Gets the `ConnectionInfo` stats, where `best_connection` has not been
   // populated (default value false).
@@ -142,22 +144,23 @@ class RTC_EXPORT Connection : public CandidatePairInterface {
   // covers.
   virtual int Send(const void* data,
                    size_t size,
-                   const rtc::PacketOptions& options) = 0;
+                   const AsyncSocketPacketOptions& options) = 0;
 
   // Error if Send() returns < 0
   virtual int GetError() = 0;
 
   // Register as a recipient of received packets. There can only be one.
   void RegisterReceivedPacketCallback(
-      absl::AnyInvocable<void(Connection*, const rtc::ReceivedPacket&)>
+      absl::AnyInvocable<void(webrtc::Connection*,
+                              const webrtc::ReceivedIpPacket&)>
           received_packet_callback);
   void DeregisterReceivedPacketCallback();
 
   sigslot::signal1<Connection*> SignalReadyToSend;
 
   // Called when a packet is received on this connection.
-  void OnReadPacket(const rtc::ReceivedPacket& packet);
-  [[deprecated("Pass a rtc::ReceivedPacket")]] void
+  void OnReadPacket(const ReceivedIpPacket& packet);
+  [[deprecated("Pass a webrtc::ReceivedIpPacket")]] void
   OnReadPacket(const char* data, size_t size, int64_t packet_time_us);
 
   // Called when the socket is currently able to send.
@@ -186,7 +189,7 @@ class RTC_EXPORT Connection : public CandidatePairInterface {
   bool nominated() const;
 
   int receiving_timeout() const;
-  void set_receiving_timeout(absl::optional<int> receiving_timeout_ms);
+  void set_receiving_timeout(std::optional<int> receiving_timeout_ms);
 
   // Deletes a `Connection` instance is by calling the `DestroyConnection`
   // method in `Port`.
@@ -219,13 +222,13 @@ class RTC_EXPORT Connection : public CandidatePairInterface {
   void ReceivedPingResponse(
       int rtt,
       absl::string_view request_id,
-      const absl::optional<uint32_t>& nomination = absl::nullopt);
+      const std::optional<uint32_t>& nomination = std::nullopt);
   std::unique_ptr<IceMessage> BuildPingRequest(
       std::unique_ptr<StunByteStringAttribute> delta)
       RTC_RUN_ON(network_thread_);
 
   int64_t last_ping_response_received() const;
-  const absl::optional<std::string>& last_ping_id_received() const;
+  const std::optional<std::string>& last_ping_id_received() const;
 
   // Used to check if any STUN ping response has been received.
   int rtt_samples() const;
@@ -235,7 +238,7 @@ class RTC_EXPORT Connection : public CandidatePairInterface {
   int64_t last_ping_received() const;
 
   void ReceivedPing(
-      const absl::optional<std::string>& request_id = absl::nullopt);
+      const std::optional<std::string>& request_id = std::nullopt);
   // Handles the binding request; sends a response if this is a valid request.
   void HandleStunBindingOrGoogPingRequest(IceMessage* msg);
   // Handles the piggyback acknowledgement of the lastest connectivity check
@@ -251,8 +254,8 @@ class RTC_EXPORT Connection : public CandidatePairInterface {
   std::string ToString() const;
   std::string ToSensitiveString() const;
   // Structured description of this candidate pair.
-  const webrtc::IceCandidatePairDescription& ToLogDescription();
-  void set_ice_event_log(webrtc::IceEventLog* ice_event_log);
+  const IceCandidatePairDescription& ToLogDescription();
+  void set_ice_event_log(IceEventLog* ice_event_log);
 
   // Prints pings_since_last_response_ into a string.
   void PrintPingsSinceLastResponse(std::string* pings, size_t max);
@@ -297,13 +300,13 @@ class RTC_EXPORT Connection : public CandidatePairInterface {
   bool stable(int64_t now) const;
 
   // Check if we sent `val` pings without receving a response.
-  bool TooManyOutstandingPings(const absl::optional<int>& val) const;
+  bool TooManyOutstandingPings(const std::optional<int>& val) const;
 
   // Called by Port when the network cost changes.
   void SetLocalCandidateNetworkCost(uint16_t cost);
 
   void SetIceFieldTrials(const IceFieldTrials* field_trials);
-  const rtc::EventBasedExponentialMovingAverage& GetRttEstimate() const {
+  const EventBasedExponentialMovingAverage& GetRttEstimate() const {
     return rtt_estimate_;
   }
 
@@ -347,24 +350,30 @@ class RTC_EXPORT Connection : public CandidatePairInterface {
 
   void SetStunDictConsumer(
       std::function<std::unique_ptr<StunAttribute>(
-          const StunByteStringAttribute*)> goog_delta_consumer,
-      std::function<void(webrtc::RTCErrorOr<const StunUInt64Attribute*>)>
+          const webrtc::StunByteStringAttribute*)> goog_delta_consumer,
+      std::function<void(RTCErrorOr<const webrtc::StunUInt64Attribute*>)>
           goog_delta_ack_consumer) {
     goog_delta_consumer_ = std::move(goog_delta_consumer);
     goog_delta_ack_consumer_ = std::move(goog_delta_ack_consumer);
   }
 
   void ClearStunDictConsumer() {
-    goog_delta_consumer_ = absl::nullopt;
-    goog_delta_ack_consumer_ = absl::nullopt;
+    goog_delta_consumer_ = std::nullopt;
+    goog_delta_ack_consumer_ = std::nullopt;
   }
+
+  void RegisterDtlsPiggyback(DtlsStunPiggybackCallbacks&& callbacks) {
+    dtls_stun_piggyback_callbacks_ = std::move(callbacks);
+  }
+
+  void DeregisterDtlsPiggyback() { dtls_stun_piggyback_callbacks_.reset(); }
 
  protected:
   // A ConnectionRequest is a simple STUN ping used to determine writability.
   class ConnectionRequest;
 
   // Constructs a new connection to the given remote port.
-  Connection(rtc::WeakPtr<PortInterface> port,
+  Connection(WeakPtr<PortInterface> port,
              size_t index,
              const Candidate& candidate);
 
@@ -402,15 +411,15 @@ class RTC_EXPORT Connection : public CandidatePairInterface {
   // port_->thread(). However, some tests delete the classes in the wrong order
   // so `port_` may be deleted before an instance of this class is deleted.
   // TODO(tommi): This ^^^ should be fixed.
-  webrtc::TaskQueueBase* const network_thread_;
+  TaskQueueBase* const network_thread_;
   const uint32_t id_;
-  rtc::WeakPtr<PortInterface> port_;
+  WeakPtr<PortInterface> port_;
   Candidate local_candidate_ RTC_GUARDED_BY(network_thread_);
   Candidate remote_candidate_;
 
   ConnectionInfo stats_;
-  rtc::RateTracker recv_rate_tracker_;
-  rtc::RateTracker send_rate_tracker_;
+  RateTracker recv_rate_tracker_;
+  RateTracker send_rate_tracker_;
   int64_t last_send_data_ = 0;
 
  private:
@@ -419,9 +428,9 @@ class RTC_EXPORT Connection : public CandidatePairInterface {
   void MaybeUpdateLocalCandidate(StunRequest* request, StunMessage* response)
       RTC_RUN_ON(network_thread_);
 
-  void LogCandidatePairConfig(webrtc::IceCandidatePairConfigType type)
+  void LogCandidatePairConfig(IceCandidatePairConfigType type)
       RTC_RUN_ON(network_thread_);
-  void LogCandidatePairEvent(webrtc::IceCandidatePairEventType type,
+  void LogCandidatePairEvent(IceCandidatePairEventType type,
                              uint32_t transaction_id)
       RTC_RUN_ON(network_thread_);
 
@@ -459,7 +468,7 @@ class RTC_EXPORT Connection : public CandidatePairInterface {
   // https://w3c.github.io/webrtc-stats/#dom-rtcicecandidatepairstats-totalroundtriptime
   uint64_t total_round_trip_time_ms_ RTC_GUARDED_BY(network_thread_) = 0;
   // https://w3c.github.io/webrtc-stats/#dom-rtcicecandidatepairstats-currentroundtriptime
-  absl::optional<uint32_t> current_round_trip_time_ms_
+  std::optional<uint32_t> current_round_trip_time_ms_
       RTC_GUARDED_BY(network_thread_);
   int64_t last_ping_sent_ RTC_GUARDED_BY(
       network_thread_);  // last time we sent a ping to the other side
@@ -473,63 +482,76 @@ class RTC_EXPORT Connection : public CandidatePairInterface {
       RTC_GUARDED_BY(network_thread_);
   // Transaction ID of the last connectivity check received. Null if having not
   // received a ping yet.
-  absl::optional<std::string> last_ping_id_received_
+  std::optional<std::string> last_ping_id_received_
       RTC_GUARDED_BY(network_thread_);
 
-  absl::optional<int> unwritable_timeout_ RTC_GUARDED_BY(network_thread_);
-  absl::optional<int> unwritable_min_checks_ RTC_GUARDED_BY(network_thread_);
-  absl::optional<int> inactive_timeout_ RTC_GUARDED_BY(network_thread_);
+  std::optional<int> unwritable_timeout_ RTC_GUARDED_BY(network_thread_);
+  std::optional<int> unwritable_min_checks_ RTC_GUARDED_BY(network_thread_);
+  std::optional<int> inactive_timeout_ RTC_GUARDED_BY(network_thread_);
 
   IceCandidatePairState state_ RTC_GUARDED_BY(network_thread_);
   // Time duration to switch from receiving to not receiving.
-  absl::optional<int> receiving_timeout_ RTC_GUARDED_BY(network_thread_);
+  std::optional<int> receiving_timeout_ RTC_GUARDED_BY(network_thread_);
   const int64_t time_created_ms_ RTC_GUARDED_BY(network_thread_);
   const int64_t delta_internal_unix_epoch_ms_ RTC_GUARDED_BY(network_thread_);
   int num_pings_sent_ RTC_GUARDED_BY(network_thread_) = 0;
 
-  absl::optional<webrtc::IceCandidatePairDescription> log_description_
+  std::optional<IceCandidatePairDescription> log_description_
       RTC_GUARDED_BY(network_thread_);
-  webrtc::IceEventLog* ice_event_log_ RTC_GUARDED_BY(network_thread_) = nullptr;
+  IceEventLog* ice_event_log_ RTC_GUARDED_BY(network_thread_) = nullptr;
 
   // GOOG_PING_REQUEST is sent in place of STUN_BINDING_REQUEST
   // if configured via field trial, the remote peer supports it (signaled
   // in STUN_BINDING) and if the last STUN BINDING is identical to the one
   // that is about to be sent.
-  absl::optional<bool> remote_support_goog_ping_
-      RTC_GUARDED_BY(network_thread_);
+  std::optional<bool> remote_support_goog_ping_ RTC_GUARDED_BY(network_thread_);
   std::unique_ptr<StunMessage> cached_stun_binding_
       RTC_GUARDED_BY(network_thread_);
 
   const IceFieldTrials* field_trials_;
-  rtc::EventBasedExponentialMovingAverage rtt_estimate_
+  EventBasedExponentialMovingAverage rtt_estimate_
       RTC_GUARDED_BY(network_thread_);
 
-  absl::optional<std::function<std::unique_ptr<StunAttribute>(
-      const StunByteStringAttribute*)>>
+  std::optional<std::function<std::unique_ptr<StunAttribute>(
+      const webrtc::StunByteStringAttribute*)>>
       goog_delta_consumer_;
-  absl::optional<
-      std::function<void(webrtc::RTCErrorOr<const StunUInt64Attribute*>)>>
+  std::optional<
+      std::function<void(RTCErrorOr<const webrtc::StunUInt64Attribute*>)>>
       goog_delta_ack_consumer_;
-  absl::AnyInvocable<void(Connection*, const rtc::ReceivedPacket&)>
+  absl::AnyInvocable<void(webrtc::Connection*, const webrtc::ReceivedIpPacket&)>
       received_packet_callback_;
+
+  void MaybeAddDtlsPiggybackingAttributes(StunMessage* msg);
+  DtlsStunPiggybackCallbacks dtls_stun_piggyback_callbacks_;
 };
 
 // ProxyConnection defers all the interesting work to the port.
 class ProxyConnection : public Connection {
  public:
-  ProxyConnection(rtc::WeakPtr<PortInterface> port,
+  ProxyConnection(WeakPtr<PortInterface> port,
                   size_t index,
                   const Candidate& remote_candidate);
 
   int Send(const void* data,
            size_t size,
-           const rtc::PacketOptions& options) override;
+           const AsyncSocketPacketOptions& options) override;
   int GetError() override;
 
  private:
   int error_ = 0;
 };
 
+}  //  namespace webrtc
+
+// Re-export symbols from the webrtc namespace for backwards compatibility.
+// TODO(bugs.webrtc.org/4222596): Remove once all references are updated.
+#ifdef WEBRTC_ALLOW_DEPRECATED_NAMESPACES
+namespace cricket {
+using ::webrtc::Connection;
+using ::webrtc::kGoogPingVersion;
+using ::webrtc::kMaxStunBindingLength;
+using ::webrtc::ProxyConnection;
 }  // namespace cricket
+#endif  // WEBRTC_ALLOW_DEPRECATED_NAMESPACES
 
 #endif  // P2P_BASE_CONNECTION_H_

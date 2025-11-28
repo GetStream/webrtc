@@ -83,7 +83,7 @@ class DcSctpSocket : public DcSctpSocketInterface {
   DcSctpSocket& operator=(const DcSctpSocket&) = delete;
 
   // Implementation of `DcSctpSocketInterface`.
-  void ReceivePacket(rtc::ArrayView<const uint8_t> data) override;
+  void ReceivePacket(webrtc::ArrayView<const uint8_t> data) override;
   void HandleTimeout(TimeoutID timeout_id) override;
   void Connect() override;
   void RestoreFromState(const DcSctpSocketHandoverState& state) override;
@@ -91,10 +91,10 @@ class DcSctpSocket : public DcSctpSocketInterface {
   void Close() override;
   SendStatus Send(DcSctpMessage message,
                   const SendOptions& send_options) override;
-  std::vector<SendStatus> SendMany(rtc::ArrayView<DcSctpMessage> messages,
+  std::vector<SendStatus> SendMany(webrtc::ArrayView<DcSctpMessage> messages,
                                    const SendOptions& send_options) override;
   ResetStreamsStatus ResetStreams(
-      rtc::ArrayView<const StreamID> outgoing_streams) override;
+      webrtc::ArrayView<const StreamID> outgoing_streams) override;
   SocketState state() const override;
   const DcSctpOptions& options() const override { return options_; }
   void SetMaxMessageSize(size_t max_message_size) override;
@@ -103,9 +103,9 @@ class DcSctpSocket : public DcSctpSocketInterface {
   size_t buffered_amount(StreamID stream_id) const override;
   size_t buffered_amount_low_threshold(StreamID stream_id) const override;
   void SetBufferedAmountLowThreshold(StreamID stream_id, size_t bytes) override;
-  absl::optional<Metrics> GetMetrics() const override;
+  std::optional<Metrics> GetMetrics() const override;
   HandoverReadinessStatus GetHandoverReadiness() const override;
-  absl::optional<DcSctpSocketHandoverState> GetHandoverStateAndClose() override;
+  std::optional<DcSctpSocketHandoverState> GetHandoverStateAndClose() override;
   SctpImplementation peer_implementation() const override {
     return metrics_.peer_implementation;
   }
@@ -158,7 +158,7 @@ class DcSctpSocket : public DcSctpSocketInterface {
   webrtc::TimeDelta OnInitTimerExpiry();
   webrtc::TimeDelta OnCookieTimerExpiry();
   webrtc::TimeDelta OnShutdownTimerExpiry();
-  void OnSentPacket(rtc::ArrayView<const uint8_t> packet,
+  void OnSentPacket(webrtc::ArrayView<const uint8_t> packet,
                     SendPacketStatus status);
   // Sends SHUTDOWN or SHUTDOWN-ACK if the socket is shutting down and if all
   // outstanding data has been acknowledged.
@@ -181,7 +181,7 @@ class DcSctpSocket : public DcSctpSocketInterface {
   bool ValidatePacket(const SctpPacket& packet);
   // Parses `payload`, which is a serialized packet that is just going to be
   // sent and prints all chunks.
-  void DebugPrintOutgoing(rtc::ArrayView<const uint8_t> payload);
+  void DebugPrintOutgoing(webrtc::ArrayView<const uint8_t> payload);
   // Called whenever data has been received, or the cumulative acknowledgment
   // TSN has moved, that may result in delivering messages.
   void MaybeDeliverMessages();
@@ -191,7 +191,7 @@ class DcSctpSocket : public DcSctpSocketInterface {
   // Returns true if the parsing of a chunk of type `T` succeeded. If it didn't,
   // it reports an error and returns false.
   template <class T>
-  bool ValidateParseSuccess(const absl::optional<T>& c) {
+  bool ValidateParseSuccess(const std::optional<T>& c) {
     if (c.has_value()) {
       return true;
     }

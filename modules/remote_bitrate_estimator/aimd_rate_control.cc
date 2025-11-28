@@ -10,22 +10,23 @@
 
 #include "modules/remote_bitrate_estimator/aimd_rate_control.h"
 
-#include <inttypes.h>
-
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <optional>
 #include <string>
 
-#include "absl/strings/match.h"
+#include "api/field_trials_view.h"
+#include "api/transport/bandwidth_usage.h"
 #include "api/transport/network_types.h"
 #include "api/units/data_rate.h"
+#include "api/units/data_size.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
 #include "modules/remote_bitrate_estimator/include/bwe_defines.h"
-#include "modules/remote_bitrate_estimator/overuse_detector.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/experiments/field_trial_parser.h"
 #include "rtc_base/logging.h"
-#include "rtc_base/numerics/safe_minmax.h"
 
 namespace webrtc {
 namespace {
@@ -183,7 +184,7 @@ void AimdRateControl::SetEstimate(DataRate bitrate, Timestamp at_time) {
 }
 
 void AimdRateControl::SetNetworkStateEstimate(
-    const absl::optional<NetworkStateEstimate>& estimate) {
+    const std::optional<NetworkStateEstimate>& estimate) {
   network_estimate_ = estimate;
 }
 
@@ -221,7 +222,7 @@ TimeDelta AimdRateControl::GetExpectedBandwidthPeriod() const {
 
 void AimdRateControl::ChangeBitrate(const RateControlInput& input,
                                     Timestamp at_time) {
-  absl::optional<DataRate> new_bitrate;
+  std::optional<DataRate> new_bitrate;
   DataRate estimated_throughput =
       input.estimated_throughput.value_or(latest_estimated_throughput_);
   if (input.estimated_throughput)

@@ -15,14 +15,17 @@
 #include <memory>
 #include <string>
 
+#include "api/field_trials_view.h"
+#include "p2p/base/ice_credentials_iterator.h"
 #include "p2p/base/transport_description.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/ssl_fingerprint.h"
 
-namespace cricket {
+namespace webrtc {
 
 TransportDescriptionFactory::TransportDescriptionFactory(
-    const webrtc::FieldTrialsView& field_trials)
+    const FieldTrialsView& field_trials)
     : field_trials_(field_trials) {}
 
 TransportDescriptionFactory::~TransportDescriptionFactory() = default;
@@ -146,7 +149,7 @@ bool TransportDescriptionFactory::SetSecurityInfo(TransportDescription* desc,
   // RFC 4572 Section 5 requires that those lines use the same hash function as
   // the certificate's signature, which is what CreateFromCertificate does.
   desc->identity_fingerprint =
-      rtc::SSLFingerprint::CreateFromCertificate(*certificate_);
+      SSLFingerprint::CreateFromCertificate(*certificate_);
   if (!desc->identity_fingerprint) {
     return false;
   }
@@ -156,4 +159,4 @@ bool TransportDescriptionFactory::SetSecurityInfo(TransportDescription* desc,
   return true;
 }
 
-}  // namespace cricket
+}  // namespace webrtc

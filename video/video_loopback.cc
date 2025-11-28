@@ -12,15 +12,16 @@
 #include <stdio.h>
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
-#include "absl/types/optional.h"
 #include "api/test/simulated_network.h"
 #include "api/test/video_quality_test_fixture.h"
 #include "api/transport/bitrate_settings.h"
+#include "api/units/data_rate.h"
 #include "api/video_codecs/video_codec.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
@@ -200,7 +201,6 @@ ABSL_FLAG(bool,
 
 ABSL_FLAG(bool, video, true, "Add video stream");
 
-// Video-specific flags.
 ABSL_FLAG(std::string,
           clip,
           "",
@@ -256,7 +256,7 @@ InterLayerPredMode InterLayerPred() {
   }
 }
 
-std::string Codec() {
+std::string CodecName() {
   return absl::GetFlag(FLAGS_codec);
 }
 
@@ -284,8 +284,10 @@ int AvgBurstLossLength() {
   return static_cast<int>(absl::GetFlag(FLAGS_avg_burst_loss_length));
 }
 
-int LinkCapacityKbps() {
-  return static_cast<int>(absl::GetFlag(FLAGS_link_capacity));
+DataRate LinkCapacity() {
+  int link_capacity_kbps = absl::GetFlag(FLAGS_link_capacity);
+  return link_capacity_kbps == 0 ? DataRate::Infinity()
+                                 : DataRate::KilobitsPerSec(link_capacity_kbps);
 }
 
 int QueueSize() {
@@ -358,7 +360,7 @@ void Loopback() {
   BuiltInNetworkBehaviorConfig pipe_config;
   pipe_config.loss_percent = LossPercent();
   pipe_config.avg_burst_loss_length = AvgBurstLossLength();
-  pipe_config.link_capacity_kbps = LinkCapacityKbps();
+  pipe_config.link_capacity = LinkCapacity();
   pipe_config.queue_length_packets = QueueSize();
   pipe_config.queue_delay_ms = AvgPropagationDelayMs();
   pipe_config.delay_standard_deviation_ms = StdPropagationDelayMs();
@@ -385,7 +387,7 @@ void Loopback() {
   params.video[0].max_bitrate_bps = MaxBitrateKbps() * 1000;
   params.video[0].suspend_below_min_bitrate =
       absl::GetFlag(FLAGS_suspend_below_min_bitrate);
-  params.video[0].codec = Codec();
+  params.video[0].codec = CodecName();
   params.video[0].num_temporal_layers = NumTemporalLayers();
   params.video[0].selected_tl = SelectedTL();
   params.video[0].min_transmit_bps = 0;
@@ -419,15 +421,16 @@ void Loopback() {
   SL_descriptors.push_back(SL0());
   SL_descriptors.push_back(SL1());
   SL_descriptors.push_back(SL2());
-  VideoQualityTest::FillScalabilitySettings(
+
+  VideoQualityTest fixture(nullptr);
+  fixture.FillScalabilitySettings(
       &params, 0, stream_descriptors, NumStreams(), SelectedStream(),
       NumSpatialLayers(), SelectedSL(), InterLayerPred(), SL_descriptors);
 
-  auto fixture = std::make_unique<VideoQualityTest>(nullptr);
   if (DurationSecs()) {
-    fixture->RunWithAnalyzer(params);
+    fixture.RunWithAnalyzer(params);
   } else {
-    fixture->RunWithRenderers(params);
+    fixture.RunWithRenderers(params);
   }
 }
 
@@ -435,7 +438,7 @@ int RunLoopbackTest(int argc, char* argv[]) {
   ::testing::InitGoogleTest(&argc, argv);
   absl::ParseCommandLine(argc, argv);
 
-  rtc::LogMessage::SetLogToStderr(absl::GetFlag(FLAGS_logs));
+  LogMessage::SetLogToStderr(absl::GetFlag(FLAGS_logs));
 
   // InitFieldTrialsFromString stores the char*, so the char array must outlive
   // the application.

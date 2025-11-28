@@ -34,12 +34,13 @@ class ChannelSendFrameTransformerDelegate : public TransformedFrameCallback {
       std::function<int32_t(AudioFrameType frameType,
                             uint8_t payloadType,
                             uint32_t rtp_timestamp_with_offset,
-                            rtc::ArrayView<const uint8_t> payload,
+                            webrtc::ArrayView<const uint8_t> payload,
                             int64_t absolute_capture_timestamp_ms,
-                            rtc::ArrayView<const uint32_t> csrcs)>;
+                            webrtc::ArrayView<const uint32_t> csrcs,
+                            std::optional<uint8_t> audio_level_dbov)>;
   ChannelSendFrameTransformerDelegate(
       SendFrameCallback send_frame_callback,
-      rtc::scoped_refptr<FrameTransformerInterface> frame_transformer,
+      scoped_refptr<FrameTransformerInterface> frame_transformer,
       TaskQueueBase* encoder_queue);
 
   // Registers `this` as callback for `frame_transformer_`, to get the
@@ -60,7 +61,8 @@ class ChannelSendFrameTransformerDelegate : public TransformedFrameCallback {
                  size_t payload_size,
                  int64_t absolute_capture_timestamp_ms,
                  uint32_t ssrc,
-                 const std::string& codec_mime_type);
+                 const std::string& codec_mime_type,
+                 std::optional<uint8_t> audio_level_dbov);
 
   // Implements TransformedFrameCallback. Can be called on any thread.
   void OnTransformedFrame(
@@ -78,7 +80,7 @@ class ChannelSendFrameTransformerDelegate : public TransformedFrameCallback {
  private:
   mutable Mutex send_lock_;
   SendFrameCallback send_frame_callback_ RTC_GUARDED_BY(send_lock_);
-  rtc::scoped_refptr<FrameTransformerInterface> frame_transformer_;
+  scoped_refptr<FrameTransformerInterface> frame_transformer_;
   TaskQueueBase* const encoder_queue_;
   bool short_circuit_ RTC_GUARDED_BY(send_lock_) = false;
 };

@@ -11,23 +11,23 @@
 #ifndef MODULES_RTP_RTCP_SOURCE_RTP_SENDER_H_
 #define MODULES_RTP_RTCP_SOURCE_RTP_SENDER_H_
 
+#include <cstddef>
+#include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "api/array_view.h"
-#include "api/call/transport.h"
-#include "api/field_trials_view.h"
+#include "api/environment/environment.h"
+#include "api/rtp_packet_sender.h"
 #include "modules/rtp_rtcp/include/flexfec_sender.h"
 #include "modules/rtp_rtcp/include/rtp_header_extension_map.h"
-#include "modules/rtp_rtcp/include/rtp_packet_sender.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
+#include "modules/rtp_rtcp/source/rtp_header_extension_size.h"
 #include "modules/rtp_rtcp/source/rtp_packet_history.h"
-#include "modules/rtp_rtcp/source/rtp_rtcp_config.h"
 #include "modules/rtp_rtcp/source/rtp_rtcp_interface.h"
 #include "rtc_base/random.h"
 #include "rtc_base/synchronization/mutex.h"
@@ -37,7 +37,6 @@ namespace webrtc {
 
 class FrameEncryptorInterface;
 class RateLimiter;
-class RtcEventLog;
 class RtpPacketToSend;
 
 // Maximum amount of padding in RFC 3550 is 255 bytes.
@@ -45,9 +44,11 @@ constexpr size_t kMaxPaddingLength = 255;
 
 class RTPSender {
  public:
-  RTPSender(const RtpRtcpInterface::Configuration& config,
+  RTPSender(const Environment& env,
+            const RtpRtcpInterface::Configuration& config,
             RtpPacketHistory* packet_history,
             RtpPacketSender* packet_sender);
+
   RTPSender(const RTPSender&) = delete;
   RTPSender& operator=(const RTPSender&) = delete;
 
@@ -102,7 +103,7 @@ class RTPSender {
   // RTX.
   void SetRtxStatus(int mode) RTC_LOCKS_EXCLUDED(send_mutex_);
   int RtxStatus() const RTC_LOCKS_EXCLUDED(send_mutex_);
-  absl::optional<uint32_t> RtxSsrc() const RTC_LOCKS_EXCLUDED(send_mutex_) {
+  std::optional<uint32_t> RtxSsrc() const RTC_LOCKS_EXCLUDED(send_mutex_) {
     return rtx_ssrc_;
   }
   // Returns expected size difference between an RTX packet and media packet
@@ -113,22 +114,21 @@ class RTPSender {
       RTC_LOCKS_EXCLUDED(send_mutex_);
 
   // Size info for header extensions used by FEC packets.
-  static rtc::ArrayView<const RtpExtensionSize> FecExtensionSizes()
+  static ArrayView<const RtpExtensionSize> FecExtensionSizes()
       RTC_LOCKS_EXCLUDED(send_mutex_);
 
   // Size info for header extensions used by video packets.
-  static rtc::ArrayView<const RtpExtensionSize> VideoExtensionSizes()
+  static ArrayView<const RtpExtensionSize> VideoExtensionSizes()
       RTC_LOCKS_EXCLUDED(send_mutex_);
 
   // Size info for header extensions used by audio packets.
-  static rtc::ArrayView<const RtpExtensionSize> AudioExtensionSizes()
+  static ArrayView<const RtpExtensionSize> AudioExtensionSizes()
       RTC_LOCKS_EXCLUDED(send_mutex_);
 
   // Create empty packet, fills ssrc, csrcs and reserve place for header
   // extensions RtpSender updates before sending.
   std::unique_ptr<RtpPacketToSend> AllocatePacket(
-      rtc::ArrayView<const uint32_t> csrcs = {})
-      RTC_LOCKS_EXCLUDED(send_mutex_);
+      ArrayView<const uint32_t> csrcs = {}) RTC_LOCKS_EXCLUDED(send_mutex_);
 
   // Maximum header overhead per fec/padding packet.
   size_t FecOrPaddingPacketMaxRtpHeaderLength() const
@@ -140,7 +140,7 @@ class RTPSender {
 
   uint32_t SSRC() const RTC_LOCKS_EXCLUDED(send_mutex_) { return ssrc_; }
 
-  absl::optional<uint32_t> FlexfecSsrc() const RTC_LOCKS_EXCLUDED(send_mutex_) {
+  std::optional<uint32_t> FlexfecSsrc() const RTC_LOCKS_EXCLUDED(send_mutex_) {
     return flexfec_ssrc_;
   }
 
@@ -172,8 +172,8 @@ class RTPSender {
   const bool audio_configured_;
 
   const uint32_t ssrc_;
-  const absl::optional<uint32_t> rtx_ssrc_;
-  const absl::optional<uint32_t> flexfec_ssrc_;
+  const std::optional<uint32_t> rtx_ssrc_;
+  const std::optional<uint32_t> flexfec_ssrc_;
 
   RtpPacketHistory* const packet_history_;
   RtpPacketSender* const paced_sender_;

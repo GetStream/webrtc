@@ -12,6 +12,7 @@
 
 #import "RTCRtpCodecCapability+Private.h"
 #import "RTCRtpEncodingParameters+Private.h"
+#import "RTCRtpHeaderExtensionCapability+Private.h"
 #import "RTCRtpParameters+Private.h"
 #import "RTCRtpReceiver+Private.h"
 #import "RTCRtpSender+Private.h"
@@ -22,7 +23,7 @@
 
 #include "api/rtp_parameters.h"
 
-NSString *const kRTCRtpTransceiverErrorDomain = @"org.webrtc.RTCRtpTranceiver";
+NSString *const RTC_CONSTANT_TYPE(RTCRtpTransceiverErrorDomain) = @"org.webrtc.RTCRtpTranceiver";
 
 @implementation RTC_OBJC_TYPE (RTCRtpTransceiverInit)
 
@@ -31,20 +32,22 @@ NSString *const kRTCRtpTransceiverErrorDomain = @"org.webrtc.RTCRtpTranceiver";
 @synthesize sendEncodings = _sendEncodings;
 
 - (instancetype)init {
-  if (self = [super init]) {
-    _direction = RTCRtpTransceiverDirectionSendRecv;
+  self = [super init];
+  if (self) {
+    _direction = RTC_OBJC_TYPE(RTCRtpTransceiverDirectionSendRecv);
   }
   return self;
 }
 
 - (webrtc::RtpTransceiverInit)nativeInit {
   webrtc::RtpTransceiverInit init;
-  init.direction =
-      [RTC_OBJC_TYPE(RTCRtpTransceiver) nativeRtpTransceiverDirectionFromDirection:_direction];
+  init.direction = [RTC_OBJC_TYPE(RTCRtpTransceiver)
+      nativeRtpTransceiverDirectionFromDirection:_direction];
   for (NSString *streamId in _streamIds) {
     init.stream_ids.push_back([streamId UTF8String]);
   }
-  for (RTC_OBJC_TYPE(RTCRtpEncodingParameters) * sendEncoding in _sendEncodings) {
+  for (RTC_OBJC_TYPE(RTCRtpEncodingParameters) *
+       sendEncoding in _sendEncodings) {
     init.send_encodings.push_back(sendEncoding.nativeParameters);
   }
   return init;
@@ -54,10 +57,10 @@ NSString *const kRTCRtpTransceiverErrorDomain = @"org.webrtc.RTCRtpTranceiver";
 
 @implementation RTC_OBJC_TYPE (RTCRtpTransceiver) {
   RTC_OBJC_TYPE(RTCPeerConnectionFactory) * _factory;
-  rtc::scoped_refptr<webrtc::RtpTransceiverInterface> _nativeRtpTransceiver;
+  webrtc::scoped_refptr<webrtc::RtpTransceiverInterface> _nativeRtpTransceiver;
 }
 
-- (RTCRtpMediaType)mediaType {
+- (RTC_OBJC_TYPE(RTCRtpMediaType))mediaType {
   return [RTC_OBJC_TYPE(RTCRtpReceiver)
       mediaTypeForNativeMediaType:_nativeRtpTransceiver->media_type()];
 }
@@ -91,29 +94,66 @@ NSString *const kRTCRtpTransceiverErrorDomain = @"org.webrtc.RTCRtpTranceiver";
   return _nativeRtpTransceiver->stopped();
 }
 
-- (RTCRtpTransceiverDirection)direction {
+- (RTC_OBJC_TYPE(RTCRtpTransceiverDirection))direction {
   return [RTC_OBJC_TYPE(RTCRtpTransceiver)
-      rtpTransceiverDirectionFromNativeDirection:_nativeRtpTransceiver->direction()];
+      rtpTransceiverDirectionFromNativeDirection:_nativeRtpTransceiver
+                                                     ->direction()];
 }
 
-- (void)setDirection:(RTCRtpTransceiverDirection)direction error:(NSError **)error {
+- (NSArray<RTC_OBJC_TYPE(RTCRtpHeaderExtensionCapability) *> *)
+    headerExtensionsToNegotiate {
+  std::vector<webrtc::RtpHeaderExtensionCapability> nativeHeaderExtensions(
+      _nativeRtpTransceiver->GetHeaderExtensionsToNegotiate());
+
+  NSMutableArray *headerExtensions =
+      [NSMutableArray arrayWithCapacity:nativeHeaderExtensions.size()];
+  for (const auto &headerExtension : nativeHeaderExtensions) {
+    [headerExtensions
+        addObject:
+            [[RTC_OBJC_TYPE(RTCRtpHeaderExtensionCapability) alloc]
+                initWithNativeRtpHeaderExtensionCapability:headerExtension]];
+  }
+  return headerExtensions;
+}
+
+- (NSArray<RTC_OBJC_TYPE(RTCRtpHeaderExtensionCapability) *> *)
+    negotiatedHeaderExtensions {
+  std::vector<webrtc::RtpHeaderExtensionCapability> nativeHeaderExtensions(
+      _nativeRtpTransceiver->GetNegotiatedHeaderExtensions());
+
+  NSMutableArray *headerExtensions =
+      [NSMutableArray arrayWithCapacity:nativeHeaderExtensions.size()];
+  for (const auto &headerExtension : nativeHeaderExtensions) {
+    [headerExtensions
+        addObject:
+            [[RTC_OBJC_TYPE(RTCRtpHeaderExtensionCapability) alloc]
+                initWithNativeRtpHeaderExtensionCapability:headerExtension]];
+  }
+  return headerExtensions;
+}
+
+- (void)setDirection:(RTC_OBJC_TYPE(RTCRtpTransceiverDirection))direction error:(NSError **)error {
   webrtc::RTCError nativeError = _nativeRtpTransceiver->SetDirectionWithError(
-      [RTC_OBJC_TYPE(RTCRtpTransceiver) nativeRtpTransceiverDirectionFromDirection:direction]);
+      [RTC_OBJC_TYPE(RTCRtpTransceiver)
+          nativeRtpTransceiverDirectionFromDirection:direction]);
 
   if (!nativeError.ok() && error) {
-    *error = [NSError errorWithDomain:kRTCRtpTransceiverErrorDomain
+    NSDictionary *userInfo = @{
+      NSLocalizedDescriptionKey :
+          [NSString stringWithCString:nativeError.message()
+                             encoding:NSUTF8StringEncoding]
+    };
+    *error = [NSError errorWithDomain:RTC_CONSTANT_TYPE(RTCRtpTransceiverErrorDomain)
                                  code:static_cast<int>(nativeError.type())
-                             userInfo:@{
-                               @"message" : [NSString stringWithCString:nativeError.message()
-                                                               encoding:NSUTF8StringEncoding]
-                             }];
+                             userInfo:userInfo];
   }
 }
 
-- (BOOL)currentDirection:(RTCRtpTransceiverDirection *)currentDirectionOut {
+- (BOOL)currentDirection:(RTC_OBJC_TYPE(RTCRtpTransceiverDirection) *)currentDirectionOut {
   if (_nativeRtpTransceiver->current_direction()) {
     *currentDirectionOut = [RTC_OBJC_TYPE(RTCRtpTransceiver)
-        rtpTransceiverDirectionFromNativeDirection:*_nativeRtpTransceiver->current_direction()];
+        rtpTransceiverDirectionFromNativeDirection:*_nativeRtpTransceiver
+                                                        ->current_direction()];
     return YES;
   } else {
     return NO;
@@ -124,19 +164,65 @@ NSString *const kRTCRtpTransceiverErrorDomain = @"org.webrtc.RTCRtpTranceiver";
   _nativeRtpTransceiver->StopInternal();
 }
 
-- (void)setCodecPreferences:(NSArray<RTC_OBJC_TYPE(RTCRtpCodecCapability) *> *)codecs {
+- (BOOL)setCodecPreferences:
+            (NSArray<RTC_OBJC_TYPE(RTCRtpCodecCapability) *> *)codecs
+                      error:(NSError **)error {
   std::vector<webrtc::RtpCodecCapability> codecCapabilities;
-  for (RTC_OBJC_TYPE(RTCRtpCodecCapability) * rtpCodecCapability in codecs) {
-    codecCapabilities.push_back(rtpCodecCapability.nativeRtpCodecCapability);
+  if (codecs) {
+    for (RTC_OBJC_TYPE(RTCRtpCodecCapability) * rtpCodecCapability in codecs) {
+      codecCapabilities.push_back(rtpCodecCapability.nativeRtpCodecCapability);
+    }
   }
-  _nativeRtpTransceiver->SetCodecPreferences(codecCapabilities);
+  webrtc::RTCError nativeError =
+      _nativeRtpTransceiver->SetCodecPreferences(codecCapabilities);
+  if (!nativeError.ok() && error) {
+    *error = [NSError errorWithDomain:RTC_CONSTANT_TYPE(RTCRtpTransceiverErrorDomain)
+                                 code:static_cast<int>(nativeError.type())
+                             userInfo:@{
+                               @"message" : [NSString
+                                   stringWithUTF8String:nativeError.message()]
+                             }];
+  }
+  return nativeError.ok();
+}
+
+- (void)setCodecPreferences:
+    (NSArray<RTC_OBJC_TYPE(RTCRtpCodecCapability) *> *)codecs {
+  [self setCodecPreferences:codecs error:nil];
+}
+
+- (BOOL)setHeaderExtensionsToNegotiate:
+            (NSArray<RTC_OBJC_TYPE(RTCRtpHeaderExtensionCapability) *> *)
+                extensions
+                                 error:(NSError **)error {
+  std::vector<webrtc::RtpHeaderExtensionCapability> headerExtensionCapabilities;
+  for (RTC_OBJC_TYPE(RTCRtpHeaderExtensionCapability) *
+       extension in extensions) {
+    headerExtensionCapabilities.push_back(
+        extension.nativeRtpHeaderExtensionCapability);
+  }
+  webrtc::RTCError nativeError =
+      _nativeRtpTransceiver->SetHeaderExtensionsToNegotiate(
+          headerExtensionCapabilities);
+  BOOL ok = nativeError.ok();
+  if (!ok && error) {
+    NSDictionary *userInfo = @{
+      NSLocalizedDescriptionKey :
+          [NSString stringWithCString:nativeError.message()
+                             encoding:NSUTF8StringEncoding]
+    };
+    *error = [NSError errorWithDomain:RTC_CONSTANT_TYPE(RTCRtpTransceiverErrorDomain)
+                                 code:static_cast<int>(nativeError.type())
+                             userInfo:userInfo];
+  }
+  return ok;
 }
 
 - (NSString *)description {
-  return [NSString
-      stringWithFormat:@"RTC_OBJC_TYPE(RTCRtpTransceiver) {\n  sender: %@\n  receiver: %@\n}",
-                       _sender,
-                       _receiver];
+  return [NSString stringWithFormat:@"RTC_OBJC_TYPE(RTCRtpTransceiver) {\n  "
+                                    @"sender: %@\n  receiver: %@\n}",
+                                    _sender,
+                                    _receiver];
 }
 
 - (BOOL)isEqual:(id)object {
@@ -149,7 +235,8 @@ NSString *const kRTCRtpTransceiverErrorDomain = @"org.webrtc.RTCRtpTranceiver";
   if (![object isMemberOfClass:[self class]]) {
     return NO;
   }
-  RTC_OBJC_TYPE(RTCRtpTransceiver) *transceiver = (RTC_OBJC_TYPE(RTCRtpTransceiver) *)object;
+  RTC_OBJC_TYPE(RTCRtpTransceiver) *transceiver =
+      (RTC_OBJC_TYPE(RTCRtpTransceiver) *)object;
   return _nativeRtpTransceiver == transceiver.nativeRtpTransceiver;
 }
 
@@ -159,58 +246,63 @@ NSString *const kRTCRtpTransceiverErrorDomain = @"org.webrtc.RTCRtpTranceiver";
 
 #pragma mark - Private
 
-- (rtc::scoped_refptr<webrtc::RtpTransceiverInterface>)nativeRtpTransceiver {
+- (webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>)nativeRtpTransceiver {
   return _nativeRtpTransceiver;
 }
 
-- (instancetype)initWithFactory:(RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)factory
+- (instancetype)initWithFactory:
+                    (RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)factory
            nativeRtpTransceiver:
-               (rtc::scoped_refptr<webrtc::RtpTransceiverInterface>)nativeRtpTransceiver {
+               (webrtc::scoped_refptr<webrtc::RtpTransceiverInterface>)
+                   nativeRtpTransceiver {
   NSParameterAssert(factory);
   NSParameterAssert(nativeRtpTransceiver);
-  if (self = [super init]) {
+  self = [super init];
+  if (self) {
     _factory = factory;
     _nativeRtpTransceiver = nativeRtpTransceiver;
-    _sender = [[RTC_OBJC_TYPE(RTCRtpSender) alloc] initWithFactory:_factory
-                                                   nativeRtpSender:nativeRtpTransceiver->sender()];
-    _receiver =
-        [[RTC_OBJC_TYPE(RTCRtpReceiver) alloc] initWithFactory:_factory
-                                             nativeRtpReceiver:nativeRtpTransceiver->receiver()];
-    RTCLogInfo(
-        @"RTC_OBJC_TYPE(RTCRtpTransceiver)(%p): created transceiver: %@", self, self.description);
+    _sender = [[RTC_OBJC_TYPE(RTCRtpSender) alloc]
+        initWithFactory:_factory
+        nativeRtpSender:nativeRtpTransceiver->sender()];
+    _receiver = [[RTC_OBJC_TYPE(RTCRtpReceiver) alloc]
+          initWithFactory:_factory
+        nativeRtpReceiver:nativeRtpTransceiver->receiver()];
+    RTCLogInfo(@"RTC_OBJC_TYPE(RTCRtpTransceiver)(%p): created transceiver: %@",
+               self,
+               self.description);
   }
   return self;
 }
 
 + (webrtc::RtpTransceiverDirection)nativeRtpTransceiverDirectionFromDirection:
-        (RTCRtpTransceiverDirection)direction {
+        (RTC_OBJC_TYPE(RTCRtpTransceiverDirection))direction {
   switch (direction) {
-    case RTCRtpTransceiverDirectionSendRecv:
+    case RTC_OBJC_TYPE(RTCRtpTransceiverDirectionSendRecv):
       return webrtc::RtpTransceiverDirection::kSendRecv;
-    case RTCRtpTransceiverDirectionSendOnly:
+    case RTC_OBJC_TYPE(RTCRtpTransceiverDirectionSendOnly):
       return webrtc::RtpTransceiverDirection::kSendOnly;
-    case RTCRtpTransceiverDirectionRecvOnly:
+    case RTC_OBJC_TYPE(RTCRtpTransceiverDirectionRecvOnly):
       return webrtc::RtpTransceiverDirection::kRecvOnly;
-    case RTCRtpTransceiverDirectionInactive:
+    case RTC_OBJC_TYPE(RTCRtpTransceiverDirectionInactive):
       return webrtc::RtpTransceiverDirection::kInactive;
-    case RTCRtpTransceiverDirectionStopped:
+    case RTC_OBJC_TYPE(RTCRtpTransceiverDirectionStopped):
       return webrtc::RtpTransceiverDirection::kStopped;
   }
 }
 
-+ (RTCRtpTransceiverDirection)rtpTransceiverDirectionFromNativeDirection:
++ (RTC_OBJC_TYPE(RTCRtpTransceiverDirection))rtpTransceiverDirectionFromNativeDirection:
         (webrtc::RtpTransceiverDirection)nativeDirection {
   switch (nativeDirection) {
     case webrtc::RtpTransceiverDirection::kSendRecv:
-      return RTCRtpTransceiverDirectionSendRecv;
+      return RTC_OBJC_TYPE(RTCRtpTransceiverDirectionSendRecv);
     case webrtc::RtpTransceiverDirection::kSendOnly:
-      return RTCRtpTransceiverDirectionSendOnly;
+      return RTC_OBJC_TYPE(RTCRtpTransceiverDirectionSendOnly);
     case webrtc::RtpTransceiverDirection::kRecvOnly:
-      return RTCRtpTransceiverDirectionRecvOnly;
+      return RTC_OBJC_TYPE(RTCRtpTransceiverDirectionRecvOnly);
     case webrtc::RtpTransceiverDirection::kInactive:
-      return RTCRtpTransceiverDirectionInactive;
+      return RTC_OBJC_TYPE(RTCRtpTransceiverDirectionInactive);
     case webrtc::RtpTransceiverDirection::kStopped:
-      return RTCRtpTransceiverDirectionStopped;
+      return RTC_OBJC_TYPE(RTCRtpTransceiverDirectionStopped);
   }
 }
 

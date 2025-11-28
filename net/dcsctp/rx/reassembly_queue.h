@@ -28,7 +28,6 @@
 #include "net/dcsctp/packet/data.h"
 #include "net/dcsctp/packet/parameter/outgoing_ssn_reset_request_parameter.h"
 #include "net/dcsctp/packet/parameter/reconfiguration_response_parameter.h"
-#include "net/dcsctp/public/dcsctp_handover_state.h"
 #include "net/dcsctp/public/dcsctp_message.h"
 #include "net/dcsctp/rx/reassembly_streams.h"
 #include "rtc_base/containers/flat_set.h"
@@ -91,16 +90,17 @@ class ReassemblyQueue {
   // partial reliability.
   void HandleForwardTsn(
       TSN new_cumulative_tsn,
-      rtc::ArrayView<const AnyForwardTsnChunk::SkippedStream> skipped_streams);
+      webrtc::ArrayView<const AnyForwardTsnChunk::SkippedStream>
+          skipped_streams);
 
   // Resets the provided streams and leaves deferred reset processing, if
   // enabled.
   void ResetStreamsAndLeaveDeferredReset(
-      rtc::ArrayView<const StreamID> stream_ids);
+      webrtc::ArrayView<const StreamID> stream_ids);
 
   // Enters deferred reset processing.
   void EnterDeferredReset(TSN sender_last_assigned_tsn,
-                          rtc::ArrayView<const StreamID> streams);
+                          webrtc::ArrayView<const StreamID> streams);
 
   // The number of payload bytes that have been queued. Note that the actual
   // memory usage is higher due to additional overhead of tracking received
@@ -139,7 +139,7 @@ class ReassemblyQueue {
   };
 
   bool IsConsistent() const;
-  void AddReassembledMessage(rtc::ArrayView<const UnwrappedTSN> tsns,
+  void AddReassembledMessage(webrtc::ArrayView<const UnwrappedTSN> tsns,
                              DcSctpMessage message);
 
   const absl::string_view log_prefix_;
@@ -152,11 +152,7 @@ class ReassemblyQueue {
   std::vector<DcSctpMessage> reassembled_messages_;
 
   // If present, "deferred reset processing" mode is active.
-  absl::optional<DeferredResetStreams> deferred_reset_streams_;
-
-  // Contains the last request sequence number of the
-  // OutgoingSSNResetRequestParameter that was performed.
-  ReconfigRequestSN last_completed_reset_req_seq_nbr_;
+  std::optional<DeferredResetStreams> deferred_reset_streams_;
 
   // The number of "payload bytes" that are in this queue, in total.
   size_t queued_bytes_ = 0;

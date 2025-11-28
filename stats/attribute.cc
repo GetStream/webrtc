@@ -10,9 +10,15 @@
 
 #include "api/stats/attribute.h"
 
+#include <cstdint>
+#include <cstdio>
+#include <map>
+#include <optional>
 #include <string>
+#include <type_traits>
+#include <variant>
+#include <vector>
 
-#include "absl/types/variant.h"
 #include "rtc_base/arraysize.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/string_encode.h"
@@ -25,12 +31,12 @@ namespace {
 struct VisitIsSequence {
   // Any type of vector is a sequence.
   template <typename T>
-  bool operator()(const absl::optional<std::vector<T>>* attribute) {
+  bool operator()(const std::optional<std::vector<T>>* attribute) {
     return true;
   }
   // Any other type is not.
   template <typename T>
-  bool operator()(const absl::optional<T>* attribute) {
+  bool operator()(const std::optional<T>* attribute) {
     return false;
   }
 };
@@ -43,8 +49,12 @@ struct VisitToString {
                     std::is_same_v<T, bool> || std::is_same_v<T, std::string>,
                 bool> = true>
   std::string ValueToString(const T& value) {
-    return rtc::ToString(value);
+    if constexpr (std::is_same_v<T, bool>) {
+      return BoolToString(value);
+    }
+    return absl::StrCat(value);
   }
+
   // Convert 64-bit integers to doubles before converting to string because JSON
   // represents all numbers as floating points with ~15 digits of precision.
   template <typename T,
@@ -62,8 +72,8 @@ struct VisitToString {
 
   // Vector attributes.
   template <typename T>
-  std::string operator()(const absl::optional<std::vector<T>>* attribute) {
-    rtc::StringBuilder sb;
+  std::string operator()(const std::optional<std::vector<T>>* attribute) {
+    StringBuilder sb;
     sb << "[";
     const char* separator = "";
     constexpr bool element_is_string = std::is_same<T, std::string>::value;
@@ -84,8 +94,8 @@ struct VisitToString {
   // Map attributes.
   template <typename T>
   std::string operator()(
-      const absl::optional<std::map<std::string, T>>* attribute) {
-    rtc::StringBuilder sb;
+      const std::optional<std::map<std::string, T>>* attribute) {
+    StringBuilder sb;
     sb << "{";
     const char* separator = "";
     constexpr bool element_is_string = std::is_same<T, std::string>::value;
@@ -106,14 +116,14 @@ struct VisitToString {
   }
   // Simple attributes.
   template <typename T>
-  std::string operator()(const absl::optional<T>* attribute) {
+  std::string operator()(const std::optional<T>* attribute) {
     return ValueToString(attribute->value());
   }
 };
 
 struct VisitIsEqual {
   template <typename T>
-  bool operator()(const absl::optional<T>* attribute) {
+  bool operator()(const std::optional<T>* attribute) {
     if (!other.holds_alternative<T>()) {
       return false;
     }
@@ -134,28 +144,27 @@ const Attribute::StatVariant& Attribute::as_variant() const {
 }
 
 bool Attribute::has_value() const {
-  return absl::visit([](const auto* attr) { return attr->has_value(); },
-                     attribute_);
+  return std::visit([](const auto* attr) { return attr->has_value(); },
+                    attribute_);
 }
 
 bool Attribute::is_sequence() const {
-  return absl::visit(VisitIsSequence(), attribute_);
+  return std::visit(VisitIsSequence(), attribute_);
 }
 
 bool Attribute::is_string() const {
-  return absl::holds_alternative<const absl::optional<std::string>*>(
-      attribute_);
+  return std::holds_alternative<const std::optional<std::string>*>(attribute_);
 }
 
 std::string Attribute::ToString() const {
   if (!has_value()) {
     return "null";
   }
-  return absl::visit(VisitToString(), attribute_);
+  return std::visit(VisitToString(), attribute_);
 }
 
 bool Attribute::operator==(const Attribute& other) const {
-  return absl::visit(VisitIsEqual{.other = other}, attribute_);
+  return std::visit(VisitIsEqual{.other = other}, attribute_);
 }
 
 bool Attribute::operator!=(const Attribute& other) const {

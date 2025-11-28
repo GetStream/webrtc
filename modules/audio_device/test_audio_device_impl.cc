@@ -10,9 +10,9 @@
 #include "modules/audio_device/test_audio_device_impl.h"
 
 #include <memory>
+#include <optional>
 #include <utility>
 
-#include "absl/types/optional.h"
 #include "api/array_view.h"
 #include "api/task_queue/task_queue_factory.h"
 #include "api/units/time_delta.h"
@@ -169,7 +169,7 @@ void TestAudioDevice::ProcessAudio() {
       audio_buffer_->SetRecordedBuffer(
           recording_buffer_.data(),
           recording_buffer_.size() / capturer_->NumChannels(),
-          absl::make_optional(rtc::TimeNanos()));
+          std::make_optional(TimeNanos()));
       audio_buffer_->DeliverRecordedData();
     }
     if (!keep_capturing) {
@@ -184,7 +184,7 @@ void TestAudioDevice::ProcessAudio() {
     size_t samples_out = samples_per_channel * renderer_->NumChannels();
     RTC_CHECK_LE(samples_out, playout_buffer_.size());
     const bool keep_rendering = renderer_->Render(
-        rtc::ArrayView<const int16_t>(playout_buffer_.data(), samples_out));
+        ArrayView<const int16_t>(playout_buffer_.data(), samples_out));
     if (!keep_rendering) {
       rendering_ = false;
     }

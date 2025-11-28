@@ -15,10 +15,10 @@
 #include <stdint.h>
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "api/environment/environment.h"
 #include "api/fec_controller_override.h"
 #include "api/sequence_checker.h"
@@ -38,9 +38,6 @@ namespace test {
 class FakeEncoder : public VideoEncoder {
  public:
   explicit FakeEncoder(const Environment& env_);
-  // TODO: bugs.webrtc.org/15860 - Delete constructor taking just `Clock` when
-  // users are migrated to pass full `Environment`
-  explicit FakeEncoder(Clock* clock);
   virtual ~FakeEncoder() = default;
 
   // Sets max bitrate. Not thread-safe, call before registering the encoder.
@@ -86,8 +83,6 @@ class FakeEncoder : public VideoEncoder {
     std::vector<SpatialLayer> layers;
   };
 
-  FakeEncoder(absl::optional<Environment> env, Clock* clock);
-
   FrameInfo NextFrame(const std::vector<VideoFrameType>* frame_types,
                       bool keyframe,
                       uint8_t num_simulcast_streams,
@@ -100,16 +95,13 @@ class FakeEncoder : public VideoEncoder {
   // `buffer`.
   virtual CodecSpecificInfo EncodeHook(
       EncodedImage& encoded_image,
-      rtc::scoped_refptr<EncodedImageBuffer> buffer);
+      scoped_refptr<EncodedImageBuffer> buffer);
 
   void SetRatesLocked(const RateControlParameters& parameters)
       RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
-  // TODO: bugs.webrtc.org/15860 - Remove constructor that takes just the clock
-  // and make env_ non-optional.
-  const absl::optional<Environment> env_;
+  const Environment env_;
   FrameInfo last_frame_info_ RTC_GUARDED_BY(mutex_);
-  Clock* const clock_;
 
   VideoCodec config_ RTC_GUARDED_BY(mutex_);
   int num_initializations_ RTC_GUARDED_BY(mutex_);
@@ -120,8 +112,8 @@ class FakeEncoder : public VideoEncoder {
   uint32_t counter_ RTC_GUARDED_BY(mutex_);
   mutable Mutex mutex_;
   bool used_layers_[kMaxSimulcastStreams];
-  absl::optional<int> qp_ RTC_GUARDED_BY(mutex_);
-  absl::optional<std::string> implementation_name_ RTC_GUARDED_BY(mutex_);
+  std::optional<int> qp_ RTC_GUARDED_BY(mutex_);
+  std::optional<std::string> implementation_name_ RTC_GUARDED_BY(mutex_);
 
   // Current byte debt to be payed over a number of frames.
   // The debt is acquired by keyframes overshooting the bitrate target.
@@ -131,13 +123,12 @@ class FakeEncoder : public VideoEncoder {
 class FakeH264Encoder : public FakeEncoder {
  public:
   explicit FakeH264Encoder(const Environment& env);
-  [[deprecated]] explicit FakeH264Encoder(Clock* clock);
   virtual ~FakeH264Encoder() = default;
 
  private:
   CodecSpecificInfo EncodeHook(
       EncodedImage& encoded_image,
-      rtc::scoped_refptr<EncodedImageBuffer> buffer) override;
+      scoped_refptr<EncodedImageBuffer> buffer) override;
 
   int idr_counter_ RTC_GUARDED_BY(local_mutex_);
   Mutex local_mutex_;

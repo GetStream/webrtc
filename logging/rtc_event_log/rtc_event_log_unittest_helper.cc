@@ -17,23 +17,70 @@
 #include <limits>
 #include <memory>
 #include <numeric>
-#include <string>
+#include <optional>
 #include <utility>
 #include <vector>
 
+#include "absl/algorithm/container.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "api/array_view.h"
-#include "api/network_state_predictor.h"
+#include "api/candidate.h"
+#include "api/dtls_transport_interface.h"
+#include "api/rtc_event_log/rtc_event_log.h"
 #include "api/rtp_headers.h"
 #include "api/rtp_parameters.h"
+#include "api/transport/bandwidth_usage.h"
+#include "api/units/data_rate.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
+#include "api/video/video_codec_type.h"
+#include "logging/rtc_event_log/events/logged_rtp_rtcp.h"
+#include "logging/rtc_event_log/events/rtc_event_alr_state.h"
+#include "logging/rtc_event_log/events/rtc_event_audio_network_adaptation.h"
+#include "logging/rtc_event_log/events/rtc_event_audio_playout.h"
+#include "logging/rtc_event_log/events/rtc_event_audio_receive_stream_config.h"
+#include "logging/rtc_event_log/events/rtc_event_audio_send_stream_config.h"
+#include "logging/rtc_event_log/events/rtc_event_begin_log.h"
+#include "logging/rtc_event_log/events/rtc_event_bwe_update_delay_based.h"
+#include "logging/rtc_event_log/events/rtc_event_bwe_update_loss_based.h"
+#include "logging/rtc_event_log/events/rtc_event_dtls_transport_state.h"
+#include "logging/rtc_event_log/events/rtc_event_dtls_writable_state.h"
+#include "logging/rtc_event_log/events/rtc_event_end_log.h"
+#include "logging/rtc_event_log/events/rtc_event_frame_decoded.h"
+#include "logging/rtc_event_log/events/rtc_event_generic_ack_received.h"
+#include "logging/rtc_event_log/events/rtc_event_generic_packet_received.h"
+#include "logging/rtc_event_log/events/rtc_event_generic_packet_sent.h"
+#include "logging/rtc_event_log/events/rtc_event_ice_candidate_pair.h"
+#include "logging/rtc_event_log/events/rtc_event_ice_candidate_pair_config.h"
+#include "logging/rtc_event_log/events/rtc_event_neteq_set_minimum_delay.h"
+#include "logging/rtc_event_log/events/rtc_event_probe_cluster_created.h"
+#include "logging/rtc_event_log/events/rtc_event_probe_result_failure.h"
+#include "logging/rtc_event_log/events/rtc_event_probe_result_success.h"
+#include "logging/rtc_event_log/events/rtc_event_remote_estimate.h"
+#include "logging/rtc_event_log/events/rtc_event_route_change.h"
+#include "logging/rtc_event_log/events/rtc_event_rtcp_packet_incoming.h"
+#include "logging/rtc_event_log/events/rtc_event_rtcp_packet_outgoing.h"
+#include "logging/rtc_event_log/events/rtc_event_rtp_packet_incoming.h"
+#include "logging/rtc_event_log/events/rtc_event_rtp_packet_outgoing.h"
+#include "logging/rtc_event_log/events/rtc_event_video_receive_stream_config.h"
+#include "logging/rtc_event_log/events/rtc_event_video_send_stream_config.h"
+#include "logging/rtc_event_log/rtc_stream_config.h"
 #include "modules/audio_coding/audio_network_adaptor/include/audio_network_adaptor_config.h"
 #include "modules/rtp_rtcp/include/rtp_cvo.h"
+#include "modules/rtp_rtcp/include/rtp_header_extension_map.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/bye.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/dlrr.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/extended_reports.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/fir.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/loss_notification.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/nack.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/pli.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/receiver_report.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/remb.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/report_block.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/rrtr.h"
+#include "modules/rtp_rtcp/source/rtcp_packet/sender_report.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/target_bitrate.h"
 #include "modules/rtp_rtcp/source/rtp_dependency_descriptor_extension.h"
 #include "modules/rtp_rtcp/source/rtp_header_extensions.h"
@@ -41,6 +88,7 @@
 #include "modules/rtp_rtcp/source/rtp_packet_to_send.h"
 #include "rtc_base/buffer.h"
 #include "rtc_base/checks.h"
+#include "rtc_base/random.h"
 #include "rtc_base/time_utils.h"
 #include "system_wrappers/include/ntp_time.h"
 #include "test/gmock.h"
@@ -80,7 +128,7 @@ constexpr ExtensionPair kExtensions[kMaxNumExtensions] = {
      RtpExtension::kDependencyDescriptorUri}};
 
 template <typename T>
-void ShuffleInPlace(Random* prng, rtc::ArrayView<T> array) {
+void ShuffleInPlace(Random* prng, ArrayView<T> array) {
   RTC_DCHECK_LE(array.size(), std::numeric_limits<uint32_t>::max());
   for (uint32_t i = 0; i + 1 < array.size(); i++) {
     uint32_t other = prng->Rand(i, static_cast<uint32_t>(array.size() - 1));
@@ -88,13 +136,13 @@ void ShuffleInPlace(Random* prng, rtc::ArrayView<T> array) {
   }
 }
 
-absl::optional<int> GetExtensionId(const std::vector<RtpExtension>& extensions,
-                                   absl::string_view uri) {
+std::optional<int> GetExtensionId(const std::vector<RtpExtension>& extensions,
+                                  absl::string_view uri) {
   for (const auto& extension : extensions) {
     if (extension.uri == uri)
       return extension.id;
   }
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 }  // namespace
@@ -178,7 +226,7 @@ std::unique_ptr<RtcEventFrameDecoded> EventGenerator::NewFrameDecodedEvent(
       kVideoCodecGeneric, kVideoCodecVP8,  kVideoCodecVP9,
       kVideoCodecAV1,     kVideoCodecH264, kVideoCodecH265};
   const int64_t render_time_ms =
-      rtc::TimeMillis() + prng_.Rand(kMinRenderDelayMs, kMaxRenderDelayMs);
+      TimeMillis() + prng_.Rand(kMinRenderDelayMs, kMaxRenderDelayMs);
   const int width = prng_.Rand(kMinWidth, kMaxWidth);
   const int height = prng_.Rand(kMinHeight, kMaxHeight);
   const VideoCodecType codec = kCodecList[prng_.Rand(0, kNumCodecTypes - 1)];
@@ -449,52 +497,52 @@ EventGenerator::NewRtcpPacketIncoming() {
   switch (type) {
     case SupportedRtcpTypes::kSenderReport: {
       rtcp::SenderReport sender_report = NewSenderReport();
-      rtc::Buffer buffer = sender_report.Build();
+      Buffer buffer = sender_report.Build();
       return std::make_unique<RtcEventRtcpPacketIncoming>(buffer);
     }
     case SupportedRtcpTypes::kReceiverReport: {
       rtcp::ReceiverReport receiver_report = NewReceiverReport();
-      rtc::Buffer buffer = receiver_report.Build();
+      Buffer buffer = receiver_report.Build();
       return std::make_unique<RtcEventRtcpPacketIncoming>(buffer);
     }
     case SupportedRtcpTypes::kExtendedReports: {
       rtcp::ExtendedReports extended_report = NewExtendedReports();
-      rtc::Buffer buffer = extended_report.Build();
+      Buffer buffer = extended_report.Build();
       return std::make_unique<RtcEventRtcpPacketIncoming>(buffer);
     }
     case SupportedRtcpTypes::kFir: {
       rtcp::Fir fir = NewFir();
-      rtc::Buffer buffer = fir.Build();
+      Buffer buffer = fir.Build();
       return std::make_unique<RtcEventRtcpPacketIncoming>(buffer);
     }
     case SupportedRtcpTypes::kPli: {
       rtcp::Pli pli = NewPli();
-      rtc::Buffer buffer = pli.Build();
+      Buffer buffer = pli.Build();
       return std::make_unique<RtcEventRtcpPacketIncoming>(buffer);
     }
     case SupportedRtcpTypes::kNack: {
       rtcp::Nack nack = NewNack();
-      rtc::Buffer buffer = nack.Build();
+      Buffer buffer = nack.Build();
       return std::make_unique<RtcEventRtcpPacketIncoming>(buffer);
     }
     case SupportedRtcpTypes::kRemb: {
       rtcp::Remb remb = NewRemb();
-      rtc::Buffer buffer = remb.Build();
+      Buffer buffer = remb.Build();
       return std::make_unique<RtcEventRtcpPacketIncoming>(buffer);
     }
     case SupportedRtcpTypes::kBye: {
       rtcp::Bye bye = NewBye();
-      rtc::Buffer buffer = bye.Build();
+      Buffer buffer = bye.Build();
       return std::make_unique<RtcEventRtcpPacketIncoming>(buffer);
     }
     case SupportedRtcpTypes::kTransportFeedback: {
       rtcp::TransportFeedback transport_feedback = NewTransportFeedback();
-      rtc::Buffer buffer = transport_feedback.Build();
+      Buffer buffer = transport_feedback.Build();
       return std::make_unique<RtcEventRtcpPacketIncoming>(buffer);
     }
     default:
       RTC_DCHECK_NOTREACHED();
-      rtc::Buffer buffer;
+      Buffer buffer;
       return std::make_unique<RtcEventRtcpPacketIncoming>(buffer);
   }
 }
@@ -518,52 +566,52 @@ EventGenerator::NewRtcpPacketOutgoing() {
   switch (type) {
     case SupportedRtcpTypes::kSenderReport: {
       rtcp::SenderReport sender_report = NewSenderReport();
-      rtc::Buffer buffer = sender_report.Build();
+      Buffer buffer = sender_report.Build();
       return std::make_unique<RtcEventRtcpPacketOutgoing>(buffer);
     }
     case SupportedRtcpTypes::kReceiverReport: {
       rtcp::ReceiverReport receiver_report = NewReceiverReport();
-      rtc::Buffer buffer = receiver_report.Build();
+      Buffer buffer = receiver_report.Build();
       return std::make_unique<RtcEventRtcpPacketOutgoing>(buffer);
     }
     case SupportedRtcpTypes::kExtendedReports: {
       rtcp::ExtendedReports extended_report = NewExtendedReports();
-      rtc::Buffer buffer = extended_report.Build();
+      Buffer buffer = extended_report.Build();
       return std::make_unique<RtcEventRtcpPacketOutgoing>(buffer);
     }
     case SupportedRtcpTypes::kFir: {
       rtcp::Fir fir = NewFir();
-      rtc::Buffer buffer = fir.Build();
+      Buffer buffer = fir.Build();
       return std::make_unique<RtcEventRtcpPacketOutgoing>(buffer);
     }
     case SupportedRtcpTypes::kPli: {
       rtcp::Pli pli = NewPli();
-      rtc::Buffer buffer = pli.Build();
+      Buffer buffer = pli.Build();
       return std::make_unique<RtcEventRtcpPacketOutgoing>(buffer);
     }
     case SupportedRtcpTypes::kNack: {
       rtcp::Nack nack = NewNack();
-      rtc::Buffer buffer = nack.Build();
+      Buffer buffer = nack.Build();
       return std::make_unique<RtcEventRtcpPacketOutgoing>(buffer);
     }
     case SupportedRtcpTypes::kRemb: {
       rtcp::Remb remb = NewRemb();
-      rtc::Buffer buffer = remb.Build();
+      Buffer buffer = remb.Build();
       return std::make_unique<RtcEventRtcpPacketOutgoing>(buffer);
     }
     case SupportedRtcpTypes::kBye: {
       rtcp::Bye bye = NewBye();
-      rtc::Buffer buffer = bye.Build();
+      Buffer buffer = bye.Build();
       return std::make_unique<RtcEventRtcpPacketOutgoing>(buffer);
     }
     case SupportedRtcpTypes::kTransportFeedback: {
       rtcp::TransportFeedback transport_feedback = NewTransportFeedback();
-      rtc::Buffer buffer = transport_feedback.Build();
+      Buffer buffer = transport_feedback.Build();
       return std::make_unique<RtcEventRtcpPacketOutgoing>(buffer);
     }
     default:
       RTC_DCHECK_NOTREACHED();
-      rtc::Buffer buffer;
+      Buffer buffer;
       return std::make_unique<RtcEventRtcpPacketOutgoing>(buffer);
   }
 }
@@ -581,7 +629,7 @@ EventGenerator::NewGenericPacketReceived() {
 }
 std::unique_ptr<RtcEventGenericAckReceived>
 EventGenerator::NewGenericAckReceived() {
-  absl::optional<int64_t> receive_timestamp = absl::nullopt;
+  std::optional<int64_t> receive_timestamp = std::nullopt;
   if (prng_.Rand(0, 2) > 0) {
     receive_timestamp = prng_.Rand(0, 100000);
   }
@@ -723,7 +771,7 @@ RtpHeaderExtensionMap EventGenerator::NewRtpHeaderExtensionMap(
   std::vector<int> id(RtpExtension::kOneByteHeaderExtensionMaxId -
                       RtpExtension::kMinId + 1);
   std::iota(id.begin(), id.end(), RtpExtension::kMinId);
-  ShuffleInPlace(&prng_, rtc::ArrayView<int>(id));
+  ShuffleInPlace(&prng_, ArrayView<int>(id));
 
   auto not_excluded = [&](RTPExtensionType type) -> bool {
     return !absl::c_linear_search(excluded_extensions, type);
@@ -1057,7 +1105,7 @@ void EventVerifier::VerifyLoggedDependencyDescriptor(
     const Event& packet,
     const std::vector<uint8_t>& logged_dd) const {
   if (expect_dependency_descriptor_rtp_header_extension_is_set_) {
-    rtc::ArrayView<const uint8_t> original =
+    ArrayView<const uint8_t> original =
         packet.template GetRawExtension<RtpDependencyDescriptorExtension>();
     EXPECT_THAT(logged_dd, ElementsAreArray(original));
   } else {

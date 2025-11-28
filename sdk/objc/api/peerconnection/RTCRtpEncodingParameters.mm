@@ -34,7 +34,8 @@
 
 - (instancetype)initWithNativeParameters:
     (const webrtc::RtpEncodingParameters &)nativeParameters {
-  if (self = [super init]) {
+  self = [super init];
+  if (self) {
     if (!nativeParameters.rid.empty()) {
       _rid = [NSString stringForStdString:nativeParameters.rid];
     }
@@ -51,11 +52,12 @@
       _maxFramerate = [NSNumber numberWithInt:*nativeParameters.max_framerate];
     }
     if (nativeParameters.num_temporal_layers) {
-      _numTemporalLayers = [NSNumber numberWithInt:*nativeParameters.num_temporal_layers];
+      _numTemporalLayers =
+          [NSNumber numberWithInt:*nativeParameters.num_temporal_layers];
     }
     if (nativeParameters.scale_resolution_down_by) {
-      _scaleResolutionDownBy =
-          [NSNumber numberWithDouble:*nativeParameters.scale_resolution_down_by];
+      _scaleResolutionDownBy = [NSNumber
+          numberWithDouble:*nativeParameters.scale_resolution_down_by];
     }
     if (nativeParameters.ssrc) {
       _ssrc = [NSNumber numberWithUnsignedLong:*nativeParameters.ssrc];
@@ -78,57 +80,61 @@
   }
   parameters.active = _isActive;
   if (_maxBitrateBps != nil) {
-    parameters.max_bitrate_bps = absl::optional<int>(_maxBitrateBps.intValue);
+    parameters.max_bitrate_bps = std::optional<int>(_maxBitrateBps.intValue);
   }
   if (_minBitrateBps != nil) {
-    parameters.min_bitrate_bps = absl::optional<int>(_minBitrateBps.intValue);
+    parameters.min_bitrate_bps = std::optional<int>(_minBitrateBps.intValue);
   }
   if (_maxFramerate != nil) {
-    parameters.max_framerate = absl::optional<int>(_maxFramerate.intValue);
+    parameters.max_framerate = std::optional<int>(_maxFramerate.intValue);
   }
   if (_numTemporalLayers != nil) {
-    parameters.num_temporal_layers = absl::optional<int>(_numTemporalLayers.intValue);
+    parameters.num_temporal_layers =
+        std::optional<int>(_numTemporalLayers.intValue);
   }
   if (_scaleResolutionDownBy != nil) {
     parameters.scale_resolution_down_by =
-        absl::optional<double>(_scaleResolutionDownBy.doubleValue);
+        std::optional<double>(_scaleResolutionDownBy.doubleValue);
   }
   if (_ssrc != nil) {
-    parameters.ssrc = absl::optional<uint32_t>(_ssrc.unsignedLongValue);
+    parameters.ssrc = std::optional<uint32_t>(_ssrc.unsignedLongValue);
   }
   if (_scalabilityMode != nil) {
-    parameters.scalability_mode = absl::optional<std::string>(std::string([_scalabilityMode UTF8String]));
+    parameters.scalability_mode = std::optional<std::string>(std::string([_scalabilityMode UTF8String]));
+  }
+  if (_scalabilityMode != nil) {
+    parameters.scalability_mode = std::optional<std::string>(std::string([_scalabilityMode UTF8String]));
   }
   parameters.bitrate_priority = _bitratePriority;
-  parameters.network_priority =
-      [RTC_OBJC_TYPE(RTCRtpEncodingParameters) nativePriorityFromPriority:_networkPriority];
+  parameters.network_priority = [RTC_OBJC_TYPE(RTCRtpEncodingParameters)
+      nativePriorityFromPriority:_networkPriority];
   parameters.adaptive_ptime = _adaptiveAudioPacketTime;
   return parameters;
 }
 
-+ (webrtc::Priority)nativePriorityFromPriority:(RTCPriority)networkPriority {
++ (webrtc::Priority)nativePriorityFromPriority:(RTC_OBJC_TYPE(RTCPriority))networkPriority {
   switch (networkPriority) {
-    case RTCPriorityVeryLow:
+    case RTC_OBJC_TYPE(RTCPriorityVeryLow):
       return webrtc::Priority::kVeryLow;
-    case RTCPriorityLow:
+    case RTC_OBJC_TYPE(RTCPriorityLow):
       return webrtc::Priority::kLow;
-    case RTCPriorityMedium:
+    case RTC_OBJC_TYPE(RTCPriorityMedium):
       return webrtc::Priority::kMedium;
-    case RTCPriorityHigh:
+    case RTC_OBJC_TYPE(RTCPriorityHigh):
       return webrtc::Priority::kHigh;
   }
 }
 
-+ (RTCPriority)priorityFromNativePriority:(webrtc::Priority)nativePriority {
++ (RTC_OBJC_TYPE(RTCPriority))priorityFromNativePriority:(webrtc::Priority)nativePriority {
   switch (nativePriority) {
     case webrtc::Priority::kVeryLow:
-      return RTCPriorityVeryLow;
+      return RTC_OBJC_TYPE(RTCPriorityVeryLow);
     case webrtc::Priority::kLow:
-      return RTCPriorityLow;
+      return RTC_OBJC_TYPE(RTCPriorityLow);
     case webrtc::Priority::kMedium:
-      return RTCPriorityMedium;
+      return RTC_OBJC_TYPE(RTCPriorityMedium);
     case webrtc::Priority::kHigh:
-      return RTCPriorityHigh;
+      return RTC_OBJC_TYPE(RTCPriorityHigh);
   }
 }
 

@@ -10,19 +10,37 @@
 
 #include "modules/rtp_rtcp/source/rtp_video_stream_receiver_frame_transformer_delegate.h"
 
-#include <cstdio>
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
 #include "absl/memory/memory.h"
-#include "api/call/transport.h"
+#include "api/array_view.h"
+#include "api/frame_transformer_interface.h"
+#include "api/make_ref_counted.h"
+#include "api/rtp_headers.h"
+#include "api/rtp_packet_info.h"
+#include "api/rtp_packet_infos.h"
+#include "api/scoped_refptr.h"
 #include "api/test/mock_frame_transformer.h"
 #include "api/test/mock_transformable_video_frame.h"
+#include "api/transport/rtp/dependency_descriptor.h"
+#include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
-#include "call/video_receive_stream.h"
-#include "modules/rtp_rtcp/source/rtp_descriptor_authentication.h"
-#include "rtc_base/event.h"
+#include "api/video/encoded_image.h"
+#include "api/video/video_codec_type.h"
+#include "api/video/video_content_type.h"
+#include "api/video/video_frame_metadata.h"
+#include "api/video/video_rotation.h"
+#include "api/video/video_timing.h"
+#include "modules/rtp_rtcp/source/frame_object.h"
+#include "modules/rtp_rtcp/source/rtp_video_header.h"
+#include "modules/video_coding/codecs/vp8/include/vp8_globals.h"
+#include "rtc_base/thread.h"
+#include "system_wrappers/include/clock.h"
+#include "system_wrappers/include/ntp_time.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 
@@ -50,8 +68,8 @@ std::unique_ptr<RtpFrameObject> CreateRtpFrameObject(
       /*last_packet_received_time=*/5, /*rtp_timestamp=*/6, /*ntp_time_ms=*/7,
       VideoSendTiming(), /*payload_type=*/8, video_header.codec,
       kVideoRotation_0, VideoContentType::UNSPECIFIED, video_header,
-      absl::nullopt, RtpPacketInfos({packet_info}),
-      EncodedImageBuffer::Create(0));
+      /*color_space=*/std::nullopt, /*frame_instrumentation_data=*/std::nullopt,
+      RtpPacketInfos({packet_info}), EncodedImageBuffer::Create(0));
 }
 
 std::unique_ptr<RtpFrameObject> CreateRtpFrameObject() {
@@ -72,11 +90,11 @@ class TestRtpVideoFrameReceiver : public RtpVideoFrameReceiver {
 TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest,
      RegisterTransformedFrameCallbackSinkOnInit) {
   TestRtpVideoFrameReceiver receiver;
-  auto frame_transformer(rtc::make_ref_counted<MockFrameTransformer>());
+  auto frame_transformer(make_ref_counted<MockFrameTransformer>());
   SimulatedClock clock(0);
   auto delegate(
-      rtc::make_ref_counted<RtpVideoStreamReceiverFrameTransformerDelegate>(
-          &receiver, &clock, frame_transformer, rtc::Thread::Current(),
+      make_ref_counted<RtpVideoStreamReceiverFrameTransformerDelegate>(
+          &receiver, &clock, frame_transformer, Thread::Current(),
           /*remote_ssrc*/ 1111));
   EXPECT_CALL(*frame_transformer,
               RegisterTransformedFrameSinkCallback(testing::_, 1111));
@@ -86,11 +104,11 @@ TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest,
 TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest,
      UnregisterTransformedFrameSinkCallbackOnReset) {
   TestRtpVideoFrameReceiver receiver;
-  auto frame_transformer(rtc::make_ref_counted<MockFrameTransformer>());
+  auto frame_transformer(make_ref_counted<MockFrameTransformer>());
   SimulatedClock clock(0);
   auto delegate(
-      rtc::make_ref_counted<RtpVideoStreamReceiverFrameTransformerDelegate>(
-          &receiver, &clock, frame_transformer, rtc::Thread::Current(),
+      make_ref_counted<RtpVideoStreamReceiverFrameTransformerDelegate>(
+          &receiver, &clock, frame_transformer, Thread::Current(),
           /*remote_ssrc*/ 1111));
   EXPECT_CALL(*frame_transformer, UnregisterTransformedFrameSinkCallback(1111));
   delegate->Reset();
@@ -99,11 +117,11 @@ TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest,
 TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest, TransformFrame) {
   TestRtpVideoFrameReceiver receiver;
   auto frame_transformer(
-      rtc::make_ref_counted<testing::NiceMock<MockFrameTransformer>>());
+      make_ref_counted<testing::NiceMock<MockFrameTransformer>>());
   SimulatedClock clock(0);
   auto delegate(
-      rtc::make_ref_counted<RtpVideoStreamReceiverFrameTransformerDelegate>(
-          &receiver, &clock, frame_transformer, rtc::Thread::Current(),
+      make_ref_counted<RtpVideoStreamReceiverFrameTransformerDelegate>(
+          &receiver, &clock, frame_transformer, Thread::Current(),
           /*remote_ssrc*/ 1111));
   auto frame = CreateRtpFrameObject();
   EXPECT_CALL(*frame_transformer, Transform);
@@ -112,18 +130,18 @@ TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest, TransformFrame) {
 
 TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest,
      ManageFrameOnTransformedFrame) {
-  rtc::AutoThread main_thread_;
+  AutoThread main_thread_;
   TestRtpVideoFrameReceiver receiver;
   auto mock_frame_transformer(
-      rtc::make_ref_counted<NiceMock<MockFrameTransformer>>());
+      make_ref_counted<NiceMock<MockFrameTransformer>>());
   SimulatedClock clock(0);
   std::vector<uint32_t> csrcs = {234, 345, 456};
   auto delegate =
-      rtc::make_ref_counted<RtpVideoStreamReceiverFrameTransformerDelegate>(
-          &receiver, &clock, mock_frame_transformer, rtc::Thread::Current(),
+      make_ref_counted<RtpVideoStreamReceiverFrameTransformerDelegate>(
+          &receiver, &clock, mock_frame_transformer, Thread::Current(),
           /*remote_ssrc*/ 1111);
 
-  rtc::scoped_refptr<TransformedFrameCallback> callback;
+  scoped_refptr<TransformedFrameCallback> callback;
   EXPECT_CALL(*mock_frame_transformer, RegisterTransformedFrameSinkCallback)
       .WillOnce(SaveArg<0>(&callback));
   delegate->Init();
@@ -142,23 +160,31 @@ TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest,
             callback->OnTransformedFrame(std::move(frame));
           });
   delegate->TransformFrame(CreateRtpFrameObject(RTPVideoHeader(), csrcs));
-  rtc::ThreadManager::ProcessAllMessageQueuesForTesting();
+  ThreadManager::ProcessAllMessageQueuesForTesting();
 }
 
 TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest,
      TransformableFrameMetadataHasCorrectValue) {
   TestRtpVideoFrameReceiver receiver;
   auto mock_frame_transformer =
-      rtc::make_ref_counted<NiceMock<MockFrameTransformer>>();
+      make_ref_counted<NiceMock<MockFrameTransformer>>();
   SimulatedClock clock(0);
   auto delegate =
-      rtc::make_ref_counted<RtpVideoStreamReceiverFrameTransformerDelegate>(
-          &receiver, &clock, mock_frame_transformer, rtc::Thread::Current(),
-          1111);
+      make_ref_counted<RtpVideoStreamReceiverFrameTransformerDelegate>(
+          &receiver, &clock, mock_frame_transformer, Thread::Current(), 1111);
   delegate->Init();
   RTPVideoHeader video_header;
   video_header.width = 1280u;
   video_header.height = 720u;
+
+  Timestamp capture_time = Timestamp::Millis(1234);
+  TimeDelta sender_capture_time_offset = TimeDelta::Millis(56);
+  AbsoluteCaptureTime absolute_capture_time = {
+      .absolute_capture_timestamp = Int64MsToUQ32x32(capture_time.ms()),
+      .estimated_capture_clock_offset =
+          Int64MsToQ32x32(sender_capture_time_offset.ms())};
+  video_header.absolute_capture_time = absolute_capture_time;
+
   RTPVideoHeader::GenericDescriptorInfo& generic =
       video_header.generic.emplace();
   generic.frame_id = 10;
@@ -188,24 +214,60 @@ TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest,
         EXPECT_THAT(metadata.GetDecodeTargetIndications(),
                     ElementsAre(DecodeTargetIndication::kSwitch));
         EXPECT_EQ(metadata.GetCsrcs(), csrcs);
+        ASSERT_TRUE(frame->ReceiveTime().has_value());
+        EXPECT_GE(frame->ReceiveTime()->us(), 0);
+        EXPECT_EQ(frame->CaptureTime(), capture_time);
+        EXPECT_EQ(frame->SenderCaptureTimeOffset(), sender_capture_time_offset);
       });
   // The delegate creates a transformable frame from the RtpFrameObject.
   delegate->TransformFrame(CreateRtpFrameObject(video_header, csrcs));
 }
 
 TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest,
-     TransformableFrameMetadataHasCorrectValueAfterSetMetadata) {
-  rtc::AutoThread main_thread;
+     TransformableFrameWithNegativeSenderCaptureTimeOffsetIsCorrect) {
   TestRtpVideoFrameReceiver receiver;
   auto mock_frame_transformer =
-      rtc::make_ref_counted<NiceMock<MockFrameTransformer>>();
+      make_ref_counted<NiceMock<MockFrameTransformer>>();
+  SimulatedClock clock(0);
+  auto delegate =
+      make_ref_counted<RtpVideoStreamReceiverFrameTransformerDelegate>(
+          &receiver, &clock, mock_frame_transformer, Thread::Current(), 1111);
+  delegate->Init();
+  RTPVideoHeader video_header;
+  Timestamp capture_time = Timestamp::Millis(1234);
+  TimeDelta sender_capture_time_offset = TimeDelta::Millis(-56);
+  AbsoluteCaptureTime absolute_capture_time = {
+      .absolute_capture_timestamp = Int64MsToUQ32x32(capture_time.ms()),
+      .estimated_capture_clock_offset =
+          Int64MsToQ32x32(sender_capture_time_offset.ms())};
+  video_header.absolute_capture_time = absolute_capture_time;
+
+  EXPECT_CALL(*mock_frame_transformer, Transform)
+      .WillOnce([&](std::unique_ptr<TransformableFrameInterface>
+                        transformable_frame) {
+        auto frame =
+            absl::WrapUnique(static_cast<TransformableVideoFrameInterface*>(
+                transformable_frame.release()));
+        ASSERT_TRUE(frame);
+        EXPECT_GE(frame->ReceiveTime()->us(), 0);
+        EXPECT_EQ(frame->CaptureTime(), capture_time);
+        EXPECT_EQ(frame->SenderCaptureTimeOffset(), sender_capture_time_offset);
+      });
+  delegate->TransformFrame(CreateRtpFrameObject(video_header, /*csrcs=*/{}));
+}
+
+TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest,
+     TransformableFrameMetadataHasCorrectValueAfterSetMetadata) {
+  AutoThread main_thread;
+  TestRtpVideoFrameReceiver receiver;
+  auto mock_frame_transformer =
+      make_ref_counted<NiceMock<MockFrameTransformer>>();
   SimulatedClock clock(1000);
   auto delegate =
-      rtc::make_ref_counted<RtpVideoStreamReceiverFrameTransformerDelegate>(
-          &receiver, &clock, mock_frame_transformer, rtc::Thread::Current(),
-          1111);
+      make_ref_counted<RtpVideoStreamReceiverFrameTransformerDelegate>(
+          &receiver, &clock, mock_frame_transformer, Thread::Current(), 1111);
 
-  rtc::scoped_refptr<TransformedFrameCallback> callback;
+  scoped_refptr<TransformedFrameCallback> callback;
   EXPECT_CALL(*mock_frame_transformer, RegisterTransformedFrameSinkCallback)
       .WillOnce(SaveArg<0>(&callback));
   delegate->Init();
@@ -222,8 +284,8 @@ TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest,
   // Checks that the recieved RTPFrameObject has the new metadata.
   EXPECT_CALL(receiver, ManageFrame)
       .WillOnce([&](std::unique_ptr<RtpFrameObject> frame) {
-        const absl::optional<RTPVideoHeader::GenericDescriptorInfo>&
-            descriptor = frame->GetRtpVideoHeader().generic;
+        const std::optional<RTPVideoHeader::GenericDescriptorInfo>& descriptor =
+            frame->GetRtpVideoHeader().generic;
         if (!descriptor.has_value()) {
           ADD_FAILURE() << "GenericDescriptorInfo in RTPVideoHeader doesn't "
                            "have a value.";
@@ -254,19 +316,19 @@ TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest,
 
   // The delegate creates a transformable frame from the RtpFrameObject.
   delegate->TransformFrame(CreateRtpFrameObject(video_header, csrcs));
-  rtc::ThreadManager::ProcessAllMessageQueuesForTesting();
+  ThreadManager::ProcessAllMessageQueuesForTesting();
 }
 
 TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest,
      SenderFramesAreConvertedToReceiverFrames) {
-  rtc::AutoThread main_thread_;
+  AutoThread main_thread_;
   TestRtpVideoFrameReceiver receiver;
   auto mock_frame_transformer =
-      rtc::make_ref_counted<NiceMock<MockFrameTransformer>>();
+      make_ref_counted<NiceMock<MockFrameTransformer>>();
   SimulatedClock clock(/*initial_timestamp_us=*/12345000);
   auto delegate =
-      rtc::make_ref_counted<RtpVideoStreamReceiverFrameTransformerDelegate>(
-          &receiver, &clock, mock_frame_transformer, rtc::Thread::Current(),
+      make_ref_counted<RtpVideoStreamReceiverFrameTransformerDelegate>(
+          &receiver, &clock, mock_frame_transformer, Thread::Current(),
           /*remote_ssrc*/ 1111);
 
   auto mock_sender_frame =
@@ -277,12 +339,12 @@ TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest,
   metadata.SetCodec(kVideoCodecVP8);
   metadata.SetRTPVideoHeaderCodecSpecifics(RTPVideoHeaderVP8());
   ON_CALL(*mock_sender_frame, Metadata).WillByDefault(Return(metadata));
-  rtc::scoped_refptr<EncodedImageBufferInterface> buffer =
+  scoped_refptr<EncodedImageBufferInterface> buffer =
       EncodedImageBuffer::Create(1);
   ON_CALL(*mock_sender_frame, GetData)
-      .WillByDefault(Return(rtc::ArrayView<const uint8_t>(*buffer)));
+      .WillByDefault(Return(ArrayView<const uint8_t>(*buffer)));
 
-  rtc::scoped_refptr<TransformedFrameCallback> callback;
+  scoped_refptr<TransformedFrameCallback> callback;
   EXPECT_CALL(*mock_frame_transformer, RegisterTransformedFrameSinkCallback)
       .WillOnce(SaveArg<0>(&callback));
   delegate->Init();
@@ -294,34 +356,34 @@ TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest,
         EXPECT_EQ(frame->ReceivedTime(), 12345);
       });
   callback->OnTransformedFrame(std::move(mock_sender_frame));
-  rtc::ThreadManager::ProcessAllMessageQueuesForTesting();
+  ThreadManager::ProcessAllMessageQueuesForTesting();
 }
 
 TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest,
      ManageFrameFromDifferentReceiver) {
-  rtc::AutoThread main_thread_;
+  AutoThread main_thread_;
   std::vector<uint32_t> csrcs = {234, 345, 456};
   const int frame_id = 11;
 
   TestRtpVideoFrameReceiver receiver1;
   auto mock_frame_transformer1(
-      rtc::make_ref_counted<NiceMock<MockFrameTransformer>>());
+      make_ref_counted<NiceMock<MockFrameTransformer>>());
   SimulatedClock clock(0);
   auto delegate1 =
-      rtc::make_ref_counted<RtpVideoStreamReceiverFrameTransformerDelegate>(
-          &receiver1, &clock, mock_frame_transformer1, rtc::Thread::Current(),
+      make_ref_counted<RtpVideoStreamReceiverFrameTransformerDelegate>(
+          &receiver1, &clock, mock_frame_transformer1, Thread::Current(),
           /*remote_ssrc*/ 1111);
 
   TestRtpVideoFrameReceiver receiver2;
   auto mock_frame_transformer2(
-      rtc::make_ref_counted<NiceMock<MockFrameTransformer>>());
+      make_ref_counted<NiceMock<MockFrameTransformer>>());
   auto delegate2 =
-      rtc::make_ref_counted<RtpVideoStreamReceiverFrameTransformerDelegate>(
-          &receiver2, &clock, mock_frame_transformer2, rtc::Thread::Current(),
+      make_ref_counted<RtpVideoStreamReceiverFrameTransformerDelegate>(
+          &receiver2, &clock, mock_frame_transformer2, Thread::Current(),
           /*remote_ssrc*/ 1111);
 
   delegate1->Init();
-  rtc::scoped_refptr<TransformedFrameCallback> callback_for_2;
+  scoped_refptr<TransformedFrameCallback> callback_for_2;
   EXPECT_CALL(*mock_frame_transformer2, RegisterTransformedFrameSinkCallback)
       .WillOnce(SaveArg<0>(&callback_for_2));
   delegate2->Init();
@@ -346,24 +408,23 @@ TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest,
       CreateRtpFrameObject(RTPVideoHeader(), csrcs);
   untransformed_frame->SetId(frame_id);
   delegate1->TransformFrame(std::move(untransformed_frame));
-  rtc::ThreadManager::ProcessAllMessageQueuesForTesting();
+  ThreadManager::ProcessAllMessageQueuesForTesting();
 }
 
 TEST(RtpVideoStreamReceiverFrameTransformerDelegateTest,
      ShortCircuitingSkipsTransform) {
-  rtc::AutoThread main_thread_;
+  AutoThread main_thread_;
   TestRtpVideoFrameReceiver receiver;
   auto mock_frame_transformer =
-      rtc::make_ref_counted<NiceMock<MockFrameTransformer>>();
+      make_ref_counted<NiceMock<MockFrameTransformer>>();
   SimulatedClock clock(0);
   auto delegate =
-      rtc::make_ref_counted<RtpVideoStreamReceiverFrameTransformerDelegate>(
-          &receiver, &clock, mock_frame_transformer, rtc::Thread::Current(),
-          1111);
+      make_ref_counted<RtpVideoStreamReceiverFrameTransformerDelegate>(
+          &receiver, &clock, mock_frame_transformer, Thread::Current(), 1111);
   delegate->Init();
 
   delegate->StartShortCircuiting();
-  rtc::ThreadManager::ProcessAllMessageQueuesForTesting();
+  ThreadManager::ProcessAllMessageQueuesForTesting();
 
   // Will not call the actual transformer.
   EXPECT_CALL(*mock_frame_transformer, Transform).Times(0);

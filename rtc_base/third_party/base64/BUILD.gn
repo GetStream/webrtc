@@ -16,6 +16,23 @@ rtc_library("base64") {
   deps = [
     "../..:checks",
     "../../system:rtc_export",
+    "//third_party/abseil-cpp/absl/strings:string_view",
   ]
-  absl_deps = [ "//third_party/abseil-cpp/absl/strings" ]
+}
+
+if (rtc_include_tests) {
+  rtc_library("base64_unittest") {
+    testonly = true
+    sources = [
+      "base64_unittest.cc",
+      "test_base64.h",
+    ]
+    deps = [
+      ":base64",
+      "../..:logging",
+      "../../../test:test_main",
+      "../../../test:test_support",
+      "//third_party/abseil-cpp/absl/strings:string_view",
+    ]
+  }
 }

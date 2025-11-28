@@ -20,6 +20,7 @@
 #include "sdk/android/src/jni/jni_helpers.h"
 #include "system_wrappers/include/field_trial.h"
 #include "system_wrappers/include/metrics.h"
+#include "third_party/jni_zero/jni_zero.h"
 
 namespace webrtc {
 
@@ -27,14 +28,15 @@ namespace jni {
 
 ScopedJavaLocalRef<jobject> AudioTrackJni::CreateJavaWebRtcAudioTrack(
     JNIEnv* env,
-    const JavaRef<jobject>& j_context,
-    const JavaRef<jobject>& j_audio_manager) {
+    const jni_zero::JavaRef<jobject>& j_context,
+    const jni_zero::JavaRef<jobject>& j_audio_manager) {
   return Java_WebRtcAudioTrack_Constructor(env, j_context, j_audio_manager);
 }
 
-AudioTrackJni::AudioTrackJni(JNIEnv* env,
-                             const AudioParameters& audio_parameters,
-                             const JavaRef<jobject>& j_webrtc_audio_track)
+AudioTrackJni::AudioTrackJni(
+    JNIEnv* env,
+    const AudioParameters& audio_parameters,
+    const jni_zero::JavaRef<jobject>& j_webrtc_audio_track)
     : j_audio_track_(env, j_webrtc_audio_track),
       audio_parameters_(audio_parameters),
       direct_buffer_address_(nullptr),
@@ -91,7 +93,7 @@ int32_t AudioTrackJni::InitPlayout() {
     buffer_size_factor = 1.0;
   int requested_buffer_size_bytes = Java_WebRtcAudioTrack_initPlayout(
       env_, j_audio_track_, audio_parameters_.sample_rate(),
-      static_cast<int>(audio_parameters_.channels()), buffer_size_factor);
+      static_cast<int>(audio_parameters_.channels()), buffer_size_factor, true);
   if (requested_buffer_size_bytes < 0) {
     RTC_LOG(LS_ERROR) << "InitPlayout failed";
     return -1;
@@ -136,7 +138,7 @@ int32_t AudioTrackJni::StartPlayout() {
         << "Playout can not start since InitPlayout must succeed first";
     return 0;
   }
-  if (!Java_WebRtcAudioTrack_startPlayout(env_, j_audio_track_)) {
+  if (!Java_WebRtcAudioTrack_startPlayout(env_, j_audio_track_, true)) {
     RTC_LOG(LS_ERROR) << "StartPlayout failed";
     return -1;
   }
@@ -162,7 +164,7 @@ int32_t AudioTrackJni::StopPlayout() {
           sample_rate_hz,
       -500, 100, 100);
 
-  if (!Java_WebRtcAudioTrack_stopPlayout(env_, j_audio_track_)) {
+  if (!Java_WebRtcAudioTrack_stopPlayout(env_, j_audio_track_, true)) {
     RTC_LOG(LS_ERROR) << "StopPlayout failed";
     return -1;
   }
@@ -192,17 +194,17 @@ int AudioTrackJni::SetSpeakerVolume(uint32_t volume) {
              : -1;
 }
 
-absl::optional<uint32_t> AudioTrackJni::MaxSpeakerVolume() const {
+std::optional<uint32_t> AudioTrackJni::MaxSpeakerVolume() const {
   RTC_DCHECK(thread_checker_.IsCurrent());
   return Java_WebRtcAudioTrack_getStreamMaxVolume(env_, j_audio_track_);
 }
 
-absl::optional<uint32_t> AudioTrackJni::MinSpeakerVolume() const {
+std::optional<uint32_t> AudioTrackJni::MinSpeakerVolume() const {
   RTC_DCHECK(thread_checker_.IsCurrent());
   return 0;
 }
 
-absl::optional<uint32_t> AudioTrackJni::SpeakerVolume() const {
+std::optional<uint32_t> AudioTrackJni::SpeakerVolume() const {
   RTC_DCHECK(thread_checker_.IsCurrent());
   const uint32_t volume =
       Java_WebRtcAudioTrack_getStreamVolume(env_, j_audio_track_);
@@ -229,7 +231,7 @@ void AudioTrackJni::AttachAudioBuffer(AudioDeviceBuffer* audioBuffer) {
 
 void AudioTrackJni::CacheDirectBufferAddress(
     JNIEnv* env,
-    const JavaParamRef<jobject>& byte_buffer) {
+    const jni_zero::JavaParamRef<jobject>& byte_buffer) {
   RTC_LOG(LS_INFO) << "OnCacheDirectBufferAddress";
   RTC_DCHECK(thread_checker_.IsCurrent());
   RTC_DCHECK(!direct_buffer_address_);

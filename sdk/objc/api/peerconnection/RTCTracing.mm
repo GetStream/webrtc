@@ -12,18 +12,18 @@
 
 #include "rtc_base/event_tracer.h"
 
-void RTCSetupInternalTracer(void) {
-  rtc::tracing::SetupInternalTracer();
+void RTC_OBJC_TYPE(RTCSetupInternalTracer)(void) {
+  webrtc::tracing::SetupInternalTracer();
 }
 
-BOOL RTCStartInternalCapture(NSString *filePath) {
-  return rtc::tracing::StartInternalCapture(filePath.UTF8String);
+BOOL RTC_OBJC_TYPE(RTCStartInternalCapture)(NSString *filePath) {
+  return webrtc::tracing::StartInternalCapture(filePath.UTF8String);
 }
 
-void RTCStopInternalCapture(void) {
-  rtc::tracing::StopInternalCapture();
+void RTC_OBJC_TYPE(RTCStopInternalCapture)(void) {
+  webrtc::tracing::StopInternalCapture();
 }
 
-void RTCShutdownInternalTracer(void) {
-  rtc::tracing::ShutdownInternalTracer();
+void RTC_OBJC_TYPE(RTCShutdownInternalTracer)(void) {
+  webrtc::tracing::ShutdownInternalTracer();
 }

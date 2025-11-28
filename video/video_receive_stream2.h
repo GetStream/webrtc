@@ -11,28 +11,45 @@
 #ifndef VIDEO_VIDEO_RECEIVE_STREAM2_H_
 #define VIDEO_VIDEO_RECEIVE_STREAM2_H_
 
+#include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
-#include "absl/types/optional.h"
+#include "api/crypto/frame_decryptor_interface.h"
 #include "api/environment/environment.h"
+#include "api/frame_transformer_interface.h"
+#include "api/rtp_headers.h"
+#include "api/scoped_refptr.h"
 #include "api/sequence_checker.h"
 #include "api/task_queue/pending_task_safety_flag.h"
 #include "api/task_queue/task_queue_base.h"
+#include "api/transport/rtp/rtp_source.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
+#include "api/video/encoded_frame.h"
 #include "api/video/recordable_encoded_frame.h"
+#include "api/video/video_frame.h"
+#include "api/video/video_sink_interface.h"
 #include "call/call.h"
 #include "call/rtp_packet_sink_interface.h"
 #include "call/syncable.h"
 #include "call/video_receive_stream.h"
+#include "common_video/frame_instrumentation_data.h"
+#include "common_video/include/corruption_score_calculator.h"
+#include "modules/include/module_common_types.h"
 #include "modules/rtp_rtcp/source/source_tracker.h"
 #include "modules/video_coding/nack_requester.h"
 #include "modules/video_coding/video_receiver2.h"
+#include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/system/no_unique_address.h"
 #include "rtc_base/thread_annotations.h"
+#include "rtc_base/time_utils.h"
+#include "video/decode_synchronizer.h"
 #include "video/receive_statistics_proxy.h"
 #include "video/rtp_streams_synchronizer2.h"
 #include "video/rtp_video_stream_receiver2.h"
@@ -69,7 +86,7 @@ struct VideoFrameMetaData {
         decode_timestamp(now) {}
 
   int64_t render_time_ms() const {
-    return timestamp_us / rtc::kNumMicrosecsPerMillisec;
+    return timestamp_us / kNumMicrosecsPerMillisec;
   }
 
   const uint32_t rtp_timestamp;
@@ -83,11 +100,12 @@ struct VideoFrameMetaData {
 
 class VideoReceiveStream2
     : public webrtc::VideoReceiveStreamInterface,
-      public rtc::VideoSinkInterface<VideoFrame>,
+      public VideoSinkInterface<VideoFrame>,
       public RtpVideoStreamReceiver2::OnCompleteFrameCallback,
       public Syncable,
       public CallStatsObserver,
-      public FrameSchedulingReceiver {
+      public FrameSchedulingReceiver,
+      public CorruptionScoreCalculator {
  public:
   // The maximum number of buffered encoded frames when encoded output is
   // configured.
@@ -163,11 +181,11 @@ class VideoReceiveStream2
   int GetBaseMinimumPlayoutDelayMs() const override;
 
   void SetFrameDecryptor(
-      rtc::scoped_refptr<FrameDecryptorInterface> frame_decryptor) override;
+      scoped_refptr<FrameDecryptorInterface> frame_decryptor) override;
   void SetDepacketizerToDecoderFrameTransformer(
-      rtc::scoped_refptr<FrameTransformerInterface> frame_transformer) override;
+      scoped_refptr<FrameTransformerInterface> frame_transformer) override;
 
-  // Implements rtc::VideoSinkInterface<VideoFrame>.
+  // Implements webrtc::VideoSinkInterface<VideoFrame>.
   void OnFrame(const VideoFrame& video_frame) override;
 
   // Implements RtpVideoStreamReceiver2::OnCompleteFrameCallback.
@@ -178,7 +196,7 @@ class VideoReceiveStream2
 
   // Implements Syncable.
   uint32_t id() const override;
-  absl::optional<Syncable::Info> GetInfo() const override;
+  std::optional<Syncable::Info> GetInfo() const override;
   bool GetPlayoutRtpTimestamp(uint32_t* rtp_timestamp,
                               int64_t* time_ms) const override;
   void SetEstimatedPlayoutNtpTimestampMs(int64_t ntp_timestamp_ms,
@@ -213,7 +231,7 @@ class VideoReceiveStream2
 
     // The picture id of the frame that was decoded, or nullopt if the frame was
     // not decoded.
-    absl::optional<int64_t> decoded_frame_picture_id;
+    std::optional<int64_t> decoded_frame_picture_id;
 
     // True if the next frame decoded must be a keyframe. This value will set
     // the value of `keyframe_required_`, which will force the frame buffer to
@@ -239,6 +257,9 @@ class VideoReceiveStream2
       RTC_RUN_ON(decode_sequence_checker_);
 
   void UpdateHistograms();
+  std::optional<double> CalculateCorruptionScore(
+      const VideoFrame& frame,
+      const FrameInstrumentationData& frame_instrumentation_data) override;
 
   const Environment env_;
 
@@ -264,7 +285,7 @@ class VideoReceiveStream2
   bool decoder_running_ RTC_GUARDED_BY(worker_sequence_checker_) = false;
   bool decoder_stopped_ RTC_GUARDED_BY(decode_sequence_checker_) = true;
 
-  SourceTracker source_tracker_;
+  SourceTracker source_tracker_ RTC_GUARDED_BY(worker_sequence_checker_);
   ReceiveStatisticsProxy stats_proxy_;
   // Shared by media and rtx stream receivers, since the latter has no RtpRtcp
   // module of its own.
@@ -272,7 +293,7 @@ class VideoReceiveStream2
 
   std::unique_ptr<VCMTiming> timing_;  // Jitter buffer experiment.
   VideoReceiver2 video_receiver_;
-  std::unique_ptr<rtc::VideoSinkInterface<VideoFrame>> incoming_video_stream_;
+  std::unique_ptr<VideoSinkInterface<VideoFrame>> incoming_video_stream_;
   RtpVideoStreamReceiver2 rtp_video_stream_receiver_;
   std::unique_ptr<VideoStreamDecoder> video_stream_decoder_;
   RtpStreamsSynchronizer rtp_stream_sync_;
@@ -288,7 +309,7 @@ class VideoReceiveStream2
       RTC_GUARDED_BY(packet_sequence_checker_);
   std::unique_ptr<RtxReceiveStream> rtx_receive_stream_
       RTC_GUARDED_BY(packet_sequence_checker_);
-  absl::optional<uint32_t> updated_rtx_ssrc_
+  std::optional<uint32_t> updated_rtx_ssrc_
       RTC_GUARDED_BY(packet_sequence_checker_);
   std::unique_ptr<RtpStreamReceiverInterface> rtx_receiver_
       RTC_GUARDED_BY(packet_sequence_checker_);
@@ -300,7 +321,7 @@ class VideoReceiveStream2
   // If we have successfully decoded any frame.
   bool frame_decoded_ RTC_GUARDED_BY(decode_sequence_checker_) = false;
 
-  absl::optional<Timestamp> last_keyframe_request_
+  std::optional<Timestamp> last_keyframe_request_
       RTC_GUARDED_BY(packet_sequence_checker_);
 
   // Keyframe request intervals are configurable through field trials.
@@ -312,17 +333,17 @@ class VideoReceiveStream2
   // biggest delay is used. -1 means use default value from the `timing_`.
   //
   // Minimum delay as decided by the RTP playout delay extension.
-  absl::optional<TimeDelta> frame_minimum_playout_delay_
+  std::optional<TimeDelta> frame_minimum_playout_delay_
       RTC_GUARDED_BY(worker_sequence_checker_);
   // Minimum delay as decided by the setLatency function in "webrtc/api".
-  absl::optional<TimeDelta> base_minimum_playout_delay_
+  std::optional<TimeDelta> base_minimum_playout_delay_
       RTC_GUARDED_BY(worker_sequence_checker_);
   // Minimum delay as decided by the A/V synchronization feature.
-  absl::optional<TimeDelta> syncable_minimum_playout_delay_
+  std::optional<TimeDelta> syncable_minimum_playout_delay_
       RTC_GUARDED_BY(worker_sequence_checker_);
 
   // Maximum delay as decided by the RTP playout delay extension.
-  absl::optional<TimeDelta> frame_maximum_playout_delay_
+  std::optional<TimeDelta> frame_maximum_playout_delay_
       RTC_GUARDED_BY(worker_sequence_checker_);
 
   // Function that is triggered with encoded frames, if not empty.
@@ -334,9 +355,9 @@ class VideoReceiveStream2
   // Lock to avoid unnecessary per-frame idle wakeups in the code.
   webrtc::Mutex pending_resolution_mutex_;
   // Signal from decode queue to OnFrame callback to fill pending_resolution_.
-  // absl::nullopt - no resolution needed. 0x0 - next OnFrame to fill with
+  // std::nullopt - no resolution needed. 0x0 - next OnFrame to fill with
   // received resolution. Not 0x0 - OnFrame has filled a resolution.
-  absl::optional<RecordableEncodedFrame::EncodedResolution> pending_resolution_
+  std::optional<RecordableEncodedFrame::EncodedResolution> pending_resolution_
       RTC_GUARDED_BY(pending_resolution_mutex_);
   // Buffered encoded frames held while waiting for decoded resolution.
   std::vector<std::unique_ptr<EncodedFrame>> buffered_encoded_frames_
@@ -350,6 +371,8 @@ class VideoReceiveStream2
   // destructed to avoid races when running tasks on the `decode_queue_` during
   // VideoReceiveStream2 destruction.
   std::unique_ptr<TaskQueueBase, TaskQueueDeleter> decode_queue_;
+
+  std::optional<uint32_t> last_decoded_rtp_timestamp_;
 };
 
 }  // namespace internal

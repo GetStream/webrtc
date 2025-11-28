@@ -13,17 +13,18 @@ lucicfg.check_version("1.30.9")
 WEBRTC_GIT = "https://webrtc.googlesource.com/src"
 WEBRTC_GERRIT = "https://webrtc-review.googlesource.com/src"
 WEBRTC_TROOPER_EMAIL = "webrtc-troopers-robots@google.com"
-WEBRTC_XCODE14 = "14c18"
+WEBRTC_XCODE = "15f31d"
 DEFAULT_CPU = "x86-64"
 
 # Helpers:
 
-def make_reclient_properties(instance, jobs = None):
-    """Makes a default reclient property with the specified argument.
+def make_rbe_properties(instance, jobs = None, use_siso = None):
+    """Makes a default RBE property with the specified argument.
 
     Args:
       instance: RBE insatnce name.
       jobs: Number of jobs to be used by the builder.
+      use_siso: Add $build/siso properties to switch from Ninja to Siso.
     Returns:
       A dictonary with the reclient properties.
     """
@@ -31,9 +32,22 @@ def make_reclient_properties(instance, jobs = None):
         "instance": instance,
         "metrics_project": "chromium-reclient-metrics",
     }
+    siso_props = {
+        "project": instance,
+        "configs": ["builder"],
+        "enable_cloud_profiler": True,
+        "enable_cloud_trace": True,
+        "enable_monitoring": True,
+    }
     if jobs:
         reclient_props["jobs"] = jobs
-    return {"$build/reclient": reclient_props}
+        siso_props["remote_jobs"] = jobs
+    props = {
+        "$build/reclient": reclient_props,
+    }
+    if use_siso:
+        props["$build/siso"] = siso_props
+    return props
 
 def os_from_name(name):
     """Returns the 'os' dimension based on a builder name.
@@ -52,7 +66,8 @@ def os_from_name(name):
 # Add names of builders to remove from LKGR finder to this list. This is
 # useful when a failure can be safely ignored while fixing it without
 # blocking the LKGR finder on it.
-skipped_lkgr_bots = []
+skipped_lkgr_bots = [
+]
 
 # Use LUCI Scheduler BBv2 names and add Scheduler realms configs.
 lucicfg.enable_experiment("crbug.com/1182002")
@@ -218,6 +233,10 @@ luci.realm(name = "pools/try-tests", bindings = [
 ])
 luci.realm(name = "try", bindings = [
     luci.binding(
+        roles = "role/buildbucket.creator",
+        groups = "project-webrtc-led-users",
+    ),
+    luci.binding(
         roles = "role/swarming.taskTriggerer",
         groups = "project-webrtc-led-users",
     ),
@@ -237,6 +256,10 @@ luci.realm(name = "pools/perf", bindings = [
 ])
 luci.realm(name = "perf", bindings = [
     luci.binding(
+        roles = "role/buildbucket.creator",
+        groups = "project-webrtc-led-users",
+    ),
+    luci.binding(
         roles = "role/swarming.taskTriggerer",
         groups = "project-webrtc-led-users",
     ),
@@ -246,6 +269,10 @@ luci.realm(name = "@root", bindings = [
     # Allow admins to use LED & Swarming "Debug" feature on all WebRTC bots.
     luci.binding(
         roles = "role/swarming.poolUser",
+        groups = "project-webrtc-admins",
+    ),
+    luci.binding(
+        roles = "role/buildbucket.creator",
         groups = "project-webrtc-admins",
     ),
     luci.binding(
@@ -264,6 +291,10 @@ luci.bucket(
             "project-webrtc-tryjob-access",
         ]),
     ],
+    constraints = luci.bucket_constraints(
+        pools = ["luci.webrtc.try"],
+        service_accounts = ["webrtc-try-builder@chops-service-accounts.iam.gserviceaccount.com"],
+    ),
 )
 
 luci.bucket(
@@ -273,6 +304,10 @@ luci.bucket(
             "project-webrtc-ci-schedulers",
         ]),
     ],
+    constraints = luci.bucket_constraints(
+        pools = ["luci.webrtc.ci"],
+        service_accounts = ["webrtc-ci-builder@chops-service-accounts.iam.gserviceaccount.com"],
+    ),
 )
 
 luci.bucket(
@@ -286,6 +321,10 @@ luci.bucket(
             "service-account-chromeperf",
         ]),
     ],
+    constraints = luci.bucket_constraints(
+        pools = ["luci.webrtc.perf"],
+        service_accounts = ["webrtc-ci-builder@chops-service-accounts.iam.gserviceaccount.com"],
+    ),
 )
 
 luci.bucket(
@@ -299,7 +338,7 @@ luci.cq_group(
     tree_status_host = "webrtc-status.appspot.com",
     watch = [cq.refset(repo = WEBRTC_GERRIT, refs = ["refs/heads/main"])],
     acls = [
-        acl.entry(acl.CQ_COMMITTER, groups = ["project-webrtc-committers"]),
+        acl.entry(acl.CQ_COMMITTER, groups = ["project-webrtc-submit-access"]),
         acl.entry(acl.CQ_DRY_RUNNER, groups = ["project-webrtc-tryjob-access"]),
     ],
     allow_owner_if_submittable = cq.ACTION_DRY_RUN,
@@ -311,7 +350,7 @@ luci.cq_group(
     name = "cq_branch",
     watch = [cq.refset(repo = WEBRTC_GERRIT, refs = ["refs/branch-heads/.+"])],
     acls = [
-        acl.entry(acl.CQ_COMMITTER, groups = ["project-webrtc-committers"]),
+        acl.entry(acl.CQ_COMMITTER, groups = ["project-webrtc-submit-access"]),
         acl.entry(acl.CQ_DRY_RUNNER, groups = ["project-webrtc-tryjob-access"]),
     ],
     retry_config = cq.RETRY_ALL_FAILURES,
@@ -388,6 +427,11 @@ luci.notifier(
         name = "infra_failure",
         body = io.read_file("luci-notify/email-templates/infra_failure.template"),
     ),
+)
+
+# Notify findit about completed builds for code coverage purposes
+luci.buildbucket_notification_topic(
+    name = "projects/findit-for-me/topics/buildbucket_notification",
 )
 
 # Tree closer definitions:
@@ -527,6 +571,7 @@ def ci_builder(
         perf_cat = None,
         prioritized = False,
         enabled = True,
+        use_siso = None,
         **kwargs):
     """Add a post-submit builder.
 
@@ -537,6 +582,7 @@ def ci_builder(
       perf_cat: the category + name for the /perf/ console, or None to omit from the console.
       prioritized: True to make this builder have a higher priority and never batch builds.
       enabled: False to exclude this builder from consoles and failure notifications.
+      use_siso: True to switch build system from Ninja to Siso.
       **kwargs: Pass on to webrtc_builder / luci.builder.
     Returns:
       A luci.builder.
@@ -558,7 +604,7 @@ def ci_builder(
     dimensions["builderless"] = "1"
     properties = properties or {}
     properties["builder_group"] = "client.webrtc"
-    properties.update(make_reclient_properties("rbe-webrtc-trusted"))
+    properties.update(make_rbe_properties("rbe-webrtc-trusted", use_siso = use_siso))
 
     notifies = ["post_submit_failure_notifier", "infra_failure_notifier"]
     notifies += ["webrtc_tree_closer"] if name not in skipped_lkgr_bots else []
@@ -581,6 +627,7 @@ def try_builder(
         cq = {},
         branch_cq = True,
         builder = None,
+        use_siso = None,
         **kwargs):
     """Add a pre-submit builder.
 
@@ -591,6 +638,7 @@ def try_builder(
       cq: None to exclude this from all commit queues, or a dict of kwargs for cq_tryjob_verifier.
       branch_cq: False to exclude this builder just from the release-branch CQ.
       builder: builder to set in the dimensions, if None, builderless:1 is used.
+      use_siso: True to switch build system from Ninja to Siso.
       **kwargs: Pass on to webrtc_builder / luci.builder.
     Returns:
       A luci.builder.
@@ -603,7 +651,7 @@ def try_builder(
         dimensions["builderless"] = "1"
     properties = properties or {}
     properties["builder_group"] = "tryserver.webrtc"
-    properties.update(make_reclient_properties("rbe-webrtc-untrusted"))
+    properties.update(make_rbe_properties("rbe-webrtc-untrusted", use_siso = use_siso))
     if cq != None:
         luci.cq_tryjob_verifier(name, cq_group = "cq", **cq)
         if branch_cq:
@@ -632,13 +680,9 @@ def perf_builder(name, perf_cat, **kwargs):
     Notifications are also disabled.
     """
     add_milo(name, {"perf": perf_cat})
-    properties = make_reclient_properties("rbe-webrtc-trusted")
+    properties = make_rbe_properties("rbe-webrtc-trusted")
     properties["builder_group"] = "client.webrtc.perf"
-    dimensions = {"pool": "luci.webrtc.perf", "os": "Linux", "cores": "2"}
-    if "Android" in name or "Fuchsia" in name:
-        # Android perf testers require more performant bots to finish under 3 hours.
-        # Fuchsia perf testers encountered "no space left on device" error on multiple runs.
-        dimensions["cores"] = "8"
+    dimensions = {"pool": "luci.webrtc.perf", "os": "Linux"}
     return webrtc_builder(
         name = name,
         dimensions = dimensions,
@@ -676,6 +720,7 @@ def chromium_try_builder(name, **kwargs):
         recipe = "chromium_trybot",
         branch_cq = False,
         execution_timeout = 3 * time.hour,
+        use_siso = True,
         **kwargs
     )
 
@@ -693,10 +738,10 @@ def normal_builder_factory(**common_kwargs):
 # Mixins:
 
 ios_builder, ios_try_job = normal_builder_factory(
-    properties = {"xcode_build_version": WEBRTC_XCODE14},
+    properties = {"xcode_build_version": WEBRTC_XCODE},
     caches = [swarming.cache(
-        name = "xcode_ios_" + WEBRTC_XCODE14,
-        path = "xcode_ios_" + WEBRTC_XCODE14 + ".app",
+        name = "xcode_ios_" + WEBRTC_XCODE,
+        path = "xcode_ios_" + WEBRTC_XCODE + ".app",
     )],
 )
 
@@ -733,6 +778,7 @@ ios_try_job("ios_compile_arm64_dbg")
 ios_builder("iOS64 Release", "iOS|arm64|rel")
 ios_try_job("ios_compile_arm64_rel")
 ios_builder("iOS Debug (simulator)", "iOS|x64|sim")
+
 ios_try_job("ios_dbg_simulator")
 ios_builder("iOS API Framework Builder", "iOS|fat|size", recipe = "ios_api_framework", prioritized = True)
 ios_try_job("ios_api_framework", recipe = "ios_api_framework")
@@ -820,6 +866,8 @@ try_builder("win11_release", cq = None)
 try_builder("win11_debug", cq = None)
 chromium_try_builder("win_chromium_compile")
 chromium_try_builder("win_chromium_compile_dbg")
+
+try_builder("iwyu_verifier")
 
 try_builder(
     "presubmit",

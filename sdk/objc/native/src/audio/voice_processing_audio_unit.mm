@@ -32,7 +32,8 @@ static void LogStreamDescription(AudioStreamBasicDescription description) {
           "  mChannelsPerFrame: %u\n"
           "  mBitsPerChannel: %u\n"
           "  mReserved: %u\n}",
-         description.mSampleRate, formatIdString,
+         description.mSampleRate,
+         formatIdString,
          static_cast<unsigned int>(description.mFormatFlags),
          static_cast<unsigned int>(description.mBytesPerPacket),
          static_cast<unsigned int>(description.mFramesPerPacket),
@@ -61,19 +62,23 @@ static const AudioUnitElement kOutputBus = 0;
 static OSStatus GetAGCState(AudioUnit audio_unit, UInt32* enabled) {
   RTC_DCHECK(audio_unit);
   UInt32 size = sizeof(*enabled);
-  OSStatus result = AudioUnitGetProperty(audio_unit,
-                                         kAUVoiceIOProperty_VoiceProcessingEnableAGC,
-                                         kAudioUnitScope_Global,
-                                         kInputBus,
-                                         enabled,
-                                         &size);
+  OSStatus result =
+      AudioUnitGetProperty(audio_unit,
+                           kAUVoiceIOProperty_VoiceProcessingEnableAGC,
+                           kAudioUnitScope_Global,
+                           kInputBus,
+                           enabled,
+                           &size);
   RTCLog(@"VPIO unit AGC: %u", static_cast<unsigned int>(*enabled));
   return result;
 }
 
-VoiceProcessingAudioUnit::VoiceProcessingAudioUnit(bool bypass_voice_processing,
-                                                   VoiceProcessingAudioUnitObserver* observer)
+VoiceProcessingAudioUnit::VoiceProcessingAudioUnit(
+    bool bypass_voice_processing,
+    bool detect_mute_speech,
+    VoiceProcessingAudioUnitObserver* observer)
     : bypass_voice_processing_(bypass_voice_processing),
+      detect_mute_speech_(detect_mute_speech),
       observer_(observer),
       vpio_unit_(nullptr),
       state_(kInitRequired) {
@@ -111,11 +116,30 @@ bool VoiceProcessingAudioUnit::Init() {
     return false;
   }
 
+  // Enable input on the input scope of the input element.
+  UInt32 enable_input = 1;
+  result = AudioUnitSetProperty(vpio_unit_,
+                                kAudioOutputUnitProperty_EnableIO,
+                                kAudioUnitScope_Input,
+                                kInputBus,
+                                &enable_input,
+                                sizeof(enable_input));
+  if (result != noErr) {
+    DisposeAudioUnit();
+    RTCLogError(@"Failed to enable input on input scope of input element. "
+                 "Error=%ld.",
+                (long)result);
+    return false;
+  }
+
   // Enable output on the output scope of the output element.
   UInt32 enable_output = 1;
-  result = AudioUnitSetProperty(vpio_unit_, kAudioOutputUnitProperty_EnableIO,
-                                kAudioUnitScope_Output, kOutputBus,
-                                &enable_output, sizeof(enable_output));
+  result = AudioUnitSetProperty(vpio_unit_,
+                                kAudioOutputUnitProperty_EnableIO,
+                                kAudioUnitScope_Output,
+                                kOutputBus,
+                                &enable_output,
+                                sizeof(enable_output));
   if (result != noErr) {
     DisposeAudioUnit();
     RTCLogError(@"Failed to enable output on output scope of output element. "
@@ -129,9 +153,12 @@ bool VoiceProcessingAudioUnit::Init() {
   AURenderCallbackStruct render_callback;
   render_callback.inputProc = OnGetPlayoutData;
   render_callback.inputProcRefCon = this;
-  result = AudioUnitSetProperty(
-      vpio_unit_, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input,
-      kOutputBus, &render_callback, sizeof(render_callback));
+  result = AudioUnitSetProperty(vpio_unit_,
+                                kAudioUnitProperty_SetRenderCallback,
+                                kAudioUnitScope_Input,
+                                kOutputBus,
+                                &render_callback,
+                                sizeof(render_callback));
   if (result != noErr) {
     DisposeAudioUnit();
     RTCLogError(@"Failed to specify the render callback on the output bus. "
@@ -143,9 +170,12 @@ bool VoiceProcessingAudioUnit::Init() {
   // Disable AU buffer allocation for the recorder, we allocate our own.
   // TODO(henrika): not sure that it actually saves resource to make this call.
   UInt32 flag = 0;
-  result = AudioUnitSetProperty(
-      vpio_unit_, kAudioUnitProperty_ShouldAllocateBuffer,
-      kAudioUnitScope_Output, kInputBus, &flag, sizeof(flag));
+  result = AudioUnitSetProperty(vpio_unit_,
+                                kAudioUnitProperty_ShouldAllocateBuffer,
+                                kAudioUnitScope_Output,
+                                kInputBus,
+                                &flag,
+                                sizeof(flag));
   if (result != noErr) {
     DisposeAudioUnit();
     RTCLogError(@"Failed to disable buffer allocation on the input bus. "
@@ -162,8 +192,10 @@ bool VoiceProcessingAudioUnit::Init() {
   input_callback.inputProcRefCon = this;
   result = AudioUnitSetProperty(vpio_unit_,
                                 kAudioOutputUnitProperty_SetInputCallback,
-                                kAudioUnitScope_Global, kInputBus,
-                                &input_callback, sizeof(input_callback));
+                                kAudioUnitScope_Global,
+                                kInputBus,
+                                &input_callback,
+                                sizeof(input_callback));
   if (result != noErr) {
     DisposeAudioUnit();
     RTCLogError(@"Failed to specify the input callback on the input bus. "
@@ -205,9 +237,12 @@ bool VoiceProcessingAudioUnit::Initialize(Float64 sample_rate, bool enable_input
   }
 
   // Set the format on the output scope of the input element/bus.
-  result =
-      AudioUnitSetProperty(vpio_unit_, kAudioUnitProperty_StreamFormat,
-                           kAudioUnitScope_Output, kInputBus, &format, size);
+  result = AudioUnitSetProperty(vpio_unit_,
+                                kAudioUnitProperty_StreamFormat,
+                                kAudioUnitScope_Output,
+                                kInputBus,
+                                &format,
+                                size);
   if (result != noErr) {
     RTCLogError(@"Failed to set format on output scope of input bus. "
                  "Error=%ld.",
@@ -216,9 +251,12 @@ bool VoiceProcessingAudioUnit::Initialize(Float64 sample_rate, bool enable_input
   }
 
   // Set the format on the input scope of the output element/bus.
-  result =
-      AudioUnitSetProperty(vpio_unit_, kAudioUnitProperty_StreamFormat,
-                           kAudioUnitScope_Input, kOutputBus, &format, size);
+  result = AudioUnitSetProperty(vpio_unit_,
+                                kAudioUnitProperty_StreamFormat,
+                                kAudioUnitScope_Input,
+                                kOutputBus,
+                                &format,
+                                size);
   if (result != noErr) {
     RTCLogError(@"Failed to set format on input scope of output bus. "
                  "Error=%ld.",
@@ -252,6 +290,28 @@ bool VoiceProcessingAudioUnit::Initialize(Float64 sample_rate, bool enable_input
     RTCLog(@"Voice Processing I/O unit is now initialized.");
   }
 
+  if (detect_mute_speech_) {
+    if (@available(iOS 15, *)) {
+      // Set listener for muted speech event.
+      AUVoiceIOMutedSpeechActivityEventListener listener =
+          ^(AUVoiceIOSpeechActivityEvent event) {
+            observer_->OnReceivedMutedSpeechActivity(event);
+          };
+      result = AudioUnitSetProperty(
+          vpio_unit_,
+          kAUVoiceIOProperty_MutedSpeechActivityEventListener,
+          kAudioUnitScope_Global,
+          0,
+          &listener,
+          sizeof(AUVoiceIOMutedSpeechActivityEventListener));
+      if (result != noErr) {
+        RTCLog(
+            @"Failed to set muted speech activity event listener. Error=%ld.",
+            (long)result);
+      }
+    }
+  }
+
   if (bypass_voice_processing_) {
     // Attempt to disable builtin voice processing.
     UInt32 toggle = 1;
@@ -264,7 +324,8 @@ bool VoiceProcessingAudioUnit::Initialize(Float64 sample_rate, bool enable_input
     if (result == noErr) {
       RTCLog(@"Successfully bypassed voice processing.");
     } else {
-      RTCLogError(@"Failed to bypass voice processing. Error=%ld.", (long)result);
+      RTCLogError(@"Failed to bypass voice processing. Error=%ld.",
+                  (long)result);
     }
     state_ = kInitialized;
     return true;
@@ -285,33 +346,34 @@ bool VoiceProcessingAudioUnit::Initialize(Float64 sample_rate, bool enable_input
     // Example of error code: kAudioUnitErr_NoConnection (-10876).
     // All error codes related to audio units are negative and are therefore
     // converted into a postive value to match the UMA APIs.
-    RTC_HISTOGRAM_COUNTS_SPARSE_100000(
-        "WebRTC.Audio.GetAGCStateErrorCode1", (-1) * result);
+    RTC_HISTOGRAM_COUNTS_SPARSE_100000("WebRTC.Audio.GetAGCStateErrorCode1",
+                                       (-1) * result);
   } else if (agc_is_enabled) {
     // Remember that the AGC was enabled by default. Will be used in UMA.
     agc_was_enabled_by_default = 1;
   } else {
     // AGC was initially disabled => try to enable it explicitly.
     UInt32 enable_agc = 1;
-    result =
-        AudioUnitSetProperty(vpio_unit_,
-                             kAUVoiceIOProperty_VoiceProcessingEnableAGC,
-                             kAudioUnitScope_Global, kInputBus, &enable_agc,
-                             sizeof(enable_agc));
+    result = AudioUnitSetProperty(vpio_unit_,
+                                  kAUVoiceIOProperty_VoiceProcessingEnableAGC,
+                                  kAudioUnitScope_Global,
+                                  kInputBus,
+                                  &enable_agc,
+                                  sizeof(enable_agc));
     if (result != noErr) {
       RTCLogError(@"Failed to enable the built-in AGC. "
                    "Error=%ld.",
                   (long)result);
-      RTC_HISTOGRAM_COUNTS_SPARSE_100000(
-          "WebRTC.Audio.SetAGCStateErrorCode", (-1) * result);
+      RTC_HISTOGRAM_COUNTS_SPARSE_100000("WebRTC.Audio.SetAGCStateErrorCode",
+                                         (-1) * result);
     }
     result = GetAGCState(vpio_unit_, &agc_is_enabled);
     if (result != noErr) {
       RTCLogError(@"Failed to get AGC state (2nd attempt). "
                    "Error=%ld.",
                   (long)result);
-      RTC_HISTOGRAM_COUNTS_SPARSE_100000(
-          "WebRTC.Audio.GetAGCStateErrorCode2", (-1) * result);
+      RTC_HISTOGRAM_COUNTS_SPARSE_100000("WebRTC.Audio.GetAGCStateErrorCode2",
+                                         (-1) * result);
     }
   }
 
@@ -378,6 +440,41 @@ bool VoiceProcessingAudioUnit::Uninitialize() {
   return true;
 }
 
+bool VoiceProcessingAudioUnit::SetMicrophoneMute(bool enable) {
+  RTC_DCHECK_GE(state_, kUninitialized);
+
+  RTCLog(@"Setting microphone %s.", enable ? "mute" : "unmute");
+
+  OSStatus result = noErr;
+  if (detect_mute_speech_) {
+    UInt32 muteUplinkOutput = enable ? 1 : 0;
+    result = AudioUnitSetProperty(vpio_unit_,
+                                  kAUVoiceIOProperty_MuteOutput,
+                                  kAudioUnitScope_Global,
+                                  kInputBus,
+                                  &muteUplinkOutput,
+                                  sizeof(muteUplinkOutput));
+  } else {
+    UInt32 enableInput = enable ? 0 : 1;
+    result = AudioUnitSetProperty(vpio_unit_,
+                                  kAudioOutputUnitProperty_EnableIO,
+                                  kAudioUnitScope_Input,
+                                  kInputBus,
+                                  &enableInput,
+                                  sizeof(enableInput));
+  }
+
+  if (result != noErr) {
+    RTCLogError(@"Failed to %s microphone. Error=%ld",
+                (enable ? "mute" : "unmute"),
+                (long)result);
+    return false;
+  }
+
+  RTCLog(@"Set microphone %s.", enable ? "mute" : "unmute");
+  return true;
+}
+
 OSStatus VoiceProcessingAudioUnit::Render(AudioUnitRenderActionFlags* flags,
                                           const AudioTimeStamp* time_stamp,
                                           UInt32 output_bus_number,
@@ -385,8 +482,8 @@ OSStatus VoiceProcessingAudioUnit::Render(AudioUnitRenderActionFlags* flags,
                                           AudioBufferList* io_data) {
   RTC_DCHECK(vpio_unit_) << "Init() not called.";
 
-  OSStatus result = AudioUnitRender(vpio_unit_, flags, time_stamp,
-                                    output_bus_number, num_frames, io_data);
+  OSStatus result = AudioUnitRender(
+      vpio_unit_, flags, time_stamp, output_bus_number, num_frames, io_data);
   if (result != noErr) {
     RTCLogError(@"Failed to render audio unit. Error=%ld", (long)result);
   }
@@ -402,8 +499,8 @@ OSStatus VoiceProcessingAudioUnit::OnGetPlayoutData(
     AudioBufferList* io_data) {
   VoiceProcessingAudioUnit* audio_unit =
       static_cast<VoiceProcessingAudioUnit*>(in_ref_con);
-  return audio_unit->NotifyGetPlayoutData(flags, time_stamp, bus_number,
-                                          num_frames, io_data);
+  return audio_unit->NotifyGetPlayoutData(
+      flags, time_stamp, bus_number, num_frames, io_data);
 }
 
 OSStatus VoiceProcessingAudioUnit::OnDeliverRecordedData(
@@ -415,8 +512,8 @@ OSStatus VoiceProcessingAudioUnit::OnDeliverRecordedData(
     AudioBufferList* io_data) {
   VoiceProcessingAudioUnit* audio_unit =
       static_cast<VoiceProcessingAudioUnit*>(in_ref_con);
-  return audio_unit->NotifyDeliverRecordedData(flags, time_stamp, bus_number,
-                                               num_frames, io_data);
+  return audio_unit->NotifyDeliverRecordedData(
+      flags, time_stamp, bus_number, num_frames, io_data);
 }
 
 OSStatus VoiceProcessingAudioUnit::NotifyGetPlayoutData(
@@ -425,8 +522,8 @@ OSStatus VoiceProcessingAudioUnit::NotifyGetPlayoutData(
     UInt32 bus_number,
     UInt32 num_frames,
     AudioBufferList* io_data) {
-  return observer_->OnGetPlayoutData(flags, time_stamp, bus_number, num_frames,
-                                     io_data);
+  return observer_->OnGetPlayoutData(
+      flags, time_stamp, bus_number, num_frames, io_data);
 }
 
 OSStatus VoiceProcessingAudioUnit::NotifyDeliverRecordedData(
@@ -435,8 +532,8 @@ OSStatus VoiceProcessingAudioUnit::NotifyDeliverRecordedData(
     UInt32 bus_number,
     UInt32 num_frames,
     AudioBufferList* io_data) {
-  return observer_->OnDeliverRecordedData(flags, time_stamp, bus_number,
-                                          num_frames, io_data);
+  return observer_->OnDeliverRecordedData(
+      flags, time_stamp, bus_number, num_frames, io_data);
 }
 
 AudioStreamBasicDescription VoiceProcessingAudioUnit::GetFormat(
@@ -447,7 +544,7 @@ AudioStreamBasicDescription VoiceProcessingAudioUnit::GetFormat(
   // - linear PCM => noncompressed audio data format with one frame per packet
   // - no need to specify interleaving since only mono is supported
   AudioStreamBasicDescription format;
-  RTC_DCHECK_EQ(1, kRTCAudioSessionPreferredNumberOfChannels);
+  RTC_DCHECK_EQ(1, RTC_CONSTANT_TYPE(RTCAudioSessionPreferredNumberOfChannels));
   format.mSampleRate = sample_rate;
   format.mFormatID = kAudioFormatLinearPCM;
   format.mFormatFlags =
@@ -455,7 +552,7 @@ AudioStreamBasicDescription VoiceProcessingAudioUnit::GetFormat(
   format.mBytesPerPacket = kBytesPerSample;
   format.mFramesPerPacket = 1;  // uncompressed.
   format.mBytesPerFrame = kBytesPerSample;
-  format.mChannelsPerFrame = kRTCAudioSessionPreferredNumberOfChannels;
+  format.mChannelsPerFrame = RTC_CONSTANT_TYPE(RTCAudioSessionPreferredNumberOfChannels);
   format.mBitsPerChannel = 8 * kBytesPerSample;
   return format;
 }

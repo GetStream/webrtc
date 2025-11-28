@@ -22,12 +22,12 @@
 #include "api/test/video/function_video_encoder_factory.h"
 #include "api/video/builtin_video_bitrate_allocator_factory.h"
 #include "call/fake_network_pipe.h"
-#include "call/simulated_network.h"
 #include "media/engine/internal_decoder_factory.h"
 #include "modules/video_coding/codecs/vp8/include/vp8.h"
 #include "rtc_base/task_queue_for_test.h"
 #include "test/call_test.h"
 #include "test/encoder_settings.h"
+#include "test/network/simulated_network.h"
 #include "test/video_test_constants.h"
 
 namespace webrtc {
@@ -48,7 +48,8 @@ void MultiStreamTester::RunTest() {
   // to make test more stable.
   auto task_queue = env.task_queue_factory().CreateTaskQueue(
       "TaskQueue", TaskQueueFactory::Priority::HIGH);
-  CallConfig config(env);
+  CallConfig sender_config(env);
+  CallConfig receiver_config(env);
   std::unique_ptr<Call> sender_call;
   std::unique_ptr<Call> receiver_call;
   std::unique_ptr<test::DirectTransport> sender_transport;
@@ -66,8 +67,8 @@ void MultiStreamTester::RunTest() {
   InternalDecoderFactory decoder_factory;
 
   SendTask(task_queue.get(), [&]() {
-    sender_call = Call::Create(config);
-    receiver_call = Call::Create(config);
+    sender_call = Call::Create(std::move(sender_config));
+    receiver_call = Call::Create(std::move(receiver_config));
     sender_transport = CreateSendTransport(task_queue.get(), sender_call.get());
     receiver_transport =
         CreateReceiveTransport(task_queue.get(), receiver_call.get());
@@ -114,8 +115,8 @@ void MultiStreamTester::RunTest() {
 
       auto* frame_generator = new test::FrameGeneratorCapturer(
           &env.clock(),
-          test::CreateSquareFrameGenerator(width, height, absl::nullopt,
-                                           absl::nullopt),
+          test::CreateSquareFrameGenerator(width, height, std::nullopt,
+                                           std::nullopt),
           30, env.task_queue_factory());
       frame_generators[i] = frame_generator;
       send_streams[i]->SetSource(frame_generator,

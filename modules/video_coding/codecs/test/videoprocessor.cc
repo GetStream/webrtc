@@ -14,26 +14,45 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <utility>
+#include <vector>
 
+#include "api/environment/environment.h"
 #include "api/scoped_refptr.h"
+#include "api/sequence_checker.h"
+#include "api/task_queue/task_queue_base.h"
+#include "api/test/videocodec_test_fixture.h"
+#include "api/test/videocodec_test_stats.h"
 #include "api/video/builtin_video_bitrate_allocator_factory.h"
+#include "api/video/encoded_image.h"
 #include "api/video/i420_buffer.h"
+#include "api/video/resolution.h"
+#include "api/video/video_bitrate_allocator.h"
 #include "api/video/video_bitrate_allocator_factory.h"
+#include "api/video/video_codec_type.h"
+#include "api/video/video_frame.h"
 #include "api/video/video_frame_buffer.h"
+#include "api/video/video_frame_type.h"
 #include "api/video/video_rotation.h"
 #include "api/video_codecs/video_codec.h"
+#include "api/video_codecs/video_decoder.h"
 #include "api/video_codecs/video_encoder.h"
 #include "common_video/h264/h264_common.h"
 #include "common_video/libyuv/include/webrtc_libyuv.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/video_coding/codecs/interface/common_constants.h"
+#include "modules/video_coding/codecs/test/videocodec_test_stats_impl.h"
+#include "modules/video_coding/include/video_codec_interface.h"
 #include "modules/video_coding/include/video_error_codes.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/time_utils.h"
 #include "test/gtest.h"
+#include "test/testsupport/frame_reader.h"
+#include "test/testsupport/frame_writer.h"
 #include "third_party/libyuv/include/libyuv/compare.h"
 #include "third_party/libyuv/include/libyuv/scale.h"
 
@@ -52,7 +71,7 @@ size_t GetMaxNaluSizeBytes(const EncodedImage& encoded_frame,
     return 0;
 
   std::vector<webrtc::H264::NaluIndex> nalu_indices =
-      webrtc::H264::FindNaluIndices(encoded_frame.data(), encoded_frame.size());
+      webrtc::H264::FindNaluIndices(encoded_frame);
 
   RTC_CHECK(!nalu_indices.empty());
 
@@ -77,7 +96,7 @@ size_t GetTemporalLayerIndex(const CodecSpecificInfo& codec_specific) {
 }
 
 int GetElapsedTimeMicroseconds(int64_t start_ns, int64_t stop_ns) {
-  int64_t diff_us = (stop_ns - start_ns) / rtc::kNumNanosecsPerMicrosec;
+  int64_t diff_us = (stop_ns - start_ns) / kNumNanosecsPerMicrosec;
   RTC_DCHECK_GE(diff_us, std::numeric_limits<int>::min());
   RTC_DCHECK_LE(diff_us, std::numeric_limits<int>::max());
   return static_cast<int>(diff_us);
@@ -92,7 +111,7 @@ void CalculateFrameQuality(const I420BufferInterface& ref_buffer,
     RTC_CHECK_GE(ref_buffer.width(), dec_buffer.width());
     RTC_CHECK_GE(ref_buffer.height(), dec_buffer.height());
     // Downscale reference frame.
-    rtc::scoped_refptr<I420Buffer> scaled_buffer =
+    scoped_refptr<I420Buffer> scaled_buffer =
         I420Buffer::Create(dec_buffer.width(), dec_buffer.height());
     I420Scale(ref_buffer.DataY(), ref_buffer.StrideY(), ref_buffer.DataU(),
               ref_buffer.StrideU(), ref_buffer.DataV(), ref_buffer.StrideV(),
@@ -135,7 +154,8 @@ void CalculateFrameQuality(const I420BufferInterface& ref_buffer,
 
 }  // namespace
 
-VideoProcessor::VideoProcessor(webrtc::VideoEncoder* encoder,
+VideoProcessor::VideoProcessor(const Environment& env,
+                               webrtc::VideoEncoder* encoder,
                                VideoDecoderList* decoders,
                                FrameReader* input_frame_reader,
                                const VideoCodecTestFixture::Config& config,
@@ -150,9 +170,9 @@ VideoProcessor::VideoProcessor(webrtc::VideoEncoder* encoder,
       stats_(stats),
       encoder_(encoder),
       decoders_(decoders),
-      bitrate_allocator_(
-          CreateBuiltinVideoBitrateAllocatorFactory()
-              ->CreateVideoBitrateAllocator(config_.codec_settings)),
+      bitrate_allocator_(CreateBuiltinVideoBitrateAllocatorFactory()->Create(
+          env,
+          config_.codec_settings)),
       encode_callback_(this),
       input_frame_reader_(input_frame_reader),
       merged_encoded_frames_(num_simulcast_or_spatial_layers_),
@@ -243,9 +263,8 @@ void VideoProcessor::ProcessFrame() {
   FrameReader::Ratio framerate_scale = FrameReader::Ratio(
       {.num = config_.clip_fps.value_or(config_.codec_settings.maxFramerate),
        .den = static_cast<int>(config_.codec_settings.maxFramerate)});
-  rtc::scoped_refptr<I420BufferInterface> buffer =
-      input_frame_reader_->PullFrame(
-          /*frame_num*/ nullptr, resolution, framerate_scale);
+  scoped_refptr<I420BufferInterface> buffer = input_frame_reader_->PullFrame(
+      /*frame_num*/ nullptr, resolution, framerate_scale);
 
   RTC_CHECK(buffer) << "Tried to read too many frames from the file.";
   const size_t timestamp =
@@ -267,7 +286,7 @@ void VideoProcessor::ProcessFrame() {
     if (config_.reference_width != -1 && config_.reference_height != -1 &&
         (input_frame.width() != config_.reference_width ||
          input_frame.height() != config_.reference_height)) {
-      rtc::scoped_refptr<I420Buffer> scaled_buffer = I420Buffer::Create(
+      scoped_refptr<I420Buffer> scaled_buffer = I420Buffer::Create(
           config_.codec_settings.width, config_.codec_settings.height);
       scaled_buffer->ScaleFrom(*input_frame.video_frame_buffer()->ToI420());
 
@@ -297,7 +316,7 @@ void VideoProcessor::ProcessFrame() {
 
   // For the highest measurement accuracy of the encode time, the start/stop
   // time recordings should wrap the Encode call as tightly as possible.
-  const int64_t encode_start_ns = rtc::TimeNanos();
+  const int64_t encode_start_ns = TimeNanos();
   for (size_t i = 0; i < num_simulcast_or_spatial_layers_; ++i) {
     FrameStatistics* frame_stat = stats_->GetFrame(frame_number, i);
     frame_stat->encode_start_ns = encode_start_ns;
@@ -305,7 +324,7 @@ void VideoProcessor::ProcessFrame() {
 
   if (input_frame.width() != config_.codec_settings.width ||
       input_frame.height() != config_.codec_settings.height) {
-    rtc::scoped_refptr<I420Buffer> scaled_buffer = I420Buffer::Create(
+    scoped_refptr<I420Buffer> scaled_buffer = I420Buffer::Create(
         config_.codec_settings.width, config_.codec_settings.height);
     scaled_buffer->ScaleFrom(*input_frame.video_frame_buffer()->ToI420());
     input_frame.set_video_frame_buffer(scaled_buffer);
@@ -370,7 +389,7 @@ void VideoProcessor::FrameEncoded(
 
   // For the highest measurement accuracy of the encode time, the start/stop
   // time recordings should wrap the Encode call as tightly as possible.
-  const int64_t encode_stop_ns = rtc::TimeNanos();
+  const int64_t encode_stop_ns = TimeNanos();
 
   const VideoCodecType codec_type = codec_specific.codecType;
   if (config_.encoded_frame_checker) {
@@ -492,7 +511,7 @@ void VideoProcessor::FrameEncoded(
   if (!config_.encode_in_real_time) {
     // To get pure encode time for next layers, measure time spent in encode
     // callback and subtract it from encode time of next layers.
-    post_encode_time_ns_ += rtc::TimeNanos() - encode_stop_ns;
+    post_encode_time_ns_ += TimeNanos() - encode_stop_ns;
   }
 }
 
@@ -518,7 +537,7 @@ void VideoProcessor::WriteDecodedFrame(const I420BufferInterface& decoded_frame,
   int input_video_width = config_.codec_settings.width;
   int input_video_height = config_.codec_settings.height;
 
-  rtc::scoped_refptr<I420Buffer> scaled_buffer;
+  scoped_refptr<I420Buffer> scaled_buffer;
   const I420BufferInterface* scaled_frame;
 
   if (decoded_frame.width() == input_video_width &&
@@ -552,7 +571,7 @@ void VideoProcessor::FrameDecoded(const VideoFrame& decoded_frame,
 
   // For the highest measurement accuracy of the decode time, the start/stop
   // time recordings should wrap the Decode call as tightly as possible.
-  const int64_t decode_stop_ns = rtc::TimeNanos();
+  const int64_t decode_stop_ns = TimeNanos();
 
   FrameStatistics* frame_stat =
       stats_->GetFrameWithTimestamp(decoded_frame.rtp_timestamp(), spatial_idx);
@@ -596,7 +615,7 @@ void VideoProcessor::FrameDecoded(const VideoFrame& decoded_frame,
   // Skip quality metrics calculation to not affect CPU usage.
   if (analyze_frame_quality_ || decoded_frame_writers_) {
     // Save last decoded frame to handle possible future drops.
-    rtc::scoped_refptr<I420BufferInterface> i420buffer =
+    scoped_refptr<I420BufferInterface> i420buffer =
         decoded_frame.video_frame_buffer()->ToI420();
 
     // Copy decoded frame to a buffer without padding/stride such that we can
@@ -636,15 +655,15 @@ void VideoProcessor::DecodeFrame(const EncodedImage& encoded_image,
   FrameStatistics* frame_stat =
       stats_->GetFrameWithTimestamp(encoded_image.RtpTimestamp(), spatial_idx);
 
-  frame_stat->decode_start_ns = rtc::TimeNanos();
+  frame_stat->decode_start_ns = TimeNanos();
   frame_stat->decode_return_code =
       decoders_->at(spatial_idx)->Decode(encoded_image, 0);
 }
 
 const webrtc::EncodedImage* VideoProcessor::BuildAndStoreSuperframe(
     const EncodedImage& encoded_image,
-    const VideoCodecType codec,
-    size_t frame_number,
+    const VideoCodecType /* codec */,
+    size_t /* frame_number */,
     size_t spatial_idx,
     bool inter_layer_predicted) {
   // Should only be called for SVC.

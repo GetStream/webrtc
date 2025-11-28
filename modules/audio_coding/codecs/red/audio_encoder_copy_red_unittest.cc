@@ -63,10 +63,9 @@ class AudioEncoderCopyRedTest : public ::testing::Test {
     ASSERT_TRUE(red_.get() != NULL);
     encoded_.Clear();
     encoded_info_ = red_->Encode(
-        timestamp_,
-        rtc::ArrayView<const int16_t>(audio_, num_audio_samples_10ms),
+        timestamp_, ArrayView<const int16_t>(audio_, num_audio_samples_10ms),
         &encoded_);
-    timestamp_ += rtc::checked_cast<uint32_t>(num_audio_samples_10ms);
+    timestamp_ += checked_cast<uint32_t>(num_audio_samples_10ms);
   }
 
   test::ScopedKeyValueConfig field_trials_;
@@ -76,7 +75,7 @@ class AudioEncoderCopyRedTest : public ::testing::Test {
   int16_t audio_[kMaxNumSamples];
   const int sample_rate_hz_;
   size_t num_audio_samples_10ms;
-  rtc::Buffer encoded_;
+  Buffer encoded_;
   AudioEncoder::EncodedInfo encoded_info_;
   const int red_payload_type_;
 };
@@ -106,8 +105,8 @@ TEST_F(AudioEncoderCopyRedTest, CheckMaxFrameSizePropagation) {
 
 TEST_F(AudioEncoderCopyRedTest, CheckTargetAudioBitratePropagation) {
   EXPECT_CALL(*mock_encoder_,
-              OnReceivedUplinkBandwidth(4711, absl::optional<int64_t>()));
-  red_->OnReceivedUplinkBandwidth(4711, absl::nullopt);
+              OnReceivedUplinkBandwidth(4711, std::optional<int64_t>()));
+  red_->OnReceivedUplinkBandwidth(4711, std::nullopt);
 }
 
 TEST_F(AudioEncoderCopyRedTest, CheckPacketLossFractionPropagation) {
@@ -119,7 +118,7 @@ TEST_F(AudioEncoderCopyRedTest, CheckGetFrameLengthRangePropagation) {
   auto expected_range =
       std::make_pair(TimeDelta::Millis(20), TimeDelta::Millis(20));
   EXPECT_CALL(*mock_encoder_, GetFrameLengthRange())
-      .WillRepeatedly(Return(absl::make_optional(expected_range)));
+      .WillRepeatedly(Return(std::make_optional(expected_range)));
   EXPECT_THAT(red_->GetFrameLengthRange(), Optional(Eq(expected_range)));
 }
 

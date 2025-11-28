@@ -73,11 +73,11 @@ class AudioDeviceWindowsCore : public AudioDeviceGeneric {
     ULONG __stdcall Release() override;
     HRESULT __stdcall QueryInterface(REFIID iid, void** object) override;
 
-    void SetAudioDeviceSink(AudioDeviceSink *sink);
+    void SetObserver(AudioDeviceObserver *sink);
 
    private:
     LONG ref_count_ = 1;
-    AudioDeviceSink *callback_ = nullptr;
+    AudioDeviceObserver *callback_ = nullptr;
   };
 
   static bool CoreAudioIsSupported();
@@ -180,7 +180,7 @@ class AudioDeviceWindowsCore : public AudioDeviceGeneric {
 
   virtual int32_t EnableBuiltInAEC(bool enable);
 
-  virtual int32_t SetAudioDeviceSink(AudioDeviceSink* sink);
+  virtual int32_t SetObserver(AudioDeviceObserver* observer);
 
  public:
   virtual void AttachAudioBuffer(AudioDeviceBuffer* audioBuffer);
@@ -271,8 +271,8 @@ class AudioDeviceWindowsCore : public AudioDeviceGeneric {
 
   DeviceStateListener *_deviceStateListener = nullptr;
   // DirectX Media Object (DMO) for the built-in AEC.
-  rtc::scoped_refptr<IMediaObject> _dmo;
-  rtc::scoped_refptr<IMediaBuffer> _mediaBuffer;
+  webrtc::scoped_refptr<IMediaObject> _dmo;
+  webrtc::scoped_refptr<IMediaBuffer> _mediaBuffer;
   bool _builtInAecEnabled;
 
   HANDLE _hRenderSamplesReadyEvent;

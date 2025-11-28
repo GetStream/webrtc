@@ -13,6 +13,9 @@
 #include <string>
 #include <utility>
 
+#include "api/audio/audio_device.h"
+#include "api/audio/audio_mixer.h"
+#include "api/audio/audio_processing.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "api/audio_codecs/builtin_audio_encoder_factory.h"
 #include "api/create_peerconnection_factory.h"
@@ -20,18 +23,23 @@
 #include "api/peer_connection_interface.h"
 #include "api/rtc_error.h"
 #include "api/scoped_refptr.h"
+#include "api/set_local_description_observer_interface.h"
 #include "api/set_remote_description_observer_interface.h"
+#include "api/video_codecs/video_decoder_factory.h"
 #include "api/video_codecs/video_decoder_factory_template.h"
 #include "api/video_codecs/video_decoder_factory_template_dav1d_adapter.h"
 #include "api/video_codecs/video_decoder_factory_template_libvpx_vp8_adapter.h"
 #include "api/video_codecs/video_decoder_factory_template_libvpx_vp9_adapter.h"
 #include "api/video_codecs/video_decoder_factory_template_open_h264_adapter.h"
+#include "api/video_codecs/video_encoder_factory.h"
 #include "api/video_codecs/video_encoder_factory_template.h"
 #include "api/video_codecs/video_encoder_factory_template_libaom_av1_adapter.h"
 #include "api/video_codecs/video_encoder_factory_template_libvpx_vp8_adapter.h"
 #include "api/video_codecs/video_encoder_factory_template_libvpx_vp9_adapter.h"
 #include "api/video_codecs/video_encoder_factory_template_open_h264_adapter.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/ref_counted_object.h"
 #include "rtc_base/thread.h"
 
 namespace {
@@ -42,10 +50,10 @@ class SetLocalDescriptionObserverAdapter
     : public webrtc::SetLocalDescriptionObserverInterface {
  public:
   using Callback = std::function<void(webrtc::RTCError)>;
-  static rtc::scoped_refptr<SetLocalDescriptionObserverAdapter> Create(
+  static webrtc::scoped_refptr<SetLocalDescriptionObserverAdapter> Create(
       Callback callback) {
-    return rtc::scoped_refptr<SetLocalDescriptionObserverAdapter>(
-        new rtc::RefCountedObject<SetLocalDescriptionObserverAdapter>(
+    return webrtc::scoped_refptr<SetLocalDescriptionObserverAdapter>(
+        new webrtc::RefCountedObject<SetLocalDescriptionObserverAdapter>(
             std::move(callback)));
   }
 
@@ -65,10 +73,10 @@ class SetRemoteDescriptionObserverAdapter
     : public webrtc::SetRemoteDescriptionObserverInterface {
  public:
   using Callback = std::function<void(webrtc::RTCError)>;
-  static rtc::scoped_refptr<SetRemoteDescriptionObserverAdapter> Create(
+  static webrtc::scoped_refptr<SetRemoteDescriptionObserverAdapter> Create(
       Callback callback) {
-    return rtc::scoped_refptr<SetRemoteDescriptionObserverAdapter>(
-        new rtc::RefCountedObject<SetRemoteDescriptionObserverAdapter>(
+    return webrtc::scoped_refptr<SetRemoteDescriptionObserverAdapter>(
+        new webrtc::RefCountedObject<SetRemoteDescriptionObserverAdapter>(
             std::move(callback)));
   }
 
@@ -90,11 +98,11 @@ class CreateSessionDescriptionObserverAdapter
   using Success = std::function<void(webrtc::SessionDescriptionInterface*)>;
   using Failure = std::function<void(webrtc::RTCError)>;
 
-  static rtc::scoped_refptr<CreateSessionDescriptionObserverAdapter> Create(
+  static webrtc::scoped_refptr<CreateSessionDescriptionObserverAdapter> Create(
       Success success,
       Failure failure) {
-    return rtc::scoped_refptr<CreateSessionDescriptionObserverAdapter>(
-        new rtc::RefCountedObject<CreateSessionDescriptionObserverAdapter>(
+    return webrtc::scoped_refptr<CreateSessionDescriptionObserverAdapter>(
+        new webrtc::RefCountedObject<CreateSessionDescriptionObserverAdapter>(
             std::move(success), std::move(failure)));
   }
 
@@ -138,8 +146,8 @@ PeerConnectionClient::~PeerConnectionClient() {
   Disconnect();
 }
 
-rtc::scoped_refptr<PeerConnectionFactoryInterface>
-PeerConnectionClient::CreateDefaultFactory(rtc::Thread* signaling_thread) {
+scoped_refptr<PeerConnectionFactoryInterface>
+PeerConnectionClient::CreateDefaultFactory(Thread* signaling_thread) {
   auto factory = webrtc::CreatePeerConnectionFactory(
       /*network_thread=*/nullptr, /*worker_thread=*/nullptr,
       /*signaling_thread*/ signaling_thread,
@@ -250,7 +258,7 @@ void PeerConnectionClient::OnIceCandidate(
 }
 
 void PeerConnectionClient::OnDataChannel(
-    rtc::scoped_refptr<webrtc::DataChannelInterface> channel) {
+    scoped_refptr<webrtc::DataChannelInterface> channel) {
   RTC_LOG(LS_INFO) << __FUNCTION__ << " remote datachannel created";
   if (on_data_channel_callback_)
     on_data_channel_callback_(channel);
@@ -258,7 +266,7 @@ void PeerConnectionClient::OnDataChannel(
 }
 
 void PeerConnectionClient::SetOnDataChannel(
-    std::function<void(rtc::scoped_refptr<webrtc::DataChannelInterface>)>
+    std::function<void(webrtc::scoped_refptr<webrtc::DataChannelInterface>)>
         callback) {
   on_data_channel_callback_ = callback;
 }
