@@ -121,6 +121,9 @@ class AudioDeviceModule : public webrtc::RefCountInterface {
   virtual int32_t StartRecording() = 0;
   virtual int32_t StopRecording() = 0;
   virtual bool Recording() const = 0;
+  // Optional convenience hook for implementations that expose a combined reset.
+  // Defaults to -1 for modules that don't support it.
+  virtual int32_t Reset() { return -1; }
 
   // Audio mixer initialization
   virtual int32_t InitSpeaker() = 0;
@@ -209,6 +212,13 @@ class AudioDeviceModuleForTest : public AudioDeviceModule {
   virtual int SetRecordingSampleRate(uint32_t sample_rate) = 0;
 };
 
+struct AudioProcessingState {
+  bool voice_processing_enabled = false;
+  bool voice_processing_bypassed = false;
+  bool voice_processing_agc_enabled = false;
+  bool stereo_playout_enabled = false;
+};
+
 class AudioDeviceObserver {
  public:
   virtual ~AudioDeviceObserver() = default;
@@ -216,6 +226,8 @@ class AudioDeviceObserver {
   // input/output devices updated or default device changed
   virtual void OnDevicesUpdated() {}
   virtual void OnSpeechActivityEvent(AudioDeviceModule::SpeechActivityEvent event) {}
+  virtual void OnStereoUpdatedPlayoutAvailable(bool available) {}
+  virtual void OnStereoUpdatedPlayoutEnabled(bool enabled) {}
 
   // AVAudioEngine lifecycle
   virtual int32_t OnEngineDidCreate(AVAudioEngine* engine) { return 0; }
@@ -255,6 +267,9 @@ class AudioDeviceObserver {
                                             NSDictionary* context) {
     return 0;
   }
+
+  virtual void OnAudioProcessingStateChanged(const AudioProcessingState& state) {}
+
 };
 
 }  // namespace webrtc

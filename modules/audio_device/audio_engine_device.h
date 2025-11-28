@@ -19,6 +19,7 @@
 
 #include <atomic>
 #include <memory>
+#include <string>
 
 #include "api/scoped_refptr.h"
 #include "api/sequence_checker.h"
@@ -143,6 +144,10 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
     uint32_t default_output_device_update_count = 0;  // Track default switch count
     uint32_t default_input_device_update_count = 0;
 
+    bool prefers_stereo_playout = false;
+    bool stereo_playout_available = false;
+    bool stereo_playout_enabled = false;
+
     bool operator==(const EngineState& rhs) const {
       return input_enabled == rhs.input_enabled && input_running == rhs.input_running &&
              output_enabled == rhs.output_enabled && output_running == rhs.output_running &&
@@ -156,7 +161,10 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
              advanced_ducking == rhs.advanced_ducking && ducking_level == rhs.ducking_level &&
              output_device_id == rhs.output_device_id && input_device_id == rhs.input_device_id &&
              default_output_device_update_count == rhs.default_output_device_update_count &&
-             default_input_device_update_count == rhs.default_input_device_update_count;
+             default_input_device_update_count == rhs.default_input_device_update_count &&
+             prefers_stereo_playout == rhs.prefers_stereo_playout &&
+             stereo_playout_available == rhs.stereo_playout_available &&
+             stereo_playout_enabled == rhs.stereo_playout_enabled;
     }
 
     bool operator!=(const EngineState& rhs) const { return !(*this == rhs); }
@@ -206,6 +214,12 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
       return input_device_id == 0;
 #endif
     }
+
+    uint32_t DesiredOutputChannels() const { 
+      return prefers_stereo_playout && stereo_playout_available && input_muted
+      ? 2u 
+      : 1u; 
+    }
   };
 
   explicit AudioEngineDevice(bool voice_processing_bypassed);
@@ -213,6 +227,7 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
 
   int32_t Init() override;
   int32_t Terminate() override;
+  int32_t Reset() override;
   bool Initialized() const override;
 
   int32_t InitPlayout() override;
@@ -331,6 +346,9 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
 
   int32_t InitAndStartRecording();
 
+  // Stereo Playout helpers
+  void RefreshStereoPlayoutState();
+
  private:
   struct EngineStateUpdate {
     EngineState prev;
@@ -396,7 +414,11 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
       bool special_case = (prev.IsOutputEnabled() && next.IsOutputEnabled()) &&
                           (prev.IsInputEnabled() && !next.IsInputEnabled());
 
-      return device || default_device || special_case;
+      // When stereo output channels preference changes or stereo playout becomes
+      // unavailable/available.
+      bool output_channels = DidUpdateDesiredOutputChannels();
+
+      return device || default_device || special_case || output_channels;
     }
 
     bool DidEnableManualRenderingMode() const {
@@ -406,17 +428,26 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
     bool DidEnableDeviceRenderingMode() const {
       return prev.render_mode != RenderMode::Device && next.render_mode == RenderMode::Device;
     }
+  
+    bool DidUpdateDesiredOutputChannels() const {
+      return prev.DesiredOutputChannels() != next.DesiredOutputChannels();
+    }
   };
 
   EngineState engine_state_ RTC_GUARDED_BY(thread_);
 
   bool IsMicrophonePermissionGranted();
+  void ResetEngineState();
   int32_t ModifyEngineState(std::function<EngineState(EngineState)> state_transform);
-  int32_t ApplyDeviceEngineState(EngineStateUpdate state);
-  int32_t ApplyManualEngineState(EngineStateUpdate state);
+  int32_t ApplyDeviceEngineState(EngineStateUpdate& state);
+  int32_t ApplyManualEngineState(EngineStateUpdate& state);
 
   // AudioEngine observer methods. May be called from any thread.
   void ReconfigureEngine();
+
+  // Stereo Playout helpers
+  int32_t ResolveStereoPlayoutAvailability(const EngineState& state, bool* available) const;
+  void UpdateVoiceProcessingForStereoState(EngineStateUpdate& state);
 
 // Device related
 #if TARGET_OS_OSX
@@ -438,9 +469,18 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
 #endif
 
   void DebugAudioEngine();
+  void DebugEngineState(const std::string& prefix, EngineState state);
 
   void StartRenderLoop();
   AVAudioEngineManualRenderingBlock render_block_;
+
+  void ConfigureVoiceProcessingNode(AVAudioInputNode* input_node,
+                                    EngineStateUpdate state);
+
+  void ConfigureMutedSpeechActivityEventListener(AVAudioInputNode* input_node, 
+                                                 EngineStateUpdate state);
+
+  void NotifyProcessingStateObserver(EngineStateUpdate state);
 
   // Thread that this object is created on.
   webrtc::Thread* thread_;
