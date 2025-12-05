@@ -1724,7 +1724,9 @@ int32_t AudioEngineDevice::ApplyManualEngineState(EngineStateUpdate& state) {
     audio_device_buffer_->SetPlayoutChannels(manual_render_rtc_format_.channelCount);
     fine_audio_buffer_.reset(new FineAudioBuffer(audio_device_buffer_.get()));
 
-    ConfigureVoiceProcessingNode(engine_manual_input_.inputNode, state);
+    if (state.next.IsInputEnabled()) {
+      ConfigureVoiceProcessingNode(engine_manual_input_.inputNode, state);
+    }
 
   } else if (state.prev.IsOutputEnabled() && !state.next.IsOutputEnabled()) {
     LOGI() << "Disabling output for AVAudioEngine...";
@@ -1988,7 +1990,9 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
   //
   // - Note: We configure input VP before output to avoid artifacts playout during configuration.
   //
-  ConfigureVoiceProcessingNode(inputNode(), state);
+  if (state.next.IsInputEnabled()) {
+    ConfigureVoiceProcessingNode(inputNode(), state);
+  }
 
   // --------------------------------------------------------------------------------------------
   // Step: Enable output
