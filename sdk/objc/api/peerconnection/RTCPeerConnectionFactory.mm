@@ -57,6 +57,9 @@
 #include "sdk/objc/native/api/video_encoder_factory.h"
 #include "sdk/objc/native/src/objc_video_decoder_factory.h"
 #include "sdk/objc/native/src/objc_video_encoder_factory.h"
+#if defined(RTC_STREAM_RENDERING_BACKEND)
+#include "sdk/objc/native/src/objc_nv12_conversion.h"
+#endif
 
 #import "components/audio/RTCAudioProcessingModule.h"
 #import "components/audio/RTCDefaultAudioProcessingModule+Private.h"
@@ -73,6 +76,7 @@
   RTC_OBJC_TYPE(RTCDefaultAudioProcessingModule) *_defaultAudioProcessingModule;
 
   BOOL _hasStartedAecDump;
+  RTC_OBJC_TYPE(RTCFrameBufferPolicy) _frameBufferPolicy;
 }
 
 @synthesize nativeFactory = _nativeFactory;
@@ -194,6 +198,19 @@
     NSAssert(_nativeFactory, @"Failed to initialize PeerConnectionFactory!");
   }
   return self;
+}
+
+- (RTC_OBJC_TYPE(RTCFrameBufferPolicy))frameBufferPolicy {
+  return _frameBufferPolicy;
+}
+
+- (void)setFrameBufferPolicy:(RTC_OBJC_TYPE(RTCFrameBufferPolicy))frameBufferPolicy {
+  _frameBufferPolicy = frameBufferPolicy;
+#if defined(RTC_STREAM_RENDERING_BACKEND)
+  // Only available in Stream builds with the shared backend enabled.
+  webrtc::SetObjCFrameBufferPolicy(
+      static_cast<webrtc::ObjCFrameBufferPolicy>(frameBufferPolicy));
+#endif
 }
 
 - (RTC_OBJC_TYPE(RTCRtpCapabilities) *)rtpSenderCapabilitiesFor:(RTC_OBJC_TYPE(RTCRtpMediaType))mediaType {

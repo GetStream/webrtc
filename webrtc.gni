@@ -69,6 +69,9 @@ declare_args() {
   # annotated symbols.
   rtc_enable_objc_symbol_export = rtc_enable_symbol_export
 
+  # Stream-specific toggle to enable shared rendering backend and NV12 policy.
+  stream_enable_rendering_backend = false
+
   # Setting this to true will define WEBRTC_EXCLUDE_FIELD_TRIAL_DEFAULT which
   # will tell the pre-processor to remove the default definition of symbols
   # needed to use field_trial. In that case a new implementation needs to be
