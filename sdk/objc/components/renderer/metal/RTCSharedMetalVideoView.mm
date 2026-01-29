@@ -95,7 +95,8 @@
     if (!strongSelf) {
       return;
     }
-    [strongSelf updateDrawableSizeWithSize:size];
+    // Keep drawable size tied to view bounds; setSize conveys frame size only.
+    [strongSelf updateDrawableSizeWithSize:strongSelf.bounds.size];
     [strongSelf.delegate videoView:strongSelf didChangeVideoSize:size];
   });
 }
