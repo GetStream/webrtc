@@ -22,9 +22,12 @@
 #include "common_video/include/video_frame_buffer_pool.h"
 // Conversion helper for I420 -> NV12 when using the pooled path.
 #include "third_party/libyuv/include/libyuv/convert.h"
+#include <cstring>
+#import <CoreVideo/CoreVideo.h>
 #import "base/RTCVideoFrameBuffer.h"
 #import "sdk/objc/api/video_frame_buffer/RTCNativeI420Buffer+Private.h"
 #import "sdk/objc/api/video_frame_buffer/RTCNativeNV12Buffer+Private.h"
+#import "sdk/objc/components/video_frame_buffer/RTCCVPixelBuffer.h"
 #include "sdk/objc/native/src/objc_nv12_conversion.h"
 
 namespace webrtc {
@@ -67,6 +70,85 @@ class ObjCI420FrameBuffer : public I420BufferInterface {
   int width_;
   int height_;
 };
+
+webrtc::scoped_refptr<webrtc::NV12BufferInterface> CreateNV12FromCVPixelBuffer(
+    CVPixelBufferRef pixelBuffer,
+    bool use_pool) {
+  // Only NV12 CVPixelBuffers can be wrapped/copied into an NV12Buffer.
+  if (!pixelBuffer) {
+    return nullptr;
+  }
+
+  const OSType format = CVPixelBufferGetPixelFormatType(pixelBuffer);
+  if (format != kCVPixelFormatType_420YpCbCr8BiPlanarFullRange &&
+      format != kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange) {
+    return nullptr;
+  }
+
+  // Validate dimensions to avoid creating invalid buffers.
+  const int width = static_cast<int>(CVPixelBufferGetWidth(pixelBuffer));
+  const int height = static_cast<int>(CVPixelBufferGetHeight(pixelBuffer));
+  if (width <= 0 || height <= 0) {
+    return nullptr;
+  }
+
+  webrtc::scoped_refptr<webrtc::NV12Buffer> nv12;
+  if (use_pool) {
+    // Thread-local pool avoids per-frame allocations on the hot path.
+    // The pool is intentionally leaked to avoid shutdown order issues.
+    thread_local webrtc::VideoFrameBufferPool* nv12_pool =
+        new webrtc::VideoFrameBufferPool();
+    nv12 = nv12_pool->CreateNV12Buffer(width, height);
+  } else {
+    // Simple path: allocate a fresh NV12 buffer for this frame.
+    nv12 = webrtc::NV12Buffer::Create(width, height);
+  }
+
+  if (!nv12) {
+    return nullptr;
+  }
+
+  // Copy Y/UV planes into the new NV12 buffer.
+  CVPixelBufferLockBaseAddress(pixelBuffer, kCVPixelBufferLock_ReadOnly);
+  const uint8_t* src_y = static_cast<const uint8_t*>(
+      CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 0));
+  const uint8_t* src_uv = static_cast<const uint8_t*>(
+      CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 1));
+  if (!src_y || !src_uv) {
+    CVPixelBufferUnlockBaseAddress(pixelBuffer, kCVPixelBufferLock_ReadOnly);
+    return nullptr;
+  }
+  const size_t src_stride_y =
+      CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0);
+  const size_t src_stride_uv =
+      CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 1);
+
+  uint8_t* dst_y = nv12->MutableDataY();
+  uint8_t* dst_uv = nv12->MutableDataUV();
+  const int dst_stride_y = nv12->StrideY();
+  const int dst_stride_uv = nv12->StrideUV();
+
+  // NV12 expects full-width Y and UV rows.
+  const size_t y_row_bytes = static_cast<size_t>(width);
+  const size_t uv_row_bytes = static_cast<size_t>(width);
+
+  // Copy each plane row-by-row to honor differing strides.
+  for (int row = 0; row < height; row++) {
+    memcpy(dst_y + row * dst_stride_y,
+           src_y + row * src_stride_y,
+           y_row_bytes);
+  }
+
+  const int uv_rows = height / 2;
+  for (int row = 0; row < uv_rows; row++) {
+    memcpy(dst_uv + row * dst_stride_uv,
+           src_uv + row * src_stride_uv,
+           uv_row_bytes);
+  }
+
+  CVPixelBufferUnlockBaseAddress(pixelBuffer, kCVPixelBufferLock_ReadOnly);
+  return nv12;
+}
 
 }  // namespace
 
@@ -133,7 +215,27 @@ id<RTC_OBJC_TYPE(RTCVideoFrameBuffer)> ToObjCVideoFrameBuffer(
     const webrtc::scoped_refptr<VideoFrameBuffer>& buffer) {
   // Preserve already-wrapped ObjC buffers to avoid extra bridging.
   if (buffer->type() == VideoFrameBuffer::Type::kNative) {
-    return static_cast<ObjCFrameBuffer*>(buffer.get())->wrapped_frame_buffer();
+    id<RTC_OBJC_TYPE(RTCVideoFrameBuffer)> wrapped =
+        static_cast<ObjCFrameBuffer*>(buffer.get())->wrapped_frame_buffer();
+    const auto policy = webrtc::ObjCGetFrameBufferPolicy();
+    // Only convert CVPixelBuffer when policy explicitly requests it.
+    if ((policy == webrtc::ObjCFrameBufferPolicy::kCopyToNV12 ||
+         policy == webrtc::ObjCFrameBufferPolicy::kConvertWithPoolToNV12) &&
+        [wrapped isKindOfClass:[RTC_OBJC_TYPE(RTCCVPixelBuffer) class]]) {
+      RTC_OBJC_TYPE(RTCCVPixelBuffer) *cv_buffer =
+          (RTC_OBJC_TYPE(RTCCVPixelBuffer) *)wrapped;
+      const bool use_pool =
+          policy == webrtc::ObjCFrameBufferPolicy::kConvertWithPoolToNV12;
+      webrtc::scoped_refptr<webrtc::NV12BufferInterface> nv12_buffer =
+          CreateNV12FromCVPixelBuffer(cv_buffer.pixelBuffer, use_pool);
+      if (nv12_buffer) {
+        RTC_OBJC_TYPE(RTCNV12Buffer) *result =
+            [[RTC_OBJC_TYPE(RTCNV12Buffer) alloc]
+                initWithFrameBuffer:nv12_buffer];
+        return result;
+      }
+    }
+    return wrapped;
   } else if (buffer->type() == VideoFrameBuffer::Type::kNV12) {
     // NV12 frames can be wrapped directly unless policy forbids NV12.
     if (webrtc::ObjCGetFrameBufferPolicy() ==

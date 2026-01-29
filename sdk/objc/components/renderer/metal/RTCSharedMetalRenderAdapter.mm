@@ -133,12 +133,6 @@
     }
   }
 
-  [self updateVertexBufferWithSourceSize:[self sourceSizeForFrame:frame
-                                                       rotation:rotation]
-                              targetSize:targetSize
-                                rotation:rotation
-                             contentMode:_contentMode];
-
   MTLRenderPassDescriptor *renderPassDescriptor =
       [[MTLRenderPassDescriptor alloc] init];
   renderPassDescriptor.colorAttachments[0].texture = drawable.texture;
@@ -158,6 +152,11 @@
 
   // Supported formats: CVPixelBuffer (NV12/BGRA), NV12, and I420.
   id<RTC_OBJC_TYPE(RTCVideoFrameBuffer)> buffer = frame.buffer;
+  // Match RTCMTLRenderer's texture mapping to avoid rotation/crop drift.
+  [self updateVertexBufferForFrame:frame
+                        targetSize:targetSize
+                          rotation:rotation
+                       contentMode:_contentMode];
   if ([buffer isKindOfClass:[RTC_OBJC_TYPE(RTCCVPixelBuffer) class]]) {
     RTC_OBJC_TYPE(RTCCVPixelBuffer) *pixelBuffer =
         (RTC_OBJC_TYPE(RTCCVPixelBuffer) *)buffer;
@@ -265,91 +264,146 @@
 
 #pragma mark - Private
 
-- (CGSize)sourceSizeForFrame:(RTC_OBJC_TYPE(RTCVideoFrame) *)frame
-                    rotation:(RTC_OBJC_TYPE(RTCVideoRotation))rotation {
-  CGSize size = CGSizeMake(frame.buffer.width, frame.buffer.height);
-  if (rotation == RTC_OBJC_TYPE(RTCVideoRotation_90) ||
-      rotation == RTC_OBJC_TYPE(RTCVideoRotation_270)) {
-    return CGSizeMake(size.height, size.width);
+- (void)updateVertexBufferForFrame:(RTC_OBJC_TYPE(RTCVideoFrame) *)frame
+                        targetSize:(CGSize)targetSize
+                          rotation:(RTC_OBJC_TYPE(RTCVideoRotation))rotation
+                       contentMode:(UIViewContentMode)contentMode {
+  // Default to the full buffer size for non-CVPixelBuffer inputs.
+  int frameWidth = frame.buffer.width;
+  int frameHeight = frame.buffer.height;
+  int cropX = 0;
+  int cropY = 0;
+  int cropWidth = frameWidth;
+  int cropHeight = frameHeight;
+
+  // CVPixelBuffer carries a crop rect that must be respected, otherwise
+  // the image will appear stretched or off-center.
+  if ([frame.buffer isKindOfClass:[RTC_OBJC_TYPE(RTCCVPixelBuffer) class]]) {
+    RTC_OBJC_TYPE(RTCCVPixelBuffer) *pixelBuffer =
+        (RTC_OBJC_TYPE(RTCCVPixelBuffer) *)frame.buffer;
+    frameWidth = (int)CVPixelBufferGetWidth(pixelBuffer.pixelBuffer);
+    frameHeight = (int)CVPixelBufferGetHeight(pixelBuffer.pixelBuffer);
+    cropX = pixelBuffer.cropX;
+    cropY = pixelBuffer.cropY;
+    cropWidth = pixelBuffer.cropWidth;
+    cropHeight = pixelBuffer.cropHeight;
   }
-  return size;
-}
 
-- (void)updateVertexBufferWithSourceSize:(CGSize)sourceSize
-                              targetSize:(CGSize)targetSize
-                                rotation:(RTC_OBJC_TYPE(RTCVideoRotation))rotation
-                             contentMode:(UIViewContentMode)contentMode {
+  // Guard against invalid buffers to avoid corrupting the vertex buffer.
+  if (frameWidth <= 0 || frameHeight <= 0) {
+    return;
+  }
+
+  // Treat empty crops as full-frame to keep texture coords in range.
+  if (cropWidth <= 0 || cropHeight <= 0) {
+    cropX = 0;
+    cropY = 0;
+    cropWidth = frameWidth;
+    cropHeight = frameHeight;
+  }
+
   CGFloat targetAspect = targetSize.width / MAX(targetSize.height, 1);
-  CGFloat sourceAspect = sourceSize.width / MAX(sourceSize.height, 1);
+  // When rotated 90/270, the source aspect is effectively swapped.
+  CGFloat sourceAspect =
+      (rotation == RTC_OBJC_TYPE(RTCVideoRotation_90) ||
+       rotation == RTC_OBJC_TYPE(RTCVideoRotation_270))
+          ? (CGFloat)cropHeight / MAX(cropWidth, 1)
+          : (CGFloat)cropWidth / MAX(cropHeight, 1);
 
-  CGFloat uMin = 0;
-  CGFloat uMax = 1;
-  CGFloat vMin = 0;
-  CGFloat vMax = 1;
+  // Normalize crop rect to texture coordinates (0..1).
+  CGFloat uMin = (CGFloat)cropX / frameWidth;
+  CGFloat uMax = (CGFloat)(cropX + cropWidth) / frameWidth;
+  CGFloat vMin = (CGFloat)cropY / frameHeight;
+  CGFloat vMax = (CGFloat)(cropY + cropHeight) / frameHeight;
   CGFloat xScale = 1;
   CGFloat yScale = 1;
 
   if (contentMode == UIViewContentModeScaleAspectFit) {
+    // Letterbox/pillarbox via view-space scaling.
     if (targetAspect > sourceAspect) {
       xScale = sourceAspect / targetAspect;
     } else {
       yScale = targetAspect / sourceAspect;
     }
   } else {
+    // Center-crop by trimming texture coordinates.
     if (targetAspect > sourceAspect) {
-      CGFloat vCrop = sourceAspect / targetAspect;
-      CGFloat vOffset = (1 - vCrop) / 2;
-      vMin = vOffset;
-      vMax = vOffset + vCrop;
+      CGFloat vSpan = vMax - vMin;
+      CGFloat vCrop = vSpan * (sourceAspect / targetAspect);
+      CGFloat vOffset = (vSpan - vCrop) / 2;
+      vMin = vMin + vOffset;
+      vMax = vMin + vCrop;
     } else {
-      CGFloat uCrop = targetAspect / sourceAspect;
-      CGFloat uOffset = (1 - uCrop) / 2;
-      uMin = uOffset;
-      uMax = uOffset + uCrop;
+      CGFloat uSpan = uMax - uMin;
+      CGFloat uCrop = uSpan * (targetAspect / sourceAspect);
+      CGFloat uOffset = (uSpan - uCrop) / 2;
+      uMin = uMin + uOffset;
+      uMax = uMin + uCrop;
     }
   }
 
-  float vertices[16] = {
-      -static_cast<float>(xScale), -static_cast<float>(yScale),
-      static_cast<float>(uMin), static_cast<float>(vMax),
-      static_cast<float>(xScale), -static_cast<float>(yScale),
-      static_cast<float>(uMax), static_cast<float>(vMax),
-      -static_cast<float>(xScale), static_cast<float>(yScale),
-      static_cast<float>(uMin), static_cast<float>(vMin),
-      static_cast<float>(xScale), static_cast<float>(yScale),
-      static_cast<float>(uMax), static_cast<float>(vMin)
-  };
-
-  [self rotateTextureCoordinates:vertices rotation:rotation];
-  memcpy(_vertexBuffer.contents, vertices, sizeof(vertices));
-}
-
-- (void)rotateTextureCoordinates:(float *)vertices
-                        rotation:(RTC_OBJC_TYPE(RTCVideoRotation))rotation {
-  int rotationTimes = 0;
+  // Use the same UV ordering as RTCMTLRenderer for each rotation.
+  float vertices[16];
   switch (rotation) {
-    case RTC_OBJC_TYPE(RTCVideoRotation_90):
-      rotationTimes = 1;
+    case RTC_OBJC_TYPE(RTCVideoRotation_90): {
+      float values[16] = {
+          -static_cast<float>(xScale), -static_cast<float>(yScale),
+          static_cast<float>(uMax), static_cast<float>(vMax),
+          static_cast<float>(xScale), -static_cast<float>(yScale),
+          static_cast<float>(uMax), static_cast<float>(vMin),
+          -static_cast<float>(xScale), static_cast<float>(yScale),
+          static_cast<float>(uMin), static_cast<float>(vMax),
+          static_cast<float>(xScale), static_cast<float>(yScale),
+          static_cast<float>(uMin), static_cast<float>(vMin)
+      };
+      memcpy(vertices, values, sizeof(values));
       break;
-    case RTC_OBJC_TYPE(RTCVideoRotation_180):
-      rotationTimes = 2;
+    }
+    case RTC_OBJC_TYPE(RTCVideoRotation_180): {
+      float values[16] = {
+          -static_cast<float>(xScale), -static_cast<float>(yScale),
+          static_cast<float>(uMax), static_cast<float>(vMin),
+          static_cast<float>(xScale), -static_cast<float>(yScale),
+          static_cast<float>(uMin), static_cast<float>(vMin),
+          -static_cast<float>(xScale), static_cast<float>(yScale),
+          static_cast<float>(uMax), static_cast<float>(vMax),
+          static_cast<float>(xScale), static_cast<float>(yScale),
+          static_cast<float>(uMin), static_cast<float>(vMax)
+      };
+      memcpy(vertices, values, sizeof(values));
       break;
-    case RTC_OBJC_TYPE(RTCVideoRotation_270):
-      rotationTimes = 3;
+    }
+    case RTC_OBJC_TYPE(RTCVideoRotation_270): {
+      float values[16] = {
+          -static_cast<float>(xScale), -static_cast<float>(yScale),
+          static_cast<float>(uMin), static_cast<float>(vMin),
+          static_cast<float>(xScale), -static_cast<float>(yScale),
+          static_cast<float>(uMin), static_cast<float>(vMax),
+          -static_cast<float>(xScale), static_cast<float>(yScale),
+          static_cast<float>(uMax), static_cast<float>(vMin),
+          static_cast<float>(xScale), static_cast<float>(yScale),
+          static_cast<float>(uMax), static_cast<float>(vMax)
+      };
+      memcpy(vertices, values, sizeof(values));
       break;
-    default:
-      rotationTimes = 0;
+    }
+    default: {
+      float values[16] = {
+          -static_cast<float>(xScale), -static_cast<float>(yScale),
+          static_cast<float>(uMin), static_cast<float>(vMax),
+          static_cast<float>(xScale), -static_cast<float>(yScale),
+          static_cast<float>(uMax), static_cast<float>(vMax),
+          -static_cast<float>(xScale), static_cast<float>(yScale),
+          static_cast<float>(uMin), static_cast<float>(vMin),
+          static_cast<float>(xScale), static_cast<float>(yScale),
+          static_cast<float>(uMax), static_cast<float>(vMin)
+      };
+      memcpy(vertices, values, sizeof(values));
       break;
-  }
-
-  for (int pass = 0; pass < rotationTimes; pass++) {
-    for (int i = 0; i < 16; i += 4) {
-      float u = vertices[i + 2];
-      float v = vertices[i + 3];
-      vertices[i + 2] = 1.0f - v;
-      vertices[i + 3] = u;
     }
   }
+
+  memcpy(_vertexBuffer.contents, vertices, sizeof(vertices));
 }
 
 - (BOOL)updateNV12TexturesFromPixelBuffer:(CVPixelBufferRef)pixelBuffer
