@@ -121,21 +121,25 @@
     return;
   }
   if (![_adapter beginFrameIfPossible]) {
+    RTCLogInfo(@"SharedMetal: Skipping frame (max in-flight reached).");
     return;
   }
   id<CAMetalDrawable> drawable = [self metalLayer].nextDrawable;
   if (!drawable) {
+    RTCLogError(@"SharedMetal: No drawable available.");
     [_adapter endFrame];
     return;
   }
   RTC_OBJC_TYPE(RTCVideoFrame) *frame = [_adapter consumeFrame];
   if (!frame) {
+    RTCLogError(@"SharedMetal: No frame available to render.");
     [_adapter endFrame];
     return;
   }
   id<MTLCommandBuffer> commandBuffer =
       [_context.commandQueue commandBuffer];
   if (!commandBuffer) {
+    RTCLogError(@"SharedMetal: Failed to create command buffer.");
     [_adapter endFrame];
     return;
   }
@@ -146,6 +150,7 @@
                          commandBuffer:commandBuffer
                       rotationOverride:self.rotationOverride];
   if (!encoded) {
+    RTCLogError(@"SharedMetal: Failed to encode frame.");
     [_adapter endFrame];
     return;
   }
