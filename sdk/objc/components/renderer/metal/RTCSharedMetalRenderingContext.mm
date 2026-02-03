@@ -91,6 +91,10 @@ static NSString *const kSharedMetalShaderSource =
   static dispatch_once_t onceToken;
   dispatch_once(&onceToken, ^{
     sharedContext = [[RTC_OBJC_TYPE(RTCSharedMetalRenderingContext) alloc] init];
+    if (!sharedContext) {
+      RTCLogError(@"SharedMetal: Failed to initialize shared context; "
+                  @"falling back to per-view rendering for this process.");
+    }
   });
   return sharedContext;
 }

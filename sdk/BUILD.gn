@@ -678,6 +678,7 @@ if (is_ios || is_mac) {
     }
 
     # Stream-only: iOS shared Metal implementation isolated here.
+    # XR (visionOS) is excluded until the shared backend is validated there.
     if (stream_enable_rendering_backend && is_ios &&
         !(target_environment == "xrsimulator" || target_environment == "xrdevice")) {
       rtc_library("stream_shared_metal_objc") {
