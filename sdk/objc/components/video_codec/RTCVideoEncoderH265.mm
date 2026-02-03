@@ -404,6 +404,33 @@ void compressionOutputCallback(void* encoder, void* params, OSStatus status,
                                  sourceAttributes,
                                  nullptr,  // use default compressed data allocator
                                  compressionOutputCallback, nullptr, &_compressionSession);
+  if (status == kVTCouldNotFindVideoEncoderErr) {
+    if (@available(iOS 14.5, macCatalyst 14.5, macOS 11.3, tvOS 14.5, visionOS 1.0, *)) {
+      if (CFDictionaryGetCount(encoder_specs) > 0) {
+        CFMutableDictionaryRef fallback_specs = CFDictionaryCreateMutableCopy(
+            nullptr, 0, encoder_specs);
+        if (fallback_specs) {
+          CFDictionaryRemoveValue(
+              fallback_specs, kVTVideoEncoderSpecification_EnableLowLatencyRateControl);
+          if (CFDictionaryGetCount(fallback_specs) != CFDictionaryGetCount(encoder_specs)) {
+            RTC_LOG(LS_WARNING) << "VTCompressionSessionCreate failed with "
+                                << status
+                                << ", retrying without low-latency rate control.";
+            CFDictionaryRef fallback_spec_ref =
+                CFDictionaryGetCount(fallback_specs) > 0 ? fallback_specs : nullptr;
+            status = VTCompressionSessionCreate(
+                nullptr,  // use default allocator
+                _width, _height, kCMVideoCodecType_HEVC,
+                fallback_spec_ref,
+                sourceAttributes,
+                nullptr,  // use default compressed data allocator
+                compressionOutputCallback, nullptr, &_compressionSession);
+          }
+          CFRelease(fallback_specs);
+        }
+      }
+    }
+  }
   if (status != noErr) {
     status =
         VTCompressionSessionCreate(nullptr,  // use default allocator

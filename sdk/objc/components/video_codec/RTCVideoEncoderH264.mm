@@ -763,6 +763,31 @@ NSUInteger GetMaxSampleRate(
       compressionOutputCallback,
       nullptr,
       &_compressionSession);
+  if (status == kVTCouldNotFindVideoEncoderErr) {
+    if (@available(iOS 14.5, macCatalyst 14.5, macOS 11.3, tvOS 14.5, visionOS 1.0, *)) {
+      NSMutableDictionary *fallback_specs = [encoder_specs mutableCopy];
+      [fallback_specs removeObjectForKey:(NSString *)
+                                     kVTVideoEncoderSpecification_EnableLowLatencyRateControl];
+      if (fallback_specs.count != encoder_specs.count) {
+        RTC_LOG(LS_WARNING) << "VTCompressionSessionCreate failed with "
+                            << status
+                            << ", retrying without low-latency rate control.";
+        CFDictionaryRef fallback_spec_ref =
+            fallback_specs.count > 0 ? (__bridge CFDictionaryRef)fallback_specs : nullptr;
+        status = VTCompressionSessionCreate(
+            nullptr,  // use default allocator
+            _width,
+            _height,
+            kCMVideoCodecType_H264,
+            fallback_spec_ref,
+            (__bridge CFDictionaryRef)sourceAttributes,
+            nullptr,  // use default compressed data allocator
+            compressionOutputCallback,
+            nullptr,
+            &_compressionSession);
+      }
+    }
+  }
   if (status != noErr) {
     RTC_LOG(LS_ERROR) << "Failed to create compression session: " << status;
     return WEBRTC_VIDEO_CODEC_ERROR;
@@ -977,4 +1002,3 @@ NSUInteger GetMaxSampleRate(
 }
 
 @end
-
