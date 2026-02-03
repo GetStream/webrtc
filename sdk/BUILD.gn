@@ -96,6 +96,7 @@ if (is_ios || is_mac) {
       "objc/base/RTCEncodedImage.h",
       "objc/base/RTCEncodedImage.m",
       "objc/base/RTCI420Buffer.h",
+      "objc/base/RTCNV12Buffer.h",
       "objc/base/RTCLogging.h",
       "objc/base/RTCLogging.mm",
       "objc/base/RTCMacros.h",
@@ -596,6 +597,16 @@ if (is_ios || is_mac) {
         "objc/components/video_frame_buffer/RTCCVPixelBuffer.h",
         "objc/components/video_frame_buffer/RTCCVPixelBuffer.mm",
       ]
+      # Stream-only: NV12 wrappers are built when the flag is enabled.
+      # Stream-only: enable gating macro for ObjC bridge policies.
+      # Stream-only: switch to NV12-enabled ObjC bridge implementation.
+      if (stream_enable_rendering_backend) {
+        sources += [
+          "objc/api/video_frame_buffer/RTCNativeNV12Buffer+Private.h",
+          "objc/api/video_frame_buffer/RTCNativeNV12Buffer.h",
+          "objc/api/video_frame_buffer/RTCNativeNV12Buffer.mm",
+        ]
+      }
       deps = [
         ":base_objc",
         "../rtc_base:logging",
@@ -642,6 +653,8 @@ if (is_ios || is_mac) {
         sources += [
           "objc/components/renderer/metal/RTCMTLVideoView.h",
           "objc/components/renderer/metal/RTCMTLVideoView.m",
+          "objc/components/renderer/metal/RTCVideoRenderingView.h",
+          "objc/components/renderer/metal/RTCVideoRenderingView.m",
         ]
       }
       if (is_mac) {
@@ -657,6 +670,42 @@ if (is_ios || is_mac) {
       ]
       configs += [ "..:common_objc" ]
       public_configs = [ ":common_config_objc" ]
+      # Stream-only: add shared Metal backend as a separate target.
+      if (stream_enable_rendering_backend) {
+        defines = [ "RTC_STREAM_RENDERING_BACKEND" ]
+        deps += [ ":stream_shared_metal_objc" ]
+      }
+    }
+
+    # Stream-only: iOS shared Metal implementation isolated here.
+    # XR (visionOS) is excluded until the shared backend is validated there.
+    if (stream_enable_rendering_backend && is_ios &&
+        !(target_environment == "xrsimulator" || target_environment == "xrdevice")) {
+      rtc_library("stream_shared_metal_objc") {
+        visibility = [ "*" ]
+        sources = [
+          "objc/components/renderer/metal/RTCSharedMetalRenderAdapter.h",
+          "objc/components/renderer/metal/RTCSharedMetalRenderAdapter.mm",
+          "objc/components/renderer/metal/RTCSharedMetalRenderingContext+Private.h",
+          "objc/components/renderer/metal/RTCSharedMetalRenderingContext.h",
+          "objc/components/renderer/metal/RTCSharedMetalRenderingContext.mm",
+          "objc/components/renderer/metal/RTCSharedMetalVideoView.h",
+          "objc/components/renderer/metal/RTCSharedMetalVideoView.mm",
+        ]
+        frameworks = [
+          "CoreVideo.framework",
+          "Metal.framework",
+          "QuartzCore.framework",
+          "UIKit.framework",
+        ]
+        deps = [
+          ":base_objc",
+          ":videoframebuffer_objc",
+          "../rtc_base:checks",
+        ]
+        configs += [ "..:common_objc" ]
+        public_configs = [ ":common_config_objc" ]
+      }
     }
 
     # TODO(bugs.webrtc.org/9627): Remove this target.
@@ -1036,6 +1085,9 @@ if (is_ios || is_mac) {
         "environment_construction",
       ]
       configs += [ "..:no_global_constructors" ]
+      if (stream_enable_rendering_backend) {
+        defines = [ "RTC_STREAM_RENDERING_BACKEND" ]
+      }
       sources = [
         "objc/api/peerconnection/RTCAudioDeviceModule.h",
         "objc/api/peerconnection/RTCAudioDeviceModule+Private.h",
@@ -1528,6 +1580,13 @@ if (is_ios || is_mac) {
           "objc/components/audio/RTCAudioCustomProcessingDelegate.h",
           "objc/components/audio/RTCAudioProcessingConfig.h",
         ]
+        # Stream-only: export NV12 headers when the flag is enabled.
+        if (stream_enable_rendering_backend) {
+          common_objc_headers += [
+            "objc/base/RTCNV12Buffer.h",
+            "objc/api/video_frame_buffer/RTCNativeNV12Buffer.h",
+          ]
+        }
 
         if (rtc_use_h265) {
           common_objc_headers += [
@@ -1542,6 +1601,7 @@ if (is_ios || is_mac) {
           common_objc_headers += [
             "objc/helpers/RTCCameraPreviewView.h",
             "objc/components/renderer/metal/RTCMTLVideoView.h",
+            "objc/components/renderer/metal/RTCVideoRenderingView.h",
           ]
         }
 
@@ -1692,6 +1752,7 @@ if (is_ios || is_mac) {
           "objc/components/capturer/RTCDesktopSource.h",
           "objc/components/capturer/RTCDesktopMediaList.h",
           "objc/components/renderer/metal/RTCMTLVideoView.h",
+          "objc/components/renderer/metal/RTCVideoRenderingView.h",
           "objc/components/renderer/metal/RTCMTLNSVideoView.h",
           "objc/components/renderer/opengl/RTCVideoViewShading.h",
           "objc/components/video_codec/RTCCodecSpecificInfoH264.h",
@@ -1714,6 +1775,13 @@ if (is_ios || is_mac) {
           "objc/components/audio/RTCAudioCustomProcessingDelegate.h",
           "objc/components/audio/RTCAudioProcessingConfig.h",
         ]
+        # Stream-only: export NV12 headers when the flag is enabled.
+        if (stream_enable_rendering_backend) {
+          sources += [
+            "objc/base/RTCNV12Buffer.h",
+            "objc/api/video_frame_buffer/RTCNativeNV12Buffer.h",
+          ]
+        }
         if (!build_with_chromium) {
           sources += [
             "objc/api/logging/RTCCallbackLogger.h",
@@ -1865,7 +1933,6 @@ if (is_ios || is_mac) {
     rtc_library("native_video") {
       sources = [
         "objc/native/src/objc_frame_buffer.h",
-        "objc/native/src/objc_frame_buffer.mm",
         "objc/native/src/objc_video_decoder_factory.h",
         "objc/native/src/objc_video_decoder_factory.mm",
         "objc/native/src/objc_video_encoder_factory.h",
@@ -1877,6 +1944,15 @@ if (is_ios || is_mac) {
         "objc/native/src/objc_video_track_source.h",
         "objc/native/src/objc_video_track_source.mm",
       ]
+      if (stream_enable_rendering_backend) {
+        sources += [
+          "objc/native/src/objc_frame_buffer_stream.mm",
+          "objc/native/src/objc_nv12_conversion.h",
+          "objc/native/src/objc_nv12_conversion.mm",
+        ]
+      } else {
+        sources += [ "objc/native/src/objc_frame_buffer.mm" ]
+      }
 
       configs += [ "..:common_objc" ]
 

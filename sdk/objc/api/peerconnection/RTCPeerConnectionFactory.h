@@ -43,6 +43,13 @@ typedef NS_ENUM(NSInteger, RTC_OBJC_TYPE(RTCRtpMediaType));
 @protocol RTC_OBJC_TYPE
 (RTCAudioProcessingModule);
 
+typedef NS_ENUM(NSInteger, RTC_OBJC_TYPE(RTCFrameBufferPolicy)) {
+  RTC_OBJC_TYPE(RTCFrameBufferPolicyNone) = 0,
+  RTC_OBJC_TYPE(RTCFrameBufferPolicyWrapOnlyExistingNV12),
+  RTC_OBJC_TYPE(RTCFrameBufferPolicyCopyToNV12),
+  RTC_OBJC_TYPE(RTCFrameBufferPolicyConvertWithPoolToNV12)
+};
+
 RTC_OBJC_EXPORT
 @interface RTC_OBJC_TYPE (RTCPeerConnectionFactory) : NSObject
 
@@ -70,6 +77,20 @@ RTC_OBJC_EXPORT
                 (nullable id<RTC_OBJC_TYPE(RTCAudioProcessingModule)>)audioProcessingModule;
 
 @property(nonatomic, readonly) RTC_OBJC_TYPE(RTCAudioDeviceModule) *audioDeviceModule;
+
+/**
+ * Controls how decoded frame buffers are bridged to Objective-C. Default is `none`.
+ * This can be toggled at runtime. It only takes effect when
+ * `stream_enable_rendering_backend=true` (RTC_STREAM_RENDERING_BACKEND).
+ *
+ * Note: the policy is evaluated per frame. Changing it mid-call can result in
+ * a mix of I420 and NV12 buffers for in-flight frames. For consistent format,
+ * set it before starting a call.
+ *
+ * Thread-safety: property access is not synchronized; set it from a single
+ * thread if you need strict consistency.
+ */
+@property(nonatomic, assign) RTC_OBJC_TYPE(RTCFrameBufferPolicy) frameBufferPolicy;
 
 /**
  * Valid kind values are kRTCMediaStreamTrackKindAudio and
