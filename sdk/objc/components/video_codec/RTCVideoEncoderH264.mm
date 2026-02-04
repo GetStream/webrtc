@@ -744,7 +744,11 @@ NSUInteger GetMaxSampleRate(
     }];
   }
 
-  // Enable low-latency video encoding
+  // Enable low-latency video encoding.
+  // NOTE: Some VideoToolbox configurations (notably simulator combos) report
+  // kVTCouldNotFindVideoEncoderErr when this key is present, even though the
+  // default encoder is available. We add the key optimistically, then fall back
+  // to a retry without it if VT cannot find an encoder.
   if (@available(iOS 14.5, macCatalyst 14.5, macOS 11.3, tvOS 14.5, visionOS 1.0, *)) {
     [encoder_specs addEntriesFromDictionary:@{
       (NSString *)kVTVideoEncoderSpecification_EnableLowLatencyRateControl : @(YES),
@@ -763,6 +767,8 @@ NSUInteger GetMaxSampleRate(
       compressionOutputCallback,
       nullptr,
       &_compressionSession);
+  // Retry once without the low-latency spec if that exact error is returned.
+  // We only do this when the key was present, to avoid redundant retries.
   if (status == kVTCouldNotFindVideoEncoderErr) {
     if (@available(iOS 14.5, macCatalyst 14.5, macOS 11.3, tvOS 14.5, visionOS 1.0, *)) {
       NSMutableDictionary *fallback_specs = [encoder_specs mutableCopy];

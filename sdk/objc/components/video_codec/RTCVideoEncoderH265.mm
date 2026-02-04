@@ -392,6 +392,11 @@ void compressionOutputCallback(void* encoder, void* params, OSStatus status,
                          kCFBooleanTrue);
   }
 
+  // Enable low-latency rate control where available.
+  // NOTE: Some VideoToolbox environments (especially simulator) can fail to
+  // locate an encoder when this flag is present, even though a default encoder
+  // exists. We handle that by retrying without the flag when we see
+  // kVTCouldNotFindVideoEncoderErr below.
   if (@available(iOS 14.5, macCatalyst 14.5, macOS 11.3, tvOS 14.5, visionOS 1.0, *)) {
     CFDictionarySetValue(encoder_specs, kVTVideoEncoderSpecification_EnableLowLatencyRateControl,
                          kCFBooleanTrue);
@@ -404,6 +409,8 @@ void compressionOutputCallback(void* encoder, void* params, OSStatus status,
                                  sourceAttributes,
                                  nullptr,  // use default compressed data allocator
                                  compressionOutputCallback, nullptr, &_compressionSession);
+  // Retry once without low-latency if VT can't find an encoder with it enabled.
+  // Guard on dictionary contents to avoid unnecessary work.
   if (status == kVTCouldNotFindVideoEncoderErr) {
     if (@available(iOS 14.5, macCatalyst 14.5, macOS 11.3, tvOS 14.5, visionOS 1.0, *)) {
       if (CFDictionaryGetCount(encoder_specs) > 0) {
