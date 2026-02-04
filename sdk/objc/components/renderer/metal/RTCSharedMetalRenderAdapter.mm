@@ -26,6 +26,8 @@
   UIViewContentMode _contentMode;
   NSInteger _inFlightFrames;
   NSInteger _maxInFlightFrames;
+  BOOL _didLogI420Fallback;
+  BOOL _didLogI420FallbackFailure;
 
   id<MTLBuffer> _vertexBuffer;
 
@@ -61,8 +63,31 @@
 
 - (void)renderFrame:(RTC_OBJC_TYPE(RTCVideoFrame) *)frame {
   dispatch_sync(_frameQueue, ^{
-    self->_latestFrame = frame;
-    self->_needsRedraw = frame != nil;
+    RTC_OBJC_TYPE(RTCVideoFrame) *frameToStore = frame;
+    if (frameToStore &&
+        [frameToStore.buffer isKindOfClass:[RTC_OBJC_TYPE(RTCCVPixelBuffer) class]]) {
+      RTC_OBJC_TYPE(RTCCVPixelBuffer) *pixelBuffer =
+          (RTC_OBJC_TYPE(RTCCVPixelBuffer) *)frameToStore.buffer;
+      const OSType pixelFormat =
+          CVPixelBufferGetPixelFormatType(pixelBuffer.pixelBuffer);
+      if (pixelFormat == kCVPixelFormatType_32BGRA ||
+          pixelFormat == kCVPixelFormatType_32ARGB) {
+        RTC_OBJC_TYPE(RTCVideoFrame) *i420Frame =
+            [frameToStore newI420VideoFrame];
+        if (i420Frame) {
+          frameToStore = i420Frame;
+          if (!self->_didLogI420Fallback) {
+            self->_didLogI420Fallback = YES;
+            RTCLogInfo(@"SharedMetal: Falling back to I420 for BGRA/ARGB frames.");
+          }
+        } else if (!self->_didLogI420FallbackFailure) {
+          self->_didLogI420FallbackFailure = YES;
+          RTCLogError(@"SharedMetal: Failed to convert BGRA/ARGB frame to I420.");
+        }
+      }
+    }
+    self->_latestFrame = frameToStore;
+    self->_needsRedraw = frameToStore != nil;
   });
 }
 
@@ -132,6 +157,19 @@
       [rotationOverride getValue:&rotation];
     }
   }
+#if TARGET_OS_SIMULATOR
+  if (rotation != RTC_OBJC_TYPE(RTCVideoRotation_0) &&
+      [frame.buffer isKindOfClass:[RTC_OBJC_TYPE(RTCCVPixelBuffer) class]]) {
+    RTC_OBJC_TYPE(RTCCVPixelBuffer) *pixelBuffer =
+        (RTC_OBJC_TYPE(RTCCVPixelBuffer) *)frame.buffer;
+    OSType pixelFormat =
+        CVPixelBufferGetPixelFormatType(pixelBuffer.pixelBuffer);
+    if (pixelFormat == kCVPixelFormatType_32BGRA ||
+        pixelFormat == kCVPixelFormatType_32ARGB) {
+      rotation = RTC_OBJC_TYPE(RTCVideoRotation_0);
+    }
+  }
+#endif
 
   MTLRenderPassDescriptor *renderPassDescriptor =
       [[MTLRenderPassDescriptor alloc] init];
@@ -143,6 +181,7 @@
   id<MTLRenderCommandEncoder> renderEncoder =
       [commandBuffer renderCommandEncoderWithDescriptor:renderPassDescriptor];
   if (!renderEncoder) {
+    RTCLogError(@"SharedMetal: Failed to create render encoder.");
     return NO;
   }
 
@@ -170,12 +209,14 @@
                                            context:context
                                               yRef:&yRef
                                              uvRef:&uvRef]) {
+        RTCLogError(@"SharedMetal: Failed to update NV12 textures from pixel buffer.");
         [renderEncoder endEncoding];
         return NO;
       }
       id<MTLTexture> yTexture = CVMetalTextureGetTexture(yRef);
       id<MTLTexture> uvTexture = CVMetalTextureGetTexture(uvRef);
       if (!yTexture || !uvTexture) {
+        RTCLogError(@"SharedMetal: NV12 textures are nil.");
         if (yRef) {
           CFRelease(yRef);
         }
@@ -195,11 +236,13 @@
       if (![self updateBGRATextureFromPixelBuffer:pixelBuffer.pixelBuffer
                                           context:context
                                              ref:&bgraRef]) {
+        RTCLogError(@"SharedMetal: Failed to update BGRA texture from pixel buffer.");
         [renderEncoder endEncoding];
         return NO;
       }
       id<MTLTexture> bgraTexture = CVMetalTextureGetTexture(bgraRef);
       if (!bgraTexture) {
+        RTCLogError(@"SharedMetal: BGRA texture is nil.");
         if (bgraRef) {
           CFRelease(bgraRef);
         }
@@ -210,6 +253,8 @@
       [renderEncoder setRenderPipelineState:context.bgraPipelineState];
       [renderEncoder setFragmentTexture:bgraTexture atIndex:0];
     } else {
+      RTCLogError(@"SharedMetal: Unsupported CVPixelBuffer pixel format: %u.",
+                  (unsigned int)pixelFormat);
       [renderEncoder endEncoding];
       return NO;
     }
@@ -217,6 +262,7 @@
     id<RTC_OBJC_TYPE(RTCNV12Buffer)> nv12Buffer =
         (id<RTC_OBJC_TYPE(RTCNV12Buffer)>)buffer;
     if (![self updateNV12TexturesFromNV12Buffer:nv12Buffer context:context]) {
+      RTCLogError(@"SharedMetal: Failed to update NV12 textures from NV12 buffer.");
       [renderEncoder endEncoding];
       return NO;
     }
@@ -227,6 +273,7 @@
     id<RTC_OBJC_TYPE(RTCI420Buffer)> i420Buffer =
         (id<RTC_OBJC_TYPE(RTCI420Buffer)>)buffer;
     if (![self updateI420TexturesFromI420Buffer:i420Buffer context:context]) {
+      RTCLogError(@"SharedMetal: Failed to update I420 textures from I420 buffer.");
       [renderEncoder endEncoding];
       return NO;
     }
@@ -435,6 +482,22 @@
   CVReturn result = CVMetalTextureCacheCreateTextureFromImage(
       kCFAllocatorDefault, context.textureCache, pixelBuffer, nil,
       MTLPixelFormatBGRA8Unorm, width, height, 0, ref);
+  if (result != kCVReturnSuccess || *ref == nil) {
+    const OSType pixelFormat = CVPixelBufferGetPixelFormatType(pixelBuffer);
+    CFTypeRef metalCompat =
+        CVBufferGetAttachment(pixelBuffer, kCVPixelBufferMetalCompatibilityKey, NULL);
+    const BOOL isMetalCompatible = (metalCompat == kCFBooleanTrue);
+    const BOOL hasIOSurface = CVPixelBufferGetIOSurface(pixelBuffer) != nil;
+    RTCLogError(
+        @"SharedMetal: BGRA texture creation failed (result=%d format=%u size=%zux%zu "
+        @"metalCompat=%d iosurface=%d)",
+        (int)result,
+        (unsigned int)pixelFormat,
+        width,
+        height,
+        isMetalCompatible,
+        hasIOSurface);
+  }
 
   return result == kCVReturnSuccess && *ref != nil;
 }
