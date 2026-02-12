@@ -1238,6 +1238,11 @@ if (is_ios || is_mac) {
         "objc/components/audio/RTCDefaultAudioProcessingModule.mm",
         "objc/components/audio/RTCDefaultAudioProcessingModule+Private.h",
       ]
+      if (stream_enable_rendering_backend) {
+        sources += [
+          "objc/api/peerconnection/RTCPeerConnectionFactory+Stream.h",
+        ]
+      }
 
       configs += [
         "..:common_objc",
@@ -1589,6 +1594,7 @@ if (is_ios || is_mac) {
         # Stream-only: export NV12 headers when the flag is enabled.
         if (stream_enable_rendering_backend) {
           common_objc_headers += [
+            "objc/api/peerconnection/RTCPeerConnectionFactory+Stream.h",
             "objc/base/RTCNV12Buffer.h",
             "objc/api/video_frame_buffer/RTCNativeNV12Buffer.h",
           ]
@@ -1786,6 +1792,7 @@ if (is_ios || is_mac) {
         # Stream-only: export NV12 headers when the flag is enabled.
         if (stream_enable_rendering_backend) {
           sources += [
+            "objc/api/peerconnection/RTCPeerConnectionFactory+Stream.h",
             "objc/base/RTCNV12Buffer.h",
             "objc/api/video_frame_buffer/RTCNativeNV12Buffer.h",
           ]
