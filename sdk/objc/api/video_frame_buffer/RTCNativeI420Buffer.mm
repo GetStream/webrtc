@@ -11,13 +11,16 @@
 #import "RTCNativeI420Buffer+Private.h"
 
 #include "api/video/i420_buffer.h"
+#include "third_party/libyuv/include/libyuv/convert.h"
 
 #if !defined(NDEBUG) && defined(WEBRTC_IOS)
 #import <UIKit/UIKit.h>
 #include "third_party/libyuv/include/libyuv.h"
 #endif
 
-@implementation RTC_OBJC_TYPE (RTCI420Buffer)
+@implementation RTC_OBJC_TYPE (RTCI420Buffer) {
+  CVPixelBufferRef _pixelBuffer;
+}
 
 - (instancetype)initWithWidth:(int)width height:(int)height {
   self = [super init];
@@ -68,6 +71,13 @@
   return self;
 }
 
+- (void)dealloc {
+  if (_pixelBuffer) {
+    CVBufferRelease(_pixelBuffer);
+    _pixelBuffer = nil;
+  }
+}
+
 - (int)width {
   return _i420Buffer->width();
 }
@@ -108,12 +118,85 @@
   return _i420Buffer->DataV();
 }
 
+- (CVPixelBufferRef)pixelBuffer {
+  // Cache conversion result because PiP/converter may request pixel buffer
+  // repeatedly for consecutive frames with same backing buffer instance.
+  if (_pixelBuffer || !_i420Buffer) {
+    return _pixelBuffer;
+  }
+
+  const int width = _i420Buffer->width();
+  const int height = _i420Buffer->height();
+  if (width <= 0 || height <= 0) {
+    return nil;
+  }
+
+  NSDictionary *attributes =
+      @{(id)kCVPixelBufferIOSurfacePropertiesKey : @{}};
+  // Export as NV12 because this is the common hardware-friendly format used by
+  // AVFoundation rendering pipelines.
+  CVReturn result = CVPixelBufferCreate(
+      kCFAllocatorDefault,
+      width,
+      height,
+      kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+      (__bridge CFDictionaryRef)attributes,
+      &_pixelBuffer);
+  if (result != kCVReturnSuccess || !_pixelBuffer) {
+    return nil;
+  }
+
+  CVPixelBufferLockBaseAddress(_pixelBuffer, 0);
+  uint8_t *dst_y = static_cast<uint8_t *>(
+      CVPixelBufferGetBaseAddressOfPlane(_pixelBuffer, 0));
+  uint8_t *dst_uv = static_cast<uint8_t *>(
+      CVPixelBufferGetBaseAddressOfPlane(_pixelBuffer, 1));
+  if (!dst_y || !dst_uv) {
+    CVPixelBufferUnlockBaseAddress(_pixelBuffer, 0);
+    CVBufferRelease(_pixelBuffer);
+    _pixelBuffer = nil;
+    return nil;
+  }
+
+  const int dst_stride_y =
+      static_cast<int>(CVPixelBufferGetBytesPerRowOfPlane(_pixelBuffer, 0));
+  const int dst_stride_uv =
+      static_cast<int>(CVPixelBufferGetBytesPerRowOfPlane(_pixelBuffer, 1));
+
+  // Convert I420 planes to NV12 plane layout into the destination pixel buffer.
+  const int conversion_result = libyuv::I420ToNV12(
+      _i420Buffer->DataY(),
+      _i420Buffer->StrideY(),
+      _i420Buffer->DataU(),
+      _i420Buffer->StrideU(),
+      _i420Buffer->DataV(),
+      _i420Buffer->StrideV(),
+      dst_y,
+      dst_stride_y,
+      dst_uv,
+      dst_stride_uv,
+      width,
+      height);
+
+  CVPixelBufferUnlockBaseAddress(_pixelBuffer, 0);
+
+  if (conversion_result != 0) {
+    CVBufferRelease(_pixelBuffer);
+    _pixelBuffer = nil;
+    return nil;
+  }
+
+  return _pixelBuffer;
+}
+
 - (id<RTC_OBJC_TYPE(RTCVideoFrameBuffer)>)cropAndScaleWith:(int)offsetX
                                                    offsetY:(int)offsetY
                                                  cropWidth:(int)cropWidth
-                                                cropHeight:(int)cropHeight
-                                                scaleWidth:(int)scaleWidth
+                                                 cropHeight:(int)cropHeight
+                                                 scaleWidth:(int)scaleWidth
                                                scaleHeight:(int)scaleHeight {
+  // Keep behavior aligned with WebRTC frame buffer contract:
+  // crop/scale returns another frame buffer representation of same family.
   webrtc::scoped_refptr<webrtc::VideoFrameBuffer> scaled_buffer =
       _i420Buffer->CropAndScale(
           offsetX, offsetY, cropWidth, cropHeight, scaleWidth, scaleHeight);

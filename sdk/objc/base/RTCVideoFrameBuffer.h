@@ -28,6 +28,9 @@ RTC_OBJC_EXPORT
 - (id<RTC_OBJC_TYPE(RTCI420Buffer)>)toI420;
 
 @optional
+// Optional CVPixelBuffer representation of this frame buffer.
+// Implementations may return nil if conversion/export is unavailable.
+@property(nonatomic, readonly, nullable) CVPixelBufferRef pixelBuffer;
 - (id<RTC_OBJC_TYPE(RTCVideoFrameBuffer)>)cropAndScaleWith:(int)offsetX
                                                    offsetY:(int)offsetY
                                                  cropWidth:(int)cropWidth
