@@ -594,6 +594,10 @@ if (is_ios || is_mac) {
         "objc/api/video_frame_buffer/RTCNativeI420Buffer.mm",
         "objc/api/video_frame_buffer/RTCNativeMutableI420Buffer.h",
         "objc/api/video_frame_buffer/RTCNativeMutableI420Buffer.mm",
+        "objc/components/renderer/pip/RTCPictureInPictureVideoRenderer.h",
+        "objc/components/renderer/pip/RTCPictureInPictureVideoRenderer.m",
+        "objc/components/renderer/pip/RTCVideoFrameConverter.h",
+        "objc/components/renderer/pip/RTCVideoFrameConverter.mm",
         "objc/components/video_frame_buffer/RTCCVPixelBuffer.h",
         "objc/components/video_frame_buffer/RTCCVPixelBuffer.mm",
       ]
@@ -621,7 +625,9 @@ if (is_ios || is_mac) {
         ":used_from_extension",
       ]
       frameworks = [
+        "AVFoundation.framework",
         "VideoToolbox.framework",
+        "CoreMedia.framework",
         "CoreGraphics.framework",
         "CoreVideo.framework",
       ]
@@ -1602,6 +1608,8 @@ if (is_ios || is_mac) {
             "objc/helpers/RTCCameraPreviewView.h",
             "objc/components/renderer/metal/RTCMTLVideoView.h",
             "objc/components/renderer/metal/RTCVideoRenderingView.h",
+            "objc/components/renderer/pip/RTCPictureInPictureVideoRenderer.h",
+            "objc/components/renderer/pip/RTCVideoFrameConverter.h",
           ]
         }
 
