@@ -319,6 +319,7 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
   int32_t GetEngineState(EngineState* enabled);
 
   int32_t SetObserver(AudioDeviceObserver* observer) override;
+  bool IsAudioEngineDevice() const override { return true; }
 
   int32_t SetManualRenderingMode(bool enable);
   int32_t ManualRenderingMode(bool* enabled);

@@ -154,10 +154,28 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
   return _workerThread->BlockingCall([self] { return _observer->delegate_; });
 }
 
+- (BOOL)isWorkerThreadReady {
+  return _workerThread != nullptr && !_workerThread->IsQuitting();
+}
+
+- (BOOL)isNativeModuleReady {
+  return _native.get() != nullptr;
+}
+
+- (BOOL)isAudioEngineModule {
+  return _native && _native->IsAudioEngineDevice();
+}
+
 - (void)setObserver:(id<RTC_OBJC_TYPE(RTCAudioDeviceModuleDelegate)>)observer {
+  if (![self isNativeModuleReady] || ![self isWorkerThreadReady]) {
+    return;
+  }
+
   _workerThread->BlockingCall([self, observer] {
-    _observer->delegate_ = observer;
-    _native->SetObserver(observer != nil ? _observer : nullptr);
+    if (_native) {
+      _observer->delegate_ = observer;
+      _native->SetObserver(observer != nil ? _observer : nullptr);
+    }
   });
 }
 
@@ -172,6 +190,29 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
   _observer = new AudioDeviceObserver(self);
 
   return self;
+}
+
+- (void)dealloc {
+  webrtc::scoped_refptr<webrtc::AudioDeviceModule> native = _native;
+  webrtc::Thread *workerThread = _workerThread;
+  AudioDeviceObserver *observer = _observer;
+
+  if (native && workerThread && !workerThread->IsQuitting()) {
+    workerThread->BlockingCall([native, observer] {
+      native->SetObserver(nullptr);
+      if (observer != nullptr) {
+        observer->delegate_ = nil;
+      }
+    });
+
+    delete observer;
+    _observer = nil;
+  } else if (observer != nullptr) {
+    observer->delegate_ = nil;
+  }
+
+  _native = nullptr;
+  _workerThread = nullptr;
 }
 
 - (NSArray<RTC_OBJC_TYPE(RTCIODevice) *> *)outputDevices {
@@ -283,6 +324,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 #pragma mark - Low-level access
 
 - (NSInteger)reset {
+  if (![self isNativeModuleReady] || ![self isWorkerThreadReady]) {
+    return -1;
+  }
   return _workerThread->BlockingCall([self] { return _native->Reset(); });
 }
 
@@ -340,8 +384,13 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (BOOL)isEngineRunning {
+  if (![self isNativeModuleReady] || ![self isWorkerThreadReady] || ![self isAudioEngineModule]) {
+    return false;
+  }
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
-  if (module == nullptr) return false;
+  if (module == nullptr) {
+    return false;
+  }
 
   return _workerThread->BlockingCall([module] { return module->IsEngineRunning(); });
 }
@@ -358,6 +407,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (RTC_OBJC_TYPE(RTCAudioEngineState))engineState {
+  if (![self isNativeModuleReady] || ![self isWorkerThreadReady] || ![self isAudioEngineModule]) {
+    return RTC_OBJC_TYPE(RTCAudioEngineState)();
+  }
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return RTC_OBJC_TYPE(RTCAudioEngineState)();
 
@@ -377,6 +429,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (void)setEngineState:(RTC_OBJC_TYPE(RTCAudioEngineState))state {
+  if (![self isNativeModuleReady] || ![self isWorkerThreadReady] || ![self isAudioEngineModule]) {
+    return;
+  }
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return;
 
@@ -396,6 +451,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 #pragma mark - Unique to AudioEngineDevice
 
 - (BOOL)isRecordingAlwaysPreparedMode {
+  if (![self isNativeModuleReady] || ![self isWorkerThreadReady] || ![self isAudioEngineModule]) {
+    return NO;
+  }
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return NO;
 
@@ -406,6 +464,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (NSInteger)setRecordingAlwaysPreparedMode:(BOOL)enabled {
+  if (![self isNativeModuleReady] || ![self isWorkerThreadReady] || ![self isAudioEngineModule]) {
+    return -1;
+  }
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return -1;
 
@@ -414,6 +475,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (BOOL)isManualRenderingMode {
+  if (![self isNativeModuleReady] || ![self isWorkerThreadReady] || ![self isAudioEngineModule]) {
+    return NO;
+  }
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return NO;
 
@@ -424,6 +488,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (NSInteger)setManualRenderingMode:(BOOL)enabled {
+  if (![self isNativeModuleReady] || ![self isWorkerThreadReady] || ![self isAudioEngineModule]) {
+    return -1;
+  }
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return -1;
 
@@ -432,6 +499,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (BOOL)isAdvancedDuckingEnabled {
+  if (![self isNativeModuleReady] || ![self isWorkerThreadReady] || ![self isAudioEngineModule]) {
+    return NO;
+  }
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return NO;
 
@@ -442,6 +512,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (void)setAdvancedDuckingEnabled:(BOOL)enabled {
+  if (![self isNativeModuleReady] || ![self isWorkerThreadReady] || ![self isAudioEngineModule]) {
+    return;
+  }
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return;
 
@@ -450,6 +523,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (NSInteger)duckingLevel {
+  if (![self isNativeModuleReady] || ![self isWorkerThreadReady] || ![self isAudioEngineModule]) {
+    return 0;
+  }
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return 0;
 
@@ -460,6 +536,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (void)setDuckingLevel:(NSInteger)value {
+  if (![self isNativeModuleReady] || ![self isWorkerThreadReady] || ![self isAudioEngineModule]) {
+    return;
+  }
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return;
 
@@ -467,6 +546,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (RTC_OBJC_TYPE(RTCAudioEngineMuteMode))muteMode {
+  if (![self isNativeModuleReady] || ![self isWorkerThreadReady] || ![self isAudioEngineModule]) {
+    return RTC_OBJC_TYPE(RTCAudioEngineMuteModeUnknown);
+  }
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return RTC_OBJC_TYPE(RTCAudioEngineMuteModeUnknown);
 
@@ -478,6 +560,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (NSInteger)setMuteMode:(RTC_OBJC_TYPE(RTCAudioEngineMuteMode))mode {
+  if (![self isNativeModuleReady] || ![self isWorkerThreadReady] || ![self isAudioEngineModule]) {
+    return -1;
+  }
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return -1;
 
@@ -486,6 +571,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (BOOL)isVoiceProcessingEnabled {
+  if (![self isNativeModuleReady] || ![self isWorkerThreadReady] || ![self isAudioEngineModule]) {
+    return NO;
+  }
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return NO;
 
@@ -496,6 +584,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (NSInteger)setVoiceProcessingEnabled:(BOOL)enabled {
+  if (![self isNativeModuleReady] || ![self isWorkerThreadReady] || ![self isAudioEngineModule]) {
+    return -1;
+  }
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return -1;
 
@@ -504,6 +595,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (BOOL)isVoiceProcessingBypassed {
+  if (![self isNativeModuleReady] || ![self isWorkerThreadReady] || ![self isAudioEngineModule]) {
+    return NO;
+  }
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return NO;
 
@@ -514,6 +608,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (void)setVoiceProcessingBypassed:(BOOL)enabled {
+  if (![self isNativeModuleReady] || ![self isWorkerThreadReady] || ![self isAudioEngineModule]) {
+    return;
+  }
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return;
 
@@ -522,6 +619,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (BOOL)isVoiceProcessingAGCEnabled {
+  if (![self isNativeModuleReady] || ![self isWorkerThreadReady] || ![self isAudioEngineModule]) {
+    return NO;
+  }
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return NO;
 
@@ -532,6 +632,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (void)setVoiceProcessingAGCEnabled:(BOOL)enabled {
+  if (![self isNativeModuleReady] || ![self isWorkerThreadReady] || ![self isAudioEngineModule]) {
+    return;
+  }
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return;
 
@@ -540,6 +643,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (BOOL)isStereoPlayoutAvailable {
+  if (![self isNativeModuleReady] || ![self isWorkerThreadReady] || ![self isAudioEngineModule]) {
+    return NO;
+  }
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return NO;
 
@@ -550,6 +656,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (BOOL)isStereoPlayoutEnabled {
+  if (![self isNativeModuleReady] || ![self isWorkerThreadReady] || ![self isAudioEngineModule]) {
+    return NO;
+  }
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return NO;
 
@@ -573,6 +682,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (void)setPrefersStereoPlayout:(BOOL)enabled {
+  if (![self isNativeModuleReady] || ![self isWorkerThreadReady] || ![self isAudioEngineModule]) {
+    return;
+  }
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return;
 
@@ -580,6 +692,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (void)refreshStereoPlayoutState {
+  if (![self isNativeModuleReady] || ![self isWorkerThreadReady] || ![self isAudioEngineModule]) {
+    return;
+  }
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return;
 
