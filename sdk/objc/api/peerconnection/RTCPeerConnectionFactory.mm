@@ -87,6 +87,14 @@
 @synthesize nativeFactory = _nativeFactory;
 @synthesize audioDeviceModule = _audioDeviceModule;
 
+- (void)dealloc {
+  // `RTCAudioDeviceModule` stores a raw pointer to this factory's worker
+  // thread. Releasing the module first guarantees its teardown runs while the
+  // worker thread is still valid.
+  _audioDeviceModule = nil;
+  _nativeAudioDeviceModule = nullptr;
+}
+
 - (instancetype)init {
   return [self
       initWithNativeAudioEncoderFactory:webrtc::CreateBuiltinAudioEncoderFactory()
