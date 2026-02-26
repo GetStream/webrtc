@@ -151,6 +151,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (id<RTC_OBJC_TYPE(RTCAudioDeviceModuleDelegate)>)observer {
+  if (![self isWorkerThreadReady] || _observer == nullptr) {
+    return nil;
+  }
   return _workerThread->BlockingCall([self] { return _observer->delegate_; });
 }
 
@@ -193,25 +196,41 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (void)dealloc {
+  [self invalidateWorkerThread];
+
+  _native = nullptr;
+  _workerThread = nullptr;
+}
+
+- (void)invalidateWorkerThread {
   webrtc::scoped_refptr<webrtc::AudioDeviceModule> native = _native;
   webrtc::Thread *workerThread = _workerThread;
   AudioDeviceObserver *observer = _observer;
 
-  if (native && workerThread && !workerThread->IsQuitting()) {
+  if (observer == nullptr) {
+    _workerThread = nullptr;
+    return;
+  }
+
+  if (native == nullptr) {
+    observer->delegate_ = nil;
+    delete observer;
+    _observer = nullptr;
+    _workerThread = nullptr;
+    return;
+  }
+
+  if (workerThread && !workerThread->IsQuitting()) {
     workerThread->BlockingCall([native, observer] {
       native->SetObserver(nullptr);
-      if (observer != nullptr) {
-        observer->delegate_ = nil;
-      }
+      observer->delegate_ = nil;
     });
-
     delete observer;
-    _observer = nil;
-  } else if (observer != nullptr) {
+    _observer = nullptr;
+  } else {
     observer->delegate_ = nil;
   }
 
-  _native = nullptr;
   _workerThread = nullptr;
 }
 

@@ -89,8 +89,8 @@
 
 - (void)dealloc {
   // `RTCAudioDeviceModule` stores a raw pointer to this factory's worker
-  // thread. Releasing the module first guarantees its teardown runs while the
-  // worker thread is still valid.
+  // thread. Invalidate it before threads are destroyed, then release it.
+  [_audioDeviceModule invalidateWorkerThread];
   _audioDeviceModule = nil;
   _nativeAudioDeviceModule = nullptr;
 }
