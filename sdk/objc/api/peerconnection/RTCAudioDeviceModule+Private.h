@@ -26,6 +26,10 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)initWithNativeModule:(webrtc::scoped_refptr<webrtc::AudioDeviceModule>)module
                         workerThread:(webrtc::Thread *)workerThread;
 
+/// Detaches from the factory worker thread before that thread is destroyed.
+/// This prevents stale raw thread-pointer dereferences from late callers.
+- (void)invalidateWorkerThread;
+
 @end
 
 NS_ASSUME_NONNULL_END

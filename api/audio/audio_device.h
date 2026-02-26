@@ -193,6 +193,7 @@ class AudioDeviceModule : public webrtc::RefCountInterface {
   virtual int32_t SetObserver(AudioDeviceObserver* observer) { return -1; }
   virtual int32_t GetPlayoutDevice() const { return -1; }
   virtual int32_t GetRecordingDevice() const { return -1; }
+  virtual bool IsAudioEngineDevice() const { return false; }
 
  protected:
   ~AudioDeviceModule() override {}
