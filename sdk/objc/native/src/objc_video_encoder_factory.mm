@@ -31,12 +31,37 @@
 #include "api/video_codecs/video_encoder.h"
 #include "modules/video_coding/include/video_codec_interface.h"
 #include "modules/video_coding/include/video_error_codes.h"
+#include "rtc_base/time_utils.h"
 #include "rtc_base/logging.h"
+#include "sdk/objc/native/src/objc_frame_buffer.h"
 #include "sdk/objc/native/src/objc_video_frame.h"
 
 namespace webrtc {
 
 namespace {
+
+RTC_OBJC_TYPE(RTCVideoFrame) *ToObjCVideoFrameForEncoder(
+    const VideoFrame &frame) {
+  id<RTC_OBJC_TYPE(RTCVideoFrameBuffer)> frame_buffer = nil;
+  const webrtc::scoped_refptr<VideoFrameBuffer> buffer =
+      frame.video_frame_buffer();
+
+  if (buffer && buffer->type() == VideoFrameBuffer::Type::kNative) {
+    frame_buffer = static_cast<ObjCFrameBuffer *>(buffer.get())
+                       ->wrapped_frame_buffer();
+  } else {
+    frame_buffer = ToObjCVideoFrameBuffer(buffer);
+  }
+
+  RTC_OBJC_TYPE(RTCVideoFrame) *video_frame =
+      [[RTC_OBJC_TYPE(RTCVideoFrame) alloc]
+          initWithBuffer:frame_buffer
+                rotation:RTC_OBJC_TYPE(RTCVideoRotation)(frame.rotation())
+             timeStampNs:frame.timestamp_us() *
+                         webrtc::kNumNanosecsPerMicrosec];
+  video_frame.timeStamp = frame.rtp_timestamp();
+  return video_frame;
+}
 
 class ObjCVideoEncoder : public VideoEncoder {
  public:
@@ -91,7 +116,7 @@ class ObjCVideoEncoder : public VideoEncoder {
       [rtcFrameTypes addObject:@(RTC_OBJC_TYPE(RTCFrameType)(frame_types->at(i)))];
     }
 
-    return [encoder_ encode:ToObjCVideoFrame(frame)
+    return [encoder_ encode:ToObjCVideoFrameForEncoder(frame)
           codecSpecificInfo:nil
                  frameTypes:rtcFrameTypes];
   }

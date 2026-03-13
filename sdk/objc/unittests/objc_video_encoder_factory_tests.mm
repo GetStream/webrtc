@@ -25,6 +25,7 @@
 #include "modules/video_coding/include/video_error_codes.h"
 #include "rtc_base/gunit.h"
 #include "sdk/objc/native/src/objc_frame_buffer.h"
+#include "sdk/objc/native/src/objc_nv12_conversion.h"
 
 id<RTC_OBJC_TYPE(RTCVideoEncoderFactory)> CreateEncoderFactoryReturning(
     int return_code) {
@@ -193,6 +194,67 @@ std::unique_ptr<webrtc::VideoEncoder> GetObjCEncoder(
   std::vector<webrtc::VideoFrameType> frame_types;
 
   EXPECT_EQ(encoder->Encode(frame, &frame_types), WEBRTC_VIDEO_CODEC_ERROR);
+}
+
+- (void)testEncodeBypassesFrameBufferPolicyForNativeBuffers {
+  __block RTC_OBJC_TYPE(RTCVideoFrame) *capturedFrame = nil;
+
+  id encoderMock = OCMProtocolMock(@protocol(RTC_OBJC_TYPE(RTCVideoEncoder)));
+  OCMStub([encoderMock startEncodeWithSettings:[OCMArg any] numberOfCores:1])
+      .andReturn(WEBRTC_VIDEO_CODEC_OK);
+  OCMStub([encoderMock encode:[OCMArg any]
+              codecSpecificInfo:[OCMArg any]
+                     frameTypes:[OCMArg any]])
+      .andDo(^(NSInvocation *invocation) {
+        __unsafe_unretained RTC_OBJC_TYPE(RTCVideoFrame) *frameArg = nil;
+        [invocation getArgument:&frameArg atIndex:2];
+        capturedFrame = frameArg;
+      })
+      .andReturn(WEBRTC_VIDEO_CODEC_OK);
+  OCMStub([encoderMock releaseEncoder]).andReturn(WEBRTC_VIDEO_CODEC_OK);
+  OCMStub([encoderMock setBitrate:0 framerate:0]).andReturn(WEBRTC_VIDEO_CODEC_OK);
+  OCMStub([encoderMock implementationName]).andReturn(@"mock");
+
+  id encoderFactoryMock =
+      OCMProtocolMock(@protocol(RTC_OBJC_TYPE(RTCVideoEncoderFactory)));
+  RTC_OBJC_TYPE(RTCVideoCodecInfo) *supported =
+      [[RTC_OBJC_TYPE(RTCVideoCodecInfo) alloc] initWithName:@"H264"
+                                                  parameters:nil];
+  OCMStub([encoderFactoryMock supportedCodecs]).andReturn(@[ supported ]);
+  OCMStub([encoderFactoryMock implementations]).andReturn(@[ supported ]);
+  OCMStub([encoderFactoryMock createEncoder:[OCMArg any]])
+      .andReturn(encoderMock);
+
+  const auto old_policy = webrtc::ObjCGetFrameBufferPolicy();
+  webrtc::SetObjCFrameBufferPolicy(webrtc::ObjCFrameBufferPolicy::kCopyToNV12);
+
+  CVPixelBufferRef pixel_buffer = nullptr;
+  CVPixelBufferCreate(kCFAllocatorDefault,
+                      640,
+                      480,
+                      kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+                      nil,
+                      &pixel_buffer);
+  webrtc::scoped_refptr<webrtc::VideoFrameBuffer> buffer =
+      webrtc::make_ref_counted<webrtc::ObjCFrameBuffer>([[RTC_OBJC_TYPE(
+          RTCCVPixelBuffer) alloc] initWithPixelBuffer:pixel_buffer]);
+  webrtc::VideoFrame frame = webrtc::VideoFrame::Builder()
+                                 .set_video_frame_buffer(buffer)
+                                 .set_rotation(webrtc::kVideoRotation_0)
+                                 .set_timestamp_us(0)
+                                 .build();
+  std::vector<webrtc::VideoFrameType> frame_types;
+
+  @try {
+    std::unique_ptr<webrtc::VideoEncoder> encoder =
+        GetObjCEncoder(encoderFactoryMock);
+    EXPECT_EQ(encoder->Encode(frame, &frame_types), WEBRTC_VIDEO_CODEC_OK);
+    EXPECT_TRUE([capturedFrame.buffer
+        isKindOfClass:[RTC_OBJC_TYPE(RTCCVPixelBuffer) class]]);
+  } @finally {
+    webrtc::SetObjCFrameBufferPolicy(old_policy);
+    CVBufferRelease(pixel_buffer);
+  }
 }
 
 - (void)testReleaseEncodeReturnsOKOnSuccess {

@@ -100,6 +100,7 @@ class FakeAudioSendStream final : public AudioSendStream {
                           int payload_frequency,
                           int event,
                           int duration_ms) override;
+  bool GetMuted() override { return muted_; }
   void SetMuted(bool muted) override;
   AudioSendStream::Stats GetStats() const override;
   AudioSendStream::Stats GetStats(bool has_remote_tracks) const override;
