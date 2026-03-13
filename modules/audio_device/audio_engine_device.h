@@ -475,8 +475,8 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
   void StartRenderLoop();
   AVAudioEngineManualRenderingBlock render_block_;
 
-  void ConfigureVoiceProcessingNode(AVAudioInputNode* input_node,
-                                    EngineStateUpdate state);
+  int32_t ConfigureVoiceProcessingNode(AVAudioInputNode* input_node,
+                                       EngineStateUpdate& state);
 
   void ConfigureMutedSpeechActivityEventListener(AVAudioInputNode* input_node, 
                                                  EngineStateUpdate state);

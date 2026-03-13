@@ -59,6 +59,11 @@ const useconds_t kStartEngineRetryDelayMs = 100;
 const size_t kMaximumFramesPerBuffer = 3072;
 const size_t kAudioSampleSize = 2;  // Signed 16-bit integer
 
+bool IsVoiceProcessingFormatSupported(AVAudioFormat* format) {
+  return format != nil && format.sampleRate > 0 && format.channelCount > 0 &&
+         format.channelCount <= 2;
+}
+
 AudioEngineDevice::AudioEngineDevice(bool voice_processing_bypassed)
     : task_queue_factory_(CreateDefaultTaskQueueFactory()), initialized_(false) {
   LOGI() << "voice_processing_bypassed " << voice_processing_bypassed;
@@ -1725,7 +1730,10 @@ int32_t AudioEngineDevice::ApplyManualEngineState(EngineStateUpdate& state) {
     fine_audio_buffer_.reset(new FineAudioBuffer(audio_device_buffer_.get()));
 
     if (state.next.IsInputEnabled()) {
-      ConfigureVoiceProcessingNode(engine_manual_input_.inputNode, state);
+      int32_t result = ConfigureVoiceProcessingNode(engine_manual_input_.inputNode, state);
+      if (result != 0) {
+        return result;
+      }
     }
 
   } else if (state.prev.IsOutputEnabled() && !state.next.IsOutputEnabled()) {
@@ -1991,7 +1999,10 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
   // - Note: We configure input VP before output to avoid artifacts playout during configuration.
   //
   if (state.next.IsInputEnabled()) {
-    ConfigureVoiceProcessingNode(inputNode(), state);
+    int32_t result = ConfigureVoiceProcessingNode(inputNode(), state);
+    if (result != 0) {
+      return rollback(result);
+    }
   }
 
   // --------------------------------------------------------------------------------------------
@@ -2572,36 +2583,103 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
 // ----------------------------------------------------------------------------------------------------
 // Private - EngineState
 
-void AudioEngineDevice::ConfigureVoiceProcessingNode(AVAudioInputNode* input_node,
-                                                     EngineStateUpdate state) {
-  if (state.next.IsInputEnabled() && input_node.voiceProcessingEnabled != state.next.voice_processing_enabled) {
-    #if TARGET_OS_SIMULATOR
-        LOGI() << "setVoiceProcessingEnabled (input): "
-              << (state.next.voice_processing_enabled ? "YES" : "NO") << " (Ignored on Simulator)";
-    #else
-        LOGI() << "setVoiceProcessingEnabled (input): " << state.next.voice_processing_enabled ? "YES"
-                                                                                              : "NO";
-        NSError* error = nil;
-        BOOL set_vp_result = [input_node setVoiceProcessingEnabled:state.next.voice_processing_enabled
-                                                              error:&error];
-        if (!set_vp_result) {
-          NSLog(@"AudioEngineDevice setVoiceProcessingEnabled error: %@", error.localizedDescription);
-          RTC_DCHECK(set_vp_result);
-        }
-        LOGI() << "setVoiceProcessingEnabled (input) result: " << set_vp_result ? "YES" : "NO";
-    #endif
+int32_t AudioEngineDevice::ConfigureVoiceProcessingNode(AVAudioInputNode* input_node,
+                                                        EngineStateUpdate& state) {
+  if (!state.next.IsInputEnabled() ||
+      input_node.voiceProcessingEnabled == state.next.voice_processing_enabled) {
+    return 0;
+  }
 
-    if (input_node.voiceProcessingEnabled) {
-      // Always unmute vp if restart mute mode.
-      if (state.next.mute_mode == MuteMode::RestartEngine &&
-          input_node.voiceProcessingInputMuted) {
-        LOGI() << "Update mute (voice processing) unmuting vp for restart engine mode";
-        input_node.voiceProcessingInputMuted = false;
-      }
+  auto fallback_to_input_mixer = [&](NSString* reason, AVAudioFormat* format) {
+    const bool preserve_output_enabled = state.next.IsOutputEnabled();
+    const bool preserve_output_running = state.next.IsOutputRunning();
 
-      ConfigureMutedSpeechActivityEventListener(input_node, state);
+    std::ostringstream message;
+    message << "Voice processing unavailable; falling back to input mixer";
+    if (reason != nil) {
+      message << ": " << reason.UTF8String;
     }
-  } 
+    if (format != nil) {
+      message << " (sampleRate=" << format.sampleRate
+              << ", channels=" << format.channelCount << ")";
+    }
+    LOGW() << message.str();
+
+    if (preserve_output_enabled) {
+      state.next.output_enabled = true;
+    }
+    if (preserve_output_running) {
+      state.next.output_running = true;
+    }
+
+    state.next.voice_processing_enabled = false;
+    state.next.voice_processing_agc_enabled = false;
+    if (state.next.mute_mode == MuteMode::VoiceProcessing) {
+      state.next.mute_mode = MuteMode::InputMixer;
+    }
+  };
+
+  AVAudioFormat* input_format = nil;
+  if (state.next.voice_processing_enabled) {
+    input_format = [input_node outputFormatForBus:0];
+    if (!IsVoiceProcessingFormatSupported(input_format)) {
+      fallback_to_input_mixer(@"unsupported input format", input_format);
+      return 0;
+    }
+  }
+
+#if TARGET_OS_SIMULATOR
+  LOGI() << "setVoiceProcessingEnabled (input): "
+         << (state.next.voice_processing_enabled ? "YES" : "NO") << " (Ignored on Simulator)";
+#else
+  LOGI() << "setVoiceProcessingEnabled (input): "
+         << (state.next.voice_processing_enabled ? "YES" : "NO");
+
+  NSError* error = nil;
+  BOOL set_vp_result = NO;
+
+  @try {
+    set_vp_result =
+        [input_node setVoiceProcessingEnabled:state.next.voice_processing_enabled error:&error];
+  } @catch (NSException* exception) {
+    if (state.next.voice_processing_enabled) {
+      fallback_to_input_mixer(exception.reason, input_format);
+      return 0;
+    }
+
+    LOGE() << "setVoiceProcessingEnabled (input) exception: "
+           << (exception.reason ? exception.reason.UTF8String : "Unknown exception");
+    return kAudioEngineVoiceProcessingError;
+  }
+
+  if (!set_vp_result) {
+    if (state.next.voice_processing_enabled) {
+      fallback_to_input_mixer(error.localizedDescription, input_format);
+      return 0;
+    }
+
+    LOGE() << "setVoiceProcessingEnabled (input) error: "
+           << (error.localizedDescription ? error.localizedDescription.UTF8String
+                                          : "Unknown error");
+    return kAudioEngineVoiceProcessingError;
+  }
+
+  LOGI() << "setVoiceProcessingEnabled (input) result: " << (set_vp_result ? "YES" : "NO");
+#endif
+
+  if (!input_node.voiceProcessingEnabled) {
+    return 0;
+  }
+
+  // Always unmute vp if restart mute mode.
+  if (state.next.mute_mode == MuteMode::RestartEngine &&
+      input_node.voiceProcessingInputMuted) {
+    LOGI() << "Update mute (voice processing) unmuting vp for restart engine mode";
+    input_node.voiceProcessingInputMuted = false;
+  }
+
+  ConfigureMutedSpeechActivityEventListener(input_node, state);
+  return 0;
 }
 
 void AudioEngineDevice::ConfigureMutedSpeechActivityEventListener(AVAudioInputNode* input_node, 
