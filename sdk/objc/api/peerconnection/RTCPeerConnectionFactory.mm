@@ -89,10 +89,12 @@
 
 - (void)dealloc {
   // `RTCAudioDeviceModule` stores a raw pointer to this factory's worker
-  // thread. Invalidate it before threads are destroyed, then release it.
+  // thread. Release the factory's native ADM ref before invalidating the
+  // wrapper so the wrapper can tear the native module down on the worker
+  // thread instead of leaving it alive with a stale thread pointer.
+  _nativeAudioDeviceModule = nullptr;
   [_audioDeviceModule invalidateWorkerThread];
   _audioDeviceModule = nil;
-  _nativeAudioDeviceModule = nullptr;
 }
 
 - (instancetype)init {

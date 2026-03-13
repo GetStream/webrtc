@@ -15,6 +15,7 @@
  */
 
 #include <os/lock.h>
+#include <utility>
 
 #import "RTCAudioDeviceModule+Private.h"
 #import "RTCAudioDeviceModule.h"
@@ -165,6 +166,10 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
   return _native.get() != nullptr;
 }
 
+- (BOOL)isModuleReady {
+  return [self isNativeModuleReady] && [self isWorkerThreadReady];
+}
+
 - (BOOL)isAudioEngineModule {
   return _native && _native->IsAudioEngineDevice();
 }
@@ -203,7 +208,6 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (void)invalidateWorkerThread {
-  webrtc::scoped_refptr<webrtc::AudioDeviceModule> native = _native;
   webrtc::Thread *workerThread = _workerThread;
   AudioDeviceObserver *observer = _observer;
 
@@ -212,7 +216,7 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
     return;
   }
 
-  if (native == nullptr) {
+  if (_native == nullptr) {
     observer->delegate_ = nil;
     delete observer;
     _observer = nullptr;
@@ -221,9 +225,13 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
   }
 
   if (workerThread && !workerThread->IsQuitting()) {
-    workerThread->BlockingCall([native, observer] {
+    // Drop the wrapper's native ADM ref on the worker thread so teardown runs
+    // while the thread stored inside the ADM is still valid.
+    webrtc::scoped_refptr<webrtc::AudioDeviceModule> native = std::move(_native);
+    workerThread->BlockingCall([&native, observer] {
       native->SetObserver(nullptr);
       observer->delegate_ = nil;
+      native = nullptr;
     });
     delete observer;
     _observer = nullptr;
@@ -235,14 +243,23 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (NSArray<RTC_OBJC_TYPE(RTCIODevice) *> *)outputDevices {
+  if (![self isModuleReady]) {
+    return @[];
+  }
   return _workerThread->BlockingCall([self] { return [self _outputDevices]; });
 }
 
 - (NSArray<RTC_OBJC_TYPE(RTCIODevice) *> *)inputDevices {
+  if (![self isModuleReady]) {
+    return @[];
+  }
   return _workerThread->BlockingCall([self] { return [self _inputDevices]; });
 }
 
 - (RTC_OBJC_TYPE(RTCIODevice) *)outputDevice {
+  if (![self isModuleReady]) {
+    return nil;
+  }
   return _workerThread->BlockingCall([self] {
     NSArray<RTC_OBJC_TYPE(RTCIODevice) *> *devices = [self _outputDevices];
     int16_t devicesCount = (int16_t)([devices count]);
@@ -261,6 +278,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (BOOL)trySetOutputDevice:(RTC_OBJC_TYPE(RTCIODevice) *)device {
+  if (![self isModuleReady]) {
+    return NO;
+  }
   return _workerThread->BlockingCall([self, device] {
     NSUInteger index = 0;
     NSArray *devices = [self _outputDevices];
@@ -288,6 +308,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (RTC_OBJC_TYPE(RTCIODevice) *)inputDevice {
+  if (![self isModuleReady]) {
+    return nil;
+  }
   return _workerThread->BlockingCall([self] {
     NSArray<RTC_OBJC_TYPE(RTCIODevice) *> *devices = [self _inputDevices];
     int16_t devicesCount = (int16_t)([devices count]);
@@ -306,6 +329,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (BOOL)trySetInputDevice:(RTC_OBJC_TYPE(RTCIODevice) *)device {
+  if (![self isModuleReady]) {
+    return NO;
+  }
   return _workerThread->BlockingCall([self, device] {
     NSUInteger index = 0;
     NSArray *devices = [self _inputDevices];
@@ -333,47 +359,74 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (BOOL)playing {
+  if (![self isModuleReady]) {
+    return NO;
+  }
   return _workerThread->BlockingCall([self] { return _native->Playing(); });
 }
 
 - (BOOL)recording {
+  if (![self isModuleReady]) {
+    return NO;
+  }
   return _workerThread->BlockingCall([self] { return _native->Recording(); });
 }
 
 #pragma mark - Low-level access
 
 - (NSInteger)reset {
-  if (![self isNativeModuleReady] || ![self isWorkerThreadReady]) {
+  if (![self isModuleReady]) {
     return -1;
   }
   return _workerThread->BlockingCall([self] { return _native->Reset(); });
 }
 
 - (NSInteger)startPlayout {
+  if (![self isModuleReady]) {
+    return -1;
+  }
   return _workerThread->BlockingCall([self] { return _native->StartPlayout(); });
 }
 
 - (NSInteger)stopPlayout {
+  if (![self isModuleReady]) {
+    return -1;
+  }
   return _workerThread->BlockingCall([self] { return _native->StopPlayout(); });
 }
 
 - (NSInteger)initPlayout {
+  if (![self isModuleReady]) {
+    return -1;
+  }
   return _workerThread->BlockingCall([self] { return _native->InitPlayout(); });
 }
 
 - (NSInteger)startRecording {
+  if (![self isModuleReady]) {
+    return -1;
+  }
   return _workerThread->BlockingCall([self] { return _native->StartRecording(); });
 }
 
 - (NSInteger)stopRecording {
+  if (![self isModuleReady]) {
+    return -1;
+  }
   return _workerThread->BlockingCall([self] { return _native->StopRecording(); });
 }
 
 - (NSInteger)initRecording {
+  if (![self isModuleReady]) {
+    return -1;
+  }
   return _workerThread->BlockingCall([self] { return _native->InitRecording(); });
 }
 
 - (NSInteger)initAndStartRecording {
+  if (![self isModuleReady]) {
+    return -1;
+  }
   return _workerThread->BlockingCall([self] {
     webrtc::AudioEngineDevice *engine_device =
         static_cast<webrtc::AudioEngineDevice *>(_native.get());
@@ -387,18 +440,30 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (BOOL)isPlayoutInitialized {
+  if (![self isModuleReady]) {
+    return NO;
+  }
   return _workerThread->BlockingCall([self] { return _native->PlayoutIsInitialized(); });
 }
 
 - (BOOL)isRecordingInitialized {
+  if (![self isModuleReady]) {
+    return NO;
+  }
   return _workerThread->BlockingCall([self] { return _native->RecordingIsInitialized(); });
 }
 
 - (BOOL)isPlaying {
+  if (![self isModuleReady]) {
+    return NO;
+  }
   return _workerThread->BlockingCall([self] { return _native->Playing(); });
 }
 
 - (BOOL)isRecording {
+  if (![self isModuleReady]) {
+    return NO;
+  }
   return _workerThread->BlockingCall([self] { return _native->Recording(); });
 }
 
@@ -415,6 +480,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (BOOL)isMicrophoneMuted {
+  if (![self isModuleReady]) {
+    return NO;
+  }
   return _workerThread->BlockingCall([self] {
     bool value = false;
     return _native->MicrophoneMute(&value) == 0 ? value : NO;
@@ -422,6 +490,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (NSInteger)setMicrophoneMuted:(BOOL)muted {
+  if (![self isModuleReady]) {
+    return -1;
+  }
   return _workerThread->BlockingCall([self, muted] { return _native->SetMicrophoneMute(muted); });
 }
 
@@ -688,6 +759,9 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 }
 
 - (BOOL)prefersStereoPlayout {
+  if (![self isNativeModuleReady] || ![self isWorkerThreadReady] || ![self isAudioEngineModule]) {
+    return NO;
+  }
   webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
   if (module == nullptr) return NO;
 
