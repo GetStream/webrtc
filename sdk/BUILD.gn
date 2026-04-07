@@ -676,17 +676,21 @@ if (is_ios || is_mac) {
       ]
       configs += [ "..:common_objc" ]
       public_configs = [ ":common_config_objc" ]
-      # Stream-only: add shared Metal backend as a separate target.
-      if (stream_enable_rendering_backend) {
+      # Stream-only: add shared Metal backend as a separate target (iOS only).
+      # visionOS (xrdevice/xrsimulator) is excluded -- not validated there yet.
+      if (stream_enable_rendering_backend && is_ios &&
+          !(target_environment == "xrsimulator" ||
+            target_environment == "xrdevice")) {
         defines = [ "RTC_STREAM_RENDERING_BACKEND" ]
         deps += [ ":stream_shared_metal_objc" ]
       }
     }
 
     # Stream-only: iOS shared Metal implementation isolated here.
-    # XR (visionOS) is excluded until the shared backend is validated there.
+    # visionOS (xrdevice/xrsimulator) is excluded -- not validated there yet.
     if (stream_enable_rendering_backend && is_ios &&
-        !(target_environment == "xrsimulator" || target_environment == "xrdevice")) {
+        !(target_environment == "xrsimulator" ||
+          target_environment == "xrdevice")) {
       rtc_library("stream_shared_metal_objc") {
         visibility = [ "*" ]
         sources = [
