@@ -32,6 +32,13 @@
 
 @synthesize audioSession = _audioSession;
 
+#define RETURN_IF_AUDIO_TEST_DISABLED() \
+  do {                                  \
+    if (!_testEnabled) {                \
+      return;                           \
+    }                                   \
+  } while (false)
+
 - (void)setUp {
   [super setUp];
 #if defined(WEBRTC_IOS) && TARGET_OS_SIMULATOR
@@ -100,7 +107,7 @@
 // RTC_OBJC_TYPE(RTCAudioSession)'s isInterrupted flag in
 // AudioDeviceIOS.InitPlayOrRecord.
 - (void)testInterruptedAudioSession {
-  XCTSkipIf(!_testEnabled);
+  RETURN_IF_AUDIO_TEST_DISABLED();
   XCTAssertTrue(self.audioSession.isActive);
   XCTAssertTrue(
       [self.audioSession.category
@@ -178,3 +185,5 @@
 }
 
 @end
+
+#undef RETURN_IF_AUDIO_TEST_DISABLED

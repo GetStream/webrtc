@@ -23,7 +23,9 @@
 #include "api/make_ref_counted.h"
 #include "api/task_queue/task_queue_factory.h"
 #include "common_audio/wav_file.h"
+#if defined(WEBRTC_INCLUDE_INTERNAL_AUDIO_DEVICE)
 #include "modules/audio_device/audio_device_impl.h"
+#endif
 #include "modules/audio_device/include/audio_device_default.h"
 #include "modules/audio_device/test_audio_device_impl.h"
 #include "rtc_base/buffer.h"
@@ -45,6 +47,7 @@ namespace {
 constexpr int kFrameLengthUs = 10000;
 constexpr int kFramesPerSecond = kNumMicrosecsPerSec / kFrameLengthUs;
 
+#if defined(WEBRTC_INCLUDE_INTERNAL_AUDIO_DEVICE)
 class TestAudioDeviceModuleImpl : public AudioDeviceModuleImpl {
  public:
   TestAudioDeviceModuleImpl(
@@ -63,6 +66,342 @@ class TestAudioDeviceModuleImpl : public AudioDeviceModuleImpl {
 
   ~TestAudioDeviceModuleImpl() override = default;
 };
+#else
+class TestAudioDeviceModuleImpl : public AudioDeviceModuleForTest {
+ public:
+  TestAudioDeviceModuleImpl(
+      TaskQueueFactory* task_queue_factory,
+      std::unique_ptr<TestAudioDeviceModule::Capturer> capturer,
+      std::unique_ptr<TestAudioDeviceModule::Renderer> renderer,
+      float speed = 1)
+      : audio_device_(std::make_unique<TestAudioDevice>(
+            task_queue_factory,
+            std::move(capturer),
+            std::move(renderer),
+            speed)),
+        audio_device_buffer_(task_queue_factory,
+                             /*create_detached=*/true) {
+    audio_device_->AttachAudioBuffer(&audio_device_buffer_);
+  }
+
+  ~TestAudioDeviceModuleImpl() override = default;
+
+  int RestartPlayoutInternally() override { return -1; }
+  int RestartRecordingInternally() override { return -1; }
+  int SetPlayoutSampleRate(uint32_t sample_rate) override {
+    return audio_device_buffer_.SetPlayoutSampleRate(sample_rate);
+  }
+  int SetRecordingSampleRate(uint32_t sample_rate) override {
+    return audio_device_buffer_.SetRecordingSampleRate(sample_rate);
+  }
+
+  int32_t ActiveAudioLayer(AudioLayer* audio_layer) const override {
+    AudioLayer layer;
+    const int32_t ret = audio_device_->ActiveAudioLayer(layer);
+    if (audio_layer) {
+      *audio_layer = layer;
+    }
+    return ret;
+  }
+
+  int32_t RegisterAudioCallback(AudioTransport* audio_callback) override {
+    return audio_device_buffer_.RegisterAudioCallback(audio_callback);
+  }
+
+  int32_t Init() override {
+    return audio_device_->Init() == AudioDeviceGeneric::InitStatus::OK ? 0 : -1;
+  }
+  int32_t Terminate() override { return audio_device_->Terminate(); }
+  bool Initialized() const override { return audio_device_->Initialized(); }
+
+  int16_t PlayoutDevices() override { return audio_device_->PlayoutDevices(); }
+  int16_t RecordingDevices() override {
+    return audio_device_->RecordingDevices();
+  }
+  int32_t PlayoutDeviceName(uint16_t index,
+                            char name[kAdmMaxDeviceNameSize],
+                            char guid[kAdmMaxGuidSize]) override {
+    return audio_device_->PlayoutDeviceName(index, name, guid);
+  }
+  int32_t RecordingDeviceName(uint16_t index,
+                              char name[kAdmMaxDeviceNameSize],
+                              char guid[kAdmMaxGuidSize]) override {
+    return audio_device_->RecordingDeviceName(index, name, guid);
+  }
+
+  int32_t SetPlayoutDevice(uint16_t index) override {
+    return audio_device_->SetPlayoutDevice(index);
+  }
+  int32_t SetPlayoutDevice(WindowsDeviceType device) override {
+    return audio_device_->SetPlayoutDevice(device);
+  }
+  int32_t SetRecordingDevice(uint16_t index) override {
+    return audio_device_->SetRecordingDevice(index);
+  }
+  int32_t SetRecordingDevice(WindowsDeviceType device) override {
+    return audio_device_->SetRecordingDevice(device);
+  }
+
+  int32_t PlayoutIsAvailable(bool* available) override {
+    bool value = false;
+    const int32_t ret = audio_device_->PlayoutIsAvailable(value);
+    if (available) {
+      *available = value;
+    }
+    return ret;
+  }
+  int32_t InitPlayout() override { return audio_device_->InitPlayout(); }
+  bool PlayoutIsInitialized() const override {
+    return audio_device_->PlayoutIsInitialized();
+  }
+  int32_t RecordingIsAvailable(bool* available) override {
+    bool value = false;
+    const int32_t ret = audio_device_->RecordingIsAvailable(value);
+    if (available) {
+      *available = value;
+    }
+    return ret;
+  }
+  int32_t InitRecording() override { return audio_device_->InitRecording(); }
+  bool RecordingIsInitialized() const override {
+    return audio_device_->RecordingIsInitialized();
+  }
+
+  int32_t StartPlayout() override {
+    audio_device_buffer_.StartPlayout();
+    return audio_device_->StartPlayout();
+  }
+  int32_t StopPlayout() override {
+    audio_device_buffer_.StopPlayout();
+    return audio_device_->StopPlayout();
+  }
+  bool Playing() const override { return audio_device_->Playing(); }
+  int32_t StartRecording() override {
+    audio_device_buffer_.StartRecording();
+    return audio_device_->StartRecording();
+  }
+  int32_t StopRecording() override {
+    audio_device_buffer_.StopRecording();
+    return audio_device_->StopRecording();
+  }
+  bool Recording() const override { return audio_device_->Recording(); }
+
+  int32_t InitSpeaker() override { return audio_device_->InitSpeaker(); }
+  bool SpeakerIsInitialized() const override {
+    return audio_device_->SpeakerIsInitialized();
+  }
+  int32_t InitMicrophone() override { return audio_device_->InitMicrophone(); }
+  bool MicrophoneIsInitialized() const override {
+    return audio_device_->MicrophoneIsInitialized();
+  }
+
+  int32_t SpeakerVolumeIsAvailable(bool* available) override {
+    bool value = false;
+    const int32_t ret = audio_device_->SpeakerVolumeIsAvailable(value);
+    if (available) {
+      *available = value;
+    }
+    return ret;
+  }
+  int32_t SetSpeakerVolume(uint32_t volume) override {
+    return audio_device_->SetSpeakerVolume(volume);
+  }
+  int32_t SpeakerVolume(uint32_t* volume) const override {
+    uint32_t value = 0;
+    const int32_t ret = audio_device_->SpeakerVolume(value);
+    if (volume) {
+      *volume = value;
+    }
+    return ret;
+  }
+  int32_t MaxSpeakerVolume(uint32_t* max_volume) const override {
+    uint32_t value = 0;
+    const int32_t ret = audio_device_->MaxSpeakerVolume(value);
+    if (max_volume) {
+      *max_volume = value;
+    }
+    return ret;
+  }
+  int32_t MinSpeakerVolume(uint32_t* min_volume) const override {
+    uint32_t value = 0;
+    const int32_t ret = audio_device_->MinSpeakerVolume(value);
+    if (min_volume) {
+      *min_volume = value;
+    }
+    return ret;
+  }
+
+  int32_t MicrophoneVolumeIsAvailable(bool* available) override {
+    bool value = false;
+    const int32_t ret = audio_device_->MicrophoneVolumeIsAvailable(value);
+    if (available) {
+      *available = value;
+    }
+    return ret;
+  }
+  int32_t SetMicrophoneVolume(uint32_t volume) override {
+    return audio_device_->SetMicrophoneVolume(volume);
+  }
+  int32_t MicrophoneVolume(uint32_t* volume) const override {
+    uint32_t value = 0;
+    const int32_t ret = audio_device_->MicrophoneVolume(value);
+    if (volume) {
+      *volume = value;
+    }
+    return ret;
+  }
+  int32_t MaxMicrophoneVolume(uint32_t* max_volume) const override {
+    uint32_t value = 0;
+    const int32_t ret = audio_device_->MaxMicrophoneVolume(value);
+    if (max_volume) {
+      *max_volume = value;
+    }
+    return ret;
+  }
+  int32_t MinMicrophoneVolume(uint32_t* min_volume) const override {
+    uint32_t value = 0;
+    const int32_t ret = audio_device_->MinMicrophoneVolume(value);
+    if (min_volume) {
+      *min_volume = value;
+    }
+    return ret;
+  }
+
+  int32_t SpeakerMuteIsAvailable(bool* available) override {
+    bool value = false;
+    const int32_t ret = audio_device_->SpeakerMuteIsAvailable(value);
+    if (available) {
+      *available = value;
+    }
+    return ret;
+  }
+  int32_t SetSpeakerMute(bool enable) override {
+    return audio_device_->SetSpeakerMute(enable);
+  }
+  int32_t SpeakerMute(bool* enabled) const override {
+    bool value = false;
+    const int32_t ret = audio_device_->SpeakerMute(value);
+    if (enabled) {
+      *enabled = value;
+    }
+    return ret;
+  }
+
+  int32_t MicrophoneMuteIsAvailable(bool* available) override {
+    bool value = false;
+    const int32_t ret = audio_device_->MicrophoneMuteIsAvailable(value);
+    if (available) {
+      *available = value;
+    }
+    return ret;
+  }
+  int32_t SetMicrophoneMute(bool enable) override {
+    return audio_device_->SetMicrophoneMute(enable);
+  }
+  int32_t MicrophoneMute(bool* enabled) const override {
+    bool value = false;
+    const int32_t ret = audio_device_->MicrophoneMute(value);
+    if (enabled) {
+      *enabled = value;
+    }
+    return ret;
+  }
+
+  int32_t StereoPlayoutIsAvailable(bool* available) const override {
+    bool value = false;
+    const int32_t ret = audio_device_->StereoPlayoutIsAvailable(value);
+    if (available) {
+      *available = value;
+    }
+    return ret;
+  }
+  int32_t SetStereoPlayout(bool enable) override {
+    return audio_device_->SetStereoPlayout(enable);
+  }
+  int32_t StereoPlayout(bool* enabled) const override {
+    bool value = false;
+    const int32_t ret = audio_device_->StereoPlayout(value);
+    if (enabled) {
+      *enabled = value;
+    }
+    return ret;
+  }
+  int32_t StereoRecordingIsAvailable(bool* available) const override {
+    bool value = false;
+    const int32_t ret = audio_device_->StereoRecordingIsAvailable(value);
+    if (available) {
+      *available = value;
+    }
+    return ret;
+  }
+  int32_t SetStereoRecording(bool enable) override {
+    return audio_device_->SetStereoRecording(enable);
+  }
+  int32_t StereoRecording(bool* enabled) const override {
+    bool value = false;
+    const int32_t ret = audio_device_->StereoRecording(value);
+    if (enabled) {
+      *enabled = value;
+    }
+    return ret;
+  }
+
+  int32_t PlayoutDelay(uint16_t* delay_ms) const override {
+    uint16_t value = 0;
+    const int32_t ret = audio_device_->PlayoutDelay(value);
+    if (delay_ms) {
+      *delay_ms = value;
+    }
+    return ret;
+  }
+
+  bool BuiltInAECIsAvailable() const override {
+    return audio_device_->BuiltInAECIsAvailable();
+  }
+  int32_t EnableBuiltInAEC(bool enable) override {
+    return audio_device_->EnableBuiltInAEC(enable);
+  }
+  bool BuiltInAGCIsAvailable() const override {
+    return audio_device_->BuiltInAGCIsAvailable();
+  }
+  int32_t EnableBuiltInAGC(bool enable) override {
+    return audio_device_->EnableBuiltInAGC(enable);
+  }
+  bool BuiltInNSIsAvailable() const override {
+    return audio_device_->BuiltInNSIsAvailable();
+  }
+  int32_t EnableBuiltInNS(bool enable) override {
+    return audio_device_->EnableBuiltInNS(enable);
+  }
+
+  int32_t GetPlayoutUnderrunCount() const override {
+    return audio_device_->GetPlayoutUnderrunCount();
+  }
+
+#if defined(WEBRTC_IOS)
+  int GetPlayoutAudioParameters(AudioParameters* params) const override {
+    return audio_device_->GetPlayoutAudioParameters(params);
+  }
+  int GetRecordAudioParameters(AudioParameters* params) const override {
+    return audio_device_->GetRecordAudioParameters(params);
+  }
+#endif  // WEBRTC_IOS
+
+  int32_t SetObserver(AudioDeviceObserver* observer) override {
+    return audio_device_->SetObserver(observer);
+  }
+  int32_t GetPlayoutDevice() const override {
+    return audio_device_->GetPlayoutDevice();
+  }
+  int32_t GetRecordingDevice() const override {
+    return audio_device_->GetRecordingDevice();
+  }
+
+ private:
+  std::unique_ptr<TestAudioDevice> audio_device_;
+  AudioDeviceBuffer audio_device_buffer_;
+};
+#endif
 
 // A fake capturer that generates pulses with random samples between
 // -max_amplitude and +max_amplitude.
@@ -452,6 +791,7 @@ scoped_refptr<AudioDeviceModule> TestAudioDeviceModule::Create(
   auto audio_device = make_ref_counted<TestAudioDeviceModuleImpl>(
       task_queue_factory, std::move(capturer), std::move(renderer), speed);
 
+#if defined(WEBRTC_INCLUDE_INTERNAL_AUDIO_DEVICE)
   // Ensure that the current platform is supported.
   if (audio_device->CheckPlatform() == -1) {
     return nullptr;
@@ -467,6 +807,7 @@ scoped_refptr<AudioDeviceModule> TestAudioDeviceModule::Create(
   if (audio_device->AttachAudioBuffer() == -1) {
     return nullptr;
   }
+#endif
 
   return audio_device;
 }

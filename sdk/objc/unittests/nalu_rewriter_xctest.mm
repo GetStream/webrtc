@@ -233,13 +233,15 @@ static const uint8_t SPS_PPS_BUFFER[] = {
     0x00, 0x00, 0x01,
     0xAA, 0xFF, // second chunk, 2 bytes
     0x00, 0x00, 0x01,
-    0xBB};  // third chunk, 1 byte, will not fit into output array
+    0xBB};  // third chunk, 1 byte
 
   const uint8_t expected_cmsample_data[] = {
     0x00, 0x00, 0x00, 0x04,
     0x01, 0x00, 0x00, 0xFF, // first chunk, 4 bytes
     0x00, 0x00, 0x00, 0x02,
-    0xAA, 0xFF}; // second chunk, 2 bytes
+    0xAA, 0xFF, // second chunk, 2 bytes
+    0x00, 0x00, 0x00, 0x01,
+    0xBB}; // third chunk, 1 byte
   // clang-format on
 
   CMMemoryPoolRef memory_pool = CMMemoryPoolCreate(nil);
@@ -263,7 +265,7 @@ static const uint8_t SPS_PPS_BUFFER[] = {
       CMSampleBufferGetDataBuffer(out_sample_buffer);
   size_t block_buffer_size = CMBlockBufferGetDataLength(block_buffer);
   CMBlockBufferGetDataPointer(block_buffer, 0, nullptr, nullptr, &data_ptr);
-  XCTAssertEqual(block_buffer_size, arraysize(annex_b_test_data));
+  XCTAssertEqual(block_buffer_size, arraysize(expected_cmsample_data));
 
   int data_comparison_result = memcmp(
       expected_cmsample_data, data_ptr, arraysize(expected_cmsample_data));

@@ -99,6 +99,10 @@ void FakeAudioSendStream::SetMuted(bool muted) {
   muted_ = muted;
 }
 
+bool FakeAudioSendStream::GetMuted() {
+  return muted_;
+}
+
 AudioSendStream::Stats FakeAudioSendStream::GetStats() const {
   return stats_;
 }

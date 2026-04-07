@@ -71,7 +71,11 @@ using ios::CheckAndLogError;
 #if !defined(NDEBUG)
 // Returns true when the code runs on a device simulator.
 static bool DeviceIsSimulator() {
-  return ios::GetDeviceName() == "x86_64";
+#if TARGET_IPHONE_SIMULATOR
+  return true;
+#else
+  return false;
+#endif
 }
 
 // Helper method that logs essential device information strings.

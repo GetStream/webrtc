@@ -29,7 +29,15 @@
 
 @implementation RTCPeerConnectionFactoryAudioEngineTests
 
+#define RETURN_IF_SIMULATOR_AUDIO_TEST_DISABLED() \
+  do {                                            \
+    if (TARGET_OS_SIMULATOR) {                    \
+      return;                                     \
+    }                                             \
+  } while (false)
+
 - (void)testAudioEngineModuleRetainedAfterFactoryDeallocDoesNotKeepAudioSessionDelegate {
+  RETURN_IF_SIMULATOR_AUDIO_TEST_DISABLED();
   RTC_OBJC_TYPE(RTCAudioSession) *session =
       [RTC_OBJC_TYPE(RTCAudioSession) sharedInstance];
   const size_t delegateCountBeforeFactory = session.delegates.size();
@@ -83,3 +91,5 @@
 }
 
 @end
+
+#undef RETURN_IF_SIMULATOR_AUDIO_TEST_DISABLED

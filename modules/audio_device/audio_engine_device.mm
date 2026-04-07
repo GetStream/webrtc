@@ -2613,8 +2613,8 @@ void AudioEngineDevice::ConfigureMutedSpeechActivityEventListener(AVAudioInputNo
     return;
   }
 
-  if (@available(iOS 17.0, macCatalyst 17.0, macOS 14.0, tvOS 17.0, visionOS 1.0, *)) {
-    // Muted talker detection.
+#if TARGET_OS_IPHONE
+  if (@available(iOS 17.0, macCatalyst 17.0, tvOS 17.0, visionOS 1.0, *)) {
     AVAudioSession* session = [AVAudioSession sharedInstance];
     NSString* mode = session.mode;
     static NSSet<NSString*>* const kMonoModes = [NSSet setWithArray:@[
@@ -2655,6 +2655,7 @@ void AudioEngineDevice::ConfigureMutedSpeechActivityEventListener(AVAudioInputNo
       } 
     }
   }
+#endif
 }
 
 void AudioEngineDevice::StartRenderLoop() {
