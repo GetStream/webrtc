@@ -1,0 +1,145 @@
+name: Build, Test & Release
+
+on:
+  push:
+    tags:
+      - '*'
+  workflow_dispatch:
+    inputs:
+      skip_ios_tests:
+        description: 'Skip iOS simulator tests'
+        type: boolean
+        default: false
+      skip_macos_tests:
+        description: 'Skip macOS host tests'
+        type: boolean
+        default: false
+      version:
+        description: 'Release version name (e.g. 114.5735.10)'
+        type: string
+        required: true
+      prerelease:
+        description: 'Mark as pre-release'
+        type: boolean
+        default: false
+      create_release:
+        description: 'Create a GitHub release'
+        type: boolean
+        default: true
+      maccatalyst_support:
+        description: 'Include Mac Catalyst slices'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  WEBRTC_SRC: ${{ github.workspace }}/webrtc_build/src
+  PIPELINE_DIR: ${{ github.workspace }}/release-pipeline
+
+jobs:
+  build-test-release:
+    name: Build, Test & Release
+    runs-on: macos-14
+    timeout-minutes: 480
+    steps:
+      # ── Checkout ────────────────────────────────────────────────────
+      - name: Checkout WebRTC
+        uses: actions/checkout@v4
+        with:
+          path: webrtc_build/src
+
+      - name: Checkout Release Pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: GetStream/stream-webrtc-release-pipeline
+          token: ${{ secrets.STREAM_PIPELINE_TOKEN }}
+          path: release-pipeline
+
+      # ── Tool Setup ─────────────────────────────────────────────────
+      - name: Setup depot_tools
+        run: |
+          git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$HOME/depot_tools"
+          echo "$HOME/depot_tools" >> "$GITHUB_PATH"
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.1'
+          bundler-cache: true
+          working-directory: release-pipeline
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.2.app || sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+
+      # ── Build XCFramework (syncs gclient internally) ───────────────
+      - name: Build XCFramework
+        working-directory: release-pipeline
+        run: |
+          bundle exec fastlane ios build \
+            root:"$WEBRTC_SRC" \
+            verbose:true \
+            maccatalyst_support:${{ inputs.maccatalyst_support || true }} \
+            prepare_signing_skip:false \
+            sign_product_skip:true \
+            verify_signatures_skip:true \
+            build_product_skip_licenses:true
+
+      # ── Tests ───────────────────────────────────────────────────────
+      - name: Run iOS Tests
+        if: github.event_name == 'push' || !inputs.skip_ios_tests
+        working-directory: release-pipeline
+        run: |
+          bundle exec fastlane ios test \
+            root:"$WEBRTC_SRC" \
+            verbose:true
+
+      - name: Run macOS Tests
+        if: github.event_name == 'push' || !inputs.skip_macos_tests
+        working-directory: release-pipeline
+        run: |
+          bundle exec fastlane macos test \
+            root:"$WEBRTC_SRC" \
+            verbose:true
+
+      # ── Release ─────────────────────────────────────────────────────
+      - name: Determine release tag
+        id: release-tag
+        run: |
+          if [[ -n "${{ inputs.version }}" ]]; then
+            echo "tag_name=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "tag_name=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            SHORT_SHA="${{ github.sha }}"
+            echo "tag_name=v$(date +%Y%m%d%H%M%S)-${SHORT_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute checksum
+        id: checksum
+        run: |
+          ZIP_PATH="$WEBRTC_SRC/.products/StreamWebRTC.zip"
+          CHECKSUM=$(swift package compute-checksum "$ZIP_PATH")
+          echo "sha256=$CHECKSUM" >> "$GITHUB_OUTPUT"
+          echo "**StreamWebRTC.zip checksum:** \`$CHECKSUM\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create GitHub Release
+        if: github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.create_release)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release-tag.outputs.tag_name }}
+          name: ${{ steps.release-tag.outputs.tag_name }}
+          prerelease: ${{ inputs.prerelease || false }}
+          body: |
+            ## StreamWebRTC XCFramework
+
+            **Checksum (SHA-256):** `${{ steps.checksum.outputs.sha256 }}`
+
+            ### Included slices
+            - iOS device (arm64)
+            - iOS simulator (arm64, x86_64)
+            ${{ inputs.maccatalyst_support != false && '- Mac Catalyst (arm64, x86_64)' || '' }}
+          files: |
+            ${{ env.WEBRTC_SRC }}/.products/StreamWebRTC.zip
+          generate_release_notes: true
