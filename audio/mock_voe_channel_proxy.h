@@ -173,6 +173,7 @@ class MockChannelSend : public voe::ChannelSendInterface {
               OnBitrateAllocation,
               (BitrateAllocationUpdate update),
               (override));
+  MOCK_METHOD(bool, InputMute, (), (const, override));
   MOCK_METHOD(void, SetInputMute, (bool muted), (override));
   MOCK_METHOD(void,
               ReceivedRTCPPacket,

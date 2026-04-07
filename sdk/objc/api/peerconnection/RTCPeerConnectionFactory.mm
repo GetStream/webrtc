@@ -52,7 +52,9 @@
 #import "components/video_codec/RTCVideoEncoderFactoryH264.h"
 #include "media/base/media_constants.h"
 #include "modules/audio_device/include/audio_device.h"
+#if defined(WEBRTC_INCLUDE_INTERNAL_AUDIO_DEVICE)
 #include "modules/audio_device/audio_engine_device.h"
+#endif
 #include "modules/audio_processing/include/audio_processing.h"
 
 #include "sdk/objc/native/api/objc_audio_device_module.h"
@@ -345,6 +347,7 @@
 
     if (audioDeviceModule != nullptr) {
       _nativeAudioDeviceModule = audioDeviceModule;
+#if defined(WEBRTC_INCLUDE_INTERNAL_AUDIO_DEVICE)
     } else if (audioDeviceModuleType == RTC_OBJC_TYPE(RTCAudioDeviceModuleTypeAudioEngine)) {
       _nativeAudioDeviceModule = _workerThread->BlockingCall([&bypassVoiceProcessing]() {
         return webrtc::make_ref_counted<webrtc::AudioEngineDevice>(bypassVoiceProcessing == YES);
@@ -357,6 +360,11 @@
                 dependencies.task_queue_factory.get(), bypassVoiceProcessing == YES);
           });
     }
+#else
+    } else {
+      _nativeAudioDeviceModule = nullptr;
+    }
+#endif
 
     _audioDeviceModule = [[RTC_OBJC_TYPE(RTCAudioDeviceModule) alloc] initWithNativeModule: _nativeAudioDeviceModule
                                                        workerThread: _workerThread.get()];
