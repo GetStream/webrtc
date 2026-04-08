@@ -313,6 +313,7 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
   std::optional<VideoFrameInfo> last_frame_info_ RTC_GUARDED_BY(encoder_queue_);
   int crop_width_ RTC_GUARDED_BY(encoder_queue_) = 0;
   int crop_height_ RTC_GUARDED_BY(encoder_queue_) = 0;
+  size_t prev_num_active_simulcast_layers_ RTC_GUARDED_BY(encoder_queue_) = 0;
   std::optional<uint32_t> encoder_target_bitrate_bps_
       RTC_GUARDED_BY(encoder_queue_);
   size_t max_data_payload_length_ RTC_GUARDED_BY(encoder_queue_) = 0;

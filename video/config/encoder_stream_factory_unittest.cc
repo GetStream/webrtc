@@ -340,12 +340,68 @@ TEST(EncoderStreamFactory, ReducesStreamCountWhenResolutionIsLow) {
       SizeIs(1));
 }
 
-TEST(EncoderStreamFactory, ReducesStreamCountDownToFirstActiveStream) {
+TEST(EncoderStreamFactory, KeepsStreamCountToIncludeHighestActiveLayer) {
   EXPECT_THAT(
       CreateStreamResolutions({.number_of_streams = 3,
                                .resolution = {.width = 100, .height = 100},
                                .first_active_layer_idx = 1}),
-      SizeIs(2));
+      SizeIs(3));
+}
+
+TEST(EncoderStreamFactory, KeepsAllStreamsForSparseActivePattern) {
+  ExplicitKeyValueConfig field_trials("");
+  VideoEncoderConfig encoder_config;
+  encoder_config.codec_type = VideoCodecType::kVideoCodecVP8;
+  encoder_config.number_of_streams = 3;
+  encoder_config.simulcast_layers.resize(3);
+  encoder_config.simulcast_layers[0].active = true;
+  encoder_config.simulcast_layers[1].active = false;
+  encoder_config.simulcast_layers[2].active = true;
+  auto streams = CreateEncoderStreams(
+      field_trials, {.width = 100, .height = 100}, encoder_config);
+  EXPECT_THAT(streams, SizeIs(3));
+}
+
+TEST(EncoderStreamFactory, KeepsStreamsForHighAndLowActive) {
+  ExplicitKeyValueConfig field_trials("");
+  VideoEncoderConfig encoder_config;
+  encoder_config.codec_type = VideoCodecType::kVideoCodecVP8;
+  encoder_config.number_of_streams = 3;
+  encoder_config.simulcast_layers.resize(3);
+  encoder_config.simulcast_layers[0].active = true;
+  encoder_config.simulcast_layers[1].active = true;
+  encoder_config.simulcast_layers[2].active = false;
+  auto streams = CreateEncoderStreams(
+      field_trials, {.width = 100, .height = 100}, encoder_config);
+  EXPECT_THAT(streams, SizeIs(2));
+}
+
+TEST(EncoderStreamFactory, KeepsStreamsForOnlyHighestActive) {
+  ExplicitKeyValueConfig field_trials("");
+  VideoEncoderConfig encoder_config;
+  encoder_config.codec_type = VideoCodecType::kVideoCodecVP8;
+  encoder_config.number_of_streams = 3;
+  encoder_config.simulcast_layers.resize(3);
+  encoder_config.simulcast_layers[0].active = false;
+  encoder_config.simulcast_layers[1].active = false;
+  encoder_config.simulcast_layers[2].active = true;
+  auto streams = CreateEncoderStreams(
+      field_trials, {.width = 100, .height = 100}, encoder_config);
+  EXPECT_THAT(streams, SizeIs(3));
+}
+
+TEST(EncoderStreamFactory, ReducesToOneStreamWhenOnlyLowestActive) {
+  ExplicitKeyValueConfig field_trials("");
+  VideoEncoderConfig encoder_config;
+  encoder_config.codec_type = VideoCodecType::kVideoCodecVP8;
+  encoder_config.number_of_streams = 3;
+  encoder_config.simulcast_layers.resize(3);
+  encoder_config.simulcast_layers[0].active = true;
+  encoder_config.simulcast_layers[1].active = false;
+  encoder_config.simulcast_layers[2].active = false;
+  auto streams = CreateEncoderStreams(
+      field_trials, {.width = 100, .height = 100}, encoder_config);
+  EXPECT_THAT(streams, SizeIs(1));
 }
 
 TEST(EncoderStreamFactory,

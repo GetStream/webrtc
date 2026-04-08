@@ -1059,6 +1059,72 @@ void VideoStreamEncoder::ReconfigureEncoder() {
   AlignmentAdjuster::GetAlignmentAndMaybeAdjustScaleFactors(
       encoder_->GetEncoderInfo(), &encoder_config_, std::nullopt);
 
+  size_t num_active_layers = 0;
+  for (size_t i = 0; i < encoder_config_.number_of_streams; ++i) {
+    if (encoder_config_.simulcast_layers[i].active) {
+      ++num_active_layers;
+    }
+  }
+
+  // Determine whether we are effectively in simulcast mode based on the
+  // number of *active* layers, not the number of configured streams. The
+  // encoder config may always specify 3 streams, but the SFU controls how
+  // many are active. A 1:1 call typically has only the highest layer active
+  // (single-stream), while a group call activates multiple layers (simulcast).
+  //
+  // This distinction drives whether the quality scaler should be running:
+  //  - Single active layer: quality scaler is enabled so the encoder can
+  //    adapt resolution based on QP/bandwidth on constrained networks.
+  //  - Multiple active layers (simulcast): quality scaler is disabled because
+  //    adaptation is handled by the SFU activating/deactivating layers.
+  //    Keeping the quality scaler on during simulcast would scale down the
+  //    input resolution, causing all simulcast layer dimensions to be
+  //    recomputed from the degraded input (e.g. f=268x480 instead of
+  //    f=720x1280), which defeats the purpose of simulcast.
+  const bool is_simulcast = num_active_layers > 1;
+  const bool was_simulcast = prev_num_active_simulcast_layers_ > 1;
+
+  RTC_LOG(LS_INFO) << "[VSE] Simulcast state: active_layers="
+                   << num_active_layers
+                   << ", prev_active_layers="
+                   << prev_num_active_simulcast_layers_
+                   << ", streams=" << encoder_config_.number_of_streams
+                   << ", is_simulcast=" << is_simulcast
+                   << ", was_simulcast=" << was_simulcast;
+
+  if (is_simulcast && !was_simulcast) {
+    // Transition to simulcast (e.g. 3rd participant joined): disable the
+    // quality scaler and clear any accumulated resolution restrictions so
+    // that the video source delivers full-resolution frames. The simulcast
+    // layer dimensions will then be computed from the un-degraded capture
+    // resolution (e.g. q=180x320, h=360x640, f=720x1280 for 720p input).
+    // The guard on prev > 0 avoids clearing on the very first encoder
+    // configuration where no restrictions exist yet.
+    RTC_LOG(LS_INFO) << "[VSE] Transition -> simulcast: disabling quality "
+                        "scaler, clearing accumulated restrictions.";
+    stream_resource_manager_.SetSimulcastActive(true);
+    if (prev_num_active_simulcast_layers_ > 0) {
+      stream_resource_manager_.ResetAdaptationsForSimulcastChange();
+    }
+  } else if (!is_simulcast && was_simulcast) {
+    // Transition from simulcast back to single stream (e.g. 3rd participant
+    // left): re-enable the quality scaler. ConfigureQualityScaler() called
+    // later in this function will start the scaler from a clean state (zero
+    // downgrades) since restrictions were cleared on the earlier transition.
+    RTC_LOG(LS_INFO) << "[VSE] Transition -> single stream: quality scaler "
+                        "will be re-enabled.";
+    stream_resource_manager_.SetSimulcastActive(false);
+  } else if (is_simulcast) {
+    RTC_LOG(LS_INFO) << "[VSE] Staying in simulcast: quality scaler remains "
+                        "disabled.";
+    stream_resource_manager_.SetSimulcastActive(true);
+  } else {
+    RTC_LOG(LS_INFO) << "[VSE] Staying in single stream: quality scaler "
+                        "remains enabled.";
+  }
+
+  prev_num_active_simulcast_layers_ = num_active_layers;
+
   std::vector<VideoStream> streams;
   if (encoder_config_.video_stream_factory) {
     // Note: only tests set their own EncoderStreamFactory...
