@@ -109,6 +109,21 @@ class VideoStreamEncoderResourceManager
   // TODO(https://crbug.com/webrtc/11338): This can be made private if we
   // configure on SetDegredationPreference and SetEncoderSettings.
   void ConfigureQualityScaler(const VideoEncoder::EncoderInfo& encoder_info);
+
+  // Controls whether the quality scaler is suppressed due to simulcast.
+  // When multiple simulcast layers are active, resolution-based quality
+  // adaptation must be disabled because the quality scaler would shrink the
+  // input resolution, causing all simulcast layer dimensions to be derived
+  // from the degraded input rather than the original capture resolution.
+  // In simulcast mode, quality adaptation is handled by the SFU
+  // activating/deactivating layers instead.
+  void SetSimulcastActive(bool simulcast_active);
+
+  // Stops the quality scaler and clears its accumulated adaptation
+  // restrictions. Called when the number of active simulcast layers increases
+  // from <=1 to >1, so that the source provides full-resolution frames for
+  // the new multi-layer configuration.
+  void ResetAdaptationsForSimulcastChange();
   void ConfigureBandwidthQualityScaler(
       const VideoEncoder::EncoderInfo& encoder_info);
 
@@ -219,6 +234,12 @@ class VideoStreamEncoderResourceManager
       RTC_GUARDED_BY(encoder_queue_);
   std::optional<EncoderSettings> encoder_settings_
       RTC_GUARDED_BY(encoder_queue_);
+
+  // True when multiple simulcast layers are active. While set, the quality
+  // scaler is suppressed to prevent input resolution degradation that would
+  // corrupt simulcast layer dimensions. Set by VideoStreamEncoder during
+  // ReconfigureEncoder based on the number of active layers.
+  bool simulcast_active_ RTC_GUARDED_BY(encoder_queue_) = false;
 
   // Ties a resource to a reason for statistical reporting. This AdaptReason is
   // also used by this module to make decisions about how to adapt up/down.

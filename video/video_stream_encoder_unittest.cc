@@ -6832,6 +6832,144 @@ TEST_F(VideoStreamEncoderTest,
 }
 
 TEST_F(VideoStreamEncoderTest,
+       QualityScalerRestrictionsResetWhenActiveLayersIncrease) {
+  // Set up 3-stream simulcast with only the highest layer active (1:1 call).
+  ResetEncoder("VP8", 3, 1, 1, false);
+  fake_encoder_.SetQualityScaling(true);
+  const int kWidth = 1280;
+  const int kHeight = 720;
+
+  video_stream_encoder_->OnBitrateUpdatedAndWaitForManagedResources(
+      kSimulcastTargetBitrate, kSimulcastTargetBitrate, kSimulcastTargetBitrate,
+      0, 0, 0);
+
+  VideoEncoderConfig config_1_active;
+  test::FillEncoderConfiguration(PayloadStringToCodecType("VP8"), 3,
+                                 &config_1_active);
+  config_1_active.video_stream_factory = nullptr;
+  for (auto& layer : config_1_active.simulcast_layers) {
+    layer.num_temporal_layers = 1;
+    layer.max_framerate = kDefaultFramerate;
+  }
+  config_1_active.max_bitrate_bps = kSimulcastTargetBitrate.bps();
+  config_1_active.content_type =
+      VideoEncoderConfig::ContentType::kRealtimeVideo;
+  config_1_active.simulcast_layers[0].active = false;
+  config_1_active.simulcast_layers[1].active = false;
+  config_1_active.simulcast_layers[2].active = true;
+
+  video_stream_encoder_->ConfigureEncoder(config_1_active.Copy(),
+                                          kMaxPayloadLength);
+  video_stream_encoder_->WaitUntilTaskQueueIsIdle();
+
+  // Send a frame and trigger quality low to accumulate a resolution adaptation.
+  video_source_.IncomingCapturedFrame(CreateFrame(1, kWidth, kHeight));
+  video_stream_encoder_->WaitUntilTaskQueueIsIdle();
+  video_stream_encoder_->TriggerQualityLow();
+
+  video_source_.IncomingCapturedFrame(CreateFrame(2, kWidth, kHeight));
+  video_stream_encoder_->WaitUntilTaskQueueIsIdle();
+
+  EXPECT_THAT(video_source_.sink_wants(), WantsMaxPixels(Lt(kWidth * kHeight)));
+
+  // Now transition to multi-layer: activate all 3 layers (3rd participant).
+  VideoEncoderConfig video_encoder_config;
+  test::FillEncoderConfiguration(PayloadStringToCodecType("VP8"), 3,
+                                 &video_encoder_config);
+  video_encoder_config.video_stream_factory = nullptr;
+  for (auto& layer : video_encoder_config.simulcast_layers) {
+    layer.num_temporal_layers = 1;
+    layer.max_framerate = kDefaultFramerate;
+  }
+  video_encoder_config.max_bitrate_bps = kSimulcastTargetBitrate.bps();
+  video_encoder_config.content_type =
+      VideoEncoderConfig::ContentType::kRealtimeVideo;
+  video_encoder_config.simulcast_layers[0].active = true;
+  video_encoder_config.simulcast_layers[1].active = true;
+  video_encoder_config.simulcast_layers[2].active = true;
+
+  video_stream_encoder_->ConfigureEncoder(video_encoder_config.Copy(),
+                                          kMaxPayloadLength);
+  video_stream_encoder_->WaitUntilTaskQueueIsIdle();
+  AdvanceTime(TimeDelta::Zero());
+
+  // Quality scaler restrictions should have been cleared on the active-layer
+  // increase so the source can provide full-resolution frames.
+  EXPECT_THAT(video_source_.sink_wants(), ResolutionMax());
+
+  video_stream_encoder_->Stop();
+}
+
+TEST_F(VideoStreamEncoderTest,
+       QualityScalerRestrictionsResetOnTwoToThreeLayerIncrease) {
+  // Set up 3-stream simulcast with 2 layers active.
+  ResetEncoder("VP8", 3, 1, 1, false);
+  fake_encoder_.SetQualityScaling(true);
+  const int kWidth = 1280;
+  const int kHeight = 720;
+
+  video_stream_encoder_->OnBitrateUpdatedAndWaitForManagedResources(
+      kSimulcastTargetBitrate, kSimulcastTargetBitrate, kSimulcastTargetBitrate,
+      0, 0, 0);
+
+  // Start with 2 active layers.
+  VideoEncoderConfig config_2_active;
+  test::FillEncoderConfiguration(PayloadStringToCodecType("VP8"), 3,
+                                 &config_2_active);
+  config_2_active.video_stream_factory = nullptr;
+  for (auto& layer : config_2_active.simulcast_layers) {
+    layer.num_temporal_layers = 1;
+    layer.max_framerate = kDefaultFramerate;
+  }
+  config_2_active.max_bitrate_bps = kSimulcastTargetBitrate.bps();
+  config_2_active.content_type =
+      VideoEncoderConfig::ContentType::kRealtimeVideo;
+  config_2_active.simulcast_layers[0].active = true;
+  config_2_active.simulcast_layers[1].active = true;
+  config_2_active.simulcast_layers[2].active = false;
+
+  video_stream_encoder_->ConfigureEncoder(config_2_active.Copy(),
+                                          kMaxPayloadLength);
+  video_stream_encoder_->WaitUntilTaskQueueIsIdle();
+
+  // Send a frame and trigger quality low to accumulate a restriction.
+  video_source_.IncomingCapturedFrame(CreateFrame(1, kWidth, kHeight));
+  WaitForEncodedFrame(1);
+  video_stream_encoder_->TriggerQualityLow();
+
+  video_source_.IncomingCapturedFrame(CreateFrame(2, kWidth, kHeight));
+  WaitForEncodedFrame(2);
+
+  EXPECT_THAT(video_source_.sink_wants(), WantsMaxPixels(Lt(kWidth * kHeight)));
+
+  // Now increase to 3 active layers.
+  VideoEncoderConfig config_3_active;
+  test::FillEncoderConfiguration(PayloadStringToCodecType("VP8"), 3,
+                                 &config_3_active);
+  config_3_active.video_stream_factory = nullptr;
+  for (auto& layer : config_3_active.simulcast_layers) {
+    layer.num_temporal_layers = 1;
+    layer.max_framerate = kDefaultFramerate;
+  }
+  config_3_active.max_bitrate_bps = kSimulcastTargetBitrate.bps();
+  config_3_active.content_type =
+      VideoEncoderConfig::ContentType::kRealtimeVideo;
+  config_3_active.simulcast_layers[0].active = true;
+  config_3_active.simulcast_layers[1].active = true;
+  config_3_active.simulcast_layers[2].active = true;
+
+  video_stream_encoder_->ConfigureEncoder(config_3_active.Copy(),
+                                          kMaxPayloadLength);
+  video_stream_encoder_->WaitUntilTaskQueueIsIdle();
+  AdvanceTime(TimeDelta::Zero());
+
+  // Restrictions should be cleared on the 2 -> 3 active-layer increase.
+  EXPECT_THAT(video_source_.sink_wants(), ResolutionMax());
+
+  video_stream_encoder_->Stop();
+}
+
+TEST_F(VideoStreamEncoderTest,
        ResolutionNotAdaptedForTooSmallFrame_MaintainFramerateMode) {
   const int kTooSmallWidth = 10;
   const int kTooSmallHeight = 10;

@@ -85,13 +85,15 @@ bool IsTemporalLayersSupported(VideoCodecType codec_type) {
 }
 
 size_t FindRequiredActiveLayers(const VideoEncoderConfig& encoder_config) {
-  // Need enough layers so that at least the first active one is present.
+  // Need enough layers so that all active ones are present.
+  // Return the position after the highest active layer.
+  size_t highest = 0;
   for (size_t i = 0; i < encoder_config.number_of_streams; ++i) {
     if (encoder_config.simulcast_layers[i].active) {
-      return i + 1;
+      highest = i + 1;
     }
   }
-  return 0;
+  return highest;
 }
 
 // The selected thresholds for QVGA and VGA corresponded to a QP around 10.

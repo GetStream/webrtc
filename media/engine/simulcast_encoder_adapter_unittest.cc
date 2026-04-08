@@ -289,6 +289,7 @@ class MockVideoEncoder : public VideoEncoder {
     info.supports_simulcast = supports_simulcast_;
     info.is_qp_trusted = is_qp_trusted_;
     info.resolution_bitrate_limits = resolution_bitrate_limits;
+    info.min_qp = min_qp_;
     return info;
   }
 
@@ -368,6 +369,8 @@ class MockVideoEncoder : public VideoEncoder {
     resolution_bitrate_limits = limits;
   }
 
+  void set_min_qp(std::optional<int> min_qp) { min_qp_ = min_qp; }
+
   bool supports_simulcast() const { return supports_simulcast_; }
 
   SdpVideoFormat video_format() const { return video_format_; }
@@ -387,6 +390,7 @@ class MockVideoEncoder : public VideoEncoder {
   FramerateFractions fps_allocation_;
   bool supports_simulcast_ = false;
   std::optional<bool> is_qp_trusted_;
+  std::optional<int> min_qp_;
   SdpVideoFormat video_format_;
   std::vector<VideoEncoder::ResolutionBitrateLimits> resolution_bitrate_limits;
 
@@ -1714,6 +1718,141 @@ TEST_F(TestSimulcastEncoderAdapterFake, ReportsFpsAllocation) {
   EXPECT_EQ(0, adapter_->InitEncode(&codec_, kSettings));
   EXPECT_THAT(adapter_->GetEncoderInfo().fps_allocation,
               ::testing::ElementsAreArray(expected_fps_allocation));
+}
+
+TEST_F(TestSimulcastEncoderAdapterFake,
+       ForwardsRuntimeSensitiveEncoderInfoForSingleUnpausedLayer) {
+  SimulcastTestFixtureImpl::DefaultSettings(
+      &codec_, static_cast<const int*>(kTestTemporalLayerProfile),
+      kVideoCodecVP8);
+  codec_.numberOfSimulcastStreams = 3;
+  EXPECT_EQ(0, adapter_->InitEncode(&codec_, kSettings));
+  adapter_->RegisterEncodeCompleteCallback(this);
+  ASSERT_EQ(3u, helper_->factory()->encoders().size());
+
+  auto* low_encoder = helper_->factory()->encoders()[0];
+  auto* mid_encoder = helper_->factory()->encoders()[1];
+  auto* high_encoder = helper_->factory()->encoders()[2];
+
+  low_encoder->set_scaling_settings(VideoEncoder::ScalingSettings(10, 20, 111));
+  low_encoder->set_supports_native_handle(false);
+  low_encoder->set_is_qp_trusted(true);
+  low_encoder->set_resolution_bitrate_limits(
+      {VideoEncoder::ResolutionBitrateLimits(111, 1111, 2222, 3333)});
+  low_encoder->set_min_qp(10);
+  low_encoder->set_fps_allocation(
+      FramerateFractions{EncoderInfo::kMaxFramerateFraction / 2});
+
+  mid_encoder->set_scaling_settings(VideoEncoder::ScalingSettings(30, 40, 222));
+  mid_encoder->set_supports_native_handle(true);
+  mid_encoder->set_is_qp_trusted(false);
+  mid_encoder->set_resolution_bitrate_limits(
+      {VideoEncoder::ResolutionBitrateLimits(222, 4444, 5555, 6666)});
+  mid_encoder->set_min_qp(20);
+  mid_encoder->set_fps_allocation(
+      FramerateFractions{EncoderInfo::kMaxFramerateFraction / 3,
+                         EncoderInfo::kMaxFramerateFraction});
+
+  high_encoder->set_scaling_settings(
+      VideoEncoder::ScalingSettings(50, 60, 333));
+  high_encoder->set_supports_native_handle(false);
+  high_encoder->set_is_qp_trusted(true);
+  high_encoder->set_resolution_bitrate_limits(
+      {VideoEncoder::ResolutionBitrateLimits(333, 7777, 8888, 9999)});
+  high_encoder->set_min_qp(30);
+  high_encoder->set_fps_allocation(
+      FramerateFractions{EncoderInfo::kMaxFramerateFraction});
+
+  // Only keep the middle spatial layer active. SEA still has three stream
+  // contexts, so this exercises the runtime state that used to incorrectly
+  // report aggregated simulcast encoder info with scaling disabled.
+  VideoBitrateAllocation allocation;
+  ASSERT_TRUE(allocation.SetBitrate(1, 0, 500000));
+  adapter_->SetRates(VideoEncoder::RateControlParameters(allocation, 30.0));
+
+  const auto info = adapter_->GetEncoderInfo();
+  // Runtime-sensitive fields should come from the only unpaused encoder.
+  ASSERT_TRUE(info.scaling_settings.thresholds.has_value());
+  EXPECT_EQ(30, info.scaling_settings.thresholds->low);
+  EXPECT_EQ(40, info.scaling_settings.thresholds->high);
+  EXPECT_EQ(222, info.scaling_settings.min_pixels_per_frame);
+  EXPECT_TRUE(info.supports_native_handle);
+  EXPECT_EQ(std::optional<bool>(false), info.is_qp_trusted);
+  EXPECT_EQ(std::optional<int>(20), info.min_qp);
+  EXPECT_EQ(info.resolution_bitrate_limits,
+            std::vector<VideoEncoder::ResolutionBitrateLimits>(
+                {VideoEncoder::ResolutionBitrateLimits(222, 4444, 5555, 6666)}));
+  // Simulcast-specific fields must remain in SEA's aggregated spatial-slot
+  // layout even when runtime-sensitive fields are forwarded from one encoder.
+  EXPECT_THAT(info.fps_allocation[0], ::testing::IsEmpty());
+  EXPECT_THAT(info.fps_allocation[1],
+              ::testing::ElementsAre(EncoderInfo::kMaxFramerateFraction / 3,
+                                     EncoderInfo::kMaxFramerateFraction));
+  EXPECT_THAT(info.fps_allocation[2],
+              ::testing::ElementsAre(EncoderInfo::kMaxFramerateFraction));
+}
+
+TEST_F(TestSimulcastEncoderAdapterFake,
+       RestoresAggregatedEncoderInfoWhenMultipleLayersUnpause) {
+  SimulcastTestFixtureImpl::DefaultSettings(
+      &codec_, static_cast<const int*>(kTestTemporalLayerProfile),
+      kVideoCodecVP8);
+  codec_.numberOfSimulcastStreams = 3;
+  EXPECT_EQ(0, adapter_->InitEncode(&codec_, kSettings));
+  adapter_->RegisterEncodeCompleteCallback(this);
+  ASSERT_EQ(3u, helper_->factory()->encoders().size());
+
+  auto* low_encoder = helper_->factory()->encoders()[0];
+  auto* mid_encoder = helper_->factory()->encoders()[1];
+  auto* high_encoder = helper_->factory()->encoders()[2];
+
+  low_encoder->set_scaling_settings(VideoEncoder::ScalingSettings(10, 20, 111));
+  low_encoder->set_supports_native_handle(false);
+  low_encoder->set_fps_allocation(
+      FramerateFractions{EncoderInfo::kMaxFramerateFraction / 2});
+
+  mid_encoder->set_scaling_settings(VideoEncoder::ScalingSettings(30, 40, 222));
+  mid_encoder->set_supports_native_handle(true);
+  mid_encoder->set_fps_allocation(
+      FramerateFractions{EncoderInfo::kMaxFramerateFraction / 3,
+                         EncoderInfo::kMaxFramerateFraction});
+
+  high_encoder->set_scaling_settings(
+      VideoEncoder::ScalingSettings(50, 60, 333));
+  high_encoder->set_supports_native_handle(false);
+  high_encoder->set_fps_allocation(
+      FramerateFractions{EncoderInfo::kMaxFramerateFraction});
+
+  // First collapse to a single active spatial layer and verify the forwarded
+  // encoder info.
+  VideoBitrateAllocation one_layer_allocation;
+  ASSERT_TRUE(one_layer_allocation.SetBitrate(1, 0, 500000));
+  adapter_->SetRates(
+      VideoEncoder::RateControlParameters(one_layer_allocation, 30.0));
+
+  auto info = adapter_->GetEncoderInfo();
+  ASSERT_TRUE(info.scaling_settings.thresholds.has_value());
+  EXPECT_EQ(30, info.scaling_settings.thresholds->low);
+  EXPECT_EQ(40, info.scaling_settings.thresholds->high);
+  EXPECT_TRUE(info.supports_native_handle);
+
+  // Then enable another layer. SEA should immediately return to its normal
+  // aggregated simulcast view without requiring a re-init.
+  VideoBitrateAllocation two_layer_allocation;
+  ASSERT_TRUE(two_layer_allocation.SetBitrate(1, 0, 500000));
+  ASSERT_TRUE(two_layer_allocation.SetBitrate(2, 0, 700000));
+  adapter_->SetRates(
+      VideoEncoder::RateControlParameters(two_layer_allocation, 30.0));
+
+  info = adapter_->GetEncoderInfo();
+  EXPECT_FALSE(info.scaling_settings.thresholds.has_value());
+  EXPECT_TRUE(info.supports_native_handle);
+  EXPECT_THAT(info.fps_allocation[0], ::testing::IsEmpty());
+  EXPECT_THAT(info.fps_allocation[1],
+              ::testing::ElementsAre(EncoderInfo::kMaxFramerateFraction / 3,
+                                     EncoderInfo::kMaxFramerateFraction));
+  EXPECT_THAT(info.fps_allocation[2],
+              ::testing::ElementsAre(EncoderInfo::kMaxFramerateFraction));
 }
 
 TEST_F(TestSimulcastEncoderAdapterFake, SetRateDistributesBandwithAllocation) {
