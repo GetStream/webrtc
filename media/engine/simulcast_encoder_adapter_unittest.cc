@@ -1760,7 +1760,8 @@ TEST_F(TestSimulcastEncoderAdapterFake,
                 {VideoEncoder::ResolutionBitrateLimits(222, 4444, 5555, 6666)}));
   // Simulcast-specific fields must remain in SEA's aggregated spatial-slot
   // layout even when runtime-sensitive fields are forwarded from one encoder.
-  EXPECT_THAT(info.fps_allocation[0], ::testing::IsEmpty());
+  EXPECT_THAT(info.fps_allocation[0],
+              ::testing::ElementsAre(EncoderInfo::kMaxFramerateFraction / 2));
   EXPECT_THAT(info.fps_allocation[1],
               ::testing::ElementsAre(EncoderInfo::kMaxFramerateFraction / 3,
                                      EncoderInfo::kMaxFramerateFraction));
@@ -1823,7 +1824,8 @@ TEST_F(TestSimulcastEncoderAdapterFake,
   info = adapter_->GetEncoderInfo();
   EXPECT_FALSE(info.scaling_settings.thresholds.has_value());
   EXPECT_TRUE(info.supports_native_handle);
-  EXPECT_THAT(info.fps_allocation[0], ::testing::IsEmpty());
+  EXPECT_THAT(info.fps_allocation[0],
+              ::testing::ElementsAre(EncoderInfo::kMaxFramerateFraction / 2));
   EXPECT_THAT(info.fps_allocation[1],
               ::testing::ElementsAre(EncoderInfo::kMaxFramerateFraction / 3,
                                      EncoderInfo::kMaxFramerateFraction));
