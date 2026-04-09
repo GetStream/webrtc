@@ -10,6 +10,7 @@
 #include "video/video_stream_encoder.h"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -176,6 +177,40 @@ constexpr uint8_t kCodedFrameVp8Qp25[] = {
 // Default value from encoder_info_settings.cc
 constexpr DataRate kDefaultH265Bitrate180p = DataRate::KilobitsPerSec(150);
 #endif
+
+VideoEncoderConfig Make3LayerVp8SimulcastConfig(
+    const std::array<bool, 3>& active_layers) {
+  VideoEncoderConfig config;
+  test::FillEncoderConfiguration(PayloadStringToCodecType("VP8"), 3, &config);
+  config.video_stream_factory = nullptr;
+  for (size_t i = 0; i < active_layers.size(); ++i) {
+    config.simulcast_layers[i].active = active_layers[i];
+    config.simulcast_layers[i].num_temporal_layers = 1;
+    config.simulcast_layers[i].max_framerate = kDefaultFramerate;
+  }
+  config.max_bitrate_bps = kSimulcastTargetBitrate.bps();
+  config.content_type = VideoEncoderConfig::ContentType::kRealtimeVideo;
+  return config;
+}
+
+size_t CountActiveSpatialLayers(const VideoBitrateAllocation& bitrate,
+                                size_t num_streams) {
+  size_t active_layers = 0;
+  for (size_t i = 0; i < num_streams; ++i) {
+    if (bitrate.GetSpatialLayerSum(i) > 0) {
+      ++active_layers;
+    }
+  }
+  return active_layers;
+}
+
+bool HasAdaptationResourceNamed(
+    const std::vector<scoped_refptr<Resource>>& resources,
+    const char* name) {
+  return absl::c_any_of(resources, [name](const scoped_refptr<Resource>& r) {
+    return r->Name() == name;
+  });
+}
 
 VideoFrame CreateSimpleNV12Frame() {
   return VideoFrame::Builder()
@@ -1126,8 +1161,13 @@ class VideoStreamEncoderTest : public ::testing::Test {
       EncoderInfo info = FakeEncoder::GetEncoderInfo();
       if (initialized_ == EncoderState::kInitialized) {
         if (quality_scaling_) {
-          info.scaling_settings = VideoEncoder::ScalingSettings(
-              kQpLow, kQpHigh, kMinPixelsPerFrame);
+          const bool allow_quality_scaling =
+              !quality_scaling_follows_active_spatial_layers_ ||
+              active_spatial_layers_ <= 1;
+          info.scaling_settings = allow_quality_scaling
+                                      ? VideoEncoder::ScalingSettings(
+                                            kQpLow, kQpHigh, kMinPixelsPerFrame)
+                                      : VideoEncoder::ScalingSettings::kOff;
         }
         info.is_hardware_accelerated = is_hardware_accelerated_;
         for (int i = 0; i < kMaxSpatialLayers; ++i) {
@@ -1170,6 +1210,11 @@ class VideoStreamEncoderTest : public ::testing::Test {
     void SetQualityScaling(bool b) {
       MutexLock lock(&local_mutex_);
       quality_scaling_ = b;
+    }
+
+    void SetQualityScalingFollowsActiveSpatialLayers(bool enabled) {
+      MutexLock lock(&local_mutex_);
+      quality_scaling_follows_active_spatial_layers_ = enabled;
     }
 
     void SetRequestedResolutionAlignment(
@@ -1383,6 +1428,8 @@ class VideoStreamEncoderTest : public ::testing::Test {
     void SetRates(const RateControlParameters& parameters) override {
       MutexLock lock(&local_mutex_);
       num_set_rates_++;
+      active_spatial_layers_ =
+          CountActiveSpatialLayers(parameters.bitrate, kMaxSpatialLayers);
       VideoBitrateAllocation adjusted_rate_allocation;
       for (size_t si = 0; si < kMaxSpatialLayers; ++si) {
         for (size_t ti = 0; ti < kMaxTemporalStreams; ++ti) {
@@ -1413,6 +1460,9 @@ class VideoStreamEncoderTest : public ::testing::Test {
     int last_input_width_ RTC_GUARDED_BY(local_mutex_) = 0;
     int last_input_height_ RTC_GUARDED_BY(local_mutex_) = 0;
     bool quality_scaling_ RTC_GUARDED_BY(local_mutex_) = true;
+    bool quality_scaling_follows_active_spatial_layers_
+        RTC_GUARDED_BY(local_mutex_) = false;
+    size_t active_spatial_layers_ RTC_GUARDED_BY(local_mutex_) = 0;
     uint32_t requested_resolution_alignment_ RTC_GUARDED_BY(local_mutex_) = 1;
     bool apply_alignment_to_all_simulcast_layers_ RTC_GUARDED_BY(local_mutex_) =
         false;
@@ -6843,21 +6893,8 @@ TEST_F(VideoStreamEncoderTest,
       kSimulcastTargetBitrate, kSimulcastTargetBitrate, kSimulcastTargetBitrate,
       0, 0, 0);
 
-  VideoEncoderConfig config_1_active;
-  test::FillEncoderConfiguration(PayloadStringToCodecType("VP8"), 3,
-                                 &config_1_active);
-  config_1_active.video_stream_factory = nullptr;
-  for (auto& layer : config_1_active.simulcast_layers) {
-    layer.num_temporal_layers = 1;
-    layer.max_framerate = kDefaultFramerate;
-  }
-  config_1_active.max_bitrate_bps = kSimulcastTargetBitrate.bps();
-  config_1_active.content_type =
-      VideoEncoderConfig::ContentType::kRealtimeVideo;
-  config_1_active.simulcast_layers[0].active = false;
-  config_1_active.simulcast_layers[1].active = false;
-  config_1_active.simulcast_layers[2].active = true;
-
+  VideoEncoderConfig config_1_active =
+      Make3LayerVp8SimulcastConfig({false, false, true});
   video_stream_encoder_->ConfigureEncoder(config_1_active.Copy(),
                                           kMaxPayloadLength);
   video_stream_encoder_->WaitUntilTaskQueueIsIdle();
@@ -6873,21 +6910,8 @@ TEST_F(VideoStreamEncoderTest,
   EXPECT_THAT(video_source_.sink_wants(), WantsMaxPixels(Lt(kWidth * kHeight)));
 
   // Now transition to multi-layer: activate all 3 layers (3rd participant).
-  VideoEncoderConfig video_encoder_config;
-  test::FillEncoderConfiguration(PayloadStringToCodecType("VP8"), 3,
-                                 &video_encoder_config);
-  video_encoder_config.video_stream_factory = nullptr;
-  for (auto& layer : video_encoder_config.simulcast_layers) {
-    layer.num_temporal_layers = 1;
-    layer.max_framerate = kDefaultFramerate;
-  }
-  video_encoder_config.max_bitrate_bps = kSimulcastTargetBitrate.bps();
-  video_encoder_config.content_type =
-      VideoEncoderConfig::ContentType::kRealtimeVideo;
-  video_encoder_config.simulcast_layers[0].active = true;
-  video_encoder_config.simulcast_layers[1].active = true;
-  video_encoder_config.simulcast_layers[2].active = true;
-
+  VideoEncoderConfig video_encoder_config =
+      Make3LayerVp8SimulcastConfig({true, true, true});
   video_stream_encoder_->ConfigureEncoder(video_encoder_config.Copy(),
                                           kMaxPayloadLength);
   video_stream_encoder_->WaitUntilTaskQueueIsIdle();
@@ -6913,21 +6937,8 @@ TEST_F(VideoStreamEncoderTest,
       0, 0, 0);
 
   // Start with 2 active layers.
-  VideoEncoderConfig config_2_active;
-  test::FillEncoderConfiguration(PayloadStringToCodecType("VP8"), 3,
-                                 &config_2_active);
-  config_2_active.video_stream_factory = nullptr;
-  for (auto& layer : config_2_active.simulcast_layers) {
-    layer.num_temporal_layers = 1;
-    layer.max_framerate = kDefaultFramerate;
-  }
-  config_2_active.max_bitrate_bps = kSimulcastTargetBitrate.bps();
-  config_2_active.content_type =
-      VideoEncoderConfig::ContentType::kRealtimeVideo;
-  config_2_active.simulcast_layers[0].active = true;
-  config_2_active.simulcast_layers[1].active = true;
-  config_2_active.simulcast_layers[2].active = false;
-
+  VideoEncoderConfig config_2_active =
+      Make3LayerVp8SimulcastConfig({true, true, false});
   video_stream_encoder_->ConfigureEncoder(config_2_active.Copy(),
                                           kMaxPayloadLength);
   video_stream_encoder_->WaitUntilTaskQueueIsIdle();
@@ -6943,21 +6954,8 @@ TEST_F(VideoStreamEncoderTest,
   EXPECT_THAT(video_source_.sink_wants(), WantsMaxPixels(Lt(kWidth * kHeight)));
 
   // Now increase to 3 active layers.
-  VideoEncoderConfig config_3_active;
-  test::FillEncoderConfiguration(PayloadStringToCodecType("VP8"), 3,
-                                 &config_3_active);
-  config_3_active.video_stream_factory = nullptr;
-  for (auto& layer : config_3_active.simulcast_layers) {
-    layer.num_temporal_layers = 1;
-    layer.max_framerate = kDefaultFramerate;
-  }
-  config_3_active.max_bitrate_bps = kSimulcastTargetBitrate.bps();
-  config_3_active.content_type =
-      VideoEncoderConfig::ContentType::kRealtimeVideo;
-  config_3_active.simulcast_layers[0].active = true;
-  config_3_active.simulcast_layers[1].active = true;
-  config_3_active.simulcast_layers[2].active = true;
-
+  VideoEncoderConfig config_3_active =
+      Make3LayerVp8SimulcastConfig({true, true, true});
   video_stream_encoder_->ConfigureEncoder(config_3_active.Copy(),
                                           kMaxPayloadLength);
   video_stream_encoder_->WaitUntilTaskQueueIsIdle();
@@ -6965,6 +6963,88 @@ TEST_F(VideoStreamEncoderTest,
 
   // Restrictions should be cleared on the 2 -> 3 active-layer increase.
   EXPECT_THAT(video_source_.sink_wants(), ResolutionMax());
+
+  video_stream_encoder_->Stop();
+}
+
+TEST_F(VideoStreamEncoderTest,
+       BandwidthQualityScalerRemovedWhenTransitioningToSimulcast) {
+  fake_encoder_.SetQualityScaling(false);
+  fake_encoder_.SetIsQpTrusted(false);
+
+  VideoEncoderConfig single_layer_config =
+      Make3LayerVp8SimulcastConfig({false, false, true});
+  single_layer_config.is_quality_scaling_allowed = true;
+  ConfigureEncoder(single_layer_config.Copy());
+  video_stream_encoder_->OnBitrateUpdatedAndWaitForManagedResources(
+      kSimulcastTargetBitrate, kSimulcastTargetBitrate, kSimulcastTargetBitrate,
+      0, 0, 0);
+  video_source_.IncomingCapturedFrame(CreateFrame(1, 1280, 720));
+  video_stream_encoder_->WaitUntilTaskQueueIsIdle();
+
+  EXPECT_TRUE(HasAdaptationResourceNamed(
+      video_stream_encoder_->GetAdaptationResources(),
+      "BandwidthQualityScalerResource"));
+
+  VideoEncoderConfig simulcast_config =
+      Make3LayerVp8SimulcastConfig({true, true, true});
+  simulcast_config.is_quality_scaling_allowed = true;
+  video_stream_encoder_->ConfigureEncoder(simulcast_config.Copy(),
+                                          kMaxPayloadLength);
+  video_stream_encoder_->WaitUntilTaskQueueIsIdle();
+
+  EXPECT_FALSE(HasAdaptationResourceNamed(
+      video_stream_encoder_->GetAdaptationResources(),
+      "BandwidthQualityScalerResource"));
+
+  video_stream_encoder_->Stop();
+}
+
+TEST_F(VideoStreamEncoderTest,
+       QualityScalerResourceTracksRuntimeLayerAllocation) {
+  fake_encoder_.SetQualityScaling(true);
+  fake_encoder_.SetQualityScalingFollowsActiveSpatialLayers(true);
+
+  VideoEncoderConfig simulcast_config =
+      Make3LayerVp8SimulcastConfig({true, true, true});
+  ConfigureEncoder(simulcast_config.Copy());
+  video_stream_encoder_->OnBitrateUpdatedAndWaitForManagedResources(
+      kSimulcastTargetBitrate, kSimulcastTargetBitrate, kSimulcastTargetBitrate,
+      0, 0, 0);
+  video_source_.IncomingCapturedFrame(CreateFrame(1, 1280, 720));
+  WaitForEncodedFrame(1);
+
+  auto rate_settings = fake_encoder_.GetAndResetLastRateControlSettings();
+  ASSERT_TRUE(rate_settings.has_value());
+  EXPECT_GT(CountActiveSpatialLayers(rate_settings->bitrate,
+                                     simulcast_config.number_of_streams),
+            1u);
+
+  EXPECT_FALSE(HasAdaptationResourceNamed(
+      video_stream_encoder_->GetAdaptationResources(), "QualityScalerResource"));
+
+  const std::array<DataRate, 5> single_layer_rates = {
+      DataRate::KilobitsPerSec(100), DataRate::KilobitsPerSec(150),
+      DataRate::KilobitsPerSec(200), DataRate::KilobitsPerSec(300),
+      DataRate::KilobitsPerSec(500)};
+  bool found_single_layer_rate = false;
+  for (DataRate rate : single_layer_rates) {
+    video_stream_encoder_->OnBitrateUpdatedAndWaitForManagedResources(
+        rate, rate, rate, 0, 0, 0);
+    rate_settings = fake_encoder_.GetAndResetLastRateControlSettings();
+    ASSERT_TRUE(rate_settings.has_value());
+    if (CountActiveSpatialLayers(rate_settings->bitrate,
+                                 simulcast_config.number_of_streams) == 1u) {
+      found_single_layer_rate = true;
+      break;
+    }
+  }
+  ASSERT_TRUE(found_single_layer_rate);
+
+  video_source_.IncomingCapturedFrame(CreateFrame(2, 1280, 720));
+  WaitForEncodedFrame(2);
+  EXPECT_TRUE(HasAdaptationResourceNamed(
+      video_stream_encoder_->GetAdaptationResources(), "QualityScalerResource"));
 
   video_stream_encoder_->Stop();
 }

@@ -237,8 +237,9 @@ class VideoStreamEncoderResourceManager
 
   // True when multiple simulcast layers are active. While set, the quality
   // scaler is suppressed to prevent input resolution degradation that would
-  // corrupt simulcast layer dimensions. Set by VideoStreamEncoder during
-  // ReconfigureEncoder based on the number of active layers.
+  // corrupt simulcast layer dimensions. Set by VideoStreamEncoder from the
+  // current runtime layer allocation, with encoder-config fallback before the
+  // first SetRates() arrives.
   bool simulcast_active_ RTC_GUARDED_BY(encoder_queue_) = false;
 
   // Ties a resource to a reason for statistical reporting. This AdaptReason is
