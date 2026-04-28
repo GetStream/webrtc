@@ -10,17 +10,25 @@
 
 #include "sdk/android/src/jni/audio_device/opensles_recorder.h"
 
+#include <SLES/OpenSLES.h>
+#include <SLES/OpenSLES_Android.h>
+#include <SLES/OpenSLES_AndroidConfiguration.h>
 #include <android/log.h>
 
+#include <cstddef>
+#include <cstdint>
+#include <iterator>
 #include <memory>
+#include <utility>
 
 #include "api/array_view.h"
+#include "api/audio/audio_device_defines.h"
+#include "api/scoped_refptr.h"
 #include "modules/audio_device/fine_audio_buffer.h"
-#include "rtc_base/arraysize.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/platform_thread.h"
+#include "rtc_base/platform_thread_types.h"
 #include "rtc_base/time_utils.h"
-#include "sdk/android/src/jni/audio_device/audio_common.h"
+#include "sdk/android/src/jni/audio_device/opensles_common.h"
 
 #define TAG "OpenSLESRecorder"
 #define ALOGV(...) __android_log_print(ANDROID_LOG_VERBOSE, TAG, __VA_ARGS__)
@@ -264,7 +272,7 @@ bool OpenSLESRecorder::CreateAudioRecorder() {
   const SLboolean interface_required[] = {SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE};
   if (LOG_ON_ERROR((*engine_)->CreateAudioRecorder(
           engine_, recorder_object_.Receive(), &audio_source, &audio_sink,
-          arraysize(interface_id), interface_id, interface_required))) {
+          std::size(interface_id), interface_id, interface_required))) {
     return false;
   }
 

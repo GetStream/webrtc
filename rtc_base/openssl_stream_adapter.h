@@ -33,11 +33,11 @@
 #endif
 #include "api/field_trials_view.h"
 #include "api/task_queue/pending_task_safety_flag.h"
+#include "api/task_queue/task_queue_base.h"
 #include "rtc_base/ssl_identity.h"
 #include "rtc_base/ssl_stream_adapter.h"
 #include "rtc_base/stream.h"
 #include "rtc_base/task_utils/repeating_task.h"
-#include "rtc_base/thread.h"
 
 namespace webrtc {
 
@@ -79,7 +79,7 @@ class OpenSSLStreamAdapter final : public SSLStreamAdapter {
   SSLIdentity* GetIdentityForTesting() const override;
 
   // Default argument is for compatibility
-  void SetServerRole(SSLRole role = webrtc::SSL_SERVER) override;
+  void SetServerRole(SSLRole role = SSL_SERVER) override;
   SSLPeerCertificateDigestError SetPeerCertificateDigest(
       absl::string_view digest_alg,
       ArrayView<const uint8_t> digest_val) override;
@@ -92,6 +92,7 @@ class OpenSSLStreamAdapter final : public SSLStreamAdapter {
   [[deprecated]] void SetMode(SSLMode mode) override;
   void SetMaxProtocolVersion(SSLProtocolVersion version) override;
   void SetInitialRetransmissionTimeout(int timeout_ms) override;
+  void UpdateRetransmissionTimeout(int timeout_ms) override;
   void SetMTU(int mtu) override;
 
   StreamResult Read(ArrayView<uint8_t> data, size_t& read, int& error) override;
@@ -136,9 +137,13 @@ class OpenSSLStreamAdapter final : public SSLStreamAdapter {
   // Used for testing (and maybe put into stats?).
   int GetRetransmissionCount() const override { return retransmission_count_; }
 
+  // Set cipher group ids to use during DTLS handshake to establish ephemeral
+  // key, see CryptoOptions::EphemeralKeyExchangeCipherGroups.
+  bool SetSslGroupIds(const std::vector<uint16_t>& group_ids) override;
+
   // Return the the ID of the group used by the adapters most recently
   // completed handshake, or 0 if not applicable (e.g. before the handshake).
-  uint16_t GetSslGroupIdForTesting() const override;
+  uint16_t GetSslGroupId() const override;
 
  private:
   enum SSLState {
@@ -206,10 +211,12 @@ class OpenSSLStreamAdapter final : public SSLStreamAdapter {
            !peer_certificate_digest_value_.empty();
   }
 
+  void MaybeSetTimeout();
+
   const std::unique_ptr<StreamInterface> stream_;
   absl::AnyInvocable<void(SSLHandshakeError)> handshake_error_;
 
-  Thread* const owner_;
+  TaskQueueBase* const owner_;
   ScopedTaskSafety task_safety_;
   RepeatingTaskHandle timeout_task_;
 
@@ -228,7 +235,7 @@ class OpenSSLStreamAdapter final : public SSLStreamAdapter {
 #ifdef OPENSSL_IS_BORINGSSL
   std::unique_ptr<BoringSSLIdentity> identity_;
 #else
-  std::unique_ptr<webrtc::OpenSSLIdentity> identity_;
+  std::unique_ptr<OpenSSLIdentity> identity_;
 #endif
   // The certificate chain that the peer presented. Initially null, until the
   // connection is established.
@@ -240,6 +247,9 @@ class OpenSSLStreamAdapter final : public SSLStreamAdapter {
 
   // The DtlsSrtp ciphers
   std::string srtp_ciphers_;
+
+  // The ssl cipher groups to be used for DTLS handshake.
+  std::vector<uint16_t> ssl_cipher_groups_;
 
   // Do DTLS or not
   SSLMode ssl_mode_;
@@ -261,20 +271,14 @@ class OpenSSLStreamAdapter final : public SSLStreamAdapter {
 
   int retransmission_count_ = 0;
 
-  // Experimental flag to enable Post-Quantum Cryptography TLS.
-  const bool enable_dtls_pqc_ = false;
+  // Kill switch (from field-trial) flag to disable the use of
+  // SSL_set_group_ids.
+  const bool disable_ssl_group_ids_ = false;
 };
 
 /////////////////////////////////////////////////////////////////////////////
 
 }  //  namespace webrtc
 
-// Re-export symbols from the webrtc namespace for backwards compatibility.
-// TODO(bugs.webrtc.org/4222596): Remove once all references are updated.
-#ifdef WEBRTC_ALLOW_DEPRECATED_NAMESPACES
-namespace rtc {
-using ::webrtc::OpenSSLStreamAdapter;
-}  // namespace rtc
-#endif  // WEBRTC_ALLOW_DEPRECATED_NAMESPACES
 
 #endif  // RTC_BASE_OPENSSL_STREAM_ADAPTER_H_

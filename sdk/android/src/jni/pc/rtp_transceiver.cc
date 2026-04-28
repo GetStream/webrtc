@@ -10,12 +10,24 @@
 
 #include "sdk/android/src/jni/pc/rtp_transceiver.h"
 
-#include <string>
+#include <jni.h>
 
+#include <optional>
+#include <string>
+#include <vector>
+
+#include "api/rtc_error.h"
+#include "api/rtp_parameters.h"
+#include "api/rtp_transceiver_direction.h"
+#include "api/rtp_transceiver_interface.h"
+#include "api/scoped_refptr.h"
+#include "rtc_base/logging.h"
 #include "sdk/android/generated_peerconnection_jni/RtpTransceiver_jni.h"
 #include "sdk/android/generated_rtcerror_jni/RtcError_jni.h"
 #include "sdk/android/native_api/jni/java_types.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
 #include "sdk/android/src/jni/jni_helpers.h"
+#include "sdk/android/src/jni/jvm.h"
 #include "sdk/android/src/jni/pc/media_stream_track.h"
 #include "sdk/android/src/jni/pc/rtp_capabilities.h"
 #include "sdk/android/src/jni/pc/rtp_parameters.h"
@@ -145,7 +157,7 @@ ScopedJavaLocalRef<jobject> JNI_RtpTransceiver_CurrentDirection(
 ScopedJavaLocalRef<jobject> JNI_RtpTransceiver_SetCodecPreferences(
     JNIEnv* jni,
     jlong j_rtp_transceiver_pointer,
-    const jni_zero::JavaParamRef<jobject>& j_codecs) {
+    const jni_zero::JavaRef<jobject>& j_codecs) {
   std::vector<RtpCodecCapability> codecs;
   if (j_codecs) {
     codecs = JavaListToNativeVector<RtpCodecCapability, jobject>(
@@ -175,14 +187,14 @@ void JNI_RtpTransceiver_StopStandard(JNIEnv* jni,
 jboolean JNI_RtpTransceiver_SetDirection(
     JNIEnv* jni,
     jlong j_rtp_transceiver_pointer,
-    const jni_zero::JavaParamRef<jobject>& j_rtp_transceiver_direction) {
+    const jni_zero::JavaRef<jobject>& j_rtp_transceiver_direction) {
   if (IsNull(jni, j_rtp_transceiver_direction)) {
     return false;
   }
   RtpTransceiverDirection direction = static_cast<RtpTransceiverDirection>(
       Java_RtpTransceiverDirection_getNativeIndex(jni,
                                                   j_rtp_transceiver_direction));
-  webrtc::RTCError error =
+  RTCError error =
       reinterpret_cast<RtpTransceiverInterface*>(j_rtp_transceiver_pointer)
           ->SetDirectionWithError(direction);
   if (!error.ok()) {

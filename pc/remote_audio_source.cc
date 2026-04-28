@@ -10,8 +10,7 @@
 
 #include "pc/remote_audio_source.h"
 
-#include <stddef.h>
-
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -125,13 +124,13 @@ void RemoteAudioSource::SetVolume(double volume) {
 }
 
 void RemoteAudioSource::RegisterAudioObserver(AudioObserver* observer) {
-  RTC_DCHECK(observer != NULL);
+  RTC_DCHECK(observer != nullptr);
   RTC_DCHECK(!absl::c_linear_search(audio_observers_, observer));
   audio_observers_.push_back(observer);
 }
 
 void RemoteAudioSource::UnregisterAudioObserver(AudioObserver* observer) {
-  RTC_DCHECK(observer != NULL);
+  RTC_DCHECK(observer != nullptr);
   audio_observers_.remove(observer);
 }
 

@@ -10,7 +10,9 @@
 #include "net/dcsctp/socket/dcsctp_socket.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -19,9 +21,12 @@
 #include <vector>
 
 #include "absl/functional/bind_front.h"
-#include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
 #include "api/array_view.h"
+#include "api/task_queue/task_queue_base.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
+#include "net/dcsctp/common/internal_types.h"
 #include "net/dcsctp/packet/chunk/abort_chunk.h"
 #include "net/dcsctp/packet/chunk/chunk.h"
 #include "net/dcsctp/packet/chunk/cookie_ack_chunk.h"
@@ -57,7 +62,7 @@
 #include "net/dcsctp/packet/parameter/supported_extensions_parameter.h"
 #include "net/dcsctp/packet/parameter/zero_checksum_acceptable_chunk_parameter.h"
 #include "net/dcsctp/packet/sctp_packet.h"
-#include "net/dcsctp/packet/tlv_trait.h"
+#include "net/dcsctp/public/dcsctp_handover_state.h"
 #include "net/dcsctp/public/dcsctp_message.h"
 #include "net/dcsctp/public/dcsctp_options.h"
 #include "net/dcsctp/public/dcsctp_socket.h"
@@ -73,7 +78,6 @@
 #include "net/dcsctp/socket/transmission_control_block.h"
 #include "net/dcsctp/timer/timer.h"
 #include "net/dcsctp/tx/retransmission_queue.h"
-#include "net/dcsctp/tx/send_queue.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/strings/string_builder.h"
@@ -224,7 +228,8 @@ std::string DcSctpSocket::log_prefix() const {
 }
 
 bool DcSctpSocket::IsConsistent() const {
-  if (tcb_ != nullptr && tcb_->reassembly_queue().HasMessages()) {
+  if (tcb_ != nullptr && (!options_.enable_receive_pull_mode &&
+                          tcb_->reassembly_queue().HasMessages())) {
     return false;
   }
   switch (state_) {
@@ -232,8 +237,10 @@ bool DcSctpSocket::IsConsistent() const {
       return (tcb_ == nullptr && !t1_init_->is_running() &&
               !t1_cookie_->is_running() && !t2_shutdown_->is_running());
     case State::kCookieWait:
-      return (tcb_ == nullptr && t1_init_->is_running() &&
-              !t1_cookie_->is_running() && !t2_shutdown_->is_running());
+      return (
+          tcb_ == nullptr &&
+          (t1_init_->is_running() || connect_params_.is_out_of_bands_connect) &&
+          !t1_cookie_->is_running() && !t2_shutdown_->is_running());
     case State::kCookieEchoed:
       return (tcb_ != nullptr && !t1_init_->is_running() &&
               t1_cookie_->is_running() && !t2_shutdown_->is_running() &&
@@ -327,6 +334,60 @@ void DcSctpSocket::Connect() {
                          << "Called Connect on a socket that is not closed";
   }
   RTC_DCHECK(IsConsistent());
+}
+
+std::vector<uint8_t> DcSctpSocket::GenerateConnectionToken(
+    const DcSctpOptions& options,
+    std::function<uint32_t(uint32_t low, uint32_t high)> get_random_uint32) {
+  std::vector<uint8_t> data;
+
+  VerificationTag verification_tag = VerificationTag(
+      get_random_uint32(kMinVerificationTag, kMaxVerificationTag));
+  TSN initial_tsn = TSN(get_random_uint32(kMinInitialTsn, kMaxInitialTsn));
+
+  RTC_DLOG(LS_INFO) << webrtc::StringFormat(
+      "Generating sctp-init. my_verification_tag=%08x, my_initial_tsn=%u",
+      *verification_tag, *initial_tsn);
+
+  Parameters::Builder params_builder;
+  AddCapabilityParameters(
+      options, /*support_zero_checksum=*/
+      options.zero_checksum_alternate_error_detection_method !=
+          ZeroChecksumAlternateErrorDetectionMethod::None(),
+      params_builder);
+  InitChunk init(verification_tag, options.max_receiver_window_buffer_size,
+                 options.announced_maximum_outgoing_streams,
+                 options.announced_maximum_incoming_streams, initial_tsn,
+                 params_builder.Build());
+  init.SerializeTo(data);
+
+  return data;
+}
+
+bool DcSctpSocket::ConnectWithConnectionToken(
+    webrtc::ArrayView<const uint8_t> my_data,
+    webrtc::ArrayView<const uint8_t> peer_data) {
+  CallbackDeferrer::ScopedDeferrer deferrer(callbacks_);
+
+  std::optional<InitChunk> my_init = InitChunk::Parse(my_data);
+  std::optional<InitChunk> peer_init = InitChunk::Parse(peer_data);
+  if (!my_init.has_value() || !peer_init.has_value()) {
+    return false;
+  }
+
+  Capabilities capabilities = ComputeCapabilities(
+      options_, peer_init->nbr_outbound_streams(),
+      peer_init->nbr_inbound_streams(), peer_init->parameters());
+
+  CreateTransmissionControlBlock(
+      capabilities, my_init->initiate_tag(), my_init->initial_tsn(),
+      peer_init->initiate_tag(), peer_init->initial_tsn(), peer_init->a_rwnd(),
+      MakeTieTag(callbacks_));
+
+  SetState(State::kEstablished, "Finished out of bands connect");
+  callbacks_.OnConnected();
+
+  return true;
 }
 
 void DcSctpSocket::CreateTransmissionControlBlock(
@@ -1082,15 +1143,24 @@ void DcSctpSocket::HandleDataCommon(AnyDataChunk& chunk) {
                        << tcb_->reassembly_queue().is_above_watermark();
 
   if (tcb_->reassembly_queue().is_full()) {
-    // If the reassembly queue is full, there is nothing that can be done. The
-    // specification only allows dropping gap-ack-blocks, and that's not
-    // likely to help as the socket has been trying to fill gaps since the
-    // watermark was reached.
-    packet_sender_.Send(tcb_->PacketBuilder().Add(AbortChunk(
-        true, Parameters::Builder().Add(OutOfResourceErrorCause()).Build())));
-    InternalClose(ErrorKind::kResourceExhaustion,
-                  "Reassembly Queue is exhausted");
-    return;
+    if (tcb_->reassembly_queue().HasMessages()) {
+      // If the reassembly queue is full but there are assembled messages
+      // waiting to be pulled, we can't do anything with this data except drop
+      // it, and hope the upper layer drains the accumulated messages soon.
+      RTC_DLOG(LS_VERBOSE) << log_prefix()
+                           << "Rejected data because of full reassembly queue";
+      return;
+    } else {
+      // If the reassembly queue is full and there's no messages waiting, there
+      // is nothing that can be done. The specification only allows dropping
+      // gap-ack-blocks, and that's not likely to help as the socket has been
+      // trying to fill gaps since the watermark was reached.
+      packet_sender_.Send(tcb_->PacketBuilder().Add(AbortChunk(
+          true, Parameters::Builder().Add(OutOfResourceErrorCause()).Build())));
+      InternalClose(ErrorKind::kResourceExhaustion,
+                    "Reassembly Queue is exhausted");
+      return;
+    }
   }
 
   if (tcb_->reassembly_queue().is_above_watermark()) {
@@ -1472,10 +1542,33 @@ void DcSctpSocket::HandleCookieAck(
 }
 
 void DcSctpSocket::MaybeDeliverMessages() {
-  for (auto& message : tcb_->reassembly_queue().FlushMessages()) {
-    ++metrics_.rx_messages_count;
-    callbacks_.OnMessageReceived(std::move(message));
+  if (options_.enable_receive_pull_mode) {
+    if (tcb_->reassembly_queue().HasMessages()) {
+      callbacks_.OnMessageReady();
+    }
+    return;
   }
+
+  while (std::optional<DcSctpMessage> message =
+             tcb_->reassembly_queue().GetNextMessage()) {
+    ++metrics_.rx_messages_count;
+    callbacks_.OnMessageReceived(*std::move(message));
+  }
+}
+
+size_t DcSctpSocket::MessagesReady() const {
+  return tcb_ != nullptr ? tcb_->reassembly_queue().MessagesReady() : 0;
+}
+
+std::optional<DcSctpMessage> DcSctpSocket::GetNextMessage() {
+  if (tcb_ == nullptr) {
+    return std::nullopt;
+  }
+  std::optional<DcSctpMessage> ret = tcb_->reassembly_queue().GetNextMessage();
+  if (ret.has_value()) {
+    ++metrics_.rx_messages_count;
+  }
+  return ret;
 }
 
 void DcSctpSocket::HandleSack(const CommonHeader& /* header */,

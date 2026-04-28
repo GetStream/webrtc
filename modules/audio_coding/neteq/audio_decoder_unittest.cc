@@ -8,14 +8,22 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <stdlib.h>
+#include "api/audio_codecs/audio_decoder.h"
 
 #include <array>
+#include <cstdint>
+#include <cstdlib>
 #include <memory>
-#include <string>
+#include <optional>
+#include <tuple>
+#include <utility>
 #include <vector>
 
+#include "api/array_view.h"
+#include "api/audio_codecs/audio_encoder.h"
+#include "api/audio_codecs/g722/audio_encoder_g722_config.h"
 #include "api/audio_codecs/opus/audio_encoder_opus.h"
+#include "api/audio_codecs/opus/audio_encoder_opus_config.h"
 #include "api/environment/environment_factory.h"
 #include "modules/audio_coding/codecs/g711/audio_decoder_pcm.h"
 #include "modules/audio_coding/codecs/g711/audio_encoder_pcm.h"
@@ -24,17 +32,17 @@
 #include "modules/audio_coding/codecs/opus/audio_decoder_opus.h"
 #include "modules/audio_coding/codecs/pcm16b/audio_decoder_pcm16b.h"
 #include "modules/audio_coding/codecs/pcm16b/audio_encoder_pcm16b.h"
+#include "modules/audio_coding/neteq/tools/input_audio_file.h"
 #include "modules/audio_coding/neteq/tools/resample_input_audio_file.h"
-#include "rtc_base/system/arch.h"
-#include "test/explicit_key_value_config.h"
+#include "rtc_base/buffer.h"
+#include "rtc_base/checks.h"
+#include "test/create_test_field_trials.h"
 #include "test/gtest.h"
 #include "test/testsupport/file_utils.h"
 
 namespace webrtc {
 
 namespace {
-
-using test::ExplicitKeyValueConfig;
 
 constexpr int kOverheadBytesPerPacket = 50;
 
@@ -92,15 +100,14 @@ double MseInputOutput(const std::vector<int16_t>& input,
 class AudioDecoderTest : public ::testing::Test {
  protected:
   AudioDecoderTest()
-      : input_audio_(
-            webrtc::test::ResourcePath("audio_coding/testfile32kHz", "pcm"),
-            32000),
+      : input_audio_(test::ResourcePath("audio_coding/testfile32kHz", "pcm"),
+                     32000),
         codec_input_rate_hz_(32000),  // Legacy default value.
         frame_size_(0),
         data_length_(0),
         channels_(1),
         payload_type_(17),
-        decoder_(NULL) {}
+        decoder_(nullptr) {}
 
   ~AudioDecoderTest() override {}
 
@@ -113,7 +120,7 @@ class AudioDecoderTest : public ::testing::Test {
 
   void TearDown() override {
     delete decoder_;
-    decoder_ = NULL;
+    decoder_ = nullptr;
   }
 
   virtual void InitEncoder() {}
@@ -351,7 +358,7 @@ class AudioDecoderOpusTest
     frame_size_ = CheckedDivExact(opus_sample_rate_hz_, 100);
     data_length_ = 10 * frame_size_;
     decoder_ = new AudioDecoderOpusImpl(
-        ExplicitKeyValueConfig(""), opus_num_channels_, opus_sample_rate_hz_);
+        CreateTestFieldTrials(), opus_num_channels_, opus_sample_rate_hz_);
     AudioEncoderOpusConfig config;
     config.frame_size_ms = 10;
     config.sample_rate_hz = opus_sample_rate_hz_;
@@ -360,7 +367,8 @@ class AudioDecoderOpusTest
                              ? AudioEncoderOpusConfig::ApplicationMode::kVoip
                              : AudioEncoderOpusConfig::ApplicationMode::kAudio;
     audio_encoder_ = AudioEncoderOpus::MakeAudioEncoder(
-        CreateEnvironment(), config, {.payload_type = payload_type_});
+        CreateEnvironment(), std::move(config),
+        {.payload_type = payload_type_});
     audio_encoder_->OnReceivedOverhead(kOverheadBytesPerPacket);
   }
   const int opus_sample_rate_hz_{std::get<0>(GetParam())};

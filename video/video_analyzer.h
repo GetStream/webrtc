@@ -10,24 +10,43 @@
 #ifndef VIDEO_VIDEO_ANALYZER_H_
 #define VIDEO_VIDEO_ANALYZER_H_
 
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
 #include <deque>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "absl/strings/string_view.h"
+#include "api/array_view.h"
+#include "api/call/transport.h"
+#include "api/media_types.h"
 #include "api/numerics/samples_stats_counter.h"
 #include "api/task_queue/task_queue_base.h"
 #include "api/test/metrics/metric.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
+#include "api/video/video_frame.h"
+#include "api/video/video_sink_interface.h"
 #include "api/video/video_source_interface.h"
+#include "call/audio_receive_stream.h"
+#include "call/call.h"
+#include "call/packet_receiver.h"
+#include "call/video_receive_stream.h"
+#include "call/video_send_stream.h"
 #include "modules/rtp_rtcp/source/rtp_packet.h"
+#include "modules/rtp_rtcp/source/rtp_packet_received.h"
 #include "modules/rtp_rtcp/source/video_rtp_depacketizer.h"
+#include "rtc_base/copy_on_write_buffer.h"
 #include "rtc_base/event.h"
-#include "rtc_base/numerics/running_statistics.h"
 #include "rtc_base/numerics/sequence_number_unwrapper.h"
 #include "rtc_base/platform_thread.h"
 #include "rtc_base/synchronization/mutex.h"
+#include "rtc_base/thread_annotations.h"
+#include "system_wrappers/include/clock.h"
 #include "test/layer_filtering_transport.h"
 #include "test/rtp_file_writer.h"
 
@@ -54,7 +73,7 @@ class VideoAnalyzer : public PacketReceiver,
                 Clock* clock,
                 std::string rtp_dump_name,
                 TaskQueueBase* task_queue);
-  ~VideoAnalyzer();
+  ~VideoAnalyzer() override;
 
   virtual void SetReceiver(PacketReceiver* receiver);
   void SetSource(VideoSourceInterface<VideoFrame>* video_source,
@@ -79,7 +98,8 @@ class VideoAnalyzer : public PacketReceiver,
   bool SendRtp(ArrayView<const uint8_t> packet,
                const PacketOptions& options) override;
 
-  bool SendRtcp(ArrayView<const uint8_t> packet) override;
+  bool SendRtcp(ArrayView<const uint8_t> packet,
+                const PacketOptions& options) override;
   void OnFrame(const VideoFrame& video_frame) override;
   void Wait();
 
@@ -207,14 +227,14 @@ class VideoAnalyzer : public PacketReceiver,
       RTC_LOCKS_EXCLUDED(comparison_lock_);
   void PrintResult(absl::string_view result_type,
                    const SamplesStatsCounter& stats,
-                   webrtc::test::Unit unit,
-                   webrtc::test::ImprovementDirection improvement_direction);
+                   test::Unit unit,
+                   test::ImprovementDirection improvement_direction);
   void PrintResultWithExternalMean(
       absl::string_view result_type,
       double mean,
       const SamplesStatsCounter& stats,
-      webrtc::test::Unit unit,
-      webrtc::test::ImprovementDirection improvement_direction);
+      test::Unit unit,
+      test::ImprovementDirection improvement_direction);
   void PrintSamplesToFile(void) RTC_LOCKS_EXCLUDED(comparison_lock_);
   void AddCapturedFrameForComparison(const VideoFrame& video_frame)
       RTC_LOCKS_EXCLUDED(lock_, comparison_lock_);

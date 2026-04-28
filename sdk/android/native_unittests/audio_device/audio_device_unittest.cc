@@ -10,23 +10,40 @@
 
 #include "api/audio/audio_device.h"
 
+#include <SLES/OpenSLES.h>
+#include <jni.h>
+
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <iostream>
+#include <iterator>
+#include <limits>
 #include <list>
 #include <memory>
 #include <numeric>
+#include <string>
+#include <vector>
 
+#include "api/audio/audio_device_defines.h"
+#include "api/environment/environment.h"
+#include "api/environment/environment_factory.h"
 #include "api/scoped_refptr.h"
+#include "api/units/time_delta.h"
 #include "modules/audio_device/include/mock_audio_transport.h"
-#include "rtc_base/arraysize.h"
 #include "rtc_base/event.h"
 #include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/time_utils.h"
 #include "sdk/android/generated_native_unittests_jni/BuildInfo_jni.h"
 #include "sdk/android/native_api/audio_device_module/audio_device_android.h"
 #include "sdk/android/native_api/jni/application_context_provider.h"
-#include "sdk/android/src/jni/audio_device/audio_common.h"
+#include "sdk/android/native_api/jni/java_types.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
 #include "sdk/android/src/jni/audio_device/audio_device_module.h"
 #include "sdk/android/src/jni/audio_device/opensles_common.h"
-#include "sdk/android/src/jni/jni_helpers.h"
+#include "sdk/android/src/jni/jvm.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 #include "test/testsupport/file_utils.h"
@@ -467,7 +484,8 @@ class AudioDeviceTest : public ::testing::Test {
     // Creates an audio device using a default audio layer.
     jni_ = AttachCurrentThreadIfNeeded();
     context_ = GetAppContext(jni_);
-    audio_device_ = CreateJavaAudioDeviceModule(jni_, context_.obj());
+    audio_device_ =
+        CreateJavaAudioDeviceModule(jni_, webrtc_env_, context_.obj());
     EXPECT_NE(audio_device_.get(), nullptr);
     EXPECT_EQ(0, audio_device_->Init());
     audio_manager_ = GetAudioManager(jni_, context_);
@@ -491,7 +509,7 @@ class AudioDeviceTest : public ::testing::Test {
   }
 
   void SetActiveAudioLayer(AudioDeviceModule::AudioLayer audio_layer) {
-    audio_device_ = CreateAndroidAudioDeviceModule(audio_layer);
+    audio_device_ = CreateAndroidAudioDeviceModule(webrtc_env_, audio_layer);
     EXPECT_NE(audio_device_.get(), nullptr);
     EXPECT_EQ(0, audio_device_->Init());
     UpdateParameters();
@@ -542,7 +560,7 @@ class AudioDeviceTest : public ::testing::Test {
   int TestDelayOnAudioLayer(
       const AudioDeviceModule::AudioLayer& layer_to_test) {
     webrtc::scoped_refptr<AudioDeviceModule> audio_device;
-    audio_device = CreateAndroidAudioDeviceModule(layer_to_test);
+    audio_device = CreateAndroidAudioDeviceModule(webrtc_env_, layer_to_test);
     EXPECT_NE(audio_device.get(), nullptr);
     uint16_t playout_delay;
     EXPECT_EQ(0, audio_device->PlayoutDelay(&playout_delay));
@@ -552,7 +570,7 @@ class AudioDeviceTest : public ::testing::Test {
   AudioDeviceModule::AudioLayer TestActiveAudioLayer(
       const AudioDeviceModule::AudioLayer& layer_to_test) {
     webrtc::scoped_refptr<AudioDeviceModule> audio_device;
-    audio_device = CreateAndroidAudioDeviceModule(layer_to_test);
+    audio_device = CreateAndroidAudioDeviceModule(webrtc_env_, layer_to_test);
     EXPECT_NE(audio_device.get(), nullptr);
     AudioDeviceModule::AudioLayer active;
     EXPECT_EQ(0, audio_device->ActiveAudioLayer(&active));
@@ -667,6 +685,7 @@ class AudioDeviceTest : public ::testing::Test {
   }
 
   JNIEnv* jni_;
+  const Environment webrtc_env_ = CreateEnvironment();
   ScopedJavaLocalRef<jobject> context_;
   webrtc::Event test_is_done_;
   webrtc::scoped_refptr<AudioDeviceModule> audio_device_;
@@ -784,6 +803,15 @@ TEST_F(AudioDeviceTest, InitTerminate) {
   EXPECT_TRUE(audio_device()->Initialized());
   EXPECT_EQ(0, audio_device()->Terminate());
   EXPECT_FALSE(audio_device()->Initialized());
+}
+
+TEST_F(AudioDeviceTest, InitTerminateRepeat) {
+  EXPECT_TRUE(audio_device()->Initialized());
+  for (int i = 0; i < 10; ++i) {
+    EXPECT_EQ(0, audio_device()->Terminate());
+    EXPECT_FALSE(audio_device()->Initialized());
+    EXPECT_EQ(0, audio_device()->Init());
+  }
 }
 
 TEST_F(AudioDeviceTest, Devices) {
@@ -1157,19 +1185,20 @@ TEST_F(AudioDeviceTest, DISABLED_MeasureLoopbackLatency) {
 // TODO(https://crbug.com/webrtc/15537): test randomly fails.
 TEST(JavaAudioDeviceTest, DISABLED_TestRunningTwoAdmsSimultaneously) {
   JNIEnv* jni = AttachCurrentThreadIfNeeded();
+  const Environment webrtc_env = CreateEnvironment();
   ScopedJavaLocalRef<jobject> context = GetAppContext(jni);
 
   // Create and start the first ADM.
-  webrtc::scoped_refptr<AudioDeviceModule> adm_1 =
-      CreateJavaAudioDeviceModule(jni, context.obj());
+  scoped_refptr<AudioDeviceModule> adm_1 =
+      CreateJavaAudioDeviceModule(jni, webrtc_env, context.obj());
   EXPECT_EQ(0, adm_1->Init());
   EXPECT_EQ(0, adm_1->InitRecording());
   EXPECT_EQ(0, adm_1->StartRecording());
 
   // Create and start a second ADM. Expect this to fail due to the microphone
   // already being in use.
-  webrtc::scoped_refptr<AudioDeviceModule> adm_2 =
-      CreateJavaAudioDeviceModule(jni, context.obj());
+  scoped_refptr<AudioDeviceModule> adm_2 =
+      CreateJavaAudioDeviceModule(jni, webrtc_env, context.obj());
   int32_t err = adm_2->Init();
   err |= adm_2->InitRecording();
   err |= adm_2->StartRecording();

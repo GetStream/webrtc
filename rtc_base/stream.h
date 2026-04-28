@@ -21,7 +21,6 @@
 #include "rtc_base/checks.h"
 #include "rtc_base/system/no_unique_address.h"
 #include "rtc_base/system/rtc_export.h"
-#include "rtc_base/third_party/sigslot/sigslot.h"
 #include "rtc_base/thread_annotations.h"
 
 namespace webrtc {
@@ -101,27 +100,8 @@ class RTC_EXPORT StreamInterface {
     callback_ = std::move(callback);
   }
 
-  // TODO(bugs.webrtc.org/11943): Remove after updating downstream code.
-  sigslot::signal3<StreamInterface*, int, int> SignalEvent
-      [[deprecated("Use SetEventCallback instead")]];
-
   // Return true if flush is successful.
   virtual bool Flush();
-
-  //
-  // CONVENIENCE METHODS
-  //
-  // These methods are implemented in terms of other methods, for convenience.
-  //
-
-  // WriteAll is a helper function which repeatedly calls Write until all the
-  // data is written, or something other than SR_SUCCESS is returned.  Note that
-  // unlike Write, the argument 'written' is always set, and may be non-zero
-  // on results other than SR_SUCCESS.  The remaining arguments have the
-  // same semantics as Write.
-  StreamResult WriteAll(ArrayView<const uint8_t> data,
-                        size_t& written,
-                        int& error);
 
  protected:
   StreamInterface();
@@ -131,16 +111,10 @@ class RTC_EXPORT StreamInterface {
     if (callback_) {
       callback_(stream_events, err);
     }
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    // TODO(tommi): This is for backwards compatibility only while `SignalEvent`
-    // is being replaced by `SetEventCallback`.
-    SignalEvent(this, stream_events, err);
-#pragma clang diagnostic pop
   }
 
   RTC_NO_UNIQUE_ADDRESS SequenceChecker callback_sequence_{
-      webrtc::SequenceChecker::kDetached};
+      SequenceChecker::kDetached};
 
  private:
   absl::AnyInvocable<void(int, int)> callback_
@@ -149,26 +123,5 @@ class RTC_EXPORT StreamInterface {
 
 }  //  namespace webrtc
 
-// Re-export symbols from the webrtc namespace for backwards compatibility.
-// TODO(bugs.webrtc.org/4222596): Remove once all references are updated.
-#ifdef WEBRTC_ALLOW_DEPRECATED_NAMESPACES
-namespace rtc {
-using ::webrtc::SE_CLOSE;
-using ::webrtc::SE_OPEN;
-using ::webrtc::SE_READ;
-using ::webrtc::SE_WRITE;
-using ::webrtc::SR_BLOCK;
-using ::webrtc::SR_EOS;
-using ::webrtc::SR_ERROR;
-using ::webrtc::SR_SUCCESS;
-using ::webrtc::SS_CLOSED;
-using ::webrtc::SS_OPEN;
-using ::webrtc::SS_OPENING;
-using ::webrtc::StreamEvent;
-using ::webrtc::StreamInterface;
-using ::webrtc::StreamResult;
-using ::webrtc::StreamState;
-}  // namespace rtc
-#endif  // WEBRTC_ALLOW_DEPRECATED_NAMESPACES
 
 #endif  // RTC_BASE_STREAM_H_

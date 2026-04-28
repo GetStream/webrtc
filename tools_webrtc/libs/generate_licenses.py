@@ -49,7 +49,6 @@ LIB_TO_LICENSES_DICT = {
         'third_party/android_deps/libs/'
         'com_google_errorprone_error_prone_core/LICENSE'
     ],
-    'ffmpeg': ['third_party/ffmpeg/LICENSE.md'],
     'fiat': ['third_party/boringssl/src/third_party/fiat/LICENSE'],
     'guava': ['third_party/android_deps/libs/com_google_guava_guava/LICENSE'],
     'ijar': ['third_party/ijar/LICENSE'],
@@ -64,7 +63,6 @@ LIB_TO_LICENSES_DICT = {
     'libyuv': ['third_party/libyuv/LICENSE'],
     'llvm-libc': ['third_party/llvm-libc/src/LICENSE.TXT'],
     'nasm': ['third_party/nasm/LICENSE'],
-    'openh264': ['third_party/openh264/src/LICENSE'],
     'opus': ['third_party/opus/src/COPYING'],
     'pffft': ['third_party/pffft/LICENSE'],
     'protobuf': ['third_party/protobuf/LICENSE'],
@@ -72,7 +70,6 @@ LIB_TO_LICENSES_DICT = {
     'webrtc': ['LICENSE'],
     'zlib': ['third_party/zlib/LICENSE'],
     'base64': ['rtc_base/third_party/base64/LICENSE'],
-    'sigslot': ['rtc_base/third_party/sigslot/LICENSE'],
     'portaudio': ['modules/third_party/portaudio/LICENSE'],
     'fft': ['modules/third_party/fft/LICENSE'],
     'g711': ['modules/third_party/g711/LICENSE'],
@@ -198,38 +195,18 @@ class LicenseBuilder:
         return output_json
 
     def _get_third_party_libraries(self, buildfile_dir, target):
+        license_json = LicenseBuilder._run_gn(buildfile_dir, target)
         try:
-            output = json.loads(LicenseBuilder._run_gn(buildfile_dir, target))
-        except json.JSONDecodeError:
-            print("WARNING: gn deps command failed, using fallback WebRTC dependencies")
-            # Use common WebRTC third-party dependencies as fallback
-            return self._get_fallback_webrtc_dependencies()
-
+            output = json.loads(license_json)
+        except:
+            logging.error("unable to parse license_json = '%s'", license_json)
+            raise
         libraries = set()
         for described_target in list(output.values()):
             third_party_libs = (self._parse_library(dep)
                                 for dep in described_target['deps'])
             libraries |= set(lib for lib in third_party_libs if lib)
         return libraries
-
-    def _get_fallback_webrtc_dependencies(self):
-        """Return ALL WebRTC dependencies with available licenses when gn fails"""
-        # Instead of guessing which deps to include, use ALL available licenses
-        # This ensures complete coverage when gn fails to detect dependencies
-        available_licenses = set(self.common_licenses_dict.keys())
-
-        # Exclude empty license entries (compile-time deps) and special cases
-        excluded_deps = {'android_deps', 'androidx', 'ow2_asm', 'jdk'}
-        valid_deps = available_licenses - excluded_deps
-
-        # Further filter out empty license lists
-        valid_deps = {dep for dep in valid_deps
-                     if self.common_licenses_dict[dep]}  # Only deps with actual license files
-
-        print(f"Using fallback: ALL available WebRTC licenses ({len(valid_deps)} dependencies)")
-        print(f"Dependencies included: {sorted(valid_deps)}")
-
-        return valid_deps
 
     def generate_license_text(self, output_dir):
         # Get a list of third_party libs from gn. For fat libraries we must
@@ -244,10 +221,10 @@ class LicenseBuilder:
         missing_licenses = third_party_libs - set(
             self.common_licenses_dict.keys())
         if missing_licenses:
-            print(f'WARNING: Missing licenses for third_party targets: {sorted(missing_licenses)}')
-            print('These will be excluded from license generation but build will continue')
-            # Remove dependencies that don't have license info instead of failing
-            third_party_libs = third_party_libs - missing_licenses
+            error_msg = 'Missing licenses for third_party targets: %s' % \
+                        ', '.join(sorted(missing_licenses))
+            logging.error(error_msg)
+            raise Exception(error_msg)
 
         # Put webrtc at the front of the list.
         license_libs = sorted(third_party_libs)
@@ -267,20 +244,12 @@ class LicenseBuilder:
 
             output_license_file.write('# %s\n' % license_lib)
             output_license_file.write('```\n')
-            found_license = False
             for path in self.common_licenses_dict[license_lib]:
                 license_path = os.path.join(WEBRTC_ROOT, path)
-                if not os.path.exists(license_path):
-                    logging.warning('License file not found: %s', license_path)
-                    continue
-                found_license = True
                 with open(license_path, 'r') as license_file:
                     license_text = escape(license_file.read(), quote=True)
                     output_license_file.write(license_text)
                     output_license_file.write('\n')
-            if not found_license:
-                logging.warning('No license files found for library: %s', license_lib)
-                output_license_file.write('No license file available.\n')
             output_license_file.write('```\n\n')
 
         output_license_file.close()

@@ -19,7 +19,8 @@
 #include <string>
 
 #include "absl/functional/any_invocable.h"
-#include "api/field_trials_view.h"
+#include "absl/strings/string_view.h"
+#include "api/environment/environment.h"
 #include "api/jsep.h"
 #include "api/peer_connection_interface.h"
 #include "api/rtc_error.h"
@@ -53,10 +54,10 @@ class WebRtcSessionDescriptionFactory {
       bool dtls_enabled,
       std::unique_ptr<RTCCertificateGeneratorInterface> cert_generator,
       scoped_refptr<RTCCertificate> certificate,
-      std::function<void(const webrtc::scoped_refptr<webrtc::RTCCertificate>&)>
+      std::function<void(const scoped_refptr<RTCCertificate>&)>
           on_certificate_ready,
       CodecLookupHelper* codec_lookup_helper,
-      const FieldTrialsView& field_trials);
+      const Environment& env);
   ~WebRtcSessionDescriptionFactory();
 
   WebRtcSessionDescriptionFactory(const WebRtcSessionDescriptionFactory&) =
@@ -66,7 +67,7 @@ class WebRtcSessionDescriptionFactory {
 
   static void CopyCandidatesFromSessionDescription(
       const SessionDescriptionInterface* source_desc,
-      const std::string& content_name,
+      absl::string_view content_name,
       SessionDescriptionInterface* dest_desc);
 
   void CreateOffer(
@@ -145,7 +146,7 @@ class WebRtcSessionDescriptionFactory {
   CertificateRequestState certificate_request_state_;
   std::queue<absl::AnyInvocable<void() &&>> callbacks_;
 
-  std::function<void(const webrtc::scoped_refptr<webrtc::RTCCertificate>&)>
+  std::function<void(const scoped_refptr<RTCCertificate>&)>
       on_certificate_ready_;
 
   WeakPtrFactory<WebRtcSessionDescriptionFactory> weak_factory_{this};

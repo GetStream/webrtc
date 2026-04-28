@@ -38,20 +38,20 @@ namespace webrtc_pc_e2e {
 namespace {
 
 class SetRemoteDescriptionCallback
-    : public webrtc::SetRemoteDescriptionObserverInterface {
+    : public SetRemoteDescriptionObserverInterface {
  public:
-  void OnSetRemoteDescriptionComplete(webrtc::RTCError error) override {
+  void OnSetRemoteDescriptionComplete(RTCError error) override {
     is_called_ = true;
     error_ = error;
   }
 
   bool is_called() const { return is_called_; }
 
-  webrtc::RTCError error() const { return error_; }
+  RTCError error() const { return error_; }
 
  private:
   bool is_called_ = false;
-  webrtc::RTCError error_;
+  RTCError error_;
 };
 
 }  // namespace
@@ -113,14 +113,12 @@ bool TestPeer::SetRemoteDescription(
 }
 
 bool TestPeer::AddIceCandidates(
-    std::vector<std::unique_ptr<IceCandidateInterface>> candidates) {
+    std::vector<std::unique_ptr<IceCandidate>> candidates) {
   RTC_CHECK(wrapper_) << "TestPeer is already closed";
   bool success = true;
   for (auto& candidate : candidates) {
     if (!pc()->AddIceCandidate(candidate.get())) {
-      std::string candidate_str;
-      bool res = candidate->ToString(&candidate_str);
-      RTC_CHECK(res);
+      std::string candidate_str = candidate->ToString();
       RTC_LOG(LS_ERROR) << "Failed to add ICE candidate, candidate_str="
                         << candidate_str;
       success = false;

@@ -13,11 +13,9 @@
 #include <cstdint>
 #include <memory>
 #include <string>
-#include <utility>
 #include <variant>
 #include <vector>
 
-#include "absl/base/macros.h"
 #include "absl/strings/string_view.h"
 #include "api/async_dns_resolver.h"
 #include "api/audio/audio_mixer.h"
@@ -25,7 +23,7 @@
 #include "api/audio_codecs/audio_decoder_factory.h"
 #include "api/audio_codecs/audio_encoder_factory.h"
 #include "api/fec_controller.h"
-#include "api/field_trials_view.h"
+#include "api/field_trials.h"
 #include "api/ice_transport_interface.h"
 #include "api/neteq/neteq_factory.h"
 #include "api/peer_connection_interface.h"
@@ -81,12 +79,6 @@ class PeerConfigurer {
   PeerConfigurer* SetNetEqFactory(std::unique_ptr<NetEqFactory> neteq_factory);
   PeerConfigurer* SetAudioProcessing(
       std::unique_ptr<AudioProcessingBuilderInterface> audio_processing);
-  ABSL_DEPRECATE_AND_INLINE()
-  PeerConfigurer* SetAudioProcessing(
-      scoped_refptr<webrtc::AudioProcessing> audio_processing) {
-    return SetAudioProcessing(
-        CustomAudioProcessing(std::move(audio_processing)));
-  }
   PeerConfigurer* SetAudioMixer(scoped_refptr<webrtc::AudioMixer> audio_mixer);
 
   // Forces the Peerconnection to use the network thread as the worker thread.
@@ -184,8 +176,12 @@ class PeerConfigurer {
   // Set bitrate parameters on PeerConnection. This constraints will be
   // applied to all summed RTP streams for this peer.
   PeerConfigurer* SetBitrateSettings(BitrateSettings bitrate_settings);
-  // Set field trials used for this PeerConnection.
-  PeerConfigurer* SetFieldTrials(std::unique_ptr<FieldTrialsView> field_trials);
+
+  // Appends field trials for this PeerConnection.
+  PeerConfigurer* AddFieldTrials(const FieldTrials& field_trials) {
+    GetFieldTrials().Merge(field_trials);
+    return this;
+  }
 
   // Returns InjectableComponents and transfer ownership to the caller.
   // Can be called once.
@@ -215,6 +211,10 @@ class PeerConfigurer {
   std::vector<VideoSource>* video_sources() { return &video_sources_; }
 
  private:
+  FieldTrials& GetFieldTrials() {
+    return *components_->pcf_dependencies->field_trials;
+  }
+
   std::unique_ptr<InjectableComponents> components_;
   std::unique_ptr<Params> params_;
   std::unique_ptr<ConfigurableParams> configurable_params_;

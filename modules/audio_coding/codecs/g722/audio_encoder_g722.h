@@ -11,10 +11,14 @@
 #ifndef MODULES_AUDIO_CODING_CODECS_G722_AUDIO_ENCODER_G722_H_
 #define MODULES_AUDIO_CODING_CODECS_G722_AUDIO_ENCODER_G722_H_
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <utility>
+#include <vector>
 
+#include "api/array_view.h"
 #include "api/audio_codecs/audio_encoder.h"
 #include "api/audio_codecs/g722/audio_encoder_g722_config.h"
 #include "api/units/time_delta.h"
@@ -64,7 +68,10 @@ class AudioEncoderG722Impl final : public AudioEncoder {
   size_t num_10ms_frames_buffered_;
   uint32_t first_timestamp_in_buffer_;
   const std::unique_ptr<EncoderState[]> encoders_;
-  Buffer interleave_buffer_;
+  // This vector is used for temporary storage in the
+  // EncodeImpl function. Having it allocated here might
+  // improve locality of reference.
+  std::vector<uint8_t> interleave_buffer_;
 };
 
 }  // namespace webrtc

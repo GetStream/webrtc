@@ -10,14 +10,12 @@
 
 #include <jni.h>
 
-#include <vector>
+#include <cstdint>
 
 #include "common_video/libyuv/include/webrtc_libyuv.h"
 #include "rtc_base/checks.h"
 #include "sdk/android/generated_video_jni/NV21Buffer_jni.h"
 #include "third_party/jni_zero/jni_zero.h"
-#include "third_party/libyuv/include/libyuv/convert.h"
-#include "third_party/libyuv/include/libyuv/scale.h"
 
 namespace webrtc {
 namespace jni {
@@ -30,14 +28,14 @@ static void JNI_NV21Buffer_CropAndScale(
     jint crop_height,
     jint scale_width,
     jint scale_height,
-    const jni_zero::JavaParamRef<jbyteArray>& j_src,
+    const jni_zero::JavaRef<jbyteArray>& j_src,
     jint src_width,
     jint src_height,
-    const jni_zero::JavaParamRef<jobject>& j_dst_y,
+    const jni_zero::JavaRef<jobject>& j_dst_y,
     jint dst_stride_y,
-    const jni_zero::JavaParamRef<jobject>& j_dst_u,
+    const jni_zero::JavaRef<jobject>& j_dst_u,
     jint dst_stride_u,
-    const jni_zero::JavaParamRef<jobject>& j_dst_v,
+    const jni_zero::JavaRef<jobject>& j_dst_v,
     jint dst_stride_v) {
   const int src_stride_y = src_width;
   const int src_stride_uv = src_width;

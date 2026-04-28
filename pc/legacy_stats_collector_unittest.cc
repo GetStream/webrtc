@@ -10,9 +10,8 @@
 
 #include "pc/legacy_stats_collector.h"
 
-#include <stdio.h>
-
 #include <cstdint>
+#include <cstdio>
 #include <memory>
 #include <optional>
 #include <string>
@@ -21,6 +20,7 @@
 
 #include "absl/algorithm/container.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/string_view.h"
 #include "api/audio/audio_processing_statistics.h"
 #include "api/audio_codecs/audio_encoder.h"
 #include "api/candidate.h"
@@ -33,6 +33,8 @@
 #include "api/peer_connection_interface.h"
 #include "api/rtp_sender_interface.h"
 #include "api/scoped_refptr.h"
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
 #include "call/call.h"
 #include "media/base/media_channel.h"
 #include "p2p/base/connection_info.h"
@@ -58,38 +60,33 @@
 #include "rtc_base/ssl_identity.h"
 #include "rtc_base/ssl_stream_adapter.h"
 #include "rtc_base/thread.h"
+#include "system_wrappers/include/clock.h"
+#include "system_wrappers/include/ntp_time.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
+
+namespace webrtc {
 
 using ::testing::_;
 using ::testing::AtMost;
 using ::testing::Eq;
+using ::testing::IsNull;
+using ::testing::NotNull;
 using ::testing::Return;
 using ::testing::UnorderedElementsAre;
-using ::webrtc::ConnectionInfo;
-using ::webrtc::SsrcReceiverInfo;
-using ::webrtc::TransportChannelStats;
-using ::webrtc::VideoMediaInfo;
-using ::webrtc::VideoReceiverInfo;
-using ::webrtc::VideoSenderInfo;
-using ::webrtc::VoiceMediaInfo;
-using ::webrtc::VoiceReceiverInfo;
-using ::webrtc::VoiceSenderInfo;
-
-namespace webrtc {
 
 // Error return values
-const char kNotFound[] = "NOT FOUND";
+constexpr char kNotFound[] = "NOT FOUND";
 
 // Constant names for track identification.
-const char kLocalTrackId[] = "local_track_id";
-const char kRemoteTrackId[] = "remote_track_id";
-const uint32_t kSsrcOfTrack = 1234;
+constexpr char kLocalTrackId[] = "local_track_id";
+constexpr char kRemoteTrackId[] = "remote_track_id";
+constexpr uint32_t kSsrcOfTrack = 1234;
 
 class FakeAudioProcessor : public AudioProcessorInterface {
  public:
   FakeAudioProcessor() {}
-  ~FakeAudioProcessor() {}
+  ~FakeAudioProcessor() override {}
 
  private:
   AudioProcessorInterface::AudioProcessorStatistics GetStats(
@@ -111,7 +108,7 @@ class FakeAudioTrack : public MediaStreamTrack<AudioTrackInterface> {
       : MediaStreamTrack<AudioTrackInterface>(id),
         processor_(make_ref_counted<FakeAudioProcessor>()) {}
   std::string kind() const override { return "audio"; }
-  AudioSourceInterface* GetSource() const override { return NULL; }
+  AudioSourceInterface* GetSource() const override { return nullptr; }
   void AddSink(AudioTrackSinkInterface* sink) override {}
   void RemoveSink(AudioTrackSinkInterface* sink) override {}
   bool GetSignalLevel(int* level) override {
@@ -131,7 +128,7 @@ class FakeAudioTrack : public MediaStreamTrack<AudioTrackInterface> {
 class FakeAudioProcessorWithInitValue : public AudioProcessorInterface {
  public:
   FakeAudioProcessorWithInitValue() {}
-  ~FakeAudioProcessorWithInitValue() {}
+  ~FakeAudioProcessorWithInitValue() override {}
 
  private:
   AudioProcessorInterface::AudioProcessorStatistics GetStats(
@@ -148,7 +145,7 @@ class FakeAudioTrackWithInitValue
       : MediaStreamTrack<AudioTrackInterface>(id),
         processor_(make_ref_counted<FakeAudioProcessorWithInitValue>()) {}
   std::string kind() const override { return "audio"; }
-  AudioSourceInterface* GetSource() const override { return NULL; }
+  AudioSourceInterface* GetSource() const override { return nullptr; }
   void AddSink(AudioTrackSinkInterface* sink) override {}
   void RemoveSink(AudioTrackSinkInterface* sink) override {}
   bool GetSignalLevel(int* level) override {
@@ -295,7 +292,7 @@ void CheckCertChainReports(const StatsReports& reports,
   size_t i = 0;
   while (true) {
     const StatsReport* report = FindReportById(reports, *certificate_id);
-    ASSERT_TRUE(report != NULL);
+    ASSERT_TRUE(report != nullptr);
 
     std::string der_base64;
     EXPECT_TRUE(GetValue(report, StatsReport::kStatsValueNameDer, &der_base64));
@@ -588,16 +585,7 @@ void InitVoiceReceiverInfo(VoiceReceiverInfo* voice_receiver_info) {
   voice_receiver_info->decoding_codec_plc = 127;
 }
 
-class LegacyStatsCollectorForTest : public LegacyStatsCollector {
- public:
-  explicit LegacyStatsCollectorForTest(PeerConnectionInternal* pc)
-      : LegacyStatsCollector(pc), time_now_(19477) {}
 
-  double GetTimeNow() override { return time_now_; }
-
- private:
-  double time_now_;
-};
 
 class LegacyStatsCollectorTest : public ::testing::Test {
  protected:
@@ -605,13 +593,14 @@ class LegacyStatsCollectorTest : public ::testing::Test {
     return make_ref_counted<FakePeerConnectionForStats>();
   }
 
-  std::unique_ptr<LegacyStatsCollectorForTest> CreateStatsCollector(
+  std::unique_ptr<LegacyStatsCollector> CreateStatsCollector(
       PeerConnectionInternal* pc) {
-    return std::make_unique<LegacyStatsCollectorForTest>(pc);
+    return std::make_unique<LegacyStatsCollector>(
+        pc, clock_, [this]() { return GetUtcTimeNowMs(); });
   }
 
   void VerifyAudioTrackStats(FakeAudioTrack* audio_track,
-                             LegacyStatsCollectorForTest* stats,
+                             LegacyStatsCollector* stats,
                              const VoiceMediaInfo& voice_info,
                              StatsReports* reports) {
     stats->UpdateStats(PeerConnectionInterface::kStatsOutputLevelStandard);
@@ -622,7 +611,7 @@ class LegacyStatsCollectorTest : public ::testing::Test {
     const StatsReport* report =
         FindNthReportByType(*reports, StatsReport::kStatsReportTypeSsrc, 1);
     ASSERT_TRUE(report);
-    EXPECT_EQ(stats->GetTimeNow(), report->timestamp());
+    EXPECT_EQ(GetUtcTimeNowMs(), report->timestamp());
     std::string track_id =
         ExtractSsrcStatsValue(*reports, StatsReport::kStatsValueNameTrackId);
     EXPECT_EQ(audio_track->id(), track_id);
@@ -648,7 +637,7 @@ class LegacyStatsCollectorTest : public ::testing::Test {
     const StatsReport* track_report = FindNthReportByType(
         track_reports, StatsReport::kStatsReportTypeSsrc, 1);
     ASSERT_TRUE(track_report);
-    EXPECT_EQ(stats->GetTimeNow(), track_report->timestamp());
+    EXPECT_EQ(GetUtcTimeNowMs(), track_report->timestamp());
     track_id = ExtractSsrcStatsValue(track_reports,
                                      StatsReport::kStatsValueNameTrackId);
     EXPECT_EQ(audio_track->id(), track_id);
@@ -667,12 +656,12 @@ class LegacyStatsCollectorTest : public ::testing::Test {
                               const std::vector<std::string>& local_ders,
                               const FakeSSLIdentity& remote_identity,
                               const std::vector<std::string>& remote_ders) {
-    const std::string kTransportName = "transport";
+    const std::string kTransportName = "audio";  // Same as the mid.
 
     auto pc = CreatePeerConnection();
     auto stats = CreateStatsCollector(pc.get());
 
-    pc->AddVoiceChannel("audio", kTransportName);
+    pc->AddVoiceChannel(/*mid=*/"audio", kTransportName);
 
     // Fake stats to process.
     TransportChannelStats channel_stats;
@@ -701,7 +690,7 @@ class LegacyStatsCollectorTest : public ::testing::Test {
     std::string local_certificate_id =
         ExtractStatsValue(StatsReport::kStatsReportTypeComponent, reports,
                           StatsReport::kStatsValueNameLocalCertificateId);
-    if (local_ders.size() > 0) {
+    if (!local_ders.empty()) {
       EXPECT_NE(kNotFound, local_certificate_id);
       StatsReport::Id id(IdFromCertIdString(local_certificate_id));
       CheckCertChainReports(reports, local_ders, id);
@@ -713,7 +702,7 @@ class LegacyStatsCollectorTest : public ::testing::Test {
     std::string remote_certificate_id =
         ExtractStatsValue(StatsReport::kStatsReportTypeComponent, reports,
                           StatsReport::kStatsValueNameRemoteCertificateId);
-    if (remote_ders.size() > 0) {
+    if (!remote_ders.empty()) {
       EXPECT_NE(kNotFound, remote_certificate_id);
       StatsReport::Id id(IdFromCertIdString(remote_certificate_id));
       CheckCertChainReports(reports, remote_ders, id);
@@ -732,6 +721,37 @@ class LegacyStatsCollectorTest : public ::testing::Test {
     EXPECT_EQ(SrtpCryptoSuiteToName(kSrtpAes128CmSha1_80), srtp_crypto_suite);
   }
 
+  int64_t GetUtcTimeNowMs() {
+    return Clock::NtpToUtc(clock_.CurrentNtpTime()).ms();
+  }
+
+ protected:
+  // Slight enhancement to SimulatedClock.
+  // SimulatedClock uses a simplified model where its internal monotonic time is
+  // assumed to be the Wall Clock time (relative to the Unix Epoch). It maps
+  // CurrentTime() directly to NTP time by just adding the 1900-1970 offset.
+  // Therefore, converting Ntp back to Utc just cancels the offset, ending up
+  // returning the same value as CurrentTime(). This utility class makes sure
+  // that these values are not the same so that we can accurately test when the
+  // UTC time is being used.
+  class OffsetSimulatedClock : public SimulatedClock {
+   public:
+    OffsetSimulatedClock(Timestamp start_time, TimeDelta utc_offset)
+        : SimulatedClock(start_time), offset_(utc_offset) {}
+    // Shifts the NTP calculation by the offset, simulating a Wall Clock
+    // that is ahead of the system monotonic clock.
+    NtpTime ConvertTimestampToNtpTime(Timestamp timestamp) override {
+      return SimulatedClock::ConvertTimestampToNtpTime(timestamp + offset_);
+    }
+
+   private:
+    const TimeDelta offset_;
+  };
+
+  OffsetSimulatedClock clock_{
+      Timestamp::Millis(1337),
+      TimeDelta::Seconds(int64_t{365} * 50 * 86400)};  // 50 years offset.
+
  private:
   AutoThread main_thread_;
 };
@@ -745,11 +765,13 @@ static scoped_refptr<MockRtpSenderInternal> CreateMockSender(
   EXPECT_CALL(*sender, media_type())
       .WillRepeatedly(
           Return(track->kind() == MediaStreamTrackInterface::kAudioKind
-                     ? webrtc::MediaType::AUDIO
-                     : webrtc::MediaType::VIDEO));
-  EXPECT_CALL(*sender, SetMediaChannel(_)).Times(AtMost(2));
-  EXPECT_CALL(*sender, SetTransceiverAsStopped()).Times(AtMost(1));
-  EXPECT_CALL(*sender, Stop());
+                     ? MediaType::AUDIO
+                     : MediaType::VIDEO));
+  EXPECT_CALL(*sender, SetMediaChannel(NotNull())).Times(AtMost(1));
+  EXPECT_CALL(*sender, SetMediaChannel(IsNull())).WillRepeatedly(Return());
+  EXPECT_CALL(*sender, DetachTrackAndGetStopTask()).WillRepeatedly([] {
+    return nullptr;
+  });
   return sender;
 }
 
@@ -762,8 +784,8 @@ static scoped_refptr<MockRtpReceiverInternal> CreateMockReceiver(
   EXPECT_CALL(*receiver, media_type())
       .WillRepeatedly(
           Return(track->kind() == MediaStreamTrackInterface::kAudioKind
-                     ? webrtc::MediaType::AUDIO
-                     : webrtc::MediaType::VIDEO));
+                     ? MediaType::AUDIO
+                     : MediaType::VIDEO));
   EXPECT_CALL(*receiver, SetMediaChannel(_)).WillRepeatedly(Return());
   EXPECT_CALL(*receiver, Stop()).WillRepeatedly(Return());
   return receiver;
@@ -776,7 +798,7 @@ class StatsCollectorTrackTest : public LegacyStatsCollectorTest,
   // If GetParam() returns true, the track is also inserted into the local
   // stream, which is created if necessary.
   void AddOutgoingVideoTrack(FakePeerConnectionForStats* pc,
-                             LegacyStatsCollectorForTest* stats) {
+                             LegacyStatsCollector* stats) {
     video_track_ = VideoTrack::Create(
         kLocalTrackId, FakeVideoTrackSource::Create(), Thread::Current());
     if (GetParam()) {
@@ -792,7 +814,7 @@ class StatsCollectorTrackTest : public LegacyStatsCollectorTest,
 
   // Adds a incoming video track with a given SSRC into the stats.
   void AddIncomingVideoTrack(FakePeerConnectionForStats* pc,
-                             LegacyStatsCollectorForTest* stats) {
+                             LegacyStatsCollector* stats) {
     video_track_ = VideoTrack::Create(
         kRemoteTrackId, FakeVideoTrackSource::Create(), Thread::Current());
     if (GetParam()) {
@@ -811,7 +833,7 @@ class StatsCollectorTrackTest : public LegacyStatsCollectorTest,
   // stream, which is created if necessary.
   scoped_refptr<RtpSenderInterface> AddOutgoingAudioTrack(
       FakePeerConnectionForStats* pc,
-      LegacyStatsCollectorForTest* stats) {
+      LegacyStatsCollector* stats) {
     audio_track_ = make_ref_counted<FakeAudioTrack>(kLocalTrackId);
     if (GetParam()) {
       if (!stream_)
@@ -826,7 +848,7 @@ class StatsCollectorTrackTest : public LegacyStatsCollectorTest,
 
   // Adds a incoming audio track with a given SSRC into the stats.
   void AddIncomingAudioTrack(FakePeerConnectionForStats* pc,
-                             LegacyStatsCollectorForTest* stats) {
+                             LegacyStatsCollector* stats) {
     audio_track_ = make_ref_counted<FakeAudioTrack>(kRemoteTrackId);
     if (GetParam()) {
       if (stream_ == nullptr)
@@ -943,7 +965,7 @@ TEST_F(LegacyStatsCollectorTest, ExtractDataInfo) {
 
   EXPECT_TRUE(report_id->Equals(report->id()));
 
-  EXPECT_EQ(stats->GetTimeNow(), report->timestamp());
+  EXPECT_EQ(GetUtcTimeNowMs(), report->timestamp());
   EXPECT_EQ(kDataChannelLabel,
             ExtractStatsValue(StatsReport::kStatsReportTypeDataChannel, reports,
                               StatsReport::kStatsValueNameLabel));
@@ -1177,7 +1199,7 @@ TEST_P(StatsCollectorTrackTest, TrackAndSsrcObjectExistAfterUpdateSsrcStats) {
   track_report =
       FindNthReportByType(reports, StatsReport::kStatsReportTypeTrack, 1);
   ASSERT_TRUE(track_report);
-  EXPECT_EQ(stats->GetTimeNow(), track_report->timestamp());
+  EXPECT_EQ(GetUtcTimeNowMs(), track_report->timestamp());
 
   std::string ssrc_id =
       ExtractSsrcStatsValue(reports, StatsReport::kStatsValueNameSsrc);
@@ -1311,7 +1333,7 @@ TEST_P(StatsCollectorTrackTest, ReportsFromRemoteTrack) {
   const StatsReport* track_report =
       FindNthReportByType(reports, StatsReport::kStatsReportTypeTrack, 1);
   ASSERT_TRUE(track_report);
-  EXPECT_EQ(stats->GetTimeNow(), track_report->timestamp());
+  EXPECT_EQ(GetUtcTimeNowMs(), track_report->timestamp());
 
   std::string ssrc_id =
       ExtractSsrcStatsValue(reports, StatsReport::kStatsValueNameSsrc);
@@ -1325,7 +1347,7 @@ TEST_P(StatsCollectorTrackTest, ReportsFromRemoteTrack) {
 // This test verifies the Ice Candidate report should contain the correct
 // information from local/remote candidates.
 TEST_F(LegacyStatsCollectorTest, IceCandidateReport) {
-  const std::string kTransportName = "transport";
+  const std::string kTransportName = "audio";
   const AdapterType kNetworkType = ADAPTER_TYPE_ETHERNET;
   constexpr uint32_t kPriority = 1000;
 
@@ -1644,7 +1666,7 @@ TEST_P(StatsCollectorTrackTest, GetStatsFromLocalAudioTrack) {
   // we did not set it up.
   const StatsReport* remote_report =
       FindNthReportByType(reports, StatsReport::kStatsReportTypeRemoteSsrc, 1);
-  EXPECT_TRUE(remote_report == NULL);
+  EXPECT_TRUE(remote_report == nullptr);
 }
 
 // This test verifies that audio receive streams populate stats reports
@@ -1697,7 +1719,7 @@ TEST_P(StatsCollectorTrackTest, GetStatsAfterRemoveAudioStream) {
   const StatsReport* report =
       FindNthReportByType(reports, StatsReport::kStatsReportTypeSsrc, 1);
   ASSERT_TRUE(report);
-  EXPECT_EQ(stats->GetTimeNow(), report->timestamp());
+  EXPECT_EQ(GetUtcTimeNowMs(), report->timestamp());
   std::string track_id =
       ExtractSsrcStatsValue(reports, StatsReport::kStatsValueNameTrackId);
   EXPECT_EQ(kLocalTrackId, track_id);
@@ -1759,7 +1781,7 @@ TEST_P(StatsCollectorTrackTest, LocalAndRemoteTracksWithSameSsrc) {
   const StatsReport* track_report =
       FindNthReportByType(reports, StatsReport::kStatsReportTypeSsrc, 1);
   ASSERT_TRUE(track_report);
-  EXPECT_EQ(stats->GetTimeNow(), track_report->timestamp());
+  EXPECT_EQ(GetUtcTimeNowMs(), track_report->timestamp());
   std::string track_id =
       ExtractSsrcStatsValue(reports, StatsReport::kStatsValueNameTrackId);
   EXPECT_EQ(kLocalTrackId, track_id);
@@ -1771,7 +1793,7 @@ TEST_P(StatsCollectorTrackTest, LocalAndRemoteTracksWithSameSsrc) {
   track_report =
       FindNthReportByType(reports, StatsReport::kStatsReportTypeSsrc, 1);
   ASSERT_TRUE(track_report);
-  EXPECT_EQ(stats->GetTimeNow(), track_report->timestamp());
+  EXPECT_EQ(GetUtcTimeNowMs(), track_report->timestamp());
   track_id =
       ExtractSsrcStatsValue(reports, StatsReport::kStatsValueNameTrackId);
   EXPECT_EQ(kRemoteTrackId, track_id);

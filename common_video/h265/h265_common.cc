@@ -10,7 +10,13 @@
 
 #include "common_video/h265/h265_common.h"
 
+#include <cstdint>
+#include <vector>
+
+#include "api/array_view.h"
 #include "common_video/h264/h264_common.h"
+#include "common_video/h265/h265_inline.h"
+#include "rtc_base/buffer.h"
 
 namespace webrtc {
 namespace H265 {
@@ -20,9 +26,11 @@ constexpr uint8_t kNaluTypeMask = 0x7E;
 std::vector<NaluIndex> FindNaluIndices(ArrayView<const uint8_t> buffer) {
   std::vector<H264::NaluIndex> indices = H264::FindNaluIndices(buffer);
   std::vector<NaluIndex> results;
+  results.reserve(indices.size());
   for (auto& index : indices) {
-    results.push_back(
-        {index.start_offset, index.payload_start_offset, index.payload_size});
+    results.push_back({.start_offset = index.start_offset,
+                       .payload_start_offset = index.payload_start_offset,
+                       .payload_size = index.payload_size});
   }
   return results;
 }

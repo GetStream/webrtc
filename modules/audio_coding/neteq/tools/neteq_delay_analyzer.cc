@@ -11,13 +11,21 @@
 #include "modules/audio_coding/neteq/tools/neteq_delay_analyzer.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <fstream>
 #include <ios>
-#include <iterator>
 #include <limits>
+#include <ostream>  // no-presubmit-check TODO(webrtc:8982)
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/strings/string_view.h"
+#include "api/audio/audio_frame.h"
+#include "api/neteq/neteq.h"
+#include "api/rtp_packet_info.h"
+#include "modules/rtp_rtcp/source/rtp_packet_received.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/numerics/sequence_number_unwrapper.h"
 
@@ -84,13 +92,12 @@ void PrintDelays(const NetEqDelayAnalyzer::Delays& delays,
 
 }  // namespace
 
-void NetEqDelayAnalyzer::AfterInsertPacket(
-    const test::NetEqInput::PacketData& packet,
-    NetEq* /* neteq */) {
-  data_.insert(
-      std::make_pair(packet.header.timestamp, TimingData(packet.time_ms)));
-  ssrcs_.insert(packet.header.ssrc);
-  payload_types_.insert(packet.header.payloadType);
+void NetEqDelayAnalyzer::AfterInsertPacket(const RtpPacketReceived& packet,
+                                           NetEq* /* neteq */) {
+  data_.insert(std::make_pair(packet.Timestamp(),
+                              TimingData(packet.arrival_time().ms())));
+  ssrcs_.insert(packet.Ssrc());
+  payload_types_.insert(packet.PayloadType());
 }
 
 void NetEqDelayAnalyzer::BeforeGetAudio(NetEq* neteq) {

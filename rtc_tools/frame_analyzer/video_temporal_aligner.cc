@@ -19,9 +19,11 @@
 #include <vector>
 
 #include "api/make_ref_counted.h"
+#include "api/scoped_refptr.h"
 #include "api/video/i420_buffer.h"
 #include "api/video/video_frame_buffer.h"
 #include "rtc_tools/frame_analyzer/video_quality_analysis.h"
+#include "rtc_tools/video_file_reader.h"
 
 namespace webrtc {
 namespace test {
@@ -126,7 +128,7 @@ class CachedVideo : public Video {
     }
 
     scoped_refptr<I420BufferInterface> frame = video_->GetFrame(index);
-    cache_.push_front({index, frame});
+    cache_.push_front({.index = index, .frame = frame});
     if (cache_.size() > max_cache_size_)
       cache_.pop_back();
 

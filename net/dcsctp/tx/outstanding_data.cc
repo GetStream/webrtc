@@ -10,14 +10,24 @@
 #include "net/dcsctp/tx/outstanding_data.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <map>
+#include <optional>
 #include <set>
 #include <utility>
 #include <vector>
 
+#include "api/array_view.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
+#include "net/dcsctp/common/internal_types.h"
 #include "net/dcsctp/common/math.h"
 #include "net/dcsctp/common/sequence_numbers.h"
+#include "net/dcsctp/packet/chunk/forward_tsn_chunk.h"
+#include "net/dcsctp/packet/chunk/iforward_tsn_chunk.h"
+#include "net/dcsctp/packet/chunk/sack_chunk.h"
+#include "net/dcsctp/packet/data.h"
 #include "net/dcsctp/public/types.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
@@ -392,6 +402,7 @@ std::vector<std::pair<TSN, Data>> OutstandingData::GetChunksToBeRetransmitted(
 }
 
 void OutstandingData::ExpireOutstandingChunks(Timestamp now) {
+  std::vector<UnwrappedTSN> tsns_to_expire;
   UnwrappedTSN tsn = last_cumulative_tsn_ack_;
   for (const Item& item : outstanding_data_) {
     tsn.Increment();
@@ -401,14 +412,21 @@ void OutstandingData::ExpireOutstandingChunks(Timestamp now) {
     if (item.is_abandoned()) {
       // Already abandoned.
     } else if (item.is_nacked() && item.has_expired(now)) {
-      RTC_DLOG(LS_VERBOSE) << "Marking nacked chunk " << *tsn.Wrap()
-                           << " and message " << *item.data().mid
-                           << " as expired";
-      AbandonAllFor(item);
+      tsns_to_expire.push_back(tsn);
     } else {
       // A non-expired chunk. No need to iterate any further.
       break;
     }
+  }
+
+  for (UnwrappedTSN tsn_to_expire : tsns_to_expire) {
+    // The item is retrieved by TSN, as AbandonAllFor may have modified
+    // `outstanding_data_` and invalidated iterators from the first loop.
+    Item& item = GetItem(tsn_to_expire);
+    RTC_DLOG(LS_WARNING) << "Marking nacked chunk " << *tsn_to_expire.Wrap()
+                         << " and message " << *item.data().mid
+                         << " as expired";
+    AbandonAllFor(item);
   }
   RTC_DCHECK(IsConsistent());
 }

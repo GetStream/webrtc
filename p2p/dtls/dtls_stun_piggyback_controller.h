@@ -21,7 +21,6 @@
 #include "api/sequence_checker.h"
 #include "api/transport/stun.h"
 #include "p2p/dtls/dtls_utils.h"
-#include "rtc_base/byte_buffer.h"
 #include "rtc_base/system/no_unique_address.h"
 #include "rtc_base/thread_annotations.h"
 
@@ -32,13 +31,12 @@ namespace webrtc {
 class DtlsStunPiggybackController {
  public:
   // Never ack more than 4 packets.
-  static constexpr unsigned kMaxAckSize = 16;
+  static constexpr unsigned kMaxAckSize = 4;
 
   // dtls_data_callback will be called with any DTLS packets received
   // piggybacked.
   DtlsStunPiggybackController(
-      absl::AnyInvocable<void(webrtc::ArrayView<const uint8_t>)>
-          dtls_data_callback);
+      absl::AnyInvocable<void(ArrayView<const uint8_t>)> dtls_data_callback);
   ~DtlsStunPiggybackController();
 
   enum class State {
@@ -62,8 +60,10 @@ class DtlsStunPiggybackController {
     return state_;
   }
 
-  // Called by DtlsTransport when handshake is complete.
+  // Called by DtlsTransport when the handshake is complete.
   void SetDtlsHandshakeComplete(bool is_dtls_client, bool is_dtls13);
+  // Called by DtlsTransport when DTLS failed.
+  void SetDtlsFailed();
 
   // Intercepts DTLS packets which should go into the STUN packets during the
   // handshake.
@@ -77,12 +77,19 @@ class DtlsStunPiggybackController {
   // to obtain optional DTLS data or ACKs.
   std::optional<absl::string_view> GetDataToPiggyback(
       StunMessageType stun_message_type);
-  std::optional<absl::string_view> GetAckToPiggyback(
+  std::optional<const std::vector<uint32_t>> GetAckToPiggyback(
       StunMessageType stun_message_type);
+  std::vector<ArrayView<const uint8_t>> GetPending();
 
   // Called by Connection when receiving a STUN BINDING { REQUEST / RESPONSE }.
-  void ReportDataPiggybacked(const StunByteStringAttribute* data,
-                             const StunByteStringAttribute* ack);
+  void ReportDataPiggybacked(std::optional<ArrayView<uint8_t>> data,
+                             std::optional<std::vector<uint32_t>> acks);
+
+  // Called by
+  // * DTLSTransport when receiving a DTLS packet (possibly after the packet
+  //   was emitted by this class).
+  // * This class when processing a DTLS packet.
+  void ReportDtlsPacket(ArrayView<const uint8_t> data);
 
   int GetCountOfReceivedData() const { return data_recv_count_; }
 
@@ -95,9 +102,8 @@ class DtlsStunPiggybackController {
 
   std::vector<uint32_t> handshake_messages_received_
       RTC_GUARDED_BY(sequence_checker_);
-  ByteBufferWriter handshake_ack_writer_ RTC_GUARDED_BY(sequence_checker_);
 
-  // Count of data attributes received.
+  // Count of embedded data attributes received.
   int data_recv_count_ = 0;
 
   // In practice this will be the network thread.
@@ -106,12 +112,5 @@ class DtlsStunPiggybackController {
 
 }  //  namespace webrtc
 
-// Re-export symbols from the webrtc namespace for backwards compatibility.
-// TODO(bugs.webrtc.org/4222596): Remove once all references are updated.
-#ifdef WEBRTC_ALLOW_DEPRECATED_NAMESPACES
-namespace cricket {
-using ::webrtc::DtlsStunPiggybackController;
-}  // namespace cricket
-#endif  // WEBRTC_ALLOW_DEPRECATED_NAMESPACES
 
 #endif  // P2P_DTLS_DTLS_STUN_PIGGYBACK_CONTROLLER_H_

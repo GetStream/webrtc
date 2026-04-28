@@ -10,10 +10,11 @@
 
 #include "rtc_tools/video_file_reader.h"
 
-#include <stdint.h>
-
+#include <cstdio>
 #include <string>
 
+#include "api/scoped_refptr.h"
+#include "api/video/video_frame_buffer.h"
 #include "test/gtest.h"
 #include "test/testsupport/file_utils.h"
 
@@ -24,7 +25,7 @@ class Y4mFileReaderTest : public ::testing::Test {
  public:
   void SetUp() override {
     const std::string filename =
-        TempFilename(webrtc::test::OutputPath(), "test_video_file.y4m");
+        TempFilename(test::OutputPath(), "test_video_file.y4m");
 
     // Create simple test video of size 6x4.
     FILE* file = fopen(filename.c_str(), "wb");
@@ -45,11 +46,11 @@ class Y4mFileReaderTest : public ::testing::Test {
     fclose(file);
 
     // Open the newly created file.
-    video = webrtc::test::OpenY4mFile(filename);
+    video = test::OpenY4mFile(filename);
     ASSERT_TRUE(video);
   }
 
-  scoped_refptr<webrtc::test::Video> video;
+  scoped_refptr<test::Video> video;
 };
 
 TEST_F(Y4mFileReaderTest, TestParsingFileHeader) {
@@ -77,7 +78,7 @@ class YuvFileReaderTest : public ::testing::Test {
  public:
   void SetUp() override {
     const std::string filename =
-        TempFilename(webrtc::test::OutputPath(), "test_video_file.yuv");
+        TempFilename(test::OutputPath(), "test_video_file.yuv");
 
     // Create simple test video of size 6x4.
     FILE* file = fopen(filename.c_str(), "wb");
@@ -95,11 +96,11 @@ class YuvFileReaderTest : public ::testing::Test {
     fclose(file);
 
     // Open the newly created file.
-    video = webrtc::test::OpenYuvFile(filename, 6, 4);
+    video = test::OpenYuvFile(filename, 6, 4);
     ASSERT_TRUE(video);
   }
 
-  scoped_refptr<webrtc::test::Video> video;
+  scoped_refptr<test::Video> video;
 };
 
 TEST_F(YuvFileReaderTest, TestParsingFileHeader) {

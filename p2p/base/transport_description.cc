@@ -21,7 +21,6 @@
 #include "absl/strings/string_view.h"
 #include "api/rtc_error.h"
 #include "p2p/base/p2p_constants.h"
-#include "rtc_base/arraysize.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/ssl_fingerprint.h"
 #include "rtc_base/strings/string_builder.h"
@@ -38,7 +37,7 @@ bool IsIceChar(char c) {
   // permitted in order to allow external software to upgrade.
   if (c == '-' || c == '=' || c == '#' || c == '_') {
     RTC_LOG(LS_WARNING)
-        << "'-', '=', '#' and '-' are not valid ice-char and thus not "
+        << "'-', '=', '#' and '_' are not valid ice-char and thus not "
         << "permitted in ufrag or pwd. This is a protocol violation that "
         << "is permitted to allow upgrading but will be rejected in "
         << "the future. See https://crbug.com/1053756";
@@ -88,7 +87,7 @@ RTCError ValidateIcePwd(absl::string_view raw_pwd) {
 RTCErrorOr<IceParameters> IceParameters::Parse(absl::string_view raw_ufrag,
                                                absl::string_view raw_pwd) {
   IceParameters parameters(std::string(raw_ufrag), std::string(raw_pwd),
-                           /* renomination= */ false);
+                           /* ice_renomination= */ false);
   auto result = parameters.Validate();
   if (!result.ok()) {
     return result;
@@ -123,7 +122,7 @@ std::optional<ConnectionRole> StringToConnectionRole(
       CONNECTIONROLE_ACTIVE_STR, CONNECTIONROLE_PASSIVE_STR,
       CONNECTIONROLE_ACTPASS_STR, CONNECTIONROLE_HOLDCONN_STR};
 
-  for (size_t i = 0; i < arraysize(roles); ++i) {
+  for (size_t i = 0; i < std::size(roles); ++i) {
     if (absl::EqualsIgnoreCase(roles[i], role_str)) {
       return static_cast<ConnectionRole>(CONNECTIONROLE_ACTIVE + i);
     }

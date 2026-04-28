@@ -53,10 +53,10 @@ class RtcEventEndLog final : public RtcEvent {
                                       std::vector<LoggedStopEvent>& output);
 
  private:
-  RtcEventEndLog(const RtcEventEndLog& other);
+  RtcEventEndLog(const RtcEventEndLog&) = default;
 
-  static constexpr EventParameters event_params_{"EndLog",
-                                                 RtcEventEndLog::kType};
+  static constexpr EventParameters event_params_{.name = "EndLog",
+                                                 .id = RtcEventEndLog::kType};
 };
 
 }  // namespace webrtc

@@ -8,18 +8,24 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <map>
 #include <memory>
 
+#include "api/array_view.h"
 #include "api/audio/audio_frame.h"
+#include "api/audio_codecs/audio_format.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "api/environment/environment_factory.h"
 #include "api/neteq/default_neteq_factory.h"
+#include "api/neteq/neteq.h"
 #include "api/rtp_headers.h"
 #include "api/units/timestamp.h"
 #include "modules/audio_coding/codecs/pcm16b/pcm16b.h"
 #include "modules/audio_coding/include/audio_coding_module.h"
 #include "test/gtest.h"
-#include "test/testsupport/file_utils.h"
 
 namespace webrtc {
 
@@ -31,9 +37,9 @@ class TargetDelayTest : public ::testing::Test {
                                          NetEq::Config(),
                                          CreateBuiltinAudioDecoderFactory())) {}
 
-  ~TargetDelayTest() {}
+  ~TargetDelayTest() override {}
 
-  void SetUp() {
+  void SetUp() override {
     constexpr int pltype = 108;
     std::map<int, SdpAudioFormat> receive_codecs = {
         {pltype, {"L16", kSampleRateHz, 1}}};

@@ -13,11 +13,10 @@
  * functions in ForwardErrorCorrection directly.
  */
 
-#include <string.h>
-#include <time.h>
-
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
+#include <ctime>
 #include <list>
 #include <memory>
 #include <string>
@@ -39,7 +38,7 @@
 namespace webrtc {
 namespace fec_private_tables {
 extern const uint8_t** kPacketMaskBurstyTbl[12];
-}
+}  // namespace fec_private_tables
 namespace test {
 using fec_private_tables::kPacketMaskBurstyTbl;
 
@@ -133,7 +132,7 @@ void RunTest(bool use_flexfec) {
   // reproduce past results.
   const unsigned int random_seed = static_cast<unsigned int>(time(nullptr));
   Random random(random_seed);
-  std::string filename = webrtc::test::OutputPath() + "randomSeedLog.txt";
+  std::string filename = test::OutputPath() + "randomSeedLog.txt";
   FILE* random_seed_file = fopen(filename.c_str(), "a");
   fprintf(random_seed_file, "%u\n", random_seed);
   fclose(random_seed_file);

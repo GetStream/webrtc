@@ -10,11 +10,18 @@
 
 #include "modules/audio_coding/codecs/g722/audio_encoder_g722.h"
 
+#include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <utility>
 
+#include "api/array_view.h"
+#include "api/audio_codecs/audio_encoder.h"
+#include "api/audio_codecs/g722/audio_encoder_g722_config.h"
+#include "api/units/time_delta.h"
 #include "modules/audio_coding/codecs/g722/g722_interface.h"
+#include "rtc_base/buffer.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/numerics/safe_conversions.h"
 
 namespace webrtc {
 
@@ -124,13 +131,12 @@ AudioEncoder::EncodedInfo AudioEncoderG722Impl::EncodeImpl(
         for (size_t i = 0; i < samples_per_channel / 2; ++i) {
           for (size_t j = 0; j < num_channels_; ++j) {
             uint8_t two_samples = encoders_[j].encoded_buffer.data()[i];
-            interleave_buffer_.data()[j] = two_samples >> 4;
-            interleave_buffer_.data()[num_channels_ + j] = two_samples & 0xf;
+            interleave_buffer_[j] = two_samples >> 4;
+            interleave_buffer_[num_channels_ + j] = two_samples & 0xf;
           }
           for (size_t j = 0; j < num_channels_; ++j)
             encoded[i * num_channels_ + j] =
-                interleave_buffer_.data()[2 * j] << 4 |
-                interleave_buffer_.data()[2 * j + 1];
+                interleave_buffer_[2 * j] << 4 | interleave_buffer_[2 * j + 1];
         }
 
         return bytes_to_encode;

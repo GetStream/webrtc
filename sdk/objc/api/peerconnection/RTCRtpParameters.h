@@ -19,11 +19,16 @@
 NS_ASSUME_NONNULL_BEGIN
 
 /** Corresponds to webrtc::DegradationPreference. */
-typedef NS_ENUM(NSInteger, RTC_OBJC_TYPE(RTCDegradationPreference)) {
-  RTC_OBJC_TYPE(RTCDegradationPreferenceDisabled),
-  RTC_OBJC_TYPE(RTCDegradationPreferenceMaintainFramerate),
-  RTC_OBJC_TYPE(RTCDegradationPreferenceMaintainResolution),
-  RTC_OBJC_TYPE(RTCDegradationPreferenceBalanced)
+typedef NS_ENUM(NSInteger, RTCDegradationPreference) {
+  RTCDegradationPreferenceMaintainFramerateAndResolution,
+  // TODO(webrtc:450044904): Switch downstream projects to
+  // RTCDegradationPreferenceMaintainFramerateAndResolution and remove
+  // RTCDegradationPreferenceDisabled.
+  RTCDegradationPreferenceDisabled =
+      RTCDegradationPreferenceMaintainFramerateAndResolution,
+  RTCDegradationPreferenceMaintainFramerate,
+  RTCDegradationPreferenceMaintainResolution,
+  RTCDegradationPreferenceBalanced
 };
 
 RTC_OBJC_EXPORT

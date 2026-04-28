@@ -8,9 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <stdint.h>
-#include <string.h>
-
+#include <cstdint>
+#include <cstring>
 #include <memory>
 #include <optional>
 #include <string>
@@ -21,11 +20,11 @@
 #include "api/priority.h"
 #include "api/rtc_error.h"
 #include "api/scoped_refptr.h"
+#include "api/sctp_transport_interface.h"
 #include "api/sequence_checker.h"
 #include "api/task_queue/pending_task_safety_flag.h"
 #include "api/test/rtc_error_matchers.h"
 #include "api/transport/data_channel_transport_interface.h"
-#include "media/sctp/sctp_transport_internal.h"
 #include "pc/sctp_data_channel.h"
 #include "pc/sctp_utils.h"
 #include "pc/test/fake_data_channel_controller.h"
@@ -165,8 +164,11 @@ TEST_F(SctpDataChannelTest, VerifyConfigurationGetters) {
   // Note that the `init_.reliable` field is deprecated, so we directly set
   // it here to match spec behavior for purposes of checking the `reliable()`
   // getter.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
   init_.reliable = (!init_.maxRetransmits && !init_.maxRetransmitTime);
   EXPECT_EQ(channel_->reliable(), init_.reliable);
+#pragma clang diagnostic pop
   EXPECT_EQ(channel_->ordered(), init_.ordered);
   EXPECT_EQ(channel_->negotiated(), init_.negotiated);
   EXPECT_EQ(channel_->priority(), PriorityValue(Priority::kLow));
@@ -517,7 +519,7 @@ TEST_F(SctpDataChannelTest, DeprecatedClosedOnTransportError) {
   DataBuffer buffer("abcd");
   controller_->set_transport_error();
 
-  EXPECT_TRUE(channel_->Send(buffer));
+  EXPECT_FALSE(channel_->Send(buffer));
 
   EXPECT_EQ(DataChannelInterface::kClosed, channel_->state());
   EXPECT_FALSE(channel_->error().ok());
@@ -752,12 +754,12 @@ TEST(DataChannelInterfaceTest, Coverage) {
 #if RTC_DCHECK_IS_ON && GTEST_HAS_DEATH_TEST && !defined(WEBRTC_ANDROID)
 
 TEST(DataChannelInterfaceDeathTest, SendDefaultImplDchecks) {
-  auto channel = webrtc::make_ref_counted<NoImplDataChannel>();
+  auto channel = make_ref_counted<NoImplDataChannel>();
   RTC_EXPECT_DEATH(channel->Send(DataBuffer("Foo")), "Check failed: false");
 }
 
 TEST(DataChannelInterfaceDeathTest, SendAsyncDefaultImplDchecks) {
-  auto channel = webrtc::make_ref_counted<NoImplDataChannel>();
+  auto channel = make_ref_counted<NoImplDataChannel>();
   RTC_EXPECT_DEATH(channel->SendAsync(DataBuffer("Foo"), nullptr),
                    "Check failed: false");
 }

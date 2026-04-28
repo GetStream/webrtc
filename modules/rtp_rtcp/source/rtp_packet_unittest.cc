@@ -41,6 +41,7 @@ using ::testing::Each;
 using ::testing::ElementsAre;
 using ::testing::ElementsAreArray;
 using ::testing::IsEmpty;
+using ::testing::Not;
 
 constexpr int8_t kPayloadType = 100;
 constexpr uint32_t kSsrc = 0x12345678;
@@ -433,6 +434,34 @@ TEST(RtpPacketTest, SetReservedExtensionsAfterPayload) {
       AudioLevel(kVoiceActive, kAudioLevel)));
   // Unless reserved.
   EXPECT_TRUE(packet.SetExtension<TransmissionOffset>(kTimeOffset));
+}
+
+TEST(RtpPacketTest, SetEmptyPayload) {
+  ArrayView<const uint8_t> empty_payload;
+  RtpPacket packet;
+  packet.SetPayload(empty_payload);
+
+  EXPECT_THAT(packet.payload(), IsEmpty());
+}
+
+TEST(RtpPacketTest, SetEmptyPayloadOverwritesExistingPayload) {
+  const uint8_t payload[] = {1, 2, 3, 4, 2, 0, 42};
+  ArrayView<const uint8_t> empty_payload;
+  RtpPacket packet;
+
+  packet.SetPayload(payload);
+  EXPECT_THAT(packet.payload(), Not(IsEmpty()));
+
+  packet.SetPayload(empty_payload);
+  EXPECT_THAT(packet.payload(), IsEmpty());
+}
+
+TEST(RtpPacketTest, SetPayload) {
+  const uint8_t payload[] = {1, 2, 3, 4, 2, 0, 42};
+  RtpPacket packet;
+  packet.SetPayload(payload);
+
+  EXPECT_THAT(packet.payload(), ElementsAreArray(payload));
 }
 
 TEST(RtpPacketTest, CreatePurePadding) {
@@ -1028,8 +1057,8 @@ TEST(RtpPacketTest, CreateAndParseAbsoluteCaptureTime) {
   send_packet.SetSsrc(kSsrc);
 
   constexpr AbsoluteCaptureTime kAbsoluteCaptureTime{
-      /*absolute_capture_timestamp=*/9876543210123456789ULL,
-      /*estimated_capture_clock_offset=*/-1234567890987654321LL};
+      .absolute_capture_timestamp = 9876543210123456789ULL,
+      .estimated_capture_clock_offset = -1234567890987654321LL};
   ASSERT_TRUE(send_packet.SetExtension<AbsoluteCaptureTimeExtension>(
       kAbsoluteCaptureTime));
 
@@ -1058,8 +1087,8 @@ TEST(RtpPacketTest,
   send_packet.SetSsrc(kSsrc);
 
   constexpr AbsoluteCaptureTime kAbsoluteCaptureTime{
-      /*absolute_capture_timestamp=*/9876543210123456789ULL,
-      /*estimated_capture_clock_offset=*/std::nullopt};
+      .absolute_capture_timestamp = 9876543210123456789ULL,
+      .estimated_capture_clock_offset = std::nullopt};
   ASSERT_TRUE(send_packet.SetExtension<AbsoluteCaptureTimeExtension>(
       kAbsoluteCaptureTime));
 
@@ -1147,7 +1176,7 @@ TEST(RtpPacketTest, CreateAndParseTransportSequenceNumberV2Preallocated) {
 
   constexpr int kTransportSequenceNumber = 12345;
   constexpr std::optional<FeedbackRequest> kNoFeedbackRequest =
-      FeedbackRequest{/*include_timestamps=*/false, /*sequence_count=*/0};
+      FeedbackRequest{.include_timestamps = false, .sequence_count = 0};
   send_packet.ReserveExtension<TransportSequenceNumberV2>();
   send_packet.SetExtension<TransportSequenceNumberV2>(kTransportSequenceNumber,
                                                       kNoFeedbackRequest);
@@ -1180,7 +1209,7 @@ TEST(RtpPacketTest,
 
   constexpr int kTransportSequenceNumber = 12345;
   constexpr std::optional<FeedbackRequest> kFeedbackRequest =
-      FeedbackRequest{/*include_timestamps=*/true, /*sequence_count=*/3};
+      FeedbackRequest{.include_timestamps = true, .sequence_count = 3};
   send_packet.SetExtension<TransportSequenceNumberV2>(kTransportSequenceNumber,
                                                       kFeedbackRequest);
 

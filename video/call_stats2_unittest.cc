@@ -10,12 +10,15 @@
 
 #include "video/call_stats2.h"
 
+#include <cstdint>
 #include <memory>
 
 #include "api/task_queue/default_task_queue_factory.h"
 #include "api/task_queue/task_queue_base.h"
+#include "api/task_queue/task_queue_factory.h"
+#include "modules/include/module_common_types.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
-#include "rtc_base/thread.h"
+#include "system_wrappers/include/clock.h"
 #include "system_wrappers/include/metrics.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
@@ -31,7 +34,7 @@ namespace internal {
 class MockStatsObserver : public CallStatsObserver {
  public:
   MockStatsObserver() {}
-  virtual ~MockStatsObserver() {}
+  ~MockStatsObserver() override {}
 
   MOCK_METHOD(void, OnRttUpdate, (int64_t, int64_t), (override));
 };
@@ -292,8 +295,7 @@ TEST_F(CallStats2Test, ProducesHistogramMetrics) {
 
   AsyncSimulateRttUpdate(kRtt);
   loop_.Run();
-  fake_clock_.AdvanceTimeMilliseconds(metrics::kMinRunTimeInSeconds *
-                                      CallStats::kUpdateInterval.ms());
+  fake_clock_.AdvanceTime(metrics::kMinRunTime);
   AsyncSimulateRttUpdate(kRtt);
   loop_.Run();
 

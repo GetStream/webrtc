@@ -10,7 +10,7 @@
 
 #include "pc/media_stream.h"
 
-#include <stddef.h>
+#include <cstddef>
 
 #include "api/media_stream_interface.h"
 #include "api/scoped_refptr.h"
@@ -37,7 +37,7 @@ class MockObserver : public ObserverInterface {
     notifier_->RegisterObserver(this);
   }
 
-  ~MockObserver() { Unregister(); }
+  ~MockObserver() override { Unregister(); }
 
   void Unregister() {
     if (notifier_) {
@@ -54,18 +54,18 @@ class MockObserver : public ObserverInterface {
 
 class MediaStreamTest : public ::testing::Test {
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     stream_ = MediaStream::Create(kStreamId1);
-    ASSERT_TRUE(stream_.get() != NULL);
+    ASSERT_TRUE(stream_.get() != nullptr);
 
     video_track_ = VideoTrack::Create(
         kVideoTrackId, FakeVideoTrackSource::Create(), Thread::Current());
-    ASSERT_TRUE(video_track_.get() != NULL);
+    ASSERT_TRUE(video_track_.get() != nullptr);
     EXPECT_EQ(MediaStreamTrackInterface::kLive, video_track_->state());
 
     audio_track_ = AudioTrack::Create(kAudioTrackId, nullptr);
 
-    ASSERT_TRUE(audio_track_.get() != NULL);
+    ASSERT_TRUE(audio_track_.get() != nullptr);
     EXPECT_EQ(MediaStreamTrackInterface::kLive, audio_track_->state());
 
     EXPECT_TRUE(stream_->AddTrack(video_track_));

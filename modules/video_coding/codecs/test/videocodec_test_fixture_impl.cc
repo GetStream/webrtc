@@ -10,11 +10,10 @@
 
 #include "modules/video_coding/codecs/test/videocodec_test_fixture_impl.h"
 
-#include <stdint.h>
-#include <stdio.h>
-
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <cstdio>
 #include <iterator>
 #include <memory>
 #include <optional>
@@ -27,13 +26,13 @@
 #include "absl/strings/string_view.h"
 #include "api/array_view.h"
 #include "api/environment/environment_factory.h"
+#include "api/field_trials_view.h"
 #include "api/make_ref_counted.h"
 #include "api/rtp_parameters.h"
 #include "api/test/metrics/global_metrics_logger_and_exporter.h"
 #include "api/test/metrics/metric.h"
 #include "api/test/videocodec_test_fixture.h"
 #include "api/test/videocodec_test_stats.h"
-#include "api/transport/field_trial_based_config.h"
 #include "api/video/encoded_image.h"
 #include "api/video/resolution.h"
 #include "api/video/video_codec_constants.h"
@@ -65,15 +64,16 @@
 #include "modules/video_coding/codecs/vp9/svc_config.h"
 #include "modules/video_coding/utility/ivf_file_writer.h"
 #include "rtc_base/checks.h"
+#include "rtc_base/cpu_info.h"
 #include "rtc_base/cpu_time.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/strings/string_builder.h"
 #include "rtc_base/system/file_wrapper.h"
 #include "rtc_base/system_time.h"
 #include "rtc_base/task_queue_for_test.h"
+#include "rtc_base/thread.h"
 #include "rtc_base/time_utils.h"
-#include "system_wrappers/include/cpu_info.h"
-#include "system_wrappers/include/sleep.h"
+#include "test/create_test_field_trials.h"
 #include "test/gtest.h"
 #include "test/testsupport/file_utils.h"
 #include "test/testsupport/frame_reader.h"
@@ -92,8 +92,8 @@ const int kBaseKeyFrameInterval = 3000;
 const int kDefaultMaxFramerateFps = 30;
 const int kMaxQp = 56;
 
-void ConfigureSimulcast(VideoCodec* codec_settings) {
-  FieldTrialBasedConfig trials;
+void ConfigureSimulcast(const FieldTrialsView& trials,
+                        VideoCodec* codec_settings) {
   VideoEncoderConfig encoder_config;
   encoder_config.codec_type = codec_settings->codecType;
   encoder_config.number_of_streams = codec_settings->numberOfSimulcastStreams;
@@ -215,7 +215,8 @@ SdpVideoFormat CreateSdpVideoFormat(
 
 }  // namespace
 
-VideoCodecTestFixtureImpl::Config::Config() = default;
+VideoCodecTestFixtureImpl::Config::Config()
+    : field_trials(CreateTestFieldTrials()) {}
 
 void VideoCodecTestFixtureImpl::Config::SetCodecSettings(
     std::string codec_name_to_set,
@@ -229,7 +230,7 @@ void VideoCodecTestFixtureImpl::Config::SetCodecSettings(
     size_t height) {
   codec_name = codec_name_to_set;
   VideoCodecType codec_type = PayloadStringToCodecType(codec_name);
-  webrtc::test::CodecSettings(codec_type, &codec_settings);
+  test::CodecSettings(codec_type, &codec_settings);
 
   // TODO(brandtr): Move the setting of `width` and `height` to the tests, and
   // DCHECK that they are set before initializing the codec instead.
@@ -288,7 +289,7 @@ void VideoCodecTestFixtureImpl::Config::SetCodecSettings(
   }
 
   if (codec_settings.numberOfSimulcastStreams > 1) {
-    ConfigureSimulcast(&codec_settings);
+    ConfigureSimulcast(field_trials, &codec_settings);
   } else if (codec_settings.codecType == kVideoCodecVP9 &&
              codec_settings.VP9()->numberOfSpatialLayers > 1) {
     ConfigureSvc(&codec_settings);
@@ -296,7 +297,7 @@ void VideoCodecTestFixtureImpl::Config::SetCodecSettings(
 }
 
 size_t VideoCodecTestFixtureImpl::Config::NumberOfCores() const {
-  return use_single_core ? 1 : CpuInfo::DetectNumberOfCores();
+  return use_single_core ? 1 : cpu_info::DetectNumberOfCores();
 }
 
 size_t VideoCodecTestFixtureImpl::Config::NumberOfTemporalLayers() const {
@@ -390,22 +391,22 @@ std::string VideoCodecTestFixtureImpl::Config::CodecName() const {
 // TODO(kthelgason): Move this out of the test fixture impl and
 // make available as a shared utility class.
 void VideoCodecTestFixtureImpl::H264KeyframeChecker::CheckEncodedFrame(
-    webrtc::VideoCodecType codec,
+    VideoCodecType codec,
     const EncodedImage& encoded_frame) const {
   EXPECT_EQ(kVideoCodecH264, codec);
   bool contains_sps = false;
   bool contains_pps = false;
   bool contains_idr = false;
-  const std::vector<webrtc::H264::NaluIndex> nalu_indices =
-      webrtc::H264::FindNaluIndices(encoded_frame);
-  for (const webrtc::H264::NaluIndex& index : nalu_indices) {
-    webrtc::H264::NaluType nalu_type = webrtc::H264::ParseNaluType(
-        encoded_frame.data()[index.payload_start_offset]);
-    if (nalu_type == webrtc::H264::NaluType::kSps) {
+  const std::vector<H264::NaluIndex> nalu_indices =
+      H264::FindNaluIndices(encoded_frame);
+  for (const H264::NaluIndex& index : nalu_indices) {
+    H264::NaluType nalu_type =
+        H264::ParseNaluType(encoded_frame.data()[index.payload_start_offset]);
+    if (nalu_type == H264::NaluType::kSps) {
       contains_sps = true;
-    } else if (nalu_type == webrtc::H264::NaluType::kPps) {
+    } else if (nalu_type == H264::NaluType::kPps) {
       contains_pps = true;
-    } else if (nalu_type == webrtc::H264::NaluType::kIdr) {
+    } else if (nalu_type == H264::NaluType::kIdr) {
       contains_idr = true;
     }
   }
@@ -457,18 +458,20 @@ class VideoCodecTestFixtureImpl::CpuProcessTime final {
 };
 
 VideoCodecTestFixtureImpl::VideoCodecTestFixtureImpl(Config config)
-    : encoder_factory_(std::make_unique<webrtc::VideoEncoderFactoryTemplate<
-                           webrtc::LibvpxVp8EncoderTemplateAdapter,
-                           webrtc::LibvpxVp9EncoderTemplateAdapter,
-                           webrtc::OpenH264EncoderTemplateAdapter,
-                           webrtc::LibaomAv1EncoderTemplateAdapter>>()),
-      decoder_factory_(std::make_unique<webrtc::VideoDecoderFactoryTemplate<
-                           webrtc::LibvpxVp8DecoderTemplateAdapter,
-                           webrtc::LibvpxVp9DecoderTemplateAdapter,
-                           webrtc::OpenH264DecoderTemplateAdapter,
-                           webrtc::Dav1dDecoderTemplateAdapter>>()),
-      env_(CreateEnvironment()),
-      config_(config) {}
+    : encoder_factory_(
+          std::make_unique<
+              VideoEncoderFactoryTemplate<LibvpxVp8EncoderTemplateAdapter,
+                                          LibvpxVp9EncoderTemplateAdapter,
+                                          OpenH264EncoderTemplateAdapter,
+                                          LibaomAv1EncoderTemplateAdapter>>()),
+      decoder_factory_(
+          std::make_unique<
+              VideoDecoderFactoryTemplate<LibvpxVp8DecoderTemplateAdapter,
+                                          LibvpxVp9DecoderTemplateAdapter,
+                                          OpenH264DecoderTemplateAdapter,
+                                          Dav1dDecoderTemplateAdapter>>()),
+      config_(std::move(config)),
+      env_(CreateEnvironment(&config_.field_trials)) {}
 
 VideoCodecTestFixtureImpl::VideoCodecTestFixtureImpl(
     Config config,
@@ -476,8 +479,8 @@ VideoCodecTestFixtureImpl::VideoCodecTestFixtureImpl(
     std::unique_ptr<VideoEncoderFactory> encoder_factory)
     : encoder_factory_(std::move(encoder_factory)),
       decoder_factory_(std::move(decoder_factory)),
-      env_(CreateEnvironment()),
-      config_(config) {}
+      config_(std::move(config)),
+      env_(CreateEnvironment(&config_.field_trials)) {}
 
 VideoCodecTestFixtureImpl::~VideoCodecTestFixtureImpl() = default;
 
@@ -537,7 +540,7 @@ void VideoCodecTestFixtureImpl::ProcessAllFrames(
       // Roughly pace the frames.
       const int frame_duration_ms =
           std::ceil(kNumMillisecsPerSec / rate_profile->input_fps);
-      SleepMs(frame_duration_ms);
+      Thread::SleepMs(frame_duration_ms);
     }
   }
 
@@ -548,7 +551,7 @@ void VideoCodecTestFixtureImpl::ProcessAllFrames(
 
   // Give the VideoProcessor pipeline some time to process the last frame,
   // and then release the codecs.
-  SleepMs(1 * kNumMillisecsPerSec);
+  Thread::SleepMs(1 * kNumMillisecsPerSec);
   cpu_process_time_->Stop();
 }
 

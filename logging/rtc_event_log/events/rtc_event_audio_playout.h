@@ -73,17 +73,20 @@ class RtcEventAudioPlayout final : public RtcEvent {
   }
 
  private:
-  RtcEventAudioPlayout(const RtcEventAudioPlayout& other);
+  RtcEventAudioPlayout(const RtcEventAudioPlayout&) = default;
 
   const uint32_t ssrc_;
 
   static constexpr RtcEventDefinition<RtcEventAudioPlayout,
                                       LoggedAudioPlayoutEvent,
                                       uint32_t>
-      definition_{{"AudioPlayout", RtcEventAudioPlayout::kType},
-                  {&RtcEventAudioPlayout::ssrc_,
-                   &LoggedAudioPlayoutEvent::ssrc,
-                   {"ssrc", /*id=*/1, FieldType::kFixed32, /*width=*/32}}};
+      definition_{{.name = "AudioPlayout", .id = RtcEventAudioPlayout::kType},
+                  {.event_member = &RtcEventAudioPlayout::ssrc_,
+                   .logged_member = &LoggedAudioPlayoutEvent::ssrc,
+                   .params = {.name = "ssrc",
+                              /*id=*/.field_id = 1,
+                              .field_type = FieldType::kFixed32,
+                              /*width=*/.value_width = 32}}};
 };
 
 }  // namespace webrtc

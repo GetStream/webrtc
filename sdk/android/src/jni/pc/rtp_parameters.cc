@@ -10,9 +10,16 @@
 
 #include "sdk/android/src/jni/pc/rtp_parameters.h"
 
+#include <jni.h>
+
+#include <string>
+
+#include "api/priority.h"
+#include "api/rtp_parameters.h"
+#include "rtc_base/checks.h"
 #include "sdk/android/generated_peerconnection_jni/RtpParameters_jni.h"
 #include "sdk/android/native_api/jni/java_types.h"
-#include "sdk/android/src/jni/jni_helpers.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
 #include "sdk/android/src/jni/pc/media_stream_track.h"
 
 namespace webrtc {
@@ -20,26 +27,29 @@ namespace jni {
 
 namespace {
 
-webrtc::DegradationPreference JavaToNativeDegradationPreference(
+DegradationPreference JavaToNativeDegradationPreference(
     JNIEnv* jni,
     const JavaRef<jobject>& j_degradation_preference) {
   std::string enum_name = GetJavaEnumName(jni, j_degradation_preference);
 
-  if (enum_name == "DISABLED")
-    return webrtc::DegradationPreference::DISABLED;
+  // TODO(webrtc:450044904): Switch downstream projects to
+  // MAINTAIN_FRAMERATE_AND_RESOLUTION and remove DISABLED.
+  if (enum_name == "MAINTAIN_FRAMERATE_AND_RESOLUTION" ||
+      enum_name == "DISABLED")
+    return DegradationPreference::MAINTAIN_FRAMERATE_AND_RESOLUTION;
 
   if (enum_name == "MAINTAIN_FRAMERATE")
-    return webrtc::DegradationPreference::MAINTAIN_FRAMERATE;
+    return DegradationPreference::MAINTAIN_FRAMERATE;
 
   if (enum_name == "MAINTAIN_RESOLUTION")
-    return webrtc::DegradationPreference::MAINTAIN_RESOLUTION;
+    return DegradationPreference::MAINTAIN_RESOLUTION;
 
   if (enum_name == "BALANCED")
-    return webrtc::DegradationPreference::BALANCED;
+    return DegradationPreference::BALANCED;
 
   RTC_CHECK(false) << "Unexpected DegradationPreference enum_name "
                    << enum_name;
-  return webrtc::DegradationPreference::DISABLED;
+  return DegradationPreference::MAINTAIN_FRAMERATE_AND_RESOLUTION;
 }
 
 ScopedJavaLocalRef<jobject> NativeToJavaRtpEncodingParameter(
@@ -100,7 +110,7 @@ RtpEncodingParameters JavaToNativeRtpEncodingParameters(
       Java_Encoding_getMaxBitrateBps(jni, j_encoding_parameters);
   encoding.bitrate_priority =
       Java_Encoding_getBitratePriority(jni, j_encoding_parameters);
-  encoding.network_priority = static_cast<webrtc::Priority>(
+  encoding.network_priority = static_cast<Priority>(
       Java_Encoding_getNetworkPriority(jni, j_encoding_parameters));
   encoding.max_bitrate_bps = JavaToNativeOptionalInt(jni, j_max_bitrate);
   ScopedJavaLocalRef<jobject> j_min_bitrate =

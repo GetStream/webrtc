@@ -12,10 +12,10 @@
 #include "rtc_base/ssl_identity.h"
 
 #include <openssl/ossl_typ.h>
-#include <string.h>
-#include <time.h>
 
 #include <cstdint>
+#include <cstring>
+#include <ctime>
 #include <memory>
 #include <optional>
 #include <string>
@@ -108,7 +108,7 @@ int64_t ASN1TimeToSec(const unsigned char* s, size_t length, bool long_format) {
   if (bytes_left != 1) {
     return -1;
   }
-  return webrtc::TmToSeconds(tm);
+  return TmToSeconds(tm);
 }
 
 //////////////////////////////////////////////////////////////////////

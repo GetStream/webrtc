@@ -34,9 +34,7 @@
 #include "rtc_base/network/sent_packet.h"
 #include "rtc_base/socket.h"
 #include "rtc_base/socket_address.h"
-#include "rtc_base/third_party/sigslot/sigslot.h"
 #include "rtc_base/thread.h"
-#include "rtc_base/time_utils.h"
 #include "rtc_base/virtual_socket_server.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
@@ -64,16 +62,17 @@ static const SocketAddress kRemoteIPv6Addr("2401:fa00:4:1000:be30:5bff:fee5:c4",
 
 constexpr uint64_t kTiebreakerDefault = 44444;
 
-class ConnectionObserver : public sigslot::has_slots<> {
+class ConnectionObserver {
  public:
   explicit ConnectionObserver(Connection* conn) : conn_(conn) {
-    conn->SignalDestroyed.connect(this, &ConnectionObserver::OnDestroyed);
+    conn->SubscribeDestroyed(
+        this, [this](Connection* connection) { OnDestroyed(connection); });
   }
 
   ~ConnectionObserver() {
     if (!connection_destroyed_) {
       RTC_DCHECK(conn_);
-      conn_->SignalDestroyed.disconnect(this);
+      conn_->UnsubscribeDestroyed(this);
     }
   }
 
@@ -86,7 +85,7 @@ class ConnectionObserver : public sigslot::has_slots<> {
   bool connection_destroyed_ = false;
 };
 
-class TCPPortTest : public ::testing::Test, public sigslot::has_slots<> {
+class TCPPortTest : public ::testing::Test {
  public:
   TCPPortTest()
       : ss_(new webrtc::VirtualSocketServer()),
@@ -246,10 +245,12 @@ TEST_F(TCPPortTest, TCPPortNotDiscardedIfBoundToTemporaryIP) {
       webrtc::IsRtcOk());
 }
 
-class SentPacketCounter : public sigslot::has_slots<> {
+class SentPacketCounter {
  public:
   explicit SentPacketCounter(TCPPort* p) {
-    p->SignalSentPacket.connect(this, &SentPacketCounter::OnSentPacket);
+    p->SubscribeSentPacket(this, [this](const webrtc::SentPacketInfo& info) {
+      OnSentPacket(info);
+    });
   }
 
   int sent_packets() const { return sent_packets_; }
@@ -291,8 +292,8 @@ TEST_F(TCPPortTest, SignalSentPacket) {
                         {.timeout = webrtc::TimeDelta::Millis(kTimeout)}),
       webrtc::IsRtcOk());
 
-  client_conn->Ping(webrtc::TimeMillis());
-  server_conn->Ping(webrtc::TimeMillis());
+  client_conn->Ping(env_.clock().CurrentTime());
+  server_conn->Ping(env_.clock().CurrentTime());
   ASSERT_THAT(
       webrtc::WaitUntil([&] { return client_conn->writable(); }, IsTrue(),
                         {.timeout = webrtc::TimeDelta::Millis(kTimeout)}),
@@ -355,7 +356,7 @@ TEST_F(TCPPortTest, SignalSentPacketAfterReconnect) {
                         {.timeout = webrtc::TimeDelta::Millis(kTimeout)}),
       webrtc::IsRtcOk());
   EXPECT_FALSE(client_conn->writable());
-  client_conn->Ping(webrtc::TimeMillis());
+  client_conn->Ping(env_.clock().CurrentTime());
   ASSERT_THAT(
       webrtc::WaitUntil([&] { return client_conn->writable(); }, IsTrue(),
                         {.timeout = webrtc::TimeDelta::Millis(kTimeout)}),
@@ -423,7 +424,7 @@ TEST_F(TCPPortTest, SignalSentPacketAfterReconnect) {
       webrtc::IsRtcOk());
 
   // Send Stun Binding request.
-  client_conn->Ping(webrtc::TimeMillis());
+  client_conn->Ping(env_.clock().CurrentTime());
   // The Stun Binding request is reported as sent.
   EXPECT_THAT(
       webrtc::WaitUntil([&] { return client_counter.sent_packets(); }, Eq(2),

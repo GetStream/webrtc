@@ -10,8 +10,11 @@
 
 #include "rtc_base/async_packet_socket.h"
 
+#include <cstddef>
+
+#include "rtc_base/network/received_packet.h"
+#include "rtc_base/socket.h"
 #include "rtc_base/socket_address.h"
-#include "rtc_base/third_party/sigslot/sigslot.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 
@@ -22,7 +25,7 @@ using ::testing::MockFunction;
 
 class MockAsyncPacketSocket : public AsyncPacketSocket {
  public:
-  ~MockAsyncPacketSocket() = default;
+  ~MockAsyncPacketSocket() override = default;
 
   MOCK_METHOD(SocketAddress, GetLocalAddress, (), (const, override));
   MOCK_METHOD(SocketAddress, GetRemoteAddress, (), (const, override));
@@ -30,7 +33,7 @@ class MockAsyncPacketSocket : public AsyncPacketSocket {
               Send,
               (const void* pv,
                size_t cb,
-               const webrtc::AsyncSocketPacketOptions& options),
+               const AsyncSocketPacketOptions& options),
               (override));
 
   MOCK_METHOD(int,
@@ -38,7 +41,7 @@ class MockAsyncPacketSocket : public AsyncPacketSocket {
               (const void* pv,
                size_t cb,
                const SocketAddress& addr,
-               const webrtc::AsyncSocketPacketOptions& options),
+               const AsyncSocketPacketOptions& options),
               (override));
   MOCK_METHOD(int, Close, (), (override));
   MOCK_METHOD(State, GetState, (), (const, override));
@@ -52,8 +55,7 @@ class MockAsyncPacketSocket : public AsyncPacketSocket {
 
 TEST(AsyncPacketSocket, RegisteredCallbackReceivePacketsFromNotify) {
   MockAsyncPacketSocket mock_socket;
-  MockFunction<void(webrtc::AsyncPacketSocket*,
-                    const webrtc::ReceivedIpPacket&)>
+  MockFunction<void(AsyncPacketSocket*, const ReceivedIpPacket&)>
       received_packet;
 
   EXPECT_CALL(received_packet, Call);

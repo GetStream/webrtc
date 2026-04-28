@@ -10,12 +10,23 @@
 
 #include "examples/peerconnection/client/peer_connection_client.h"
 
+#include <cerrno>
+#include <cstddef>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <memory>
+#include <string>
+
+#include "api/async_dns_resolver.h"
+#include "api/task_queue/pending_task_safety_flag.h"
 #include "api/units/time_delta.h"
 #include "examples/peerconnection/client/defaults.h"
 #include "rtc_base/async_dns_resolver.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/net_helpers.h"
+#include "rtc_base/socket.h"
 #include "rtc_base/thread.h"
 
 namespace {
@@ -27,30 +38,37 @@ constexpr webrtc::TimeDelta kReconnectDelay = webrtc::TimeDelta::Seconds(2);
 
 webrtc::Socket* CreateClientSocket(int family) {
   webrtc::Thread* thread = webrtc::Thread::Current();
-  RTC_DCHECK(thread != NULL);
+  RTC_DCHECK(thread != nullptr);
   return thread->socketserver()->CreateSocket(family, SOCK_STREAM);
 }
 
 }  // namespace
 
 PeerConnectionClient::PeerConnectionClient()
-    : callback_(NULL), resolver_(nullptr), state_(NOT_CONNECTED), my_id_(-1) {}
+    : callback_(nullptr),
+      resolver_(nullptr),
+      state_(NOT_CONNECTED),
+      my_id_(-1) {}
 
 PeerConnectionClient::~PeerConnectionClient() = default;
 
 void PeerConnectionClient::InitSocketSignals() {
-  RTC_DCHECK(control_socket_.get() != NULL);
-  RTC_DCHECK(hanging_get_.get() != NULL);
-  control_socket_->SignalCloseEvent.connect(this,
-                                            &PeerConnectionClient::OnClose);
-  hanging_get_->SignalCloseEvent.connect(this, &PeerConnectionClient::OnClose);
-  control_socket_->SignalConnectEvent.connect(this,
-                                              &PeerConnectionClient::OnConnect);
-  hanging_get_->SignalConnectEvent.connect(
-      this, &PeerConnectionClient::OnHangingGetConnect);
-  control_socket_->SignalReadEvent.connect(this, &PeerConnectionClient::OnRead);
-  hanging_get_->SignalReadEvent.connect(
-      this, &PeerConnectionClient::OnHangingGetRead);
+  RTC_DCHECK(control_socket_.get() != nullptr);
+  RTC_DCHECK(hanging_get_.get() != nullptr);
+  control_socket_->SubscribeCloseEvent(
+      this,
+      [this](webrtc::Socket* socket, int error) { OnClose(socket, error); });
+  hanging_get_->SubscribeCloseEvent(
+      this,
+      [this](webrtc::Socket* socket, int error) { OnClose(socket, error); });
+  control_socket_->SubscribeConnectEvent(
+      this, [this](webrtc::Socket* socket) { OnConnect(socket); });
+  hanging_get_->SubscribeConnectEvent(
+      this, [this](webrtc::Socket* socket) { OnHangingGetConnect(socket); });
+  control_socket_->SubscribeReadEvent(
+      this, [this](webrtc::Socket* socket) { OnRead(socket); });
+  hanging_get_->SubscribeReadEvent(
+      this, [this](webrtc::Socket* socket) { OnHangingGetRead(socket); });
 }
 
 int PeerConnectionClient::id() const {
@@ -249,7 +267,7 @@ bool PeerConnectionClient::GetHeaderValue(const std::string& data,
                                           size_t eoh,
                                           const char* header_pattern,
                                           size_t* value) {
-  RTC_DCHECK(value != NULL);
+  RTC_DCHECK(value != nullptr);
   size_t found = data.find(header_pattern);
   if (found != std::string::npos && found < eoh) {
     *value = atoi(&data[found + strlen(header_pattern)]);
@@ -262,7 +280,7 @@ bool PeerConnectionClient::GetHeaderValue(const std::string& data,
                                           size_t eoh,
                                           const char* header_pattern,
                                           std::string* value) {
-  RTC_DCHECK(value != NULL);
+  RTC_DCHECK(value != nullptr);
   size_t found = data.find(header_pattern);
   if (found != std::string::npos && found < eoh) {
     size_t begin = found + strlen(header_pattern);
@@ -412,9 +430,9 @@ bool PeerConnectionClient::ParseEntry(const std::string& entry,
                                       std::string* name,
                                       int* id,
                                       bool* connected) {
-  RTC_DCHECK(name != NULL);
-  RTC_DCHECK(id != NULL);
-  RTC_DCHECK(connected != NULL);
+  RTC_DCHECK(name != nullptr);
+  RTC_DCHECK(id != nullptr);
+  RTC_DCHECK(connected != nullptr);
   RTC_DCHECK(!entry.empty());
 
   *connected = false;

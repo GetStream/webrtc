@@ -159,7 +159,7 @@ class FakeAudioCaptureModule : public webrtc::AudioDeviceModule {
   FakeAudioCaptureModule();
   // The destructor is protected because it is reference counted and should not
   // be deleted directly.
-  virtual ~FakeAudioCaptureModule();
+  ~FakeAudioCaptureModule() override;
 
  private:
   // Initializes the state of the FakeAudioCaptureModule. This API is called on
@@ -223,6 +223,9 @@ class FakeAudioCaptureModule : public webrtc::AudioDeviceModule {
   // indicate that the frames are not faked somewhere in the audio pipeline
   // (e.g. by a jitter buffer).
   int frames_received_;
+
+  // Set to true when Init() is called.
+  bool initialized_ = false;
 
   // Protects variables that are accessed from process_thread_ and
   // the main thread.

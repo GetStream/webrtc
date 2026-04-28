@@ -12,23 +12,27 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
-#include <optional>
+#include <string>
 #include <tuple>
+#include <utility>
+#include <vector>
 
+#include "api/array_view.h"
 #include "api/audio/audio_processing.h"
 #include "api/audio/builtin_audio_processing_builder.h"
+#include "api/audio/echo_control.h"
 #include "api/environment/environment.h"
 #include "api/environment/environment_factory.h"
 #include "api/make_ref_counted.h"
+#include "api/ref_count.h"
 #include "api/scoped_refptr.h"
 #include "modules/audio_processing/test/echo_canceller_test_tools.h"
 #include "modules/audio_processing/test/echo_control_mock.h"
 #include "modules/audio_processing/test/test_utils.h"
-#include "rtc_base/checks.h"
 #include "rtc_base/random.h"
-#include "rtc_base/strings/string_builder.h"
-#include "test/field_trial.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 
@@ -117,7 +121,7 @@ class TestEchoDetector : public EchoDetector {
 class TestRenderPreProcessor : public CustomProcessing {
  public:
   TestRenderPreProcessor() = default;
-  ~TestRenderPreProcessor() = default;
+  ~TestRenderPreProcessor() override = default;
   void Initialize(int /* sample_rate_hz */, int /* num_channels */) override {}
   void Process(AudioBuffer* audio) override {
     for (size_t k = 0; k < audio->num_channels(); ++k) {
@@ -204,7 +208,7 @@ TEST(AudioProcessingImplTest, AudioParameterChangeTriggersInit) {
 TEST(AudioProcessingImplTest, UpdateCapturePreGainRuntimeSetting) {
   scoped_refptr<AudioProcessing> apm =
       BuiltinAudioProcessingBuilder().Build(CreateEnvironment());
-  webrtc::AudioProcessing::Config apm_config;
+  AudioProcessing::Config apm_config;
   apm_config.pre_amplifier.enabled = true;
   apm_config.pre_amplifier.fixed_gain_factor = 1.f;
   apm->ApplyConfig(apm_config);
@@ -237,7 +241,7 @@ TEST(AudioProcessingImplTest,
      LevelAdjustmentUpdateCapturePreGainRuntimeSetting) {
   scoped_refptr<AudioProcessing> apm =
       BuiltinAudioProcessingBuilder().Build(CreateEnvironment());
-  webrtc::AudioProcessing::Config apm_config;
+  AudioProcessing::Config apm_config;
   apm_config.capture_level_adjustment.enabled = true;
   apm_config.capture_level_adjustment.pre_gain_factor = 1.f;
   apm->ApplyConfig(apm_config);
@@ -270,7 +274,7 @@ TEST(AudioProcessingImplTest,
      LevelAdjustmentUpdateCapturePostGainRuntimeSetting) {
   scoped_refptr<AudioProcessing> apm =
       BuiltinAudioProcessingBuilder().Build(CreateEnvironment());
-  webrtc::AudioProcessing::Config apm_config;
+  AudioProcessing::Config apm_config;
   apm_config.capture_level_adjustment.enabled = true;
   apm_config.capture_level_adjustment.post_gain_factor = 1.f;
   apm->ApplyConfig(apm_config);
@@ -393,7 +397,7 @@ TEST(AudioProcessingImplTest,
           .SetEchoControlFactory(std::move(echo_control_factory))
           .Build(CreateEnvironment());
   // Disable AGC.
-  webrtc::AudioProcessing::Config apm_config;
+  AudioProcessing::Config apm_config;
   apm_config.gain_controller1.enabled = false;
   apm_config.gain_controller2.enabled = false;
   apm_config.pre_amplifier.enabled = true;
@@ -436,7 +440,7 @@ TEST(AudioProcessingImplTest,
           .SetEchoControlFactory(std::move(echo_control_factory))
           .Build(CreateEnvironment());
   // Disable AGC.
-  webrtc::AudioProcessing::Config apm_config;
+  AudioProcessing::Config apm_config;
   apm_config.gain_controller1.enabled = false;
   apm_config.gain_controller2.enabled = false;
   apm_config.capture_level_adjustment.enabled = true;
@@ -478,7 +482,7 @@ TEST(AudioProcessingImplTest,
       BuiltinAudioProcessingBuilder()
           .SetEchoControlFactory(std::move(echo_control_factory))
           .Build(CreateEnvironment());
-  webrtc::AudioProcessing::Config apm_config;
+  AudioProcessing::Config apm_config;
   // Enable AGC1.
   apm_config.gain_controller1.enabled = true;
   apm_config.gain_controller1.analog_gain_controller.enabled = true;
@@ -534,7 +538,7 @@ TEST(AudioProcessingImplTest, EchoControllerObservesPlayoutVolumeChange) {
           .SetEchoControlFactory(std::move(echo_control_factory))
           .Build(CreateEnvironment());
   // Disable AGC.
-  webrtc::AudioProcessing::Config apm_config;
+  AudioProcessing::Config apm_config;
   apm_config.gain_controller1.enabled = false;
   apm_config.gain_controller2.enabled = false;
   apm->ApplyConfig(apm_config);
@@ -591,7 +595,7 @@ TEST(AudioProcessingImplTest, RenderPreProcessorBeforeEchoDetector) {
           .SetEchoDetector(test_echo_detector)
           .SetRenderPreProcessing(std::move(test_render_pre_processor))
           .Build(CreateEnvironment());
-  webrtc::AudioProcessing::Config apm_config;
+  AudioProcessing::Config apm_config;
   apm_config.pre_amplifier.enabled = true;
   apm->ApplyConfig(apm_config);
 
@@ -643,7 +647,7 @@ class StartupInputVolumeParameterizedTest
 // is never modified.
 TEST_P(StartupInputVolumeParameterizedTest,
        WithNoInputVolumeControllerStartupVolumeNotModified) {
-  webrtc::AudioProcessing::Config config;
+  AudioProcessing::Config config;
   config.gain_controller1.enabled = false;
   config.gain_controller2.enabled = false;
   auto apm = BuiltinAudioProcessingBuilder(config).Build(CreateEnvironment());
@@ -662,7 +666,7 @@ INSTANTIATE_TEST_SUITE_P(AudioProcessingImplTest,
 // volume always matches the applied one.
 TEST(AudioProcessingImplTest,
      WithNoInputVolumeControllerAppliedAndRecommendedVolumesMatch) {
-  webrtc::AudioProcessing::Config config;
+  AudioProcessing::Config config;
   config.gain_controller1.enabled = false;
   config.gain_controller2.enabled = false;
   auto apm = BuiltinAudioProcessingBuilder(config).Build(CreateEnvironment());
@@ -967,5 +971,28 @@ INSTANTIATE_TEST_SUITE_P(
             .gain_controller2 = {.enabled = true,
                                  .input_volume_controller = {.enabled = true},
                                  .adaptive_digital = {.enabled = true}}}));
+
+TEST(AudioProcessingImplTest, DoesNotFailProcessReverseStreamAfterApplyConfig) {
+  AudioProcessing::Config apm_config;
+  apm_config.echo_canceller.enabled = true;
+  constexpr int kSampleRateHz = 48000;
+  constexpr size_t kNumChannels = 1;
+  std::array<int16_t, kNumChannels * kSampleRateHz / 100> frame;
+  StreamConfig stream_config(kSampleRateHz, kNumChannels);
+
+  scoped_refptr<AudioProcessing> apm =
+      BuiltinAudioProcessingBuilder().Build(CreateEnvironment());
+  apm->Initialize({{
+      StreamConfig(16000, /*num_channels=*/1),
+      StreamConfig(16000, /*num_channels=*/1),
+      stream_config,
+      stream_config,
+  }});
+  apm->ApplyConfig(apm_config);
+  frame.fill(0);
+  ASSERT_EQ(AudioProcessing::Error::kNoError,
+            apm->ProcessReverseStream(frame.data(), stream_config,
+                                      stream_config, frame.data()));
+}
 
 }  // namespace webrtc

@@ -20,6 +20,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
 #include "api/adaptation/resource.h"
 #include "api/audio/audio_device.h"
@@ -28,6 +29,8 @@
 #include "api/data_channel_event_observer_interface.h"
 #include "api/data_channel_interface.h"
 #include "api/dtls_transport_interface.h"
+#include "api/environment/environment.h"
+#include "api/environment/environment_factory.h"
 #include "api/field_trials_view.h"
 #include "api/jsep.h"
 #include "api/media_stream_interface.h"
@@ -45,11 +48,11 @@
 #include "api/stats/rtc_stats_collector_callback.h"
 #include "api/transport/bandwidth_estimation_settings.h"
 #include "api/transport/bitrate_settings.h"
-#include "api/transport/network_control.h"
 #include "call/call.h"
 #include "call/payload_type_picker.h"
 #include "p2p/base/port.h"
 #include "p2p/base/port_allocator.h"
+#include "pc/channel_interface.h"
 #include "pc/jsep_transport_controller.h"
 #include "pc/peer_connection_internal.h"
 #include "pc/peer_connection_message_handler.h"
@@ -58,12 +61,13 @@
 #include "pc/session_description.h"
 #include "pc/transport_stats.h"
 #include "pc/usage_pattern.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/containers/flat_map.h"
 #include "rtc_base/ref_counted_object.h"
 #include "rtc_base/rtc_certificate.h"
 #include "rtc_base/ssl_certificate.h"
 #include "rtc_base/ssl_stream_adapter.h"
 #include "rtc_base/thread.h"
-#include "test/scoped_key_value_config.h"
 
 namespace webrtc {
 
@@ -74,6 +78,7 @@ namespace webrtc {
 class FakePeerConnectionBase : public PeerConnectionInternal {
  public:
   // PeerConnectionInterface implementation.
+  FakePeerConnectionBase() : env_(CreateEnvironment()) {}
 
   scoped_refptr<StreamCollectionInterface> local_streams() override {
     return nullptr;
@@ -161,7 +166,7 @@ class FakePeerConnectionBase : public PeerConnectionInternal {
 
   void ClearStatsCache() override {}
 
-  scoped_refptr<SctpTransportInterface> GetSctpTransport() const {
+  scoped_refptr<SctpTransportInterface> GetSctpTransport() const override {
     return nullptr;
   }
 
@@ -215,7 +220,9 @@ class FakePeerConnectionBase : public PeerConnectionInternal {
       std::unique_ptr<SessionDescriptionInterface> desc,
       scoped_refptr<SetRemoteDescriptionObserverInterface> observer) override {}
 
-  bool ShouldFireNegotiationNeededEvent(uint32_t event_id) { return true; }
+  bool ShouldFireNegotiationNeededEvent(uint32_t event_id) override {
+    return true;
+  }
 
   RTCConfiguration GetConfiguration() override { return RTCConfiguration(); }
 
@@ -224,11 +231,9 @@ class FakePeerConnectionBase : public PeerConnectionInternal {
     return RTCError();
   }
 
-  bool AddIceCandidate(const IceCandidateInterface* candidate) override {
-    return false;
-  }
+  bool AddIceCandidate(const IceCandidate* candidate) override { return false; }
 
-  bool RemoveIceCandidates(const std::vector<Candidate>& candidates) override {
+  bool RemoveIceCandidate(const IceCandidate* candidate) override {
     return false;
   }
 
@@ -244,7 +249,7 @@ class FakePeerConnectionBase : public PeerConnectionInternal {
   void SetAudioRecording(bool recording) override {}
 
   scoped_refptr<DtlsTransportInterface> LookupDtlsTransportByMid(
-      const std::string& mid) {
+      const std::string& mid) override {
     return nullptr;
   }
 
@@ -266,9 +271,11 @@ class FakePeerConnectionBase : public PeerConnectionInternal {
     return IceGatheringState::kIceGatheringNew;
   }
 
-  std::optional<bool> can_trickle_ice_candidates() { return std::nullopt; }
+  std::optional<bool> can_trickle_ice_candidates() override {
+    return std::nullopt;
+  }
 
-  void AddAdaptationResource(scoped_refptr<Resource> resource) {}
+  void AddAdaptationResource(scoped_refptr<Resource> resource) override {}
 
   bool StartRtcEventLog(std::unique_ptr<RtcEventLogOutput> output,
                         int64_t output_period_ms) override {
@@ -340,6 +347,7 @@ class FakePeerConnectionBase : public PeerConnectionInternal {
   bool GetSslRole(const std::string& content_name, SSLRole* role) override {
     return false;
   }
+
   const PeerConnectionInterface::RTCConfiguration* configuration()
       const override {
     return nullptr;
@@ -362,7 +370,10 @@ class FakePeerConnectionBase : public PeerConnectionInternal {
   DataChannelController* data_channel_controller() override { return nullptr; }
   PortAllocator* port_allocator() override { return nullptr; }
   LegacyStatsCollector* legacy_stats() override { return nullptr; }
-  PeerConnectionObserver* Observer() const override { return nullptr; }
+  void RunWithObserver(
+      absl::AnyInvocable<void(webrtc::PeerConnectionObserver*) &&>) override {
+    RTC_DCHECK_NOTREACHED();
+  }
   std::optional<SSLRole> GetSctpSslRole_n() override { return std::nullopt; }
   PeerConnectionInterface::IceConnectionState ice_connection_state_internal()
       override {
@@ -374,7 +385,7 @@ class FakePeerConnectionBase : public PeerConnectionInternal {
   bool IsClosed() const override { return false; }
   bool IsUnifiedPlan() const override { return true; }
   bool ValidateBundleSettings(const SessionDescription* desc,
-                              const std::map<std::string, const ContentGroup*>&
+                              const flat_map<std::string, const ContentGroup*>&
                                   bundle_groups_by_mid) override {
     return false;
   }
@@ -400,11 +411,8 @@ class FakePeerConnectionBase : public PeerConnectionInternal {
   }
   void DestroyDataChannelTransport(RTCError error) override {}
 
-  const FieldTrialsView& trials() const override { return field_trials_; }
-
-  NetworkControllerInterface* GetNetworkController() override {
-    return nullptr;
-  }
+  const Environment& env() const override { return env_; }
+  const FieldTrialsView& trials() const override { return env_.field_trials(); }
 
   PayloadTypePicker& payload_type_picker() override {
     return payload_type_picker_;
@@ -413,7 +421,7 @@ class FakePeerConnectionBase : public PeerConnectionInternal {
   CandidateStatsList GetPooledCandidateStats() const override { return {}; }
 
  protected:
-  test::ScopedKeyValueConfig field_trials_;
+  Environment env_;
   PayloadTypePicker payload_type_picker_;
 };
 

@@ -179,24 +179,30 @@ uint32_t GetDefaultTargetBitrate(const VideoCodecType codec,
     // The three values are for H264/VP8, VP9 and AV1, respectively.
     double bitrate[2][3];
   } kBitrateTable[] = {
-      {0, {{77.5, 65.0, 60.0}, {100.0, 100.0, 100.0}}},
-      {240 * 160, {{77.5, 65.0, 60.0}, {115.0, 100.0, 100.0}}},
-      {320 * 240, {{165.0, 105.0, 105.0}, {230.0, 180.0, 180.0}}},
-      {480 * 270, {{195.0, 180.0, 180.0}, {320.0, 250, 250}}},
-      {640 * 480, {{550.0, 355.0, 342.5}, {690.0, 520, 520}}},
-      {1280 * 720, {{1700.0, 990.0, 800.0}, {2500.0, 1500, 1200}}},
-      {1920 * 1080, {{2480.0, 2060.0, 1500.0}, {4000.0, 3350.0, 2500.0}}},
+      {.area = 0, .bitrate = {{77.5, 65.0, 60.0}, {100.0, 100.0, 100.0}}},
+      {.area = 240 * 160,
+       .bitrate = {{77.5, 65.0, 60.0}, {115.0, 100.0, 100.0}}},
+      {.area = 320 * 240,
+       .bitrate = {{165.0, 105.0, 105.0}, {230.0, 180.0, 180.0}}},
+      {.area = 480 * 270,
+       .bitrate = {{195.0, 180.0, 180.0}, {320.0, 250, 250}}},
+      {.area = 640 * 480,
+       .bitrate = {{550.0, 355.0, 342.5}, {690.0, 520, 520}}},
+      {.area = 1280 * 720,
+       .bitrate = {{1700.0, 990.0, 800.0}, {2500.0, 1500, 1200}}},
+      {.area = 1920 * 1080,
+       .bitrate = {{2480.0, 2060.0, 1500.0}, {4000.0, 3350.0, 2500.0}}},
   };
   size_t codec_index = 0;
   switch (codec) {
-    case webrtc::kVideoCodecVP8:
-    case webrtc::kVideoCodecH264:
+    case kVideoCodecVP8:
+    case kVideoCodecH264:
       codec_index = 0;
       break;
-    case webrtc::kVideoCodecVP9:
+    case kVideoCodecVP9:
       codec_index = 1;
       break;
-    case webrtc::kVideoCodecAV1:
+    case kVideoCodecAV1:
       codec_index = 2;
       break;
     default:
@@ -264,7 +270,7 @@ class BitstreamProcessor final : public EncodedImageCallback,
     }
   }
 
-  void ValidatePSNR(webrtc::VideoFrame& frame) {
+  void ValidatePSNR(VideoFrame& frame) {
     RTC_CHECK(validate_psnr_);
     video_decoder_->Decode(*encoded_image_, /*dont_care=*/0);
     double psnr = I420PSNR(*frame.video_frame_buffer()->ToI420(),
@@ -302,7 +308,7 @@ class BitstreamProcessor final : public EncodedImageCallback,
     return true;
   }
 
-  ~BitstreamProcessor() = default;
+  ~BitstreamProcessor() override = default;
 
  private:
   // DecodedImageCallback
@@ -494,10 +500,9 @@ class TestVideoEncoderFactoryWrapper final {
     RTC_CHECK(video_encoder);
 
     // Initialize video encoder.
-    const webrtc::VideoEncoder::Settings kSettings(
-        webrtc::VideoEncoder::Capabilities(false),
-        /*number_of_cores=*/1,
-        /*max_payload_size=*/0);
+    const VideoEncoder::Settings kSettings(VideoEncoder::Capabilities(false),
+                                           /*number_of_cores=*/1,
+                                           /*max_payload_size=*/0);
 
     int ret = video_encoder->InitEncode(&video_codec_setting, kSettings);
     RTC_CHECK_EQ(ret, WEBRTC_VIDEO_CODEC_OK);
@@ -508,12 +513,12 @@ class TestVideoEncoderFactoryWrapper final {
             env, video_codec_setting);
     RTC_CHECK(bitrate_allocator);
 
-    webrtc::VideoBitrateAllocation allocation =
+    VideoBitrateAllocation allocation =
         bitrate_allocator->GetAllocation(bitrate_kbps * 1000, frame_rate_fps);
     RTC_LOG(LS_INFO) << allocation.ToString();
 
-    video_encoder->SetRates(webrtc::VideoEncoder::RateControlParameters(
-        allocation, frame_rate_fps));
+    video_encoder->SetRates(
+        VideoEncoder::RateControlParameters(allocation, frame_rate_fps));
 
     return video_encoder;
   }

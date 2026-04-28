@@ -115,12 +115,13 @@ void AnalyzingVideoSink::OnFrame(const VideoFrame& frame) {
 
     if (report_infra_stats_) {
       stats_.analyzing_sink_processing_time_ms.AddSample(
-          (processing_finished - processing_started).ms<double>());
+          {.value = (processing_finished - processing_started).ms<double>(),
+           .time = processing_finished});
     }
   }
 }
 
-void AnalyzingVideoSink::LogMetrics(webrtc::test::MetricsLogger& metrics_logger,
+void AnalyzingVideoSink::LogMetrics(test::MetricsLogger& metrics_logger,
                                     absl::string_view test_case_name) const {
   if (report_infra_stats_) {
     MutexLock lock(&mutex_);
@@ -151,8 +152,9 @@ VideoFrame AnalyzingVideoSink::ScaleVideoFrame(
       !required_resolution.IsRegular() ||
       (required_resolution.width() == 0 || required_resolution.height() == 0)) {
     if (report_infra_stats_) {
+      Timestamp now = clock_->CurrentTime();
       stats_.scaling_tims_ms.AddSample(
-          (clock_->CurrentTime() - processing_started).ms<double>());
+          {.value = (now - processing_started).ms<double>(), .time = now});
     }
     return frame;
   }
@@ -177,8 +179,9 @@ VideoFrame AnalyzingVideoSink::ScaleVideoFrame(
   VideoFrame scaled_frame = frame;
   scaled_frame.set_video_frame_buffer(scaled_buffer);
   if (report_infra_stats_) {
+    Timestamp now = clock_->CurrentTime();
     stats_.scaling_tims_ms.AddSample(
-        (clock_->CurrentTime() - processing_started).ms<double>());
+        {.value = (now - processing_started).ms<double>(), .time = now});
   }
   return scaled_frame;
 }

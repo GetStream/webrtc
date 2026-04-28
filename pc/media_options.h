@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "absl/strings/string_view.h"
 #include "api/crypto/crypto_options.h"
 #include "api/media_types.h"
 #include "api/rtp_parameters.h"
@@ -45,7 +46,7 @@ struct SenderOptions {
 // Options for an individual media description/"m=" section.
 struct MediaDescriptionOptions {
   MediaDescriptionOptions(MediaType type,
-                          const std::string& mid,
+                          absl::string_view mid,
                           RtpTransceiverDirection direction,
                           bool stopped)
       : type(type), mid(mid), direction(direction), stopped(stopped) {}
@@ -113,19 +114,12 @@ struct MediaSessionOptions {
   // Default is true for backwards compatibility with clients that use
   // this internal interface.
   bool use_obsolete_sctp_sdp = true;
+
+  // Parse and serialize the draft-hancke-tsvwg-snap sctp-init.
+  bool use_sctp_snap = false;
 };
 
 }  //  namespace webrtc
 
-// Re-export symbols from the webrtc namespace for backwards compatibility.
-// TODO(bugs.webrtc.org/4222596): Remove once all references are updated.
-#ifdef WEBRTC_ALLOW_DEPRECATED_NAMESPACES
-namespace cricket {
-using ::webrtc::kDefaultRtcpCname;
-using ::webrtc::MediaDescriptionOptions;
-using ::webrtc::MediaSessionOptions;
-using ::webrtc::SenderOptions;
-}  // namespace cricket
-#endif  // WEBRTC_ALLOW_DEPRECATED_NAMESPACES
 
 #endif  // PC_MEDIA_OPTIONS_H_

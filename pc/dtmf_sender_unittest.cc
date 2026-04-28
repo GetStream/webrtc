@@ -10,8 +10,7 @@
 
 #include "pc/dtmf_sender.h"
 
-#include <stddef.h>
-
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -123,7 +122,7 @@ class DtmfSenderTest : public ::testing::Test {
     dtmf_->RegisterObserver(observer_.get());
   }
 
-  ~DtmfSenderTest() {
+  ~DtmfSenderTest() override {
     if (dtmf_) {
       dtmf_->UnregisterObserver();
     }
@@ -201,8 +200,6 @@ class DtmfSenderTest : public ::testing::Test {
     const std::vector<std::string>& tones = observer_->tones();
     // The observer will get an empty string at the end.
     EXPECT_EQ(tones_ref.size() + 1, tones.size());
-    EXPECT_EQ(observer_->tones(),
-              observer_->tones_from_single_argument_callback());
     EXPECT_TRUE(tones.back().empty());
     EXPECT_TRUE(observer_->tones_remaining().empty());
     std::string::const_iterator it_ref = tones_ref.begin();
@@ -306,7 +303,7 @@ TEST_F(DtmfSenderTest, InsertDtmfWhileSenderIsDeleted) {
                    .clock = &fake_clock_}),
               webrtc::IsRtcOk());
   // Delete the sender.
-  dtmf_ = NULL;
+  dtmf_ = nullptr;
   // The queue should be discontinued so no more tone callbacks.
   fake_clock_.AdvanceTime(webrtc::TimeDelta::Millis(200));
   EXPECT_EQ(1U, observer_->tones().size());

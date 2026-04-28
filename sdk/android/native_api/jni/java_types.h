@@ -19,16 +19,19 @@
 
 #include <jni.h>
 
+#include <cstddef>
+#include <cstdint>
 #include <map>
-#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "absl/strings/string_view.h"
 #include "api/array_view.h"
 #include "api/sequence_checker.h"
 #include "rtc_base/checks.h"
 #include "sdk/android/native_api/jni/scoped_java_ref.h"
+#include "third_party/jni_zero/jni_zero.h"
 
 // Abort the process if `jni` has a Java exception pending.
 // This macros uses the comma operator to execute ExceptionDescribe
@@ -158,7 +161,7 @@ std::vector<T> JavaToNativeVector(
   container.reserve(size);
   for (size_t i = 0; i < size; ++i) {
     container.emplace_back(convert(
-        env, jni_zero::ScopedJavaLocalRef<jobject>(
+        env, jni_zero::ScopedJavaLocalRef<jobject>::Adopt(
                  env, env->GetObjectArrayElement(j_container.obj(), i))));
   }
   CHECK_EXCEPTION(env) << "Error during JavaToNativeVector";
@@ -208,6 +211,8 @@ ScopedJavaLocalRef<jobject> NativeToJavaLong(JNIEnv* env, int64_t u);
 ScopedJavaLocalRef<jstring> NativeToJavaString(JNIEnv* jni, const char* str);
 ScopedJavaLocalRef<jstring> NativeToJavaString(JNIEnv* jni,
                                                const std::string& str);
+ScopedJavaLocalRef<jstring> NativeToJavaString(JNIEnv* jni,
+                                               absl::string_view str);
 
 ScopedJavaLocalRef<jobject> NativeToJavaDouble(
     JNIEnv* jni,
@@ -226,8 +231,9 @@ ScopedJavaLocalRef<jobjectArray> NativeToJavaObjectArray(
     const std::vector<T>& container,
     jclass clazz,
     Convert convert) {
-  jni_zero::ScopedJavaLocalRef<jobjectArray> j_container(
-      env, env->NewObjectArray(container.size(), clazz, nullptr));
+  jni_zero::ScopedJavaLocalRef<jobjectArray> j_container =
+      jni_zero::ScopedJavaLocalRef<jobjectArray>::Adopt(
+          env, env->NewObjectArray(container.size(), clazz, nullptr));
   int i = 0;
   for (const T& element : container) {
     env->SetObjectArrayElement(j_container.obj(), i,
@@ -350,7 +356,8 @@ inline std::string JavaToStdString(JNIEnv* jni,
 
 // Deprecated. Use scoped jobjects instead.
 inline std::string JavaToStdString(JNIEnv* jni, jstring j_string) {
-  return JavaToStdString(jni, jni_zero::JavaParamRef<jstring>(jni, j_string));
+  return JavaToStdString(
+      jni, jni_zero::JavaRef<jstring>::CreateLeaky(jni, j_string));
 }
 
 // Deprecated. Use JavaListToNativeVector<std::string, jstring> instead.
@@ -371,7 +378,8 @@ inline std::map<std::string, std::string> JavaToStdMapStrings(
 // Deprecated. Use scoped jobjects instead.
 inline std::map<std::string, std::string> JavaToStdMapStrings(JNIEnv* jni,
                                                               jobject j_map) {
-  return JavaToStdMapStrings(jni, jni_zero::JavaParamRef<jobject>(jni, j_map));
+  return JavaToStdMapStrings(
+      jni, jni_zero::JavaRef<jobject>::CreateLeaky(jni, j_map));
 }
 
 }  // namespace webrtc

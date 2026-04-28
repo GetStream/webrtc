@@ -342,7 +342,6 @@ TEST(CodecTest, TestCodecMatches) {
   EXPECT_TRUE(c0.Matches(CreateAudioCodec(34, "", 44100, 1)));
   EXPECT_TRUE(c0.Matches(CreateAudioCodec(34, "", 44100, 0)));
   EXPECT_TRUE(c0.Matches(CreateAudioCodec(34, "", 44100, 0)));
-  EXPECT_TRUE(c0.Matches(CreateAudioCodec(34, "", 0, 0)));
   EXPECT_FALSE(c0.Matches(CreateAudioCodec(96, "A", 44100, 1)));
   EXPECT_FALSE(c0.Matches(CreateAudioCodec(96, "", 44100, 1)));
   EXPECT_FALSE(c0.Matches(CreateAudioCodec(95, "", 55100, 1)));
@@ -352,15 +351,15 @@ TEST(CodecTest, TestCodecMatches) {
 
   // Test a codec with a dynamic payload type.
   Codec c1 = CreateAudioCodec(96, "A", 44100, 1);
-  EXPECT_TRUE(c1.Matches(CreateAudioCodec(96, "A", 0, 0)));
-  EXPECT_TRUE(c1.Matches(CreateAudioCodec(97, "A", 0, 0)));
-  EXPECT_TRUE(c1.Matches(CreateAudioCodec(96, "a", 0, 0)));
-  EXPECT_TRUE(c1.Matches(CreateAudioCodec(97, "a", 0, 0)));
-  EXPECT_TRUE(c1.Matches(CreateAudioCodec(35, "a", 0, 0)));
-  EXPECT_TRUE(c1.Matches(CreateAudioCodec(42, "a", 0, 0)));
-  EXPECT_TRUE(c1.Matches(CreateAudioCodec(65, "a", 0, 0)));
-  EXPECT_FALSE(c1.Matches(CreateAudioCodec(95, "A", 0, 0)));
-  EXPECT_FALSE(c1.Matches(CreateAudioCodec(34, "A", 0, 0)));
+  EXPECT_TRUE(c1.Matches(CreateAudioCodec(96, "A", 44100, 0)));
+  EXPECT_TRUE(c1.Matches(CreateAudioCodec(97, "A", 44100, 0)));
+  EXPECT_TRUE(c1.Matches(CreateAudioCodec(96, "a", 44100, 0)));
+  EXPECT_TRUE(c1.Matches(CreateAudioCodec(97, "a", 44100, 0)));
+  EXPECT_TRUE(c1.Matches(CreateAudioCodec(35, "a", 44100, 0)));
+  EXPECT_TRUE(c1.Matches(CreateAudioCodec(42, "a", 44100, 0)));
+  EXPECT_TRUE(c1.Matches(CreateAudioCodec(65, "a", 44100, 0)));
+  EXPECT_FALSE(c1.Matches(CreateAudioCodec(95, "A", 44100, 0)));
+  EXPECT_FALSE(c1.Matches(CreateAudioCodec(34, "A", 44100, 0)));
   EXPECT_FALSE(c1.Matches(CreateAudioCodec(96, "", 44100, 2)));
   EXPECT_FALSE(c1.Matches(CreateAudioCodec(96, "A", 55100, 1)));
 
@@ -390,8 +389,7 @@ TEST(CodecTest, TestOpusAudioCodecWithDifferentParameters) {
   // Matches does not compare parameters for audio.
   EXPECT_TRUE(opus_with_fec.Matches(opus_without_fec));
 
-  webrtc::RtpCodecParameters rtp_opus_with_fec =
-      opus_with_fec.ToCodecParameters();
+  RtpCodecParameters rtp_opus_with_fec = opus_with_fec.ToCodecParameters();
   // MatchesRtpCodec takes parameters into account.
   EXPECT_TRUE(opus_with_fec.MatchesRtpCodec(rtp_opus_with_fec));
   EXPECT_FALSE(opus_without_fec.MatchesRtpCodec(rtp_opus_with_fec));
@@ -427,7 +425,7 @@ TEST(CodecTest, TestVideoCodecMatchesWithDifferentPacketization) {
   EXPECT_TRUE(c1.Matches(c0));
 }
 
-// AV1 codecs compare profile information.
+// AV1 codecs do not compare profile information.
 TEST(CodecTest, TestAV1CodecMatches) {
   const char kProfile0[] = "0";
   const char kProfile1[] = "1";
@@ -471,6 +469,24 @@ TEST(CodecTest, TestAV1CodecMatches) {
   // AV1 entries with different profiles (0 and 2) are seen as distinct.
   EXPECT_FALSE(c_profile0.Matches(c_profile2));
   EXPECT_FALSE(c_no_profile.Matches(c_profile2));
+
+  // AV1 entries with same profile and different tier are seen as equal.
+  Codec c_tier0 = CreateVideoCodec(95, kAv1CodecName);
+  c_tier0.params[kAv1FmtpProfile] = kProfile0;
+  c_tier0.params[kAv1FmtpTier] = "0";
+  Codec c_tier1 = CreateVideoCodec(95, kAv1CodecName);
+  c_tier1.params[kAv1FmtpProfile] = kProfile0;
+  c_tier1.params[kAv1FmtpTier] = "1";
+  EXPECT_TRUE(c_tier0.Matches(c_tier1));
+
+  // AV1 entries with profile and different level are seen as equal.
+  Codec c_level0 = CreateVideoCodec(95, kAv1CodecName);
+  c_level0.params[kAv1FmtpProfile] = kProfile0;
+  c_level0.params[kAv1FmtpLevelIdx] = "0";
+  Codec c_level1 = CreateVideoCodec(95, kAv1CodecName);
+  c_level1.params[kAv1FmtpProfile] = kProfile0;
+  c_level1.params[kAv1FmtpLevelIdx] = "1";
+  EXPECT_TRUE(c_level0.Matches(c_level1));
 }
 
 // VP9 codecs compare profile information.
@@ -480,19 +496,19 @@ TEST(CodecTest, TestVP9CodecMatches) {
 
   Codec c_no_profile = CreateVideoCodec(95, kVp9CodecName);
   Codec c_profile0 = CreateVideoCodec(95, kVp9CodecName);
-  c_profile0.params[webrtc::kVP9FmtpProfileId] = kProfile0;
+  c_profile0.params[kVP9FmtpProfileId] = kProfile0;
 
   EXPECT_TRUE(c_profile0.Matches(c_no_profile));
 
   {
     Codec c_profile0_eq = CreateVideoCodec(95, kVp9CodecName);
-    c_profile0_eq.params[webrtc::kVP9FmtpProfileId] = kProfile0;
+    c_profile0_eq.params[kVP9FmtpProfileId] = kProfile0;
     EXPECT_TRUE(c_profile0.Matches(c_profile0_eq));
   }
 
   {
     Codec c_profile2 = CreateVideoCodec(95, kVp9CodecName);
-    c_profile2.params[webrtc::kVP9FmtpProfileId] = kProfile2;
+    c_profile2.params[kVP9FmtpProfileId] = kProfile2;
     EXPECT_FALSE(c_profile0.Matches(c_profile2));
     EXPECT_FALSE(c_no_profile.Matches(c_profile2));
   }

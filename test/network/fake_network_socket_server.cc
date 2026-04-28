@@ -31,6 +31,7 @@
 #include "rtc_base/event.h"
 #include "rtc_base/ip_address.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/net_helpers.h"
 #include "rtc_base/socket.h"
 #include "rtc_base/socket_address.h"
 #include "rtc_base/synchronization/mutex.h"
@@ -120,7 +121,7 @@ void FakeNetworkSocket::OnPacketReceived(EmulatedIpPacket packet) {
     // where pending_packet will be read and reset. This call is done without
     // any thread switch (see AsyncUDPSocket::OnReadEvent) so it's safe to
     // assume that SignalReadEvent() will block until the packet has been read.
-    SignalReadEvent(this);
+    NotifyReadEvent(this);
     RTC_DCHECK(!pending_);
   };
   thread_->PostTask(SafeTask(alive_, std::move(task)));
@@ -296,7 +297,7 @@ void FakeNetworkSocketServer::SetMessageQueue(Thread* thread) {
 }
 
 // Always returns true (if return false, it won't be invoked again...)
-bool FakeNetworkSocketServer::Wait(webrtc::TimeDelta max_wait_duration,
+bool FakeNetworkSocketServer::Wait(TimeDelta max_wait_duration,
                                    bool process_io) {
   RTC_DCHECK(thread_ == Thread::Current());
   if (!max_wait_duration.IsZero())

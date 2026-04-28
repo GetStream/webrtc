@@ -11,7 +11,6 @@
 #define NET_DCSCTP_SOCKET_CALLBACK_DEFERRER_H_
 
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <string>
 #include <utility>
@@ -20,11 +19,12 @@
 
 #include "absl/strings/string_view.h"
 #include "api/array_view.h"
-#include "api/ref_counted_base.h"
-#include "api/scoped_refptr.h"
 #include "api/task_queue/task_queue_base.h"
+#include "api/units/timestamp.h"
 #include "net/dcsctp/public/dcsctp_message.h"
 #include "net/dcsctp/public/dcsctp_socket.h"
+#include "net/dcsctp/public/timeout.h"
+#include "net/dcsctp/public/types.h"
 
 namespace dcsctp {
 // Defers callbacks until they can be safely triggered.
@@ -69,6 +69,7 @@ class CallbackDeferrer : public DcSctpSocketCallbacks {
   webrtc::Timestamp Now() override { return underlying_.Now(); }
   uint32_t GetRandomInt(uint32_t low, uint32_t high) override;
   void OnMessageReceived(DcSctpMessage message) override;
+  void OnMessageReady() override;
   void OnError(ErrorKind error, absl::string_view message) override;
   void OnAborted(ErrorKind error, absl::string_view message) override;
   void OnConnected() override;

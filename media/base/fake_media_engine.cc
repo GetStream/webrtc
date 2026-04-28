@@ -22,10 +22,11 @@
 
 #include "absl/strings/match.h"
 #include "api/audio/audio_device.h"
-#include "api/audio_codecs/audio_codec_pair_id.h"
 #include "api/audio_options.h"
 #include "api/call/audio_sink.h"
 #include "api/crypto/crypto_options.h"
+#include "api/environment/environment.h"
+#include "api/field_trials_view.h"
 #include "api/make_ref_counted.h"
 #include "api/rtp_parameters.h"
 #include "api/scoped_refptr.h"
@@ -47,7 +48,6 @@
 #include "rtc_base/system/file_wrapper.h"
 
 namespace webrtc {
-using webrtc::TaskQueueBase;
 
 FakeVoiceMediaReceiveChannel::DtmfInfo::DtmfInfo(uint32_t ssrc,
                                                  int event_code,
@@ -495,7 +495,7 @@ bool FakeVideoMediaReceiveChannel::AddRecvStream(const StreamParams& sp) {
   if (!RtpReceiveChannelHelper<
           VideoMediaReceiveChannelInterface>::AddRecvStream(sp))
     return false;
-  sinks_[sp.first_ssrc()] = NULL;
+  sinks_[sp.first_ssrc()] = nullptr;
   output_delays_[sp.first_ssrc()] = 0;
   return true;
 }
@@ -561,34 +561,38 @@ bool FakeVideoMediaReceiveChannel::GetStats(VideoMediaReceiveInfo* /* info */) {
 }
 
 FakeVoiceEngine::FakeVoiceEngine()
-    : encoder_factory_(webrtc::make_ref_counted<FakeVoiceEncoderFactory>(this)),
-      decoder_factory_(
-          webrtc::make_ref_counted<FakeVoiceDecoderFactory>(this)) {
+    : encoder_factory_(make_ref_counted<FakeVoiceEncoderFactory>(this)),
+      decoder_factory_(make_ref_counted<FakeVoiceDecoderFactory>(this)) {
   // Add a fake audio codec. Note that the name must not be "" as there are
   // sanity checks against that.
-  SetCodecs({webrtc::CreateAudioCodec(101, "fake_audio_codec", 8000, 1)});
+  SetCodecs({CreateAudioCodec(101, "fake_audio_codec", 8000, 1)});
 }
+
 void FakeVoiceEngine::Init() {}
+
+void FakeVoiceEngine::Terminate() {}
+
 scoped_refptr<AudioState> FakeVoiceEngine::GetAudioState() const {
   return scoped_refptr<AudioState>();
 }
 std::unique_ptr<VoiceMediaSendChannelInterface>
-FakeVoiceEngine::CreateSendChannel(Call* call,
+FakeVoiceEngine::CreateSendChannel(const Environment& /*env*/,
+                                   Call* call,
                                    const MediaConfig& /* config */,
                                    const AudioOptions& options,
-                                   const CryptoOptions& /* crypto_options */,
-                                   AudioCodecPairId /* codec_pair_id */) {
+                                   const CryptoOptions& /* crypto_options */) {
   std::unique_ptr<FakeVoiceMediaSendChannel> ch =
       std::make_unique<FakeVoiceMediaSendChannel>(options,
                                                   call->network_thread());
   return ch;
 }
 std::unique_ptr<VoiceMediaReceiveChannelInterface>
-FakeVoiceEngine::CreateReceiveChannel(Call* call,
-                                      const MediaConfig& /* config */,
-                                      const AudioOptions& options,
-                                      const CryptoOptions& /* crypto_options */,
-                                      AudioCodecPairId /* codec_pair_id */) {
+FakeVoiceEngine::CreateReceiveChannel(
+    const Environment& /*env*/,
+    Call* call,
+    const MediaConfig& /* config */,
+    const AudioOptions& options,
+    const CryptoOptions& /* crypto_options */) {
   std::unique_ptr<FakeVoiceMediaReceiveChannel> ch =
       std::make_unique<FakeVoiceMediaReceiveChannel>(options,
                                                      call->network_thread());
@@ -623,7 +627,8 @@ std::optional<AudioDeviceModule::Stats> FakeVoiceEngine::GetAudioDeviceStats() {
 void FakeVoiceEngine::StopAecDump() {}
 
 std::vector<RtpHeaderExtensionCapability>
-FakeVoiceEngine::GetRtpHeaderExtensions() const {
+FakeVoiceEngine::GetRtpHeaderExtensions(
+    const FieldTrialsView* field_trials) const {
   return header_extensions_;
 }
 
@@ -635,8 +640,8 @@ void FakeVoiceEngine::SetRtpHeaderExtensions(
 FakeVideoEngine::FakeVideoEngine() : capture_(false) {
   // Add a fake video codec. Note that the name must not be "" as there are
   // sanity checks against that.
-  send_codecs_.push_back(webrtc::CreateVideoCodec(111, "fake_video_codec"));
-  recv_codecs_.push_back(webrtc::CreateVideoCodec(111, "fake_video_codec"));
+  send_codecs_.push_back(CreateVideoCodec(111, "fake_video_codec"));
+  recv_codecs_.push_back(CreateVideoCodec(111, "fake_video_codec"));
 }
 bool FakeVideoEngine::SetOptions(const VideoOptions& options) {
   options_ = options;
@@ -644,6 +649,7 @@ bool FakeVideoEngine::SetOptions(const VideoOptions& options) {
 }
 std::unique_ptr<VideoMediaSendChannelInterface>
 FakeVideoEngine::CreateSendChannel(
+    const Environment& /* env */,
     Call* call,
     const MediaConfig& /* config */,
     const VideoOptions& options,
@@ -656,6 +662,7 @@ FakeVideoEngine::CreateSendChannel(
 }
 std::unique_ptr<VideoMediaReceiveChannelInterface>
 FakeVideoEngine::CreateReceiveChannel(
+    const Environment& /* env */,
     Call* call,
     const MediaConfig& /* config */,
     const VideoOptions& options,
@@ -696,7 +703,8 @@ bool FakeVideoEngine::SetCapture(bool capture) {
   return true;
 }
 std::vector<RtpHeaderExtensionCapability>
-FakeVideoEngine::GetRtpHeaderExtensions() const {
+FakeVideoEngine::GetRtpHeaderExtensions(
+    const FieldTrialsView* field_trials) const {
   return header_extensions_;
 }
 void FakeVideoEngine::SetRtpHeaderExtensions(

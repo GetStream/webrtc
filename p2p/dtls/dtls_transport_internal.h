@@ -11,14 +11,12 @@
 #ifndef P2P_DTLS_DTLS_TRANSPORT_INTERNAL_H_
 #define P2P_DTLS_DTLS_TRANSPORT_INTERNAL_H_
 
-#include <stddef.h>
-#include <stdint.h>
-
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <utility>
 
-#include "absl/base/attributes.h"
 #include "absl/strings/string_view.h"
 #include "api/dtls_transport_interface.h"
 #include "api/rtc_error.h"
@@ -64,6 +62,9 @@ class DtlsTransportInternal : public PacketTransportInternal {
 
   // Finds out which TLS/DTLS version is running.
   virtual bool GetSslVersionBytes(int* version) const = 0;
+  // Return the the ID of the group used by the adapters most recently
+  // completed handshake, or 0 if not applicable (e.g. before the handshake).
+  virtual uint16_t GetSslGroupId() const = 0;
   // Finds out which DTLS-SRTP cipher was negotiated.
   // TODO(zhihuang): Remove this once all dependencies implement this.
   virtual bool GetSrtpCryptoSuite(int* cipher) const = 0;
@@ -79,9 +80,6 @@ class DtlsTransportInternal : public PacketTransportInternal {
   // If not applicable, it returns zero.
   virtual uint16_t GetSslPeerSignatureAlgorithm() const = 0;
 
-  // Gets the local RTCCertificate used for DTLS.
-  virtual scoped_refptr<RTCCertificate> GetLocalCertificate() const = 0;
-
   virtual bool SetLocalCertificate(
       const scoped_refptr<RTCCertificate>& certificate) = 0;
 
@@ -92,27 +90,16 @@ class DtlsTransportInternal : public PacketTransportInternal {
   virtual bool ExportSrtpKeyingMaterial(
       ZeroOnFreeBuffer<uint8_t>& keying_material) = 0;
 
-  // Set DTLS remote fingerprint. Must be after local identity set.
-  ABSL_DEPRECATED("Use SetRemoteParameters instead.")
-  virtual bool SetRemoteFingerprint(absl::string_view digest_alg,
-                                    const uint8_t* digest,
-                                    size_t digest_len) = 0;
-
   // Set DTLS remote fingerprint and role. Must be after local identity set.
   virtual RTCError SetRemoteParameters(absl::string_view digest_alg,
                                        const uint8_t* digest,
                                        size_t digest_len,
                                        std::optional<SSLRole> role) = 0;
 
-  ABSL_DEPRECATED("Set the max version via construction.")
-  bool SetSslMaxProtocolVersion(SSLProtocolVersion /* version */) {
-    return true;
-  }
-
   // Expose the underneath IceTransport.
   virtual IceTransportInternal* ice_transport() = 0;
 
-  // F: void(DtlsTransportInternal*, const webrtc::DtlsTransportState)
+  // F: void(DtlsTransportInternal*, const DtlsTransportState)
   template <typename F>
   void SubscribeDtlsTransportState(F&& callback) {
     dtls_transport_state_callback_list_.AddReceiver(std::forward<F>(callback));
@@ -134,10 +121,15 @@ class DtlsTransportInternal : public PacketTransportInternal {
   }
 
   // Emitted whenever the Dtls handshake failed on some transport channel.
-  // F: void(webrtc::SSLHandshakeError)
+  // F: void(SSLHandshakeError)
   template <typename F>
-  void SubscribeDtlsHandshakeError(F&& callback) {
+  [[deprecated]] void SubscribeDtlsHandshakeError(F&& callback) {
     dtls_handshake_error_callback_list_.AddReceiver(std::forward<F>(callback));
+  }
+  template <typename F>
+  void SubscribeDtlsHandshakeError(void* tag, F&& callback) {
+    dtls_handshake_error_callback_list_.AddReceiver(tag,
+                                                    std::forward<F>(callback));
   }
 
   void SendDtlsHandshakeError(SSLHandshakeError error) {
@@ -155,15 +147,5 @@ class DtlsTransportInternal : public PacketTransportInternal {
 
 }  //  namespace webrtc
 
-// Re-export symbols from the webrtc namespace for backwards compatibility.
-// TODO(bugs.webrtc.org/4222596): Remove once all references are updated.
-#ifdef WEBRTC_ALLOW_DEPRECATED_NAMESPACES
-namespace cricket {
-using ::webrtc::DtlsTransportInternal;
-using ::webrtc::PacketFlags;
-using ::webrtc::PF_NORMAL;
-using ::webrtc::PF_SRTP_BYPASS;
-}  // namespace cricket
-#endif  // WEBRTC_ALLOW_DEPRECATED_NAMESPACES
 
 #endif  // P2P_DTLS_DTLS_TRANSPORT_INTERNAL_H_

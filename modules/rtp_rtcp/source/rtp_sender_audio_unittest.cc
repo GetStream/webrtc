@@ -39,13 +39,13 @@ enum : int {  // The first valid value is 1.
   kAbsoluteCaptureTimeExtensionId = 2,
 };
 
-const uint16_t kSeqNum = 33;
-const uint32_t kSsrc = 725242;
-const uint64_t kStartTime = 123456789;
+constexpr uint16_t kSeqNum = 33;
+constexpr uint32_t kSsrc = 725242;
+constexpr uint64_t kStartTime = 123456789;
 
 using ::testing::ElementsAreArray;
 
-class LoopbackTransportTest : public webrtc::Transport {
+class LoopbackTransportTest : public Transport {
  public:
   LoopbackTransportTest() {
     receivers_extensions_.Register<AudioLevelExtension>(kAudioLevelExtensionId);
@@ -59,7 +59,10 @@ class LoopbackTransportTest : public webrtc::Transport {
     EXPECT_TRUE(sent_packets_.back().Parse(data));
     return true;
   }
-  bool SendRtcp(ArrayView<const uint8_t> /* data */) override { return false; }
+  bool SendRtcp(ArrayView<const uint8_t> /* data */,
+                const PacketOptions& /* options */) override {
+    return false;
+  }
   const RtpPacketReceived& last_sent_packet() { return sent_packets_.back(); }
   int packets_sent() { return sent_packets_.size(); }
 

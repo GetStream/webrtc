@@ -16,24 +16,6 @@ group("crypto") {
   ]
 }
 
-rtc_library("frame_crypto_transformer") {
-  visibility = [ "*" ]
-  sources = [
-    "frame_crypto_transformer.cc",
-    "frame_crypto_transformer.h",
-  ]
-
-  deps = [
-   "//api:frame_transformer_interface",
-  ]
-
-  if (rtc_build_ssl) {
-    deps += [ "//third_party/boringssl" ]
-  } else {
-    configs += [ ":external_ssl_library" ]
-  }
-}
-
 rtc_library("options") {
   visibility = [ "*" ]
   sources = [
@@ -41,9 +23,11 @@ rtc_library("options") {
     "crypto_options.h",
   ]
   deps = [
+    "..:field_trials_view",
     "../../rtc_base:checks",
     "../../rtc_base:ssl_adapter",
     "../../rtc_base/system:rtc_export",
+    "//third_party/abseil-cpp/absl/algorithm:container",
   ]
 }
 
@@ -69,17 +53,21 @@ rtc_source_set("frame_encryptor_interface") {
   ]
 }
 
-  rtc_library("crypto_unittests") {
+if (rtc_include_tests) {
+  rtc_library("crypto_options_unittest") {
+    visibility = [ "*" ]
     testonly = true
-
-    sources = [
-      "frame_crypto_transformer_unittest.cc",
-    ]
-
+    sources = [ "crypto_options_unittest.cc" ]
     deps = [
-      ":crypto",
-      ":frame_crypto_transformer",
-      "//testing/gtest",
+      ":options",
+      "..:field_trials",
+      "../../rtc_base:ssl_adapter",
+      "../../test:create_test_field_trials",
       "../../test:test_support",
+      "//testing/gtest",
     ]
+    if (rtc_build_ssl) {
+      deps += [ "//third_party/boringssl" ]
+    }
   }
+}

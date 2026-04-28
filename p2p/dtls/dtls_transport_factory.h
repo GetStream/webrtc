@@ -14,11 +14,12 @@
 #include <memory>
 
 #include "api/crypto/crypto_options.h"
-#include "p2p/base/ice_transport_internal.h"
-#include "p2p/dtls/dtls_transport_internal.h"
+#include "api/ice_transport_interface.h"
+#include "api/scoped_refptr.h"
 #include "rtc_base/ssl_stream_adapter.h"
 
 namespace webrtc {
+class DtlsTransportInternal;
 
 // This interface is used to create DTLS transports. The external transports
 // can be injected into the JsepTransportController through it.
@@ -31,19 +32,12 @@ class DtlsTransportFactory {
   virtual ~DtlsTransportFactory() = default;
 
   virtual std::unique_ptr<DtlsTransportInternal> CreateDtlsTransport(
-      IceTransportInternal* ice,
+      scoped_refptr<IceTransportInterface> ice,
       const CryptoOptions& crypto_options,
       SSLProtocolVersion max_version) = 0;
 };
 
 }  //  namespace webrtc
 
-// Re-export symbols from the webrtc namespace for backwards compatibility.
-// TODO(bugs.webrtc.org/4222596): Remove once all references are updated.
-#ifdef WEBRTC_ALLOW_DEPRECATED_NAMESPACES
-namespace cricket {
-using ::webrtc::DtlsTransportFactory;
-}  // namespace cricket
-#endif  // WEBRTC_ALLOW_DEPRECATED_NAMESPACES
 
 #endif  // P2P_DTLS_DTLS_TRANSPORT_FACTORY_H_

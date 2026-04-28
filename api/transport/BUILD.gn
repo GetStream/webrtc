@@ -60,20 +60,6 @@ rtc_library("network_control") {
   ]
 }
 
-rtc_library("field_trial_based_config") {
-  visibility = [ "*" ]
-  sources = [
-    "field_trial_based_config.cc",
-    "field_trial_based_config.h",
-  ]
-  deps = [
-    "../../api:field_trials_registry",
-    "../../rtc_base/system:rtc_export",
-    "../../system_wrappers:field_trial",
-    "//third_party/abseil-cpp/absl/strings:string_view",
-  ]
-}
-
 rtc_source_set("datagram_transport_interface") {
   visibility = [ "*" ]
   sources = [ "data_channel_transport_interface.h" ]
@@ -82,6 +68,7 @@ rtc_source_set("datagram_transport_interface") {
     "..:priority",
     "..:rtc_error",
     "../../rtc_base:copy_on_write_buffer",
+    "../../rtc_base:ssl_adapter",
   ]
 }
 
@@ -93,9 +80,14 @@ rtc_library("goog_cc") {
   ]
   deps = [
     ":network_control",
+    "..:field_trials_view",
     "..:network_state_predictor_api",
     "../../api/units:time_delta",
     "../../modules/congestion_controller/goog_cc",
+    "../../modules/congestion_controller/goog_cc_scream_network_controller",
+    "../../modules/congestion_controller/scream:scream_network_controller",
+    "../../rtc_base:logging",
+    "../../rtc_base/experiments:field_trial_parser",
     "../../rtc_base/system:rtc_export",
   ]
 }
@@ -103,10 +95,13 @@ rtc_library("goog_cc") {
 rtc_source_set("sctp_transport_factory_interface") {
   visibility = [ "*" ]
   sources = [ "sctp_transport_factory_interface.h" ]
-  deps = [ "../../api/environment" ]
+  deps = [
+    "..:field_trials_view",
+    "../../api/environment",
+  ]
 }
 
-rtc_source_set("stun_types") {
+rtc_library("stun_types") {
   visibility = [ "*" ]
   sources = [
     "stun.cc",
@@ -138,6 +133,8 @@ if (rtc_include_tests) {
     deps = [
       ":network_control",
       "..:simulated_network_api",
+      "../../api:network_emulation_manager_api",
+      "../../api/rtc_event_log",
       "../units:data_rate",
       "../units:data_size",
       "../units:time_delta",
@@ -154,13 +151,15 @@ if (rtc_include_tests) {
     deps = [
       ":network_control",
       ":test_feedback_generator_interface",
+      "../../api:network_emulation_manager_api",
+      "../../api/rtc_event_log",
       "../../test/network:feedback_generator",
     ]
   }
 }
 
 if (rtc_include_tests) {
-  rtc_source_set("stun_unittest") {
+  rtc_library("stun_unittest") {
     visibility = [ "*" ]
     testonly = true
     sources = [ "stun_unittest.cc" ]
@@ -170,7 +169,6 @@ if (rtc_include_tests) {
       "../../rtc_base:byte_buffer",
       "../../rtc_base:byte_order",
       "../../rtc_base:ip_address",
-      "../../rtc_base:macromagic",
       "../../rtc_base:socket_address",
       "../../system_wrappers:metrics",
       "../../test:test_support",

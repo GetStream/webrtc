@@ -12,15 +12,18 @@
 #define MODULES_DESKTOP_CAPTURE_LINUX_WAYLAND_SCREENCAST_PORTAL_H_
 
 #include <gio/gio.h>
+#include <glib-object.h>
+#include <glib.h>
 
+#include <cstdint>
 #include <string>
 
 #include "modules/desktop_capture/desktop_capture_types.h"
 #include "modules/desktop_capture/linux/wayland/screen_capture_portal_interface.h"
 #include "modules/portal/pipewire_utils.h"
 #include "modules/portal/portal_request_response.h"
-#include "modules/portal/xdg_desktop_portal_utils.h"
 #include "modules/portal/xdg_session_details.h"
+#include "rtc_base/system/rtc_export.h"
 
 namespace webrtc {
 
@@ -80,7 +83,9 @@ class RTC_EXPORT ScreenCastPortal
     virtual ~PortalNotifier() = default;
   };
 
-  ScreenCastPortal(CaptureType type, PortalNotifier* notifier);
+  ScreenCastPortal(CaptureType type,
+                   PortalNotifier* notifier,
+                   bool prefer_cursor_embedded);
   ScreenCastPortal(CaptureType type,
                    PortalNotifier* notifier,
                    ProxyRequestResponseHandler proxy_request_response_handler,
@@ -91,7 +96,7 @@ class RTC_EXPORT ScreenCastPortal
                    // downstream has been adjusted.
                    bool prefer_cursor_embedded = false);
 
-  ~ScreenCastPortal();
+  ~ScreenCastPortal() override;
 
   // Initialize ScreenCastPortal with series of DBus calls where we try to
   // obtain all the required information, like PipeWire file descriptor and

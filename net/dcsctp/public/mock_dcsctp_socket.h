@@ -10,9 +10,17 @@
 #ifndef NET_DCSCTP_PUBLIC_MOCK_DCSCTP_SOCKET_H_
 #define NET_DCSCTP_PUBLIC_MOCK_DCSCTP_SOCKET_H_
 
+#include <cstddef>
+#include <cstdint>
+#include <optional>
 #include <vector>
 
+#include "api/array_view.h"
+#include "net/dcsctp/public/dcsctp_handover_state.h"
+#include "net/dcsctp/public/dcsctp_message.h"
+#include "net/dcsctp/public/dcsctp_options.h"
 #include "net/dcsctp/public/dcsctp_socket.h"
+#include "net/dcsctp/public/types.h"
 #include "test/gmock.h"
 
 namespace dcsctp {
@@ -24,9 +32,17 @@ class MockDcSctpSocket : public DcSctpSocketInterface {
               (webrtc::ArrayView<const uint8_t> data),
               (override));
 
+  MOCK_METHOD(size_t, MessagesReady, (), (const, override));
+  MOCK_METHOD(std::optional<DcSctpMessage>, GetNextMessage, (), (override));
+
   MOCK_METHOD(void, HandleTimeout, (TimeoutID timeout_id), (override));
 
   MOCK_METHOD(void, Connect, (), (override));
+  MOCK_METHOD(bool,
+              ConnectWithConnectionToken,
+              (webrtc::ArrayView<const uint8_t>,
+               webrtc::ArrayView<const uint8_t>),
+              (override));
 
   MOCK_METHOD(void,
               RestoreFromState,

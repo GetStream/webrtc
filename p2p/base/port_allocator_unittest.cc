@@ -18,11 +18,10 @@
 #include "api/environment/environment_factory.h"
 #include "api/transport/enums.h"
 #include "p2p/base/port.h"
-#include "p2p/base/port_interface.h"
 #include "p2p/test/fake_port_allocator.h"
 #include "rtc_base/ip_address.h"
+#include "rtc_base/net_helper.h"
 #include "rtc_base/socket_address.h"
-#include "rtc_base/third_party/sigslot/sigslot.h"
 #include "rtc_base/thread.h"
 #include "rtc_base/virtual_socket_server.h"
 #include "test/gtest.h"
@@ -30,15 +29,21 @@
 using ::webrtc::CreateEnvironment;
 using ::webrtc::IceCandidateType;
 
-static const char kContentName[] = "test content";
+namespace {
+constexpr char kContentName[] = "test content";
 // Based on ICE_UFRAG_LENGTH
-static const char kIceUfrag[] = "UF00";
+constexpr char kIceUfrag[] = "UF00";
 // Based on ICE_PWD_LENGTH
-static const char kIcePwd[] = "TESTICEPWD00000000000000";
-static const char kTurnUsername[] = "test";
-static const char kTurnPassword[] = "test";
+constexpr char kIcePwd[] = "TESTICEPWD00000000000000";
+constexpr char kTurnUsername[] = "test";
+constexpr char kTurnPassword[] = "test";
 
-class PortAllocatorTest : public ::testing::Test, public sigslot::has_slots<> {
+// Constants for testing candidates
+constexpr char kIpv4Address[] = "12.34.56.78";
+constexpr char kIpv4AddressWithPort[] = "12.34.56.78:443";
+}  // namespace
+
+class PortAllocatorTest : public ::testing::Test {
  public:
   PortAllocatorTest()
       : vss_(std::make_unique<webrtc::VirtualSocketServer>()),
@@ -233,6 +238,7 @@ TEST_F(PortAllocatorTest, TakePooledSessionUpdatesIceParameters) {
       static_cast<webrtc::FakePortAllocatorSession*>(
           allocator_->TakePooledSession(kContentName, 1, kIceUfrag, kIcePwd)
               .release()));
+  EXPECT_FALSE(session->pooled());
   EXPECT_EQ(1, session->transport_info_update_count());
   EXPECT_EQ(kContentName, session->content_name());
   EXPECT_EQ(1, session->component());
@@ -287,10 +293,6 @@ TEST_F(PortAllocatorTest, RestrictIceCredentialsChange) {
                                           credentials[0].pwd));
   allocator_->DiscardCandidatePool();
 }
-
-// Constants for testing candidates
-const char kIpv4Address[] = "12.34.56.78";
-const char kIpv4AddressWithPort[] = "12.34.56.78:443";
 
 TEST_F(PortAllocatorTest, SanitizeEmptyCandidateDefaultConfig) {
   webrtc::Candidate input;

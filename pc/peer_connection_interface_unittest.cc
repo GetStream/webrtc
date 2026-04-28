@@ -10,10 +10,9 @@
 
 #include "api/peer_connection_interface.h"
 
-#include <limits.h>
-#include <stdint.h>
-
+#include <climits>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -26,6 +25,7 @@
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "api/audio_codecs/builtin_audio_encoder_factory.h"
 #include "api/create_peerconnection_factory.h"
+#include "api/crypto/crypto_options.h"
 #include "api/data_channel_interface.h"
 #include "api/enable_media_with_defaults.h"
 #include "api/environment/environment_factory.h"
@@ -42,11 +42,10 @@
 #include "api/rtp_sender_interface.h"
 #include "api/rtp_transceiver_direction.h"
 #include "api/scoped_refptr.h"
-#include "api/task_queue/default_task_queue_factory.h"
+#include "api/sctp_transport_interface.h"
 #include "api/test/rtc_error_matchers.h"
 #include "api/transport/bitrate_settings.h"
 #include "api/transport/enums.h"
-#include "api/transport/field_trial_based_config.h"
 #include "api/units/time_delta.h"
 #include "api/video_codecs/video_decoder_factory_template.h"
 #include "api/video_codecs/video_decoder_factory_template_dav1d_adapter.h"
@@ -61,7 +60,6 @@
 #include "media/base/codec.h"
 #include "media/base/media_config.h"
 #include "media/base/stream_params.h"
-#include "media/sctp/sctp_transport_internal.h"
 #include "p2p/base/p2p_constants.h"
 #include "p2p/base/port.h"
 #include "p2p/base/port_allocator.h"
@@ -73,6 +71,7 @@
 #include "pc/media_stream.h"
 #include "pc/peer_connection.h"
 #include "pc/peer_connection_factory.h"
+#include "pc/rtp_media_utils.h"
 #include "pc/rtp_sender.h"
 #include "pc/rtp_sender_proxy.h"
 #include "pc/session_description.h"
@@ -89,6 +88,7 @@
 #include "rtc_base/socket_server.h"
 #include "rtc_base/thread.h"
 #include "rtc_base/virtual_socket_server.h"
+#include "rtc_base/weak_ptr.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 #include "test/wait_until.h"
@@ -100,30 +100,41 @@
 namespace webrtc {
 namespace {
 
-static const char kStreamId1[] = "local_stream_1";
-static const char kStreamId2[] = "local_stream_2";
-static const char kStreamId3[] = "local_stream_3";
-static const int kDefaultStunPort = 3478;
-static const char kStunAddressOnly[] = "stun:address";
-static const char kStunInvalidPort[] = "stun:address:-1";
-static const char kStunAddressPortAndMore1[] = "stun:address:port:more";
-static const char kStunAddressPortAndMore2[] = "stun:address:port more";
-static const char kTurnIceServerUri[] = "turn:turn.example.org";
-static const char kTurnUsername[] = "user";
-static const char kTurnPassword[] = "password";
-static const char kTurnHostname[] = "turn.example.org";
-static const uint32_t kTimeout = 10000U;
+using ::testing::Eq;
+using ::testing::Exactly;
+using ::testing::IsNull;
+using ::testing::IsTrue;
+using ::testing::NotNull;
+using ::testing::SizeIs;
+using ::testing::Values;
 
-static const char kStreams[][8] = {"stream1", "stream2"};
-static const char kAudioTracks[][32] = {"audiotrack0", "audiotrack1"};
-static const char kVideoTracks[][32] = {"videotrack0", "videotrack1"};
+using RTCConfiguration = PeerConnectionInterface::RTCConfiguration;
+using RTCOfferAnswerOptions = PeerConnectionInterface::RTCOfferAnswerOptions;
 
-static const char kRecvonly[] = "recvonly";
-static const char kSendrecv[] = "sendrecv";
+constexpr char kStreamId1[] = "local_stream_1";
+constexpr char kStreamId2[] = "local_stream_2";
+constexpr char kStreamId3[] = "local_stream_3";
+constexpr int kDefaultStunPort = 3478;
+constexpr char kStunAddressOnly[] = "stun:address";
+constexpr char kStunInvalidPort[] = "stun:address:-1";
+constexpr char kStunAddressPortAndMore1[] = "stun:address:port:more";
+constexpr char kStunAddressPortAndMore2[] = "stun:address:port more";
+constexpr char kTurnIceServerUri[] = "turn:turn.example.org";
+constexpr char kTurnUsername[] = "user";
+constexpr char kTurnPassword[] = "password";
+constexpr char kTurnHostname[] = "turn.example.org";
+constexpr uint32_t kTimeout = 10000U;
+
+constexpr char kStreams[][8] = {"stream1", "stream2"};
+constexpr char kAudioTracks[][32] = {"audiotrack0", "audiotrack1"};
+constexpr char kVideoTracks[][32] = {"videotrack0", "videotrack1"};
+
+constexpr char kRecvonly[] = "recvonly";
+constexpr char kSendrecv[] = "sendrecv";
 
 // Reference SDP with a MediaStream with label "stream1" and audio track with
 // id "audio_1" and a video track with id "video_1;
-static const char kSdpStringWithStream1PlanB[] =
+constexpr char kSdpStringWithStream1PlanB[] =
     "v=0\r\n"
     "o=- 0 0 IN IP4 127.0.0.1\r\n"
     "s=-\r\n"
@@ -153,7 +164,7 @@ static const char kSdpStringWithStream1PlanB[] =
 // Same string as above but with the MID changed to the Unified Plan default and
 // a=msid added. This is needed so that this SDP can be used as an answer for a
 // Unified Plan offer.
-static const char kSdpStringWithStream1UnifiedPlan[] =
+constexpr char kSdpStringWithStream1UnifiedPlan[] =
     "v=0\r\n"
     "o=- 0 0 IN IP4 127.0.0.1\r\n"
     "s=-\r\n"
@@ -183,7 +194,7 @@ static const char kSdpStringWithStream1UnifiedPlan[] =
 
 // Reference SDP with a MediaStream with label "stream1" and audio track with
 // id "audio_1";
-static const char kSdpStringWithStream1AudioTrackOnly[] =
+constexpr char kSdpStringWithStream1AudioTrackOnly[] =
     "v=0\r\n"
     "o=- 0 0 IN IP4 127.0.0.1\r\n"
     "s=-\r\n"
@@ -203,7 +214,7 @@ static const char kSdpStringWithStream1AudioTrackOnly[] =
 // Reference SDP with two MediaStreams with label "stream1" and "stream2. Each
 // MediaStreams have one audio track and one video track.
 // This uses MSID.
-static const char kSdpStringWithStream1And2PlanB[] =
+constexpr char kSdpStringWithStream1And2PlanB[] =
     "v=0\r\n"
     "o=- 0 0 IN IP4 127.0.0.1\r\n"
     "s=-\r\n"
@@ -235,7 +246,7 @@ static const char kSdpStringWithStream1And2PlanB[] =
     "a=ssrc:2 msid:stream1 videotrack0\r\n"
     "a=ssrc:4 cname:stream2\r\n"
     "a=ssrc:4 msid:stream2 videotrack1\r\n";
-static const char kSdpStringWithStream1And2UnifiedPlan[] =
+constexpr char kSdpStringWithStream1And2UnifiedPlan[] =
     "v=0\r\n"
     "o=- 0 0 IN IP4 127.0.0.1\r\n"
     "s=-\r\n"
@@ -287,7 +298,7 @@ static const char kSdpStringWithStream1And2UnifiedPlan[] =
     "a=ssrc:4 msid:stream2 videotrack1\r\n";
 
 // Reference SDP without MediaStreams. Msid is not supported.
-static const char kSdpStringWithoutStreams[] =
+constexpr char kSdpStringWithoutStreams[] =
     "v=0\r\n"
     "o=- 0 0 IN IP4 127.0.0.1\r\n"
     "s=-\r\n"
@@ -312,7 +323,7 @@ static const char kSdpStringWithoutStreams[] =
     "a=rtpmap:120 VP8/90000\r\n";
 
 // Reference SDP without MediaStreams. Msid is supported.
-static const char kSdpStringWithMsidWithoutStreams[] =
+constexpr char kSdpStringWithMsidWithoutStreams[] =
     "v=0\r\n"
     "o=- 0 0 IN IP4 127.0.0.1\r\n"
     "s=-\r\n"
@@ -338,7 +349,7 @@ static const char kSdpStringWithMsidWithoutStreams[] =
     "a=rtpmap:120 VP8/90000\r\n";
 
 // Reference SDP without MediaStreams and audio only.
-static const char kSdpStringWithoutStreamsAudioOnly[] =
+constexpr char kSdpStringWithoutStreamsAudioOnly[] =
     "v=0\r\n"
     "o=- 0 0 IN IP4 127.0.0.1\r\n"
     "s=-\r\n"
@@ -354,7 +365,7 @@ static const char kSdpStringWithoutStreamsAudioOnly[] =
     "a=rtpmap:111 OPUS/48000/2\r\n";
 
 // Reference SENDONLY SDP without MediaStreams. Msid is not supported.
-static const char kSdpStringSendOnlyWithoutStreams[] =
+constexpr char kSdpStringSendOnlyWithoutStreams[] =
     "v=0\r\n"
     "o=- 0 0 IN IP4 127.0.0.1\r\n"
     "s=-\r\n"
@@ -380,14 +391,14 @@ static const char kSdpStringSendOnlyWithoutStreams[] =
     "a=rtcp-mux\r\n"
     "a=rtpmap:120 VP8/90000\r\n";
 
-static const char kSdpStringInit[] =
+constexpr char kSdpStringInit[] =
     "v=0\r\n"
     "o=- 0 0 IN IP4 127.0.0.1\r\n"
     "s=-\r\n"
     "t=0 0\r\n"
     "a=msid-semantic: WMS\r\n";
 
-static const char kSdpStringAudio[] =
+constexpr char kSdpStringAudio[] =
     "m=audio 1 RTP/AVPF 111\r\n"
     "a=ice-ufrag:e5785931\r\n"
     "a=ice-pwd:36fb7878390db89481c1d46daa4278d8\r\n"
@@ -398,7 +409,7 @@ static const char kSdpStringAudio[] =
     "a=rtcp-mux\r\n"
     "a=rtpmap:111 OPUS/48000/2\r\n";
 
-static const char kSdpStringVideo[] =
+constexpr char kSdpStringVideo[] =
     "m=video 1 RTP/AVPF 120\r\n"
     "a=ice-ufrag:e5785931\r\n"
     "a=ice-pwd:36fb7878390db89481c1d46daa4278d8\r\n"
@@ -409,19 +420,19 @@ static const char kSdpStringVideo[] =
     "a=rtcp-mux\r\n"
     "a=rtpmap:120 VP8/90000\r\n";
 
-static const char kSdpStringMs1Audio0[] =
+constexpr char kSdpStringMs1Audio0[] =
     "a=ssrc:1 cname:stream1\r\n"
     "a=ssrc:1 msid:stream1 audiotrack0\r\n";
 
-static const char kSdpStringMs1Video0[] =
+constexpr char kSdpStringMs1Video0[] =
     "a=ssrc:2 cname:stream1\r\n"
     "a=ssrc:2 msid:stream1 videotrack0\r\n";
 
-static const char kSdpStringMs1Audio1[] =
+constexpr char kSdpStringMs1Audio1[] =
     "a=ssrc:3 cname:stream1\r\n"
     "a=ssrc:3 msid:stream1 audiotrack1\r\n";
 
-static const char kSdpStringMs1Video1[] =
+constexpr char kSdpStringMs1Video1[] =
     "a=ssrc:4 cname:stream1\r\n"
     "a=ssrc:4 msid:stream1 videotrack1\r\n";
 
@@ -430,14 +441,6 @@ class RtcEventLogOutputNull final : public RtcEventLogOutput {
   bool IsActive() const override { return true; }
   bool Write(const absl::string_view /*output*/) override { return true; }
 };
-
-using ::testing::Eq;
-using ::testing::Exactly;
-using ::testing::SizeIs;
-using ::testing::Values;
-
-using RTCConfiguration = PeerConnectionInterface::RTCConfiguration;
-using RTCOfferAnswerOptions = PeerConnectionInterface::RTCOfferAnswerOptions;
 
 // Gets the first ssrc of given content type from the ContentInfo.
 bool GetFirstSsrc(const ContentInfo* content_info, int* ssrc) {
@@ -516,7 +519,8 @@ bool ContainsSender(
 // correspond to kSdpStringWithStream1.
 // CreateStreamCollection(2) correspond to kSdpStringWithStream1And2.
 scoped_refptr<StreamCollection> CreateStreamCollection(int number_of_streams,
-                                                       int tracks_per_stream) {
+                                                       int tracks_per_stream,
+                                                       Thread* worker_thread) {
   scoped_refptr<StreamCollection> local_collection(StreamCollection::Create());
 
   for (int i = 0; i < number_of_streams; ++i) {
@@ -530,9 +534,9 @@ scoped_refptr<StreamCollection> CreateStreamCollection(int number_of_streams,
       stream->AddTrack(audio_track);
 
       // Add a local video track.
-      scoped_refptr<VideoTrackInterface> video_track(VideoTrack::Create(
-          kVideoTracks[i * tracks_per_stream + j],
-          FakeVideoTrackSource::Create(), Thread::Current()));
+      scoped_refptr<VideoTrackInterface> video_track(
+          VideoTrack::Create(kVideoTracks[i * tracks_per_stream + j],
+                             FakeVideoTrackSource::Create(), worker_thread));
       stream->AddTrack(video_track);
     }
 
@@ -585,7 +589,7 @@ class MockTrackObserver : public ObserverInterface {
     notifier_->RegisterObserver(this);
   }
 
-  ~MockTrackObserver() { Unregister(); }
+  ~MockTrackObserver() override { Unregister(); }
 
   void Unregister() {
     if (notifier_) {
@@ -607,13 +611,12 @@ class MockTrackObserver : public ObserverInterface {
 class PeerConnectionFactoryForTest : public PeerConnectionFactory {
  public:
   static scoped_refptr<PeerConnectionFactoryForTest>
-  CreatePeerConnectionFactoryForTest() {
+  CreatePeerConnectionFactoryForTest(Thread* network_thread,
+                                     Thread* worker_thread) {
     PeerConnectionFactoryDependencies dependencies;
-    dependencies.worker_thread = Thread::Current();
-    dependencies.network_thread = Thread::Current();
+    dependencies.worker_thread = worker_thread;
+    dependencies.network_thread = network_thread;
     dependencies.signaling_thread = Thread::Current();
-    dependencies.task_queue_factory = CreateDefaultTaskQueueFactory();
-    dependencies.trials = std::make_unique<FieldTrialBasedConfig>();
     // Use fake audio device module since we're only testing the interface
     // level, and using a real one could make tests flaky when run in parallel.
     dependencies.adm = FakeAudioCaptureModule::Create();
@@ -646,8 +649,15 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
     // Use fake audio capture module since we're only testing the interface
     // level, and using a real one could make tests flaky when run in parallel.
     fake_audio_capture_module_ = FakeAudioCaptureModule::Create();
+    network_thread_ = Thread::CreateWithSocketServer();
+    network_thread_->SetName("NetworkThread", nullptr);
+    ASSERT_TRUE(network_thread_->Start());
+    worker_thread_ = Thread::Create();
+    worker_thread_->SetName("WorkerThread", nullptr);
+    ASSERT_TRUE(worker_thread_->Start());
+
     pc_factory_ = CreatePeerConnectionFactory(
-        Thread::Current(), Thread::Current(), Thread::Current(),
+        network_thread_.get(), worker_thread_.get(), Thread::Current(),
         scoped_refptr<AudioDeviceModule>(fake_audio_capture_module_),
         CreateBuiltinAudioEncoderFactory(), CreateBuiltinAudioDecoderFactory(),
         std::make_unique<VideoEncoderFactoryTemplate<
@@ -661,8 +671,13 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    if (pc_)
+    if (pc_) {
       pc_->Close();
+      ReleasePeerConnection();
+    }
+
+    network_thread_->BlockingCall(
+        [&] { ASSERT_THAT(port_allocator_, IsNull()); });
   }
 
   void CreatePeerConnection() {
@@ -703,11 +718,18 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
   void CreatePeerConnection(const RTCConfiguration& config) {
     if (pc_) {
       pc_->Close();
-      pc_ = nullptr;
+      ReleasePeerConnection();
     }
-    auto port_allocator =
-        std::make_unique<FakePortAllocator>(CreateEnvironment(), vss_.get());
-    port_allocator_ = port_allocator.get();
+    network_thread_->BlockingCall(
+        [&] { ASSERT_THAT(port_allocator_, IsNull()); });
+
+    std::unique_ptr<FakePortAllocator> port_allocator =
+        network_thread_->BlockingCall([&] {
+          auto allocator = std::make_unique<FakePortAllocator>(
+              CreateEnvironment(), network_thread_->socketserver());
+          port_allocator_ = allocator->NewWeakPtr();
+          return allocator;
+        });
 
     // Create certificate generator unless DTLS constraint is explicitly set to
     // false.
@@ -757,11 +779,13 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
 
   void CreatePeerConnectionWithDifferentConfigurations() {
     CreatePeerConnectionWithIceServer(kStunAddressOnly, "", "");
-    EXPECT_EQ(1u, port_allocator_->stun_servers().size());
-    EXPECT_EQ(0u, port_allocator_->turn_servers().size());
-    EXPECT_EQ("address", port_allocator_->stun_servers().begin()->hostname());
-    EXPECT_EQ(kDefaultStunPort,
-              port_allocator_->stun_servers().begin()->port());
+    network_thread_->BlockingCall([&] {
+      EXPECT_EQ(1u, port_allocator_->stun_servers().size());
+      EXPECT_EQ(0u, port_allocator_->turn_servers().size());
+      EXPECT_EQ("address", port_allocator_->stun_servers().begin()->hostname());
+      EXPECT_EQ(kDefaultStunPort,
+                port_allocator_->stun_servers().begin()->port());
+    });
 
     CreatePeerConnectionExpectFail(kStunInvalidPort);
     CreatePeerConnectionExpectFail(kStunAddressPortAndMore1);
@@ -769,14 +793,16 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
 
     CreatePeerConnectionWithIceServer(kTurnIceServerUri, kTurnUsername,
                                       kTurnPassword);
-    EXPECT_EQ(0u, port_allocator_->stun_servers().size());
-    EXPECT_EQ(1u, port_allocator_->turn_servers().size());
-    EXPECT_EQ(kTurnUsername,
-              port_allocator_->turn_servers()[0].credentials.username);
-    EXPECT_EQ(kTurnPassword,
-              port_allocator_->turn_servers()[0].credentials.password);
-    EXPECT_EQ(kTurnHostname,
-              port_allocator_->turn_servers()[0].ports[0].address.hostname());
+    network_thread_->BlockingCall([&] {
+      EXPECT_EQ(0u, port_allocator_->stun_servers().size());
+      EXPECT_EQ(1u, port_allocator_->turn_servers().size());
+      EXPECT_EQ(kTurnUsername,
+                port_allocator_->turn_servers()[0].credentials.username);
+      EXPECT_EQ(kTurnPassword,
+                port_allocator_->turn_servers()[0].credentials.password);
+      EXPECT_EQ(kTurnHostname,
+                port_allocator_->turn_servers()[0].ports[0].address.hostname());
+    });
   }
 
   void ReleasePeerConnection() {
@@ -834,7 +860,7 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
   }
 
   scoped_refptr<RtpReceiverInterface> GetFirstReceiverOfType(
-      webrtc::MediaType media_type) {
+      MediaType media_type) {
     for (auto receiver : pc_->GetReceivers()) {
       if (receiver->media_type() == media_type) {
         return receiver;
@@ -854,10 +880,9 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
       pc_->CreateAnswer(observer.get(),
                         options ? *options : RTCOfferAnswerOptions());
     }
-    EXPECT_THAT(
-        WaitUntil([&] { return observer->called(); }, ::testing::IsTrue(),
-                  {.timeout = webrtc::TimeDelta::Millis(kTimeout)}),
-        IsRtcOk());
+    EXPECT_THAT(WaitUntil([&] { return observer->called(); }, IsTrue(),
+                          {.timeout = TimeDelta::Millis(kTimeout)}),
+                IsRtcOk());
     *desc = observer->MoveDescription();
     return observer->result();
   }
@@ -882,10 +907,9 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
       pc_->SetRemoteDescription(observer.get(), desc.release());
     }
     if (pc_->signaling_state() != PeerConnectionInterface::kClosed) {
-      EXPECT_THAT(
-          WaitUntil([&] { return observer->called(); }, ::testing::IsTrue(),
-                    {.timeout = webrtc::TimeDelta::Millis(kTimeout)}),
-          IsRtcOk());
+      EXPECT_THAT(WaitUntil([&] { return observer->called(); }, IsTrue(),
+                            {.timeout = TimeDelta::Millis(kTimeout)}),
+                  IsRtcOk());
     }
     return observer->result();
   }
@@ -908,10 +932,9 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
     if (!pc_->GetStats(observer.get(), track,
                        PeerConnectionInterface::kStatsOutputLevelStandard))
       return false;
-    EXPECT_THAT(
-        WaitUntil([&] { return observer->called(); }, ::testing::IsTrue(),
-                  {.timeout = webrtc::TimeDelta::Millis(kTimeout)}),
-        IsRtcOk());
+    EXPECT_THAT(WaitUntil([&] { return observer->called(); }, IsTrue(),
+                          {.timeout = TimeDelta::Millis(kTimeout)}),
+                IsRtcOk());
     return observer->called();
   }
 
@@ -919,10 +942,9 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
   bool DoGetRTCStats() {
     auto callback = make_ref_counted<MockRTCStatsCollectorCallback>();
     pc_->GetStats(callback.get());
-    EXPECT_THAT(
-        WaitUntil([&] { return callback->called(); }, ::testing::IsTrue(),
-                  {.timeout = webrtc::TimeDelta::Millis(kTimeout)}),
-        IsRtcOk());
+    EXPECT_THAT(WaitUntil([&] { return callback->called(); }, IsTrue(),
+                          {.timeout = TimeDelta::Millis(kTimeout)}),
+                IsRtcOk());
     return callback->called();
   }
 
@@ -1004,8 +1026,18 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
 
   void CreateOfferReceiveAnswer() {
     CreateOfferAsLocalDescription();
+    std::unique_ptr<SessionDescriptionInterface> offer =
+        pc_->local_description()->Clone();
+    // Adapts the offer so that it can serve as an answer.
+    // This test does not use DTLS so direcetion does not have
+    // to be adapted in a similar way.
+    for (auto& content : offer->description()->contents()) {
+      MediaContentDescription* media_description = content.media_description();
+      media_description->set_direction(
+          RtpTransceiverDirectionReversed(media_description->direction()));
+    }
     std::string sdp;
-    EXPECT_TRUE(pc_->local_description()->ToString(&sdp));
+    EXPECT_TRUE(offer->ToString(&sdp));
     CreateAnswerAsRemoteDescription(sdp);
   }
 
@@ -1028,15 +1060,14 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
     EXPECT_EQ(PeerConnectionInterface::kHaveLocalOffer, observer_.state_);
     // Wait for the ice_complete message, so that SDP will have candidates.
     EXPECT_THAT(WaitUntil([&] { return observer_.ice_gathering_complete_; },
-                          ::testing::IsTrue(),
-                          {.timeout = webrtc::TimeDelta::Millis(kTimeout)}),
+                          IsTrue(), {.timeout = TimeDelta::Millis(kTimeout)}),
                 IsRtcOk());
   }
 
   void CreateAnswerAsRemoteDescription(const std::string& sdp) {
     std::unique_ptr<SessionDescriptionInterface> answer(
         CreateSessionDescription(SdpType::kAnswer, sdp));
-    ASSERT_TRUE(answer);
+    ASSERT_THAT(answer, NotNull());
     EXPECT_TRUE(DoSetRemoteDescription(std::move(answer)));
     EXPECT_EQ(PeerConnectionInterface::kStable, observer_.state_);
   }
@@ -1049,7 +1080,7 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
     EXPECT_EQ(PeerConnectionInterface::kHaveRemotePrAnswer, observer_.state_);
     std::unique_ptr<SessionDescriptionInterface> answer(
         CreateSessionDescription(SdpType::kAnswer, sdp));
-    ASSERT_TRUE(answer);
+    ASSERT_THAT(answer, NotNull());
     EXPECT_TRUE(DoSetRemoteDescription(std::move(answer)));
     EXPECT_EQ(PeerConnectionInterface::kStable, observer_.state_);
   }
@@ -1060,15 +1091,14 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
   void WaitAndVerifyOnAddStream(const std::string& stream_id,
                                 int expected_num_tracks) {
     // Verify that both OnAddStream and OnAddTrack are called.
-    EXPECT_THAT(WaitUntil([&] { return observer_.GetLastAddedStreamId(); },
-                          ::testing::Eq(stream_id),
-                          {.timeout = webrtc::TimeDelta::Millis(kTimeout)}),
-                IsRtcOk());
+    EXPECT_THAT(
+        WaitUntil([&] { return observer_.GetLastAddedStreamId(); },
+                  Eq(stream_id), {.timeout = TimeDelta::Millis(kTimeout)}),
+        IsRtcOk());
     EXPECT_THAT(
         WaitUntil(
             [&] { return observer_.CountAddTrackEventsForStream(stream_id); },
-            ::testing::Eq(expected_num_tracks),
-            {.timeout = webrtc::TimeDelta::Millis(kTimeout)}),
+            Eq(expected_num_tracks), {.timeout = TimeDelta::Millis(kTimeout)}),
         IsRtcOk());
   }
 
@@ -1137,7 +1167,7 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
   void AddVideoTrack(const std::string& track_id,
                      MediaStreamInterface* stream) {
     scoped_refptr<VideoTrackInterface> video_track(VideoTrack::Create(
-        track_id, FakeVideoTrackSource::Create(), Thread::Current()));
+        track_id, FakeVideoTrackSource::Create(), worker_thread_.get()));
     ASSERT_TRUE(stream->AddTrack(video_track));
   }
 
@@ -1184,10 +1214,9 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
     RTC_DCHECK(pc_);
     auto observer = make_ref_counted<MockCreateSessionDescriptionObserver>();
     pc_->CreateOffer(observer.get(), offer_answer_options);
-    EXPECT_THAT(
-        WaitUntil([&] { return observer->called(); }, ::testing::IsTrue(),
-                  {.timeout = webrtc::TimeDelta::Millis(kTimeout)}),
-        IsRtcOk());
+    EXPECT_THAT(WaitUntil([&] { return observer->called(); }, IsTrue(),
+                          {.timeout = TimeDelta::Millis(kTimeout)}),
+                IsRtcOk());
     return observer->MoveDescription();
   }
 
@@ -1249,8 +1278,10 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
 
   std::unique_ptr<VirtualSocketServer> vss_;
   AutoSocketServerThread main_;
+  std::unique_ptr<Thread> network_thread_;
+  std::unique_ptr<Thread> worker_thread_;
   scoped_refptr<FakeAudioCaptureModule> fake_audio_capture_module_;
-  FakePortAllocator* port_allocator_ = nullptr;
+  WeakPtr<FakePortAllocator> port_allocator_;
   FakeRTCCertificateGenerator* fake_certificate_generator_ = nullptr;
   scoped_refptr<PeerConnectionFactoryInterface> pc_factory_;
   scoped_refptr<PeerConnectionInterface> pc_;
@@ -1302,13 +1333,18 @@ TEST_P(PeerConnectionInterfaceTest,
 TEST_P(PeerConnectionInterfaceTest,
        CreatePeerConnectionWithDifferentIceTransportsTypes) {
   CreatePeerConnectionWithIceTransportsType(PeerConnectionInterface::kNone);
-  EXPECT_EQ(CF_NONE, port_allocator_->candidate_filter());
+  network_thread_->BlockingCall(
+      [&] { EXPECT_EQ(CF_NONE, port_allocator_->candidate_filter()); });
   CreatePeerConnectionWithIceTransportsType(PeerConnectionInterface::kRelay);
-  EXPECT_EQ(CF_RELAY, port_allocator_->candidate_filter());
+  network_thread_->BlockingCall(
+      [&] { EXPECT_EQ(CF_RELAY, port_allocator_->candidate_filter()); });
   CreatePeerConnectionWithIceTransportsType(PeerConnectionInterface::kNoHost);
-  EXPECT_EQ(CF_ALL & ~CF_HOST, port_allocator_->candidate_filter());
+  network_thread_->BlockingCall([&] {
+    EXPECT_EQ(CF_ALL & ~CF_HOST, port_allocator_->candidate_filter());
+  });
   CreatePeerConnectionWithIceTransportsType(PeerConnectionInterface::kAll);
-  EXPECT_EQ(CF_ALL, port_allocator_->candidate_filter());
+  network_thread_->BlockingCall(
+      [&] { EXPECT_EQ(CF_ALL, port_allocator_->candidate_filter()); });
 }
 
 // Test that when a PeerConnection is created with a nonzero candidate pool
@@ -1328,13 +1364,15 @@ TEST_P(PeerConnectionInterfaceTest, CreatePeerConnectionWithPooledCandidates) {
   config.ice_candidate_pool_size = 1;
   CreatePeerConnection(config);
 
-  const FakePortAllocatorSession* session =
-      static_cast<const FakePortAllocatorSession*>(
-          port_allocator_->GetPooledSession());
-  ASSERT_NE(nullptr, session);
-  EXPECT_EQ(1UL, session->stun_servers().size());
-  EXPECT_LT(0U, session->flags() & PORTALLOCATOR_DISABLE_TCP);
-  EXPECT_LT(0U, session->flags() & PORTALLOCATOR_DISABLE_COSTLY_NETWORKS);
+  network_thread_->BlockingCall([&] {
+    const FakePortAllocatorSession* session =
+        static_cast<const FakePortAllocatorSession*>(
+            port_allocator_->GetPooledSession());
+    ASSERT_NE(nullptr, session);
+    EXPECT_EQ(1UL, session->stun_servers().size());
+    EXPECT_LT(0U, session->flags() & PORTALLOCATOR_DISABLE_TCP);
+    EXPECT_LT(0U, session->flags() & PORTALLOCATOR_DISABLE_COSTLY_NETWORKS);
+  });
 }
 
 // Test that network-related RTCConfiguration members are applied to the
@@ -1350,8 +1388,16 @@ TEST_P(PeerConnectionInterfaceTest, CreatePeerConnectionWithPooledCandidates) {
 TEST_P(PeerConnectionInterfaceTest,
        CreatePeerConnectionAppliesNetworkConfigToPortAllocator) {
   // Create fake port allocator.
-  auto port_allocator =
-      std::make_unique<FakePortAllocator>(CreateEnvironment(), socket_server());
+  // Create fake port allocator on the network thread.
+  std::unique_ptr<FakePortAllocator> port_allocator;
+  network_thread_->BlockingCall([&] {
+    port_allocator = std::make_unique<FakePortAllocator>(
+        CreateEnvironment(), network_thread_->socketserver());
+  });
+  // We need to keep a raw pointer to check flags later, but we need to
+  // accessing it on the network thread or be careful. FakePortAllocator methods
+  // might be thread-safe or check threads. `flags()` is on BasicPortAllocator,
+  // which checks thread_checker_. So we must access it on network thread.
   FakePortAllocator* raw_port_allocator = port_allocator.get();
 
   // Create RTCConfiguration with some network-related fields relevant to
@@ -1367,19 +1413,6 @@ TEST_P(PeerConnectionInterfaceTest,
   config.prune_turn_ports = true;
 
   // Create the PC factory and PC with the above config.
-  scoped_refptr<PeerConnectionFactoryInterface> pc_factory(
-      CreatePeerConnectionFactory(
-          Thread::Current(), Thread::Current(), Thread::Current(),
-          fake_audio_capture_module_, CreateBuiltinAudioEncoderFactory(),
-          CreateBuiltinAudioDecoderFactory(),
-          std::make_unique<VideoEncoderFactoryTemplate<
-              LibvpxVp8EncoderTemplateAdapter, LibvpxVp9EncoderTemplateAdapter,
-              OpenH264EncoderTemplateAdapter,
-              LibaomAv1EncoderTemplateAdapter>>(),
-          std::make_unique<VideoDecoderFactoryTemplate<
-              LibvpxVp8DecoderTemplateAdapter, LibvpxVp9DecoderTemplateAdapter,
-              OpenH264DecoderTemplateAdapter, Dav1dDecoderTemplateAdapter>>(),
-          nullptr /* audio_mixer */, nullptr /* audio_processing */));
   PeerConnectionDependencies pc_dependencies(&observer_);
   pc_dependencies.allocator = std::move(port_allocator);
   auto result = pc_factory_->CreatePeerConnectionOrError(
@@ -1389,13 +1422,16 @@ TEST_P(PeerConnectionInterfaceTest,
 
   // Now validate that the config fields set above were applied to the
   // PortAllocator, as flags or otherwise.
-  EXPECT_FALSE(raw_port_allocator->flags() & PORTALLOCATOR_ENABLE_IPV6_ON_WIFI);
-  EXPECT_EQ(10, raw_port_allocator->max_ipv6_networks());
-  EXPECT_TRUE(raw_port_allocator->flags() & PORTALLOCATOR_DISABLE_TCP);
-  EXPECT_TRUE(raw_port_allocator->flags() &
-              PORTALLOCATOR_DISABLE_COSTLY_NETWORKS);
-  EXPECT_EQ(PRUNE_BASED_ON_PRIORITY,
-            raw_port_allocator->turn_port_prune_policy());
+  network_thread_->BlockingCall([&] {
+    EXPECT_FALSE(raw_port_allocator->flags() &
+                 PORTALLOCATOR_ENABLE_IPV6_ON_WIFI);
+    EXPECT_EQ(10, raw_port_allocator->max_ipv6_networks());
+    EXPECT_TRUE(raw_port_allocator->flags() & PORTALLOCATOR_DISABLE_TCP);
+    EXPECT_TRUE(raw_port_allocator->flags() &
+                PORTALLOCATOR_DISABLE_COSTLY_NETWORKS);
+    EXPECT_EQ(PRUNE_BASED_ON_PRIORITY,
+              raw_port_allocator->turn_port_prune_policy());
+  });
 }
 
 // Check that GetConfiguration returns the configuration the PeerConnection was
@@ -1767,11 +1803,10 @@ TEST_P(PeerConnectionInterfaceTest, IceCandidates) {
 
   EXPECT_THAT(WaitUntil([&] { return observer_.last_candidate(); },
                         ::testing::Ne(nullptr),
-                        {.timeout = webrtc::TimeDelta::Millis(kTimeout)}),
+                        {.timeout = TimeDelta::Millis(kTimeout)}),
               IsRtcOk());
   EXPECT_THAT(WaitUntil([&] { return observer_.ice_gathering_complete_; },
-                        ::testing::IsTrue(),
-                        {.timeout = webrtc::TimeDelta::Millis(kTimeout)}),
+                        IsTrue(), {.timeout = TimeDelta::Millis(kTimeout)}),
               IsRtcOk());
 
   EXPECT_TRUE(pc_->AddIceCandidate(observer_.last_candidate()));
@@ -1915,7 +1950,7 @@ TEST_P(PeerConnectionInterfaceTest, GetStatsForSpecificTrack) {
 // Test that we can get stats on a video track.
 TEST_P(PeerConnectionInterfaceTest, GetStatsForVideoTrack) {
   InitiateCall();
-  auto video_receiver = GetFirstReceiverOfType(webrtc::MediaType::VIDEO);
+  auto video_receiver = GetFirstReceiverOfType(MediaType::VIDEO);
   ASSERT_TRUE(video_receiver);
   EXPECT_TRUE(DoGetStats(video_receiver->track().get()));
 }
@@ -2068,7 +2103,7 @@ TEST_P(PeerConnectionInterfaceTest, DISABLED_TestRejectSctpDataChannelInAnswer)
   RTCConfiguration rtc_config;
   CreatePeerConnection(rtc_config);
 
-  auto offer_channel = pc_->CreateDataChannelOrError("offer_channel", NULL);
+  auto offer_channel = pc_->CreateDataChannelOrError("offer_channel", nullptr);
 
   CreateOfferAsLocalDescription();
 
@@ -2077,7 +2112,7 @@ TEST_P(PeerConnectionInterfaceTest, DISABLED_TestRejectSctpDataChannelInAnswer)
   EXPECT_TRUE(pc_->local_description()->ToString(&sdp));
   std::unique_ptr<SessionDescriptionInterface> answer(
       CreateSessionDescription(SdpType::kAnswer, sdp));
-  ASSERT_TRUE(answer);
+  ASSERT_THAT(answer, NotNull());
   ContentInfo* data_info = GetFirstDataContent(answer->description());
   data_info->rejected = true;
 
@@ -2199,9 +2234,11 @@ TEST_P(PeerConnectionInterfaceTest, SetConfigurationChangesIceServers) {
   config.servers.push_back(server);
   EXPECT_TRUE(pc_->SetConfiguration(config).ok());
 
-  EXPECT_EQ(1u, port_allocator_->stun_servers().size());
-  EXPECT_EQ("test_hostname",
-            port_allocator_->stun_servers().begin()->hostname());
+  network_thread_->BlockingCall([&] {
+    EXPECT_EQ(1u, port_allocator_->stun_servers().size());
+    EXPECT_EQ("test_hostname",
+              port_allocator_->stun_servers().begin()->hostname());
+  });
 }
 
 TEST_P(PeerConnectionInterfaceTest, SetConfigurationChangesCandidateFilter) {
@@ -2209,7 +2246,8 @@ TEST_P(PeerConnectionInterfaceTest, SetConfigurationChangesCandidateFilter) {
   PeerConnectionInterface::RTCConfiguration config = pc_->GetConfiguration();
   config.type = PeerConnectionInterface::kRelay;
   EXPECT_TRUE(pc_->SetConfiguration(config).ok());
-  EXPECT_EQ(CF_RELAY, port_allocator_->candidate_filter());
+  network_thread_->BlockingCall(
+      [&] { EXPECT_EQ(CF_RELAY, port_allocator_->candidate_filter()); });
 }
 
 TEST_P(PeerConnectionInterfaceTest, SetConfigurationChangesPruneTurnPortsFlag) {
@@ -2217,11 +2255,15 @@ TEST_P(PeerConnectionInterfaceTest, SetConfigurationChangesPruneTurnPortsFlag) {
   config.prune_turn_ports = false;
   CreatePeerConnection(config);
   config = pc_->GetConfiguration();
-  EXPECT_EQ(NO_PRUNE, port_allocator_->turn_port_prune_policy());
+  network_thread_->BlockingCall(
+      [&] { EXPECT_EQ(NO_PRUNE, port_allocator_->turn_port_prune_policy()); });
 
   config.prune_turn_ports = true;
   EXPECT_TRUE(pc_->SetConfiguration(config).ok());
-  EXPECT_EQ(PRUNE_BASED_ON_PRIORITY, port_allocator_->turn_port_prune_policy());
+  network_thread_->BlockingCall([&] {
+    EXPECT_EQ(PRUNE_BASED_ON_PRIORITY,
+              port_allocator_->turn_port_prune_policy());
+  });
 }
 
 // Test that the ice check interval can be changed. This does not verify that
@@ -2265,11 +2307,13 @@ TEST_P(PeerConnectionInterfaceTest,
   config.type = PeerConnectionInterface::kRelay;
   EXPECT_TRUE(pc_->SetConfiguration(config).ok());
 
-  const FakePortAllocatorSession* session =
-      static_cast<const FakePortAllocatorSession*>(
-          port_allocator_->GetPooledSession());
-  ASSERT_NE(nullptr, session);
-  EXPECT_EQ(1UL, session->stun_servers().size());
+  network_thread_->BlockingCall([&] {
+    const FakePortAllocatorSession* session =
+        static_cast<const FakePortAllocatorSession*>(
+            port_allocator_->GetPooledSession());
+    ASSERT_NE(nullptr, session);
+    EXPECT_EQ(1UL, session->stun_servers().size());
+  });
 }
 
 // Test that after SetLocalDescription, changing the pool size is not allowed,
@@ -2310,8 +2354,10 @@ TEST_P(PeerConnectionInterfaceTest,
   CreateAnswerAsLocalDescription();
 
   // Expect no pooled sessions to be left.
-  const PortAllocatorSession* session = port_allocator_->GetPooledSession();
-  EXPECT_EQ(nullptr, session);
+  network_thread_->BlockingCall([&] {
+    const PortAllocatorSession* session = port_allocator_->GetPooledSession();
+    EXPECT_EQ(nullptr, session);
+  });
 }
 
 // After Close is called, pooled candidates should be discarded so as to not
@@ -2319,14 +2365,18 @@ TEST_P(PeerConnectionInterfaceTest,
 TEST_P(PeerConnectionInterfaceTest, PooledSessionsDiscardedAfterClose) {
   CreatePeerConnection();
 
+  bool candidate_pool_discarded = false;
+  network_thread_->BlockingCall([&] {
+    port_allocator_->SetOnDiscardCandidatePool(
+        [&]() { candidate_pool_discarded = true; });
+  });
+
   PeerConnectionInterface::RTCConfiguration config = pc_->GetConfiguration();
   config.ice_candidate_pool_size = 3;
   EXPECT_TRUE(pc_->SetConfiguration(config).ok());
   pc_->Close();
 
-  // Expect no pooled sessions to be left.
-  const PortAllocatorSession* session = port_allocator_->GetPooledSession();
-  EXPECT_EQ(nullptr, session);
+  EXPECT_TRUE(candidate_pool_discarded);
 }
 
 // Test that SetConfiguration returns an invalid modification error if
@@ -2409,6 +2459,125 @@ TEST_P(PeerConnectionInterfaceTest,
             RTCErrorType::INVALID_PARAMETER);
 }
 
+TEST_P(PeerConnectionInterfaceTest, UnmodifiedSetConfigurationSucceeds) {
+  {
+    RTCConfiguration config;
+    config.sdp_semantics = sdp_semantics_;
+
+    CreatePeerConnection(config);
+
+    EXPECT_TRUE(pc_->SetConfiguration(config).ok());
+  }
+
+  {
+    RTCConfiguration config;
+    config.sdp_semantics = sdp_semantics_;
+
+    CreatePeerConnection(config);
+
+    std::unique_ptr<SessionDescriptionInterface> offer;
+    ASSERT_TRUE(DoCreateOffer(&offer, nullptr));
+    EXPECT_TRUE(DoSetLocalDescription(std::move(offer)));
+
+    EXPECT_TRUE(pc_->SetConfiguration(config).ok());
+  }
+}
+
+TEST_P(PeerConnectionInterfaceTest,
+       SetConfigurationSucceedsWithMatchingCryptoOptions) {
+  {
+    RTCConfiguration config;
+    config.sdp_semantics = sdp_semantics_;
+
+    CreatePeerConnection(config);
+
+    config.crypto_options = CryptoOptions();
+    EXPECT_TRUE(pc_->SetConfiguration(config).ok());
+  }
+
+  {
+    RTCConfiguration config;
+    config.sdp_semantics = sdp_semantics_;
+
+    CreatePeerConnection(config);
+
+    std::unique_ptr<SessionDescriptionInterface> offer;
+    ASSERT_TRUE(DoCreateOffer(&offer, nullptr));
+    EXPECT_TRUE(DoSetLocalDescription(std::move(offer)));
+
+    config.crypto_options = CryptoOptions();
+    EXPECT_TRUE(pc_->SetConfiguration(config).ok());
+  }
+
+  {
+    RTCConfiguration config;
+    config.sdp_semantics = sdp_semantics_;
+    CryptoOptions options;
+    options.ephemeral_key_exchange_cipher_groups.SetEnabled({
+        webrtc::CryptoOptions::EphemeralKeyExchangeCipherGroups::
+            kX25519_MLKEM768,
+    });
+    config.crypto_options = options;
+
+    CreatePeerConnection(config);
+
+    std::unique_ptr<SessionDescriptionInterface> offer;
+    ASSERT_TRUE(DoCreateOffer(&offer, nullptr));
+    EXPECT_TRUE(DoSetLocalDescription(std::move(offer)));
+
+    EXPECT_TRUE(pc_->SetConfiguration(config).ok());
+  }
+}
+
+TEST_P(PeerConnectionInterfaceTest,
+       SetConfigurationFailsWithMismatchingCryptoOptions) {
+  {
+    RTCConfiguration config;
+    config.sdp_semantics = sdp_semantics_;
+
+    CreatePeerConnection(config);
+
+    std::unique_ptr<SessionDescriptionInterface> offer;
+    ASSERT_TRUE(DoCreateOffer(&offer, nullptr));
+    EXPECT_TRUE(DoSetLocalDescription(std::move(offer)));
+
+    CryptoOptions options;
+    options.ephemeral_key_exchange_cipher_groups.SetEnabled({
+        webrtc::CryptoOptions::EphemeralKeyExchangeCipherGroups::
+            kX25519_MLKEM768,
+    });
+    config.crypto_options = options;
+
+    RTCError error = pc_->SetConfiguration(config);
+    EXPECT_EQ(RTCErrorType::INVALID_MODIFICATION, error.type());
+  }
+
+  {
+    RTCConfiguration config;
+    config.sdp_semantics = sdp_semantics_;
+    CryptoOptions options;
+    options.ephemeral_key_exchange_cipher_groups.SetEnabled({
+        webrtc::CryptoOptions::EphemeralKeyExchangeCipherGroups::
+            kX25519_MLKEM768,
+    });
+    config.crypto_options = options;
+
+    CreatePeerConnection(config);
+
+    std::unique_ptr<SessionDescriptionInterface> offer;
+    ASSERT_TRUE(DoCreateOffer(&offer, nullptr));
+    EXPECT_TRUE(DoSetLocalDescription(std::move(offer)));
+
+    options.ephemeral_key_exchange_cipher_groups.SetEnabled({
+        webrtc::CryptoOptions::EphemeralKeyExchangeCipherGroups::kSECP521R1,
+    });
+    config.crypto_options = options;
+
+    RTCError error = pc_->SetConfiguration(config);
+    EXPECT_EQ(RTCErrorType::INVALID_MODIFICATION, error.type());
+  }
+}
+
 // Test that PeerConnection::Close changes the states to closed and all remote
 // tracks change state to ended.
 TEST_P(PeerConnectionInterfaceTest, CloseAndTestStreamsAndStates) {
@@ -2441,19 +2610,19 @@ TEST_P(PeerConnectionInterfaceTest, CloseAndTestStreamsAndStates) {
     EXPECT_EQ(2u, pc_->GetTransceivers().size());
   }
 
-  auto audio_receiver = GetFirstReceiverOfType(webrtc::MediaType::AUDIO);
-  auto video_receiver = GetFirstReceiverOfType(webrtc::MediaType::VIDEO);
+  auto audio_receiver = GetFirstReceiverOfType(MediaType::AUDIO);
+  auto video_receiver = GetFirstReceiverOfType(MediaType::VIDEO);
   if (sdp_semantics_ == SdpSemantics::kPlanB_DEPRECATED) {
     ASSERT_TRUE(audio_receiver);
     ASSERT_TRUE(video_receiver);
     // Track state may be updated asynchronously.
     EXPECT_THAT(WaitUntil([&] { return audio_receiver->track()->state(); },
-                          ::testing::Eq(MediaStreamTrackInterface::kEnded),
-                          {.timeout = webrtc::TimeDelta::Millis(kTimeout)}),
+                          Eq(MediaStreamTrackInterface::kEnded),
+                          {.timeout = TimeDelta::Millis(kTimeout)}),
                 IsRtcOk());
     EXPECT_THAT(WaitUntil([&] { return video_receiver->track()->state(); },
-                          ::testing::Eq(MediaStreamTrackInterface::kEnded),
-                          {.timeout = webrtc::TimeDelta::Millis(kTimeout)}),
+                          Eq(MediaStreamTrackInterface::kEnded),
+                          {.timeout = TimeDelta::Millis(kTimeout)}),
                 IsRtcOk());
   } else {
     ASSERT_FALSE(audio_receiver);
@@ -2478,7 +2647,7 @@ TEST_F(PeerConnectionInterfaceTestPlanB, CloseAndTestMethods) {
   pc_->RemoveStream(local_stream.get());
   EXPECT_FALSE(pc_->AddStream(local_stream.get()));
 
-  EXPECT_FALSE(pc_->CreateDataChannelOrError("test", NULL).ok());
+  EXPECT_FALSE(pc_->CreateDataChannelOrError("test", nullptr).ok());
 
   EXPECT_TRUE(pc_->local_description() != nullptr);
   EXPECT_TRUE(pc_->remote_description() != nullptr);
@@ -2519,7 +2688,8 @@ TEST_P(PeerConnectionInterfaceTest, UpdateRemoteStreams) {
   CreatePeerConnection(config);
   CreateAndSetRemoteOffer(GetSdpStringWithStream1());
 
-  scoped_refptr<StreamCollection> reference(CreateStreamCollection(1, 1));
+  scoped_refptr<StreamCollection> reference(
+      CreateStreamCollection(1, 1, worker_thread_.get()));
   EXPECT_TRUE(
       CompareStreamCollections(observer_.remote_streams(), reference.get()));
   MediaStreamInterface* remote_stream = observer_.remote_streams()->at(0);
@@ -2529,7 +2699,8 @@ TEST_P(PeerConnectionInterfaceTest, UpdateRemoteStreams) {
   // MediaStream.
   CreateAndSetRemoteOffer(GetSdpStringWithStream1And2());
 
-  scoped_refptr<StreamCollection> reference2(CreateStreamCollection(2, 1));
+  scoped_refptr<StreamCollection> reference2(
+      CreateStreamCollection(2, 1, worker_thread_.get()));
   EXPECT_TRUE(
       CompareStreamCollections(observer_.remote_streams(), reference2.get()));
 }
@@ -2574,12 +2745,12 @@ TEST_F(PeerConnectionInterfaceTestPlanB,
                                        reference_collection_.get()));
   // Track state may be updated asynchronously.
   EXPECT_THAT(WaitUntil([&] { return audio_track2->state(); },
-                        ::testing::Eq(MediaStreamTrackInterface::kEnded),
-                        {.timeout = webrtc::TimeDelta::Millis(kTimeout)}),
+                        Eq(MediaStreamTrackInterface::kEnded),
+                        {.timeout = TimeDelta::Millis(kTimeout)}),
               IsRtcOk());
   EXPECT_THAT(WaitUntil([&] { return video_track2->state(); },
-                        ::testing::Eq(MediaStreamTrackInterface::kEnded),
-                        {.timeout = webrtc::TimeDelta::Millis(kTimeout)}),
+                        Eq(MediaStreamTrackInterface::kEnded),
+                        {.timeout = TimeDelta::Millis(kTimeout)}),
               IsRtcOk());
 }
 
@@ -2591,9 +2762,9 @@ TEST_P(PeerConnectionInterfaceTest, RejectMediaContent) {
   // First create and set a remote offer, then reject its video content in our
   // answer.
   CreateAndSetRemoteOffer(kSdpStringWithStream1PlanB);
-  auto audio_receiver = GetFirstReceiverOfType(webrtc::MediaType::AUDIO);
+  auto audio_receiver = GetFirstReceiverOfType(MediaType::AUDIO);
   ASSERT_TRUE(audio_receiver);
-  auto video_receiver = GetFirstReceiverOfType(webrtc::MediaType::VIDEO);
+  auto video_receiver = GetFirstReceiverOfType(MediaType::VIDEO);
   ASSERT_TRUE(video_receiver);
 
   scoped_refptr<MediaStreamTrackInterface> remote_audio =
@@ -2625,12 +2796,12 @@ TEST_P(PeerConnectionInterfaceTest, RejectMediaContent) {
   EXPECT_TRUE(DoSetLocalDescription(std::move(local_offer)));
   // Track state may be updated asynchronously.
   EXPECT_THAT(WaitUntil([&] { return remote_audio->state(); },
-                        ::testing::Eq(MediaStreamTrackInterface::kEnded),
-                        {.timeout = webrtc::TimeDelta::Millis(kTimeout)}),
+                        Eq(MediaStreamTrackInterface::kEnded),
+                        {.timeout = TimeDelta::Millis(kTimeout)}),
               IsRtcOk());
   EXPECT_THAT(WaitUntil([&] { return remote_video->state(); },
-                        ::testing::Eq(MediaStreamTrackInterface::kEnded),
-                        {.timeout = webrtc::TimeDelta::Millis(kTimeout)}),
+                        Eq(MediaStreamTrackInterface::kEnded),
+                        {.timeout = TimeDelta::Millis(kTimeout)}),
               IsRtcOk());
 }
 
@@ -2790,7 +2961,8 @@ TEST_F(PeerConnectionInterfaceTestPlanB, VerifyDefaultStreamIsNotRecreated) {
   RTCConfiguration config;
   CreatePeerConnection(config);
   CreateAndSetRemoteOffer(GetSdpStringWithStream1());
-  scoped_refptr<StreamCollection> reference(CreateStreamCollection(1, 1));
+  scoped_refptr<StreamCollection> reference(
+      CreateStreamCollection(1, 1, worker_thread_.get()));
   EXPECT_TRUE(
       CompareStreamCollections(observer_.remote_streams(), reference.get()));
 
@@ -2866,7 +3038,7 @@ TEST_F(PeerConnectionInterfaceTestPlanB, LocalDescriptionChanged) {
 
   // Create an offer with 1 stream with 2 tracks of each type.
   scoped_refptr<StreamCollection> stream_collection =
-      CreateStreamCollection(1, 2);
+      CreateStreamCollection(1, 2, worker_thread_.get());
   pc_->AddStream(stream_collection->at(0));
   std::unique_ptr<SessionDescriptionInterface> offer;
   ASSERT_TRUE(DoCreateOffer(&offer, nullptr));
@@ -2881,7 +3053,7 @@ TEST_F(PeerConnectionInterfaceTestPlanB, LocalDescriptionChanged) {
 
   // Remove an audio and video track.
   pc_->RemoveStream(stream_collection->at(0));
-  stream_collection = CreateStreamCollection(1, 1);
+  stream_collection = CreateStreamCollection(1, 1, worker_thread_.get());
   pc_->AddStream(stream_collection->at(0));
   ASSERT_TRUE(DoCreateOffer(&offer, nullptr));
   EXPECT_TRUE(DoSetLocalDescription(std::move(offer)));
@@ -2903,7 +3075,7 @@ TEST_F(PeerConnectionInterfaceTestPlanB,
   CreatePeerConnection(config);
 
   scoped_refptr<StreamCollection> stream_collection =
-      CreateStreamCollection(1, 2);
+      CreateStreamCollection(1, 2, worker_thread_.get());
   // Add a stream to create the offer, but remove it afterwards.
   pc_->AddStream(stream_collection->at(0));
   std::unique_ptr<SessionDescriptionInterface> offer;
@@ -2982,7 +3154,7 @@ TEST_F(PeerConnectionInterfaceTestPlanB,
   CreatePeerConnection(config);
 
   scoped_refptr<StreamCollection> stream_collection =
-      CreateStreamCollection(2, 1);
+      CreateStreamCollection(2, 1, worker_thread_.get());
   pc_->AddStream(stream_collection->at(0));
   std::unique_ptr<SessionDescriptionInterface> offer;
   ASSERT_TRUE(DoCreateOffer(&offer, nullptr));
@@ -3448,6 +3620,16 @@ TEST_P(PeerConnectionInterfaceTest, SetBitrateCurrentLessThanImplicitMin) {
   EXPECT_TRUE(pc_->SetBitrate(bitrate).ok());
 }
 
+TEST_P(PeerConnectionInterfaceTest, SetBitrateAfterCloseFails) {
+  CreatePeerConnection();
+  pc_->Close();
+  BitrateSettings bitrate;
+  bitrate.start_bitrate_bps = 1;
+  auto ret = pc_->SetBitrate(bitrate);
+  EXPECT_FALSE(ret.ok());
+  EXPECT_EQ(RTCErrorType::INVALID_STATE, ret.type());
+}
+
 // The following tests verify that the offer can be created correctly.
 TEST_P(PeerConnectionInterfaceTest,
        CreateOfferFailsWithInvalidOfferToReceiveAudio) {
@@ -3489,7 +3671,7 @@ TEST_P(PeerConnectionInterfaceTest, CreateOfferWithAudioVideoOptions) {
   std::unique_ptr<SessionDescriptionInterface> offer;
   CreatePeerConnection();
   offer = CreateOfferWithOptions(rtc_options);
-  ASSERT_TRUE(offer);
+  ASSERT_THAT(offer, NotNull());
   EXPECT_NE(nullptr, GetFirstAudioContent(offer->description()));
   EXPECT_NE(nullptr, GetFirstVideoContent(offer->description()));
 }
@@ -3504,7 +3686,7 @@ TEST_P(PeerConnectionInterfaceTest, CreateOfferWithAudioOnlyOptions) {
   std::unique_ptr<SessionDescriptionInterface> offer;
   CreatePeerConnection();
   offer = CreateOfferWithOptions(rtc_options);
-  ASSERT_TRUE(offer);
+  ASSERT_THAT(offer, NotNull());
   EXPECT_NE(nullptr, GetFirstAudioContent(offer->description()));
   EXPECT_EQ(nullptr, GetFirstVideoContent(offer->description()));
 }
@@ -3519,7 +3701,7 @@ TEST_P(PeerConnectionInterfaceTest, CreateOfferWithVideoOnlyOptions) {
   std::unique_ptr<SessionDescriptionInterface> offer;
   CreatePeerConnection();
   offer = CreateOfferWithOptions(rtc_options);
-  ASSERT_TRUE(offer);
+  ASSERT_THAT(offer, NotNull());
   EXPECT_EQ(nullptr, GetFirstAudioContent(offer->description()));
   EXPECT_NE(nullptr, GetFirstVideoContent(offer->description()));
 }
@@ -3532,7 +3714,7 @@ TEST_P(PeerConnectionInterfaceTest, CreateOfferWithDefaultOfferAnswerOptions) {
   std::unique_ptr<SessionDescriptionInterface> offer;
   CreatePeerConnection();
   offer = CreateOfferWithOptions(rtc_options);
-  ASSERT_TRUE(offer);
+  ASSERT_THAT(offer, NotNull());
   EXPECT_EQ(nullptr, GetFirstAudioContent(offer->description()));
   EXPECT_EQ(nullptr, GetFirstVideoContent(offer->description()));
 }
@@ -3548,7 +3730,7 @@ TEST_P(PeerConnectionInterfaceTest, CreateOfferWithIceRestart) {
 
   std::unique_ptr<SessionDescriptionInterface> offer;
   CreateOfferWithOptionsAsLocalDescription(&offer, rtc_options);
-  auto mid = GetFirstAudioContent(offer->description())->mid();
+  std::string mid(GetFirstAudioContent(offer->description())->mid());
   auto ufrag1 =
       offer->description()->GetTransportInfoByName(mid)->description.ice_ufrag;
   auto pwd1 =
@@ -3587,14 +3769,14 @@ TEST_P(PeerConnectionInterfaceTest, CreateOfferWithRtpMux) {
 
   rtc_options.use_rtp_mux = true;
   offer = CreateOfferWithOptions(rtc_options);
-  ASSERT_TRUE(offer);
+  ASSERT_THAT(offer, NotNull());
   EXPECT_NE(nullptr, GetFirstAudioContent(offer->description()));
   EXPECT_NE(nullptr, GetFirstVideoContent(offer->description()));
   EXPECT_TRUE(offer->description()->HasGroup(GROUP_TYPE_BUNDLE));
 
   rtc_options.use_rtp_mux = false;
   offer = CreateOfferWithOptions(rtc_options);
-  ASSERT_TRUE(offer);
+  ASSERT_THAT(offer, NotNull());
   EXPECT_NE(nullptr, GetFirstAudioContent(offer->description()));
   EXPECT_NE(nullptr, GetFirstVideoContent(offer->description()));
   EXPECT_FALSE(offer->description()->HasGroup(GROUP_TYPE_BUNDLE));
@@ -3618,32 +3800,28 @@ TEST_F(PeerConnectionInterfaceTestPlanB,
       CreateVideoTrack("video_track"));
   stream->AddTrack(audio_track);
   EXPECT_THAT(WaitUntil([&] { return observer_.renegotiation_needed_; },
-                        ::testing::IsTrue(),
-                        {.timeout = webrtc::TimeDelta::Millis(kTimeout)}),
+                        IsTrue(), {.timeout = TimeDelta::Millis(kTimeout)}),
               IsRtcOk());
   observer_.renegotiation_needed_ = false;
 
   CreateOfferReceiveAnswer();
   stream->AddTrack(video_track);
   EXPECT_THAT(WaitUntil([&] { return observer_.renegotiation_needed_; },
-                        ::testing::IsTrue(),
-                        {.timeout = webrtc::TimeDelta::Millis(kTimeout)}),
+                        IsTrue(), {.timeout = TimeDelta::Millis(kTimeout)}),
               IsRtcOk());
   observer_.renegotiation_needed_ = false;
 
   CreateOfferReceiveAnswer();
   stream->RemoveTrack(audio_track);
   EXPECT_THAT(WaitUntil([&] { return observer_.renegotiation_needed_; },
-                        ::testing::IsTrue(),
-                        {.timeout = webrtc::TimeDelta::Millis(kTimeout)}),
+                        IsTrue(), {.timeout = TimeDelta::Millis(kTimeout)}),
               IsRtcOk());
   observer_.renegotiation_needed_ = false;
 
   CreateOfferReceiveAnswer();
   stream->RemoveTrack(video_track);
   EXPECT_THAT(WaitUntil([&] { return observer_.renegotiation_needed_; },
-                        ::testing::IsTrue(),
-                        {.timeout = webrtc::TimeDelta::Millis(kTimeout)}),
+                        IsTrue(), {.timeout = TimeDelta::Millis(kTimeout)}),
               IsRtcOk());
   observer_.renegotiation_needed_ = false;
 }
@@ -3702,7 +3880,7 @@ TEST_P(PeerConnectionInterfaceTest,
   std::vector<scoped_refptr<RtpSenderInterface>> rtp_senders =
       pc_->GetSenders();
   ASSERT_EQ(rtp_senders.size(), 1u);
-  ASSERT_EQ(rtp_senders[0]->media_type(), webrtc::MediaType::VIDEO);
+  ASSERT_EQ(rtp_senders[0]->media_type(), MediaType::VIDEO);
   scoped_refptr<RtpSenderInterface> video_rtp_sender = rtp_senders[0];
   RtpParameters parameters = video_rtp_sender->GetParameters();
   ASSERT_NE(parameters.degradation_preference,
@@ -3728,7 +3906,14 @@ INSTANTIATE_TEST_SUITE_P(PeerConnectionInterfaceTest,
 class PeerConnectionMediaConfigTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    pcf_ = PeerConnectionFactoryForTest::CreatePeerConnectionFactoryForTest();
+    network_thread_ = Thread::CreateWithSocketServer();
+    network_thread_->SetName("NetworkThread", nullptr);
+    ASSERT_TRUE(network_thread_->Start());
+    worker_thread_ = Thread::Create();
+    worker_thread_->SetName("WorkerThread", nullptr);
+    ASSERT_TRUE(worker_thread_->Start());
+    pcf_ = PeerConnectionFactoryForTest::CreatePeerConnectionFactoryForTest(
+        network_thread_.get(), worker_thread_.get());
   }
   MediaConfig TestCreatePeerConnection(const RTCConfiguration& config) {
     PeerConnectionDependencies pc_dependencies(&observer_);
@@ -3739,6 +3924,8 @@ class PeerConnectionMediaConfigTest : public ::testing::Test {
     return result.value()->GetConfiguration().media_config;
   }
 
+  std::unique_ptr<Thread> network_thread_;
+  std::unique_ptr<Thread> worker_thread_;
   scoped_refptr<PeerConnectionFactoryForTest> pcf_;
   MockPeerConnectionObserver observer_;
 };

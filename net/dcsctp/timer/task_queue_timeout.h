@@ -10,13 +10,18 @@
 #ifndef NET_DCSCTP_TIMER_TASK_QUEUE_TIMEOUT_H_
 #define NET_DCSCTP_TIMER_TASK_QUEUE_TIMEOUT_H_
 
+#include <functional>
 #include <memory>
 #include <utility>
 
+#include "api/scoped_refptr.h"
+#include "api/sequence_checker.h"
 #include "api/task_queue/pending_task_safety_flag.h"
 #include "api/task_queue/task_queue_base.h"
 #include "api/units/timestamp.h"
 #include "net/dcsctp/public/timeout.h"
+#include "net/dcsctp/public/types.h"
+#include "rtc_base/system/no_unique_address.h"
 
 namespace dcsctp {
 
@@ -57,7 +62,7 @@ class TaskQueueTimeoutFactory {
    public:
     TaskQueueTimeout(TaskQueueTimeoutFactory& parent,
                      webrtc::TaskQueueBase::DelayPrecision precision);
-    ~TaskQueueTimeout();
+    ~TaskQueueTimeout() override;
 
     void Start(DurationMs duration_ms, TimeoutID timeout_id) override;
     void Stop() override;

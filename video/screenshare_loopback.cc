@@ -8,9 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <stdio.h>
-
-#include <memory>
+#include <cstdio>
 #include <optional>
 #include <string>
 #include <vector>
@@ -21,15 +19,13 @@
 #include "api/test/video_quality_test_fixture.h"
 #include "api/transport/bitrate_settings.h"
 #include "api/units/data_rate.h"
+#include "api/video_codecs/sdp_video_format.h"
 #include "api/video_codecs/video_codec.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/string_encode.h"
-#include "system_wrappers/include/field_trial.h"
-#include "test/field_trial.h"
 #include "test/gtest.h"
 #include "test/run_test.h"
-#include "test/test_flags.h"
 #include "video/video_quality_test.h"
 
 using ::webrtc::BitrateConstraints;
@@ -367,7 +363,7 @@ void Loopback() {
   SL_descriptors.push_back(SL0());
   SL_descriptors.push_back(SL1());
 
-  VideoQualityTest fixture(nullptr);
+  VideoQualityTest fixture;
   fixture.FillScalabilitySettings(
       &params, 0, stream_descriptors, NumStreams(), SelectedStream(),
       NumSpatialLayers(), SelectedSL(), InterLayerPred(), SL_descriptors);
@@ -384,11 +380,6 @@ int main(int argc, char* argv[]) {
   absl::ParseCommandLine(argc, argv);
 
   webrtc::LogMessage::SetLogToStderr(absl::GetFlag(FLAGS_logs));
-
-  // InitFieldTrialsFromString stores the char*, so the char array must outlive
-  // the application.
-  const std::string field_trials = absl::GetFlag(FLAGS_force_fieldtrials);
-  webrtc::field_trial::InitFieldTrialsFromString(field_trials.c_str());
 
   webrtc::test::RunTest(Loopback);
   return 0;

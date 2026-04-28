@@ -71,20 +71,10 @@ std::string AV1GetTierOrDefault(const CodecParameterMap& params) {
   return GetFmtpParameterOrDefault(params, kAv1FmtpTier, "0");
 }
 
-bool AV1IsSameTier(const CodecParameterMap& left,
-                   const CodecParameterMap& right) {
-  return AV1GetTierOrDefault(left) == AV1GetTierOrDefault(right);
-}
-
 std::string AV1GetLevelIdxOrDefault(const CodecParameterMap& params) {
   // If the parameter is not present, it MUST be inferred to be 5 (level 3.1).
   // https://aomediacodec.github.io/av1-rtp-spec/#72-sdp-parameters
   return GetFmtpParameterOrDefault(params, kAv1FmtpLevelIdx, "5");
-}
-
-bool AV1IsSameLevelIdx(const CodecParameterMap& left,
-                       const CodecParameterMap& right) {
-  return AV1GetLevelIdxOrDefault(left) == AV1GetLevelIdxOrDefault(right);
 }
 
 #ifdef RTC_ENABLE_H265
@@ -117,10 +107,13 @@ bool IsSameCodecSpecific(const std::string& name1,
            H264IsSamePacketizationMode(params1, params2);
   if (either_name_matches(kVp9CodecName))
     return VP9IsSameProfile(params1, params2);
+  // https://aomediacodec.github.io/av1-rtp-spec/#723-usage-with-the-sdp-offeranswer-model
+  //   These media configuration parameters are asymmetrical and the answerer
+  //   MAY declare its own media configuration
+  // TODO(bugs.webrtc.org/396434695): for backward compability we currently
+  // compare profile.
   if (either_name_matches(kAv1CodecName))
-    return AV1IsSameProfile(params1, params2) &&
-           AV1IsSameTier(params1, params2) &&
-           AV1IsSameLevelIdx(params1, params2);
+    return AV1IsSameProfile(params1, params2);
 #ifdef RTC_ENABLE_H265
   if (either_name_matches(kH265CodecName)) {
     return H265IsSameProfile(params1, params2) &&
@@ -186,7 +179,7 @@ bool MatchesWithReferenceAttributesAndComparator(
           split(red_parameters_1->second, '/');
       std::vector<absl::string_view> redundant_payloads_2 =
           split(red_parameters_2->second, '/');
-      // note: webrtc::split returns at least 1 string even on empty strings.
+      // note: split returns at least 1 string even on empty strings.
       size_t smallest_size =
           std::min(redundant_payloads_1.size(), redundant_payloads_2.size());
       // If the smaller list is equivalent to the longer list, we consider them
@@ -313,22 +306,18 @@ bool MatchesWithCodecRules(const Codec& left_codec, const Codec& right_codec) {
   auto matches_type_specific = [&]() {
     switch (left_codec.type) {
       case Codec::Type::kAudio:
-        // If a nonzero clockrate is specified, it must match the actual
-        // clockrate. If a nonzero bitrate is specified, it must match the
+        // If a nonzero bitrate is specified, it must match the
         // actual bitrate, unless the codec is VBR (0), where we just force the
         // supplied value. The number of channels must match exactly, with the
         // exception that channels=0 is treated synonymously as channels=1, per
         // RFC 4566 section 6: " [The channels] parameter is OPTIONAL and may be
         // omitted if the number of channels is one."
         // Preference is ignored.
-        // TODO(juberti): Treat a zero clockrate as 8000Hz, the RTP default
-        // clockrate.
-        return ((right_codec.clockrate == 0 /*&& clockrate == 8000*/) ||
-                left_codec.clockrate == right_codec.clockrate) &&
-               (right_codec.bitrate == 0 || left_codec.bitrate <= 0 ||
-                left_codec.bitrate == right_codec.bitrate) &&
-               ((right_codec.channels < 2 && left_codec.channels < 2) ||
-                left_codec.channels == right_codec.channels);
+        return ((left_codec.clockrate == right_codec.clockrate) &&
+                (right_codec.bitrate == 0 || left_codec.bitrate <= 0 ||
+                 left_codec.bitrate == right_codec.bitrate) &&
+                ((right_codec.channels < 2 && left_codec.channels < 2) ||
+                 left_codec.channels == right_codec.channels));
 
       case Codec::Type::kVideo:
         return IsSameCodecSpecific(left_codec.name, left_codec.params,
@@ -398,14 +387,13 @@ bool IsSameRtpCodecIgnoringLevel(const Codec& codec,
   // Some video codecs are compatible with others (e.g. same profile but
   // different level). This comparison looks at the relevant parameters,
   // ignoring ones that are either irrelevant or unrecognized.
-  if (rtp_codec.kind == webrtc::MediaType::VIDEO && rtp_codec.IsMediaCodec()) {
+  if (rtp_codec.kind == MediaType::VIDEO && rtp_codec.IsMediaCodec()) {
     return IsSameCodecSpecific(rtp_codec.name, params1, rtp_codec2.name,
                                params2);
   }
   // audio/RED should ignore the parameters which specify payload types so
   // can not be compared.
-  if (rtp_codec.kind == webrtc::MediaType::AUDIO &&
-      rtp_codec.name == kRedCodecName) {
+  if (rtp_codec.kind == MediaType::AUDIO && rtp_codec.name == kRedCodecName) {
     return true;
   }
 

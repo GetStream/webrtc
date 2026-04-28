@@ -10,9 +10,8 @@
 
 #include "modules/video_coding/include/video_codec_initializer.h"
 
-#include <stddef.h>
-#include <stdint.h>
-
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -40,28 +39,28 @@
 namespace webrtc {
 
 namespace {
-static const int kDefaultWidth = 1280;
-static const int kDefaultHeight = 720;
-static const int kDefaultFrameRate = 30;
-static const uint32_t kDefaultMinBitrateBps = 60000;
-static const uint32_t kDefaultTargetBitrateBps = 2000000;
-static const uint32_t kDefaultMaxBitrateBps = 2000000;
-static const uint32_t kDefaultMinTransmitBitrateBps = 400000;
-static const int kDefaultMaxQp = 48;
-static const uint32_t kScreenshareTl0BitrateBps = 120000;
-static const uint32_t kScreenshareConferenceTl0BitrateBps = 200000;
-static const uint32_t kScreenshareCodecTargetBitrateBps = 200000;
-static const uint32_t kScreenshareDefaultFramerate = 5;
+constexpr int kDefaultWidth = 1280;
+constexpr int kDefaultHeight = 720;
+constexpr int kDefaultFrameRate = 30;
+constexpr uint32_t kDefaultMinBitrateBps = 60000;
+constexpr uint32_t kDefaultTargetBitrateBps = 2000000;
+constexpr uint32_t kDefaultMaxBitrateBps = 2000000;
+constexpr uint32_t kDefaultMinTransmitBitrateBps = 400000;
+constexpr int kDefaultMaxQp = 48;
+constexpr uint32_t kScreenshareTl0BitrateBps = 120000;
+constexpr uint32_t kScreenshareConferenceTl0BitrateBps = 200000;
+constexpr uint32_t kScreenshareCodecTargetBitrateBps = 200000;
+constexpr uint32_t kScreenshareDefaultFramerate = 5;
 // Bitrates for the temporal layers of the higher screenshare simulcast stream.
-static const uint32_t kHighScreenshareTl0Bps = 800000;
-static const uint32_t kHighScreenshareTl1Bps = 1200000;
+constexpr uint32_t kHighScreenshareTl0Bps = 800000;
+constexpr uint32_t kHighScreenshareTl1Bps = 1200000;
 }  // namespace
 
 // TODO(sprang): Extend coverage to handle the rest of the codec initializer.
 class VideoCodecInitializerTest : public ::testing::Test {
  public:
   VideoCodecInitializerTest() {}
-  virtual ~VideoCodecInitializerTest() {}
+  ~VideoCodecInitializerTest() override {}
 
  protected:
   void SetUpFor(VideoCodecType type,
@@ -84,15 +83,17 @@ class VideoCodecInitializerTest : public ::testing::Test {
       ASSERT_FALSE(num_spatial_streams.has_value());
       VideoCodecVP8 vp8_settings = VideoEncoder::GetDefaultVp8Settings();
       vp8_settings.numberOfTemporalLayers = num_temporal_streams;
-      config_.encoder_specific_settings = make_ref_counted<
-          webrtc::VideoEncoderConfig::Vp8EncoderSpecificSettings>(vp8_settings);
+      config_.encoder_specific_settings =
+          make_ref_counted<VideoEncoderConfig::Vp8EncoderSpecificSettings>(
+              vp8_settings);
     } else if (type == VideoCodecType::kVideoCodecVP9) {
       ASSERT_TRUE(num_spatial_streams.has_value());
       VideoCodecVP9 vp9_settings = VideoEncoder::GetDefaultVp9Settings();
       vp9_settings.numberOfSpatialLayers = num_spatial_streams.value();
       vp9_settings.numberOfTemporalLayers = num_temporal_streams;
-      config_.encoder_specific_settings = make_ref_counted<
-          webrtc::VideoEncoderConfig::Vp9EncoderSpecificSettings>(vp9_settings);
+      config_.encoder_specific_settings =
+          make_ref_counted<VideoEncoderConfig::Vp9EncoderSpecificSettings>(
+              vp9_settings);
     }
   }
 
@@ -110,7 +111,7 @@ class VideoCodecInitializerTest : public ::testing::Test {
       const VideoEncoder::Settings settings(VideoEncoder::Capabilities(false),
                                             1, 1000);
       frame_buffer_controller_ =
-          factory.Create(codec_out_, settings, &fec_controller_override_);
+          factory.Create(env_, codec_out_, settings, &fec_controller_override_);
     }
   }
 

@@ -17,11 +17,13 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "absl/strings/string_view.h"
 #include "api/array_view.h"
 #include "api/dtls_transport_interface.h"
 #include "api/environment/environment.h"
+#include "api/field_trials_view.h"
 #include "api/priority.h"
 #include "api/rtc_error.h"
 #include "api/sctp_transport_interface.h"
@@ -29,6 +31,7 @@
 #include "api/transport/data_channel_transport_interface.h"
 #include "media/sctp/sctp_transport_internal.h"
 #include "net/dcsctp/public/dcsctp_message.h"
+#include "net/dcsctp/public/dcsctp_options.h"
 #include "net/dcsctp/public/dcsctp_socket.h"
 #include "net/dcsctp/public/dcsctp_socket_factory.h"
 #include "net/dcsctp/public/timeout.h"
@@ -40,15 +43,13 @@
 #include "rtc_base/copy_on_write_buffer.h"
 #include "rtc_base/network/received_packet.h"
 #include "rtc_base/random.h"
-#include "rtc_base/third_party/sigslot/sigslot.h"
 #include "rtc_base/thread.h"
 #include "rtc_base/thread_annotations.h"
 
 namespace webrtc {
 
 class DcSctpTransport : public SctpTransportInternal,
-                        public dcsctp::DcSctpSocketCallbacks,
-                        public sigslot::has_slots<> {
+                        public dcsctp::DcSctpSocketCallbacks {
  public:
   DcSctpTransport(const Environment& env,
                   Thread* network_thread,
@@ -59,10 +60,10 @@ class DcSctpTransport : public SctpTransportInternal,
                   std::unique_ptr<dcsctp::DcSctpSocketFactory> socket_factory);
   ~DcSctpTransport() override;
 
-  // webrtc::SctpTransportInternal
+  // SctpTransportInternal
   void SetOnConnectedCallback(std::function<void()> callback) override;
   void SetDataChannelSink(DataChannelSink* sink) override;
-  void SetDtlsTransport(DtlsTransportInternal* transport) override;
+  DtlsTransportInternal* dtls_transport() const override;
   bool Start(const SctpOptions& options) override;
   bool OpenStream(int sid, PriorityValue priority) override;
   bool ResetStream(int sid) override;
@@ -76,7 +77,8 @@ class DcSctpTransport : public SctpTransportInternal,
   size_t buffered_amount(int sid) const override;
   size_t buffered_amount_low_threshold(int sid) const override;
   void SetBufferedAmountLowThreshold(int sid, size_t bytes) override;
-  void set_debug_name_for_testing(const char* debug_name) override;
+
+  static std::vector<uint8_t> GenerateConnectionToken(const Environment& env);
 
  private:
   // dcsctp::DcSctpSocketCallbacks
@@ -108,18 +110,18 @@ class DcSctpTransport : public SctpTransportInternal,
   void OnTransportReadPacket(PacketTransportInternal* transport,
                              const ReceivedIpPacket& packet);
   void OnDtlsTransportState(DtlsTransportInternal* transport,
-                            webrtc::DtlsTransportState);
+                            DtlsTransportState);
   void MaybeConnectSocket();
 
-  Thread* network_thread_;
-  DtlsTransportInternal* transport_;
-  Environment env_;
+  Thread* const network_thread_;
+  DtlsTransportInternal* const transport_;
+  const Environment env_;
   Random random_;
 
-  std::unique_ptr<dcsctp::DcSctpSocketFactory> socket_factory_;
+  const std::unique_ptr<dcsctp::DcSctpSocketFactory> socket_factory_;
   dcsctp::TaskQueueTimeoutFactory task_queue_timeout_factory_;
   std::unique_ptr<dcsctp::DcSctpSocketInterface> socket_;
-  std::string debug_name_ = "DcSctpTransport";
+  const std::string debug_name_;
   CopyOnWriteBuffer receive_buffer_;
 
   // Used to keep track of the state of data channels.
@@ -137,7 +139,7 @@ class DcSctpTransport : public SctpTransportInternal,
     bool outgoing_reset_done = false;
     // Priority of the stream according to RFC 8831, section 6.4
     dcsctp::StreamPriority priority =
-        dcsctp::StreamPriority(PriorityValue(webrtc::Priority::kLow).value());
+        dcsctp::StreamPriority(PriorityValue(Priority::kLow).value());
   };
 
   // Map of all currently open or closing data channels
@@ -146,6 +148,13 @@ class DcSctpTransport : public SctpTransportInternal,
   bool ready_to_send_data_ RTC_GUARDED_BY(network_thread_) = false;
   std::function<void()> on_connected_callback_ RTC_GUARDED_BY(network_thread_);
   DataChannelSink* data_channel_sink_ RTC_GUARDED_BY(network_thread_) = nullptr;
+
+  std::optional<std::vector<uint8_t>> local_init_;
+  std::optional<std::vector<uint8_t>> remote_init_;
+
+  static dcsctp::DcSctpOptions CreateDcSctpOptions(
+      const SctpOptions& options,
+      const FieldTrialsView& field_trials);
 };
 
 }  // namespace webrtc

@@ -12,7 +12,7 @@ if (is_android) {
   import("//build/config/android/rules.gni")
 }
 
-rtc_source_set("scalability_mode") {
+rtc_library("scalability_mode") {
   visibility = [ "*" ]
   sources = [
     "scalability_mode.cc",
@@ -25,7 +25,7 @@ rtc_source_set("scalability_mode") {
   ]
 }
 
-rtc_source_set("scalability_mode_helper") {
+rtc_library("scalability_mode_helper") {
   visibility = [ "*" ]
   sources = [
     "scalability_mode_helper.cc",
@@ -44,6 +44,7 @@ rtc_library("video_codecs_api") {
   sources = [
     "av1_profile.cc",
     "av1_profile.h",
+    "encoder_speed_controller.h",
     "h264_profile_level_id.cc",
     "h264_profile_level_id.h",
     "sdp_video_format.cc",
@@ -86,12 +87,13 @@ rtc_library("video_codecs_api") {
     "../../modules/video_coding:codec_globals_headers",
     "../../rtc_base:checks",
     "../../rtc_base:logging",
-    "../../rtc_base:macromagic",
     "../../rtc_base:refcount",
     "../../rtc_base:stringutils",
     "../../rtc_base/system:rtc_export",
     "../environment",
     "../units:data_rate",
+    "../units:time_delta",
+    "../units:timestamp",
     "../video:encoded_image",
     "../video:render_resolution",
     "../video:resolution",
@@ -104,6 +106,16 @@ rtc_library("video_codecs_api") {
     "//third_party/abseil-cpp/absl/container:inlined_vector",
     "//third_party/abseil-cpp/absl/strings",
     "//third_party/abseil-cpp/absl/strings:string_view",
+  ]
+}
+
+rtc_library("encoder_speed_controller_factory") {
+  visibility = [ "*" ]
+  sources = [ "encoder_speed_controller.cc" ]
+  deps = [
+    ":video_codecs_api",
+    "../../api/units:time_delta",
+    "../../modules/video_coding:encoder_speed_controller_impl",
   ]
 }
 
@@ -152,7 +164,7 @@ rtc_library("builtin_video_encoder_factory") {
 rtc_source_set("video_encoder_factory_template") {
   visibility = [ "*" ]
   allow_poison = [ "software_video_codecs" ]
-  public = [ "video_encoder_factory_template.h" ]
+  sources = [ "video_encoder_factory_template.h" ]
 
   deps = [
     ":scalability_mode",
@@ -167,7 +179,7 @@ rtc_source_set("video_encoder_factory_template") {
 rtc_source_set("video_encoder_factory_template_libvpx_vp8_adapter") {
   visibility = [ "*" ]
   allow_poison = [ "software_video_codecs" ]
-  public = [ "video_encoder_factory_template_libvpx_vp8_adapter.h" ]
+  sources = [ "video_encoder_factory_template_libvpx_vp8_adapter.h" ]
 
   deps = [
     ":scalability_mode",
@@ -182,7 +194,7 @@ rtc_source_set("video_encoder_factory_template_libvpx_vp8_adapter") {
 rtc_source_set("video_encoder_factory_template_libvpx_vp9_adapter") {
   visibility = [ "*" ]
   allow_poison = [ "software_video_codecs" ]
-  public = [ "video_encoder_factory_template_libvpx_vp9_adapter.h" ]
+  sources = [ "video_encoder_factory_template_libvpx_vp9_adapter.h" ]
 
   deps = [
     ":scalability_mode",
@@ -195,7 +207,7 @@ rtc_source_set("video_encoder_factory_template_libvpx_vp9_adapter") {
 rtc_source_set("video_encoder_factory_template_open_h264_adapter") {
   visibility = [ "*" ]
   allow_poison = [ "software_video_codecs" ]
-  public = [ "video_encoder_factory_template_open_h264_adapter.h" ]
+  sources = [ "video_encoder_factory_template_open_h264_adapter.h" ]
 
   deps = [
     ":scalability_mode",
@@ -208,7 +220,7 @@ rtc_source_set("video_encoder_factory_template_open_h264_adapter") {
 rtc_source_set("video_encoder_factory_template_libaom_av1_adapter") {
   visibility = [ "*" ]
   allow_poison = [ "software_video_codecs" ]
-  public = [ "video_encoder_factory_template_libaom_av1_adapter.h" ]
+  sources = [ "video_encoder_factory_template_libaom_av1_adapter.h" ]
 
   deps = [
     ":scalability_mode",
@@ -224,7 +236,7 @@ rtc_source_set("video_encoder_factory_template_libaom_av1_adapter") {
 rtc_source_set("video_decoder_factory_template") {
   visibility = [ "*" ]
   allow_poison = [ "software_video_codecs" ]
-  public = [ "video_decoder_factory_template.h" ]
+  sources = [ "video_decoder_factory_template.h" ]
 
   deps = [
     ":video_codecs_api",
@@ -237,7 +249,7 @@ rtc_source_set("video_decoder_factory_template") {
 rtc_source_set("video_decoder_factory_template_libvpx_vp8_adapter") {
   visibility = [ "*" ]
   allow_poison = [ "software_video_codecs" ]
-  public = [ "video_decoder_factory_template_libvpx_vp8_adapter.h" ]
+  sources = [ "video_decoder_factory_template_libvpx_vp8_adapter.h" ]
 
   deps = [
     ":video_codecs_api",
@@ -249,7 +261,7 @@ rtc_source_set("video_decoder_factory_template_libvpx_vp8_adapter") {
 rtc_source_set("video_decoder_factory_template_libvpx_vp9_adapter") {
   visibility = [ "*" ]
   allow_poison = [ "software_video_codecs" ]
-  public = [ "video_decoder_factory_template_libvpx_vp9_adapter.h" ]
+  sources = [ "video_decoder_factory_template_libvpx_vp9_adapter.h" ]
 
   deps = [
     ":video_codecs_api",
@@ -260,7 +272,7 @@ rtc_source_set("video_decoder_factory_template_libvpx_vp9_adapter") {
 rtc_source_set("video_decoder_factory_template_open_h264_adapter") {
   visibility = [ "*" ]
   allow_poison = [ "software_video_codecs" ]
-  public = [ "video_decoder_factory_template_open_h264_adapter.h" ]
+  sources = [ "video_decoder_factory_template_open_h264_adapter.h" ]
 
   deps = [
     ":video_codecs_api",
@@ -271,7 +283,7 @@ rtc_source_set("video_decoder_factory_template_open_h264_adapter") {
 rtc_source_set("video_decoder_factory_template_dav1d_adapter") {
   visibility = [ "*" ]
   allow_poison = [ "software_video_codecs" ]
-  public = [ "video_decoder_factory_template_dav1d_adapter.h" ]
+  sources = [ "video_decoder_factory_template_dav1d_adapter.h" ]
 
   deps = [
     ":video_codecs_api",
@@ -281,11 +293,11 @@ rtc_source_set("video_decoder_factory_template_dav1d_adapter") {
 }
 
 rtc_source_set("video_encoding_general") {
-  public = [ "video_encoding_general.h" ]
+  sources = [ "video_encoding_general.h" ]
 }
 
 rtc_source_set("video_encoder_interface") {
-  public = [ "video_encoder_interface.h" ]
+  sources = [ "video_encoder_interface.h" ]
 
   deps = [
     ":video_encoding_general",
@@ -305,7 +317,7 @@ rtc_source_set("video_encoder_interface") {
 }
 
 rtc_source_set("video_encoder_factory_interface") {
-  public = [ "video_encoder_factory_interface.h" ]
+  sources = [ "video_encoder_factory_interface.h" ]
 
   deps = [
     ":video_encoder_interface",
@@ -331,7 +343,7 @@ rtc_library("simple_encoder_wrapper") {
     "../../api/units:data_rate",
     "../../api/video_codecs:scalability_mode",
     "../../api/video_codecs:scalability_mode_helper",
-    "../../common_video/generic_frame_descriptor:generic_frame_descriptor",
+    "../../common_video/generic_frame_descriptor",
     "../../modules/video_coding/svc:scalability_structures",
     "../../modules/video_coding/svc:scalable_video_controller",
     "../../rtc_base:checks",
@@ -408,7 +420,7 @@ rtc_library("libaom_av1_encoder_factory_test") {
     "..:scoped_refptr",
     "../../api/video:video_frame",
     "../../api/video_codecs:video_codecs_api",
-    "../../common_video:common_video",
+    "../../common_video",
     "../../modules/video_coding/codecs/av1:dav1d_decoder",
     "../../rtc_base:checks",
     "../../rtc_base:logging",
@@ -438,6 +450,7 @@ rtc_library("vp8_temporal_layers_factory") {
     "../../modules/video_coding:video_coding_utility",
     "../../modules/video_coding:webrtc_vp8_temporal_layers",
     "../../rtc_base:checks",
+    "../environment",
   ]
 }
 

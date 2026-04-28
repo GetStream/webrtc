@@ -17,12 +17,12 @@
 
 #include "api/array_view.h"
 #include "api/function_view.h"
+#include "api/transport/ecn_marking.h"
 #include "api/units/time_delta.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/common_header.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/rtpfb.h"
 #include "rtc_base/buffer.h"
 #include "rtc_base/logging.h"
-#include "rtc_base/network/ecn_marking.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 
@@ -129,7 +129,7 @@ TEST(CongestionControlFeedbackTest, CreateReturnsTrueForBasicPacket) {
        .arrival_time_offset = TimeDelta::Millis(2)}};
   CongestionControlFeedback fb(std::move(packets), /*compact_ntp_timestamp=*/1);
 
-  Buffer buf(fb.BlockLength());
+  Buffer buf = Buffer::CreateUninitializedWithSize(fb.BlockLength());
   size_t position = 0;
   FunctionView<void(ArrayView<const uint8_t> packet)> callback;
   EXPECT_TRUE(fb.Create(buf.data(), &position, buf.capacity(), callback));

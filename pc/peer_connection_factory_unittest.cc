@@ -20,11 +20,15 @@
 #include "api/audio/audio_device.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "api/audio_codecs/builtin_audio_encoder_factory.h"
+#include "api/create_modular_peer_connection_factory.h"
 #include "api/create_peerconnection_factory.h"
 #include "api/data_channel_interface.h"
 #include "api/enable_media.h"
 #include "api/enable_media_with_defaults.h"
+#include "api/environment/environment.h"
 #include "api/environment/environment_factory.h"
+#include "api/field_trials.h"
+#include "api/field_trials_view.h"
 #include "api/jsep.h"
 #include "api/make_ref_counted.h"
 #include "api/media_stream_interface.h"
@@ -32,9 +36,9 @@
 #include "api/peer_connection_interface.h"
 #include "api/rtp_parameters.h"
 #include "api/scoped_refptr.h"
-#include "api/task_queue/default_task_queue_factory.h"
 #include "api/test/mock_packet_socket_factory.h"
 #include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
 #include "api/video_codecs/scalability_mode.h"
 #include "api/video_codecs/video_decoder_factory_template.h"
 #include "api/video_codecs/video_decoder_factory_template_dav1d_adapter.h"
@@ -51,18 +55,17 @@
 #include "modules/audio_processing/include/mock_audio_processing.h"
 #include "p2p/base/port.h"
 #include "p2p/base/port_allocator.h"
-#include "p2p/base/port_interface.h"
 #include "p2p/test/fake_port_allocator.h"
 #include "pc/connection_context.h"
 #include "pc/test/fake_audio_capture_module.h"
 #include "pc/test/fake_video_track_source.h"
 #include "rtc_base/event.h"
 #include "rtc_base/internal/default_socket_server.h"
+#include "rtc_base/net_helper.h"
 #include "rtc_base/network.h"
 #include "rtc_base/socket_address.h"
 #include "rtc_base/socket_server.h"
 #include "rtc_base/thread.h"
-#include "rtc_base/time_utils.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 
@@ -75,40 +78,40 @@
 namespace webrtc {
 namespace {
 
+using test::MockAudioProcessing;
+using test::MockAudioProcessingBuilder;
 using ::testing::_;
 using ::testing::A;
 using ::testing::AtLeast;
 using ::testing::InvokeWithoutArgs;
 using ::testing::NiceMock;
+using ::testing::NotNull;
 using ::testing::Return;
 using ::testing::UnorderedElementsAre;
-using ::webrtc::test::MockAudioProcessing;
-using ::webrtc::test::MockAudioProcessingBuilder;
 
-static const char kStunIceServer[] = "stun:stun.l.google.com:19302";
-static const char kTurnIceServer[] = "turn:test.com:1234";
-static const char kTurnIceServerWithTransport[] =
-    "turn:hello.com?transport=tcp";
-static const char kSecureTurnIceServer[] = "turns:hello.com?transport=tcp";
-static const char kSecureTurnIceServerWithoutTransportParam[] =
+constexpr char kStunIceServer[] = "stun:stun.l.google.com:19302";
+constexpr char kTurnIceServer[] = "turn:test.com:1234";
+constexpr char kTurnIceServerWithTransport[] = "turn:hello.com?transport=tcp";
+constexpr char kSecureTurnIceServer[] = "turns:hello.com?transport=tcp";
+constexpr char kSecureTurnIceServerWithoutTransportParam[] =
     "turns:hello.com:443";
-static const char kSecureTurnIceServerWithoutTransportAndPortParam[] =
+constexpr char kSecureTurnIceServerWithoutTransportAndPortParam[] =
     "turns:hello.com";
-static const char kTurnIceServerWithNoUsernameInUri[] = "turn:test.com:1234";
-static const char kTurnPassword[] = "turnpassword";
-static const int kDefaultStunPort = 3478;
-static const int kDefaultStunTlsPort = 5349;
-static const char kTurnUsername[] = "test";
-static const char kStunIceServerWithIPv4Address[] = "stun:1.2.3.4:1234";
-static const char kStunIceServerWithIPv4AddressWithoutPort[] = "stun:1.2.3.4";
-static const char kStunIceServerWithIPv6Address[] = "stun:[2401:fa00:4::]:1234";
-static const char kStunIceServerWithIPv6AddressWithoutPort[] =
+constexpr char kTurnIceServerWithNoUsernameInUri[] = "turn:test.com:1234";
+constexpr char kTurnPassword[] = "turnpassword";
+constexpr int kDefaultStunPort = 3478;
+constexpr int kDefaultStunTlsPort = 5349;
+constexpr char kTurnUsername[] = "test";
+constexpr char kStunIceServerWithIPv4Address[] = "stun:1.2.3.4:1234";
+constexpr char kStunIceServerWithIPv4AddressWithoutPort[] = "stun:1.2.3.4";
+constexpr char kStunIceServerWithIPv6Address[] = "stun:[2401:fa00:4::]:1234";
+constexpr char kStunIceServerWithIPv6AddressWithoutPort[] =
     "stun:[2401:fa00:4::]";
-static const char kTurnIceServerWithIPv6Address[] = "turn:[2401:fa00:4::]:1234";
+constexpr char kTurnIceServerWithIPv6Address[] = "turn:[2401:fa00:4::]:1234";
 
 class NullPeerConnectionObserver : public PeerConnectionObserver {
  public:
-  virtual ~NullPeerConnectionObserver() = default;
+  ~NullPeerConnectionObserver() override = default;
   void OnSignalingChange(
       PeerConnectionInterface::SignalingState new_state) override {}
   void OnAddStream(scoped_refptr<MediaStreamInterface> stream) override {}
@@ -120,7 +123,8 @@ class NullPeerConnectionObserver : public PeerConnectionObserver {
       PeerConnectionInterface::IceConnectionState new_state) override {}
   void OnIceGatheringChange(
       PeerConnectionInterface::IceGatheringState new_state) override {}
-  void OnIceCandidate(const IceCandidateInterface* candidate) override {}
+  void OnIceCandidate(const IceCandidate* candidate) override {}
+  void OnIceCandidateRemoved(const IceCandidate* candidate) override {}
 };
 
 class MockNetworkManager : public NetworkManager {
@@ -141,7 +145,7 @@ class PeerConnectionFactoryTest : public ::testing::Test {
         main_thread_(socket_server_.get()) {}
 
  private:
-  void SetUp() {
+  void SetUp() override {
 #ifdef WEBRTC_ANDROID
     InitializeAndroidObjects();
 #endif
@@ -160,7 +164,7 @@ class PeerConnectionFactoryTest : public ::testing::Test {
             OpenH264DecoderTemplateAdapter, Dav1dDecoderTemplateAdapter>>(),
         nullptr /* audio_mixer */, nullptr /* audio_processing */);
 
-    ASSERT_TRUE(factory_.get() != NULL);
+    ASSERT_TRUE(factory_.get() != nullptr);
     port_allocator_ = std::make_unique<FakePortAllocator>(CreateEnvironment(),
                                                           socket_server_.get());
     raw_port_allocator_ = port_allocator_.get();
@@ -189,7 +193,7 @@ class PeerConnectionFactoryTest : public ::testing::Test {
   }
 
   void VerifyAudioCodecCapability(const RtpCodecCapability& codec) {
-    EXPECT_EQ(codec.kind, webrtc::MediaType::AUDIO);
+    EXPECT_EQ(codec.kind, MediaType::AUDIO);
     EXPECT_FALSE(codec.name.empty());
     EXPECT_GT(codec.clock_rate, 0);
     EXPECT_GT(codec.num_channels, 0);
@@ -197,7 +201,7 @@ class PeerConnectionFactoryTest : public ::testing::Test {
 
   void VerifyVideoCodecCapability(const RtpCodecCapability& codec,
                                   bool sender) {
-    EXPECT_EQ(codec.kind, webrtc::MediaType::VIDEO);
+    EXPECT_EQ(codec.kind, MediaType::VIDEO);
     EXPECT_FALSE(codec.name.empty());
     EXPECT_GT(codec.clock_rate, 0);
     if (sender) {
@@ -275,7 +279,6 @@ CreatePeerConnectionFactoryWithRtxDisabled() {
   pcf_dependencies.signaling_thread = Thread::Current();
   pcf_dependencies.worker_thread = Thread::Current();
   pcf_dependencies.network_thread = Thread::Current();
-  pcf_dependencies.task_queue_factory = CreateDefaultTaskQueueFactory();
 
   pcf_dependencies.adm = FakeAudioCaptureModule::Create();
   pcf_dependencies.audio_encoder_factory = CreateBuiltinAudioEncoderFactory();
@@ -290,10 +293,12 @@ CreatePeerConnectionFactoryWithRtxDisabled() {
           OpenH264DecoderTemplateAdapter, Dav1dDecoderTemplateAdapter>>(),
   EnableMedia(pcf_dependencies);
 
+  Environment env = CreateEnvironment();
   scoped_refptr<ConnectionContext> context =
-      ConnectionContext::Create(CreateEnvironment(), &pcf_dependencies);
+      ConnectionContext::Create(env, &pcf_dependencies);
   context->set_use_rtx(false);
-  return make_ref_counted<PeerConnectionFactory>(context, &pcf_dependencies);
+  return make_ref_counted<PeerConnectionFactory>(env, context,
+                                                 &pcf_dependencies);
 }
 
 // Verify creation of PeerConnection using internal ADM, video factory and
@@ -333,7 +338,7 @@ TEST(PeerConnectionFactoryTestInternal, DISABLED_CreatePCUsingInternalModules) {
 
 TEST_F(PeerConnectionFactoryTest, CheckRtpSenderAudioCapabilities) {
   RtpCapabilities audio_capabilities =
-      factory_->GetRtpSenderCapabilities(webrtc::MediaType::AUDIO);
+      factory_->GetRtpSenderCapabilities(MediaType::AUDIO);
   EXPECT_FALSE(audio_capabilities.codecs.empty());
   for (const auto& codec : audio_capabilities.codecs) {
     VerifyAudioCodecCapability(codec);
@@ -346,7 +351,7 @@ TEST_F(PeerConnectionFactoryTest, CheckRtpSenderAudioCapabilities) {
 
 TEST_F(PeerConnectionFactoryTest, CheckRtpSenderVideoCapabilities) {
   RtpCapabilities video_capabilities =
-      factory_->GetRtpSenderCapabilities(webrtc::MediaType::VIDEO);
+      factory_->GetRtpSenderCapabilities(MediaType::VIDEO);
   EXPECT_FALSE(video_capabilities.codecs.empty());
   for (const auto& codec : video_capabilities.codecs) {
     VerifyVideoCodecCapability(codec, true);
@@ -359,7 +364,7 @@ TEST_F(PeerConnectionFactoryTest, CheckRtpSenderVideoCapabilities) {
 
 TEST_F(PeerConnectionFactoryTest, CheckRtpSenderRtxEnabledCapabilities) {
   RtpCapabilities video_capabilities =
-      factory_->GetRtpSenderCapabilities(webrtc::MediaType::VIDEO);
+      factory_->GetRtpSenderCapabilities(MediaType::VIDEO);
   const auto it = std::find_if(
       video_capabilities.codecs.begin(), video_capabilities.codecs.end(),
       [](const auto& c) { return c.name == kRtxCodecName; });
@@ -369,7 +374,7 @@ TEST_F(PeerConnectionFactoryTest, CheckRtpSenderRtxEnabledCapabilities) {
 TEST(PeerConnectionFactoryTestInternal, CheckRtpSenderRtxDisabledCapabilities) {
   auto factory = CreatePeerConnectionFactoryWithRtxDisabled();
   RtpCapabilities video_capabilities =
-      factory->GetRtpSenderCapabilities(webrtc::MediaType::VIDEO);
+      factory->GetRtpSenderCapabilities(MediaType::VIDEO);
   const auto it = std::find_if(
       video_capabilities.codecs.begin(), video_capabilities.codecs.end(),
       [](const auto& c) { return c.name == kRtxCodecName; });
@@ -378,14 +383,14 @@ TEST(PeerConnectionFactoryTestInternal, CheckRtpSenderRtxDisabledCapabilities) {
 
 TEST_F(PeerConnectionFactoryTest, CheckRtpSenderDataCapabilities) {
   RtpCapabilities data_capabilities =
-      factory_->GetRtpSenderCapabilities(webrtc::MediaType::DATA);
+      factory_->GetRtpSenderCapabilities(MediaType::DATA);
   EXPECT_TRUE(data_capabilities.codecs.empty());
   EXPECT_TRUE(data_capabilities.header_extensions.empty());
 }
 
 TEST_F(PeerConnectionFactoryTest, CheckRtpReceiverAudioCapabilities) {
   RtpCapabilities audio_capabilities =
-      factory_->GetRtpReceiverCapabilities(webrtc::MediaType::AUDIO);
+      factory_->GetRtpReceiverCapabilities(MediaType::AUDIO);
   EXPECT_FALSE(audio_capabilities.codecs.empty());
   for (const auto& codec : audio_capabilities.codecs) {
     VerifyAudioCodecCapability(codec);
@@ -398,7 +403,7 @@ TEST_F(PeerConnectionFactoryTest, CheckRtpReceiverAudioCapabilities) {
 
 TEST_F(PeerConnectionFactoryTest, CheckRtpReceiverVideoCapabilities) {
   RtpCapabilities video_capabilities =
-      factory_->GetRtpReceiverCapabilities(webrtc::MediaType::VIDEO);
+      factory_->GetRtpReceiverCapabilities(MediaType::VIDEO);
   EXPECT_FALSE(video_capabilities.codecs.empty());
   for (const auto& codec : video_capabilities.codecs) {
     VerifyVideoCodecCapability(codec, false);
@@ -411,7 +416,7 @@ TEST_F(PeerConnectionFactoryTest, CheckRtpReceiverVideoCapabilities) {
 
 TEST_F(PeerConnectionFactoryTest, CheckRtpReceiverRtxEnabledCapabilities) {
   RtpCapabilities video_capabilities =
-      factory_->GetRtpReceiverCapabilities(webrtc::MediaType::VIDEO);
+      factory_->GetRtpReceiverCapabilities(MediaType::VIDEO);
   const auto it = std::find_if(
       video_capabilities.codecs.begin(), video_capabilities.codecs.end(),
       [](const auto& c) { return c.name == kRtxCodecName; });
@@ -422,7 +427,7 @@ TEST(PeerConnectionFactoryTestInternal,
      CheckRtpReceiverRtxDisabledCapabilities) {
   auto factory = CreatePeerConnectionFactoryWithRtxDisabled();
   RtpCapabilities video_capabilities =
-      factory->GetRtpReceiverCapabilities(webrtc::MediaType::VIDEO);
+      factory->GetRtpReceiverCapabilities(MediaType::VIDEO);
   const auto it = std::find_if(
       video_capabilities.codecs.begin(), video_capabilities.codecs.end(),
       [](const auto& c) { return c.name == kRtxCodecName; });
@@ -431,7 +436,7 @@ TEST(PeerConnectionFactoryTestInternal,
 
 TEST_F(PeerConnectionFactoryTest, CheckRtpReceiverDataCapabilities) {
   RtpCapabilities data_capabilities =
-      factory_->GetRtpReceiverCapabilities(webrtc::MediaType::DATA);
+      factory_->GetRtpReceiverCapabilities(MediaType::DATA);
   EXPECT_TRUE(data_capabilities.codecs.empty());
   EXPECT_TRUE(data_capabilities.header_extensions.empty());
 }
@@ -638,12 +643,13 @@ TEST_F(PeerConnectionFactoryTest, LocalRendering) {
   scoped_refptr<FakeVideoTrackSource> source =
       FakeVideoTrackSource::Create(/*is_screencast=*/false);
 
-  FakeFrameSource frame_source(1280, 720, kNumMicrosecsPerSec / 30);
+  FakeFrameSource frame_source(1280, 720, TimeDelta::Seconds(1) / 30,
+                               Timestamp::Zero());
 
-  ASSERT_TRUE(source.get() != NULL);
+  ASSERT_TRUE(source.get() != nullptr);
   scoped_refptr<VideoTrackInterface> track(
       factory_->CreateVideoTrack(source, "testlabel"));
-  ASSERT_TRUE(track.get() != NULL);
+  ASSERT_TRUE(track.get() != nullptr);
   FakeVideoTrackRenderer local_renderer(track.get());
 
   EXPECT_EQ(0, local_renderer.num_rendered_frames());
@@ -660,6 +666,22 @@ TEST_F(PeerConnectionFactoryTest, LocalRendering) {
   source->InjectFrame(frame_source.GetFrame());
   EXPECT_EQ(3, local_renderer.num_rendered_frames());
   EXPECT_FALSE(local_renderer.black_frame());
+}
+
+TEST(PeerConnectionFactoryDependenciesTest,
+     CanInjectFieldTrialsWithEnvironment) {
+  std::unique_ptr<FieldTrialsView> field_trials = FieldTrials::Create("");
+  ASSERT_THAT(field_trials, NotNull());
+  FieldTrialsView* raw_field_trials = field_trials.get();
+
+  PeerConnectionFactoryDependencies pcf_dependencies;
+  pcf_dependencies.env = CreateEnvironment(std::move(field_trials));
+  pcf_dependencies.adm = FakeAudioCaptureModule::Create();
+  EnableMediaWithDefaults(pcf_dependencies);
+
+  scoped_refptr<PeerConnectionFactory> pcf =
+      PeerConnectionFactory::Create(std::move(pcf_dependencies));
+  EXPECT_EQ(&pcf->field_trials(), raw_field_trials);
 }
 
 TEST(PeerConnectionFactoryDependenciesTest, UsesNetworkManager) {
@@ -693,12 +715,12 @@ TEST(PeerConnectionFactoryDependenciesTest, UsesPacketSocketFactory) {
       std::make_unique<NiceMock<MockPacketSocketFactory>>();
 
   Event called;
-  EXPECT_CALL(*mock_socket_factory, CreateUdpSocket(_, _, _))
-      .WillOnce(InvokeWithoutArgs([&] {
+  EXPECT_CALL(*mock_socket_factory, CreateUdpSocket)
+      .WillOnce([&] {
         called.Set();
         return nullptr;
-      }))
-      .WillRepeatedly(Return(nullptr));
+      })
+      .WillRepeatedly([] { return nullptr; });
 
   PeerConnectionFactoryDependencies pcf_dependencies;
   pcf_dependencies.packet_socket_factory = std::move(mock_socket_factory);
@@ -723,7 +745,7 @@ TEST(PeerConnectionFactoryDependenciesTest, UsesPacketSocketFactory) {
 }
 
 TEST(PeerConnectionFactoryDependenciesTest,
-     CreatesAudioProcessingWithProvidedFactory) {
+     CreatesAudioProcessingWithProvidedBuilder) {
   auto ap_factory = std::make_unique<MockAudioProcessingBuilder>();
   auto audio_processing = make_ref_counted<NiceMock<MockAudioProcessing>>();
   // Validate that provided audio_processing is used by expecting that a request
@@ -742,24 +764,28 @@ TEST(PeerConnectionFactoryDependenciesTest,
   pcf->StartAecDump(nullptr, 24'242);
 }
 
-TEST(PeerConnectionFactoryDependenciesTest, UsesAudioProcessingWhenProvided) {
-  // Test legacy way of providing audio_processing.
-  // TODO: bugs.webrtc.org/369904700 - Delete this test when webrtc users no
-  // longer set PeerConnectionFactoryDependencies::audio_processing.
-  auto audio_processing = make_ref_counted<NiceMock<MockAudioProcessing>>();
-  EXPECT_CALL(*audio_processing, CreateAndAttachAecDump(A<FILE*>(), 24'242, _));
-
+TEST(PeerConnectionFactoryDependenciesTest, RepeatMediaEngineInitialization) {
+  scoped_refptr<AudioDeviceModule> adm = FakeAudioCaptureModule::Create();
   PeerConnectionFactoryDependencies pcf_dependencies;
-  pcf_dependencies.adm = FakeAudioCaptureModule::Create();
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-  pcf_dependencies.audio_processing = std::move(audio_processing);
-#pragma clang diagnostic pop
+  pcf_dependencies.adm = adm;
+  pcf_dependencies.signaling_thread = Thread::Current();
+  pcf_dependencies.worker_thread = Thread::Current();
+  pcf_dependencies.network_thread = Thread::Current();
   EnableMediaWithDefaults(pcf_dependencies);
 
   scoped_refptr<PeerConnectionFactoryInterface> pcf =
       CreateModularPeerConnectionFactory(std::move(pcf_dependencies));
-  pcf->StartAecDump(nullptr, 24'242);
+
+  for (int i = 0; i < 10; ++i) {
+    EXPECT_FALSE(adm->Initialized());
+    PeerConnectionInterface::RTCConfiguration config;
+    NullPeerConnectionObserver observer;
+    auto pc = pcf->CreatePeerConnectionOrError(
+        config, PeerConnectionDependencies(&observer));
+    ASSERT_TRUE(pc.ok());
+    EXPECT_TRUE(adm->Initialized());
+  }
+  EXPECT_FALSE(adm->Initialized());
 }
 
 }  // namespace

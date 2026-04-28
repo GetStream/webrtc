@@ -11,6 +11,9 @@
 #include <jni.h>
 
 #include "api/media_stream_interface.h"
+#include "api/video/video_frame.h"
+#include "api/video/video_sink_interface.h"
+#include "api/video/video_source_interface.h"
 #include "sdk/android/generated_video_jni/VideoTrack_jni.h"
 #include "sdk/android/src/jni/jni_helpers.h"
 #include "sdk/android/src/jni/video_sink.h"
@@ -36,9 +39,8 @@ static void JNI_VideoTrack_RemoveSink(JNIEnv* jni,
           reinterpret_cast<VideoSinkInterface<VideoFrame>*>(j_native_sink));
 }
 
-static jlong JNI_VideoTrack_WrapSink(
-    JNIEnv* jni,
-    const jni_zero::JavaParamRef<jobject>& sink) {
+static jlong JNI_VideoTrack_WrapSink(JNIEnv* jni,
+                                     const jni_zero::JavaRef<jobject>& sink) {
   return jlongFromPointer(new VideoSinkWrapper(jni, sink));
 }
 

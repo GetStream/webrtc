@@ -55,9 +55,10 @@ class MockDataChannelSink : public DataChannelSink {
   MOCK_METHOD(void, OnConnected, ());
 
   // DataChannelSink
+  MOCK_METHOD(void, OnTransportConnected, (), (override));
   MOCK_METHOD(void,
               OnDataReceived,
-              (int, DataMessageType, const webrtc::CopyOnWriteBuffer&));
+              (int, DataMessageType, const CopyOnWriteBuffer&));
   MOCK_METHOD(void, OnChannelClosing, (int));
   MOCK_METHOD(void, OnChannelClosed, (int));
   MOCK_METHOD(void, OnReadyToSend, ());
@@ -82,7 +83,7 @@ class Peer {
         .Times(1)
         .WillOnce(Return(ByMove(std::move(socket_ptr))));
 
-    sctp_transport_ = std::make_unique<webrtc::DcSctpTransport>(
+    sctp_transport_ = std::make_unique<DcSctpTransport>(
         env_, Thread::Current(), &fake_dtls_transport_,
         std::move(mock_dcsctp_socket_factory));
     sctp_transport_->SetDataChannelSink(&sink_);
@@ -90,10 +91,10 @@ class Peer {
   }
 
   FakeDtlsTransport fake_dtls_transport_;
-  webrtc::SimulatedClock simulated_clock_;
+  SimulatedClock simulated_clock_;
   Environment env_;
   dcsctp::MockDcSctpSocket* socket_;
-  std::unique_ptr<webrtc::DcSctpTransport> sctp_transport_;
+  std::unique_ptr<DcSctpTransport> sctp_transport_;
   NiceMock<MockDataChannelSink> sink_;
 };
 }  // namespace
@@ -290,8 +291,7 @@ TEST(DcSctpTransportTest, DeliversMessage) {
   AutoThread main_thread;
   Peer peer_a;
 
-  EXPECT_CALL(peer_a.sink_,
-              OnDataReceived(1, webrtc::DataMessageType::kBinary, _))
+  EXPECT_CALL(peer_a.sink_, OnDataReceived(1, DataMessageType::kBinary, _))
       .Times(1);
 
   peer_a.sctp_transport_->OpenStream(1, kDefaultPriority);

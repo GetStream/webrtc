@@ -17,14 +17,17 @@
 #include <utility>
 #include <vector>
 
+#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "api/scoped_refptr.h"
+#include "api/sequence_checker.h"
+#include "api/task_queue/pending_task_safety_flag.h"
 #include "rtc_base/ip_address.h"
 #include "rtc_base/mdns_responder_interface.h"
 #include "rtc_base/net_helpers.h"
 #include "rtc_base/network.h"
 #include "rtc_base/network_constants.h"
 #include "rtc_base/socket_address.h"
-#include "rtc_base/string_encode.h"
 #include "rtc_base/thread.h"
 
 namespace webrtc {
@@ -35,7 +38,18 @@ const int kFakeIPv6NetworkPrefixLength = 64;
 // Fake network manager that allows us to manually specify the IPs to use.
 class FakeNetworkManager : public NetworkManagerBase {
  public:
-  FakeNetworkManager() {}
+  explicit FakeNetworkManager(Thread* network_thread)
+      : network_thread_(network_thread) {}
+  ~FakeNetworkManager() override {
+    if (network_thread_) {
+      network_thread_->BlockingCall([this]() {
+        if (safety_flag_) {
+          safety_flag_->SetNotAlive();
+          safety_flag_ = nullptr;
+        }
+      });
+    }
+  }
 
   struct Iface {
     SocketAddress socket_address;
@@ -60,7 +74,10 @@ class FakeNetworkManager : public NetworkManagerBase {
       std::optional<AdapterType> underlying_vpn_adapter_type = std::nullopt) {
     SocketAddress address(if_name, 0);
     address.SetResolvedIP(iface.ipaddr());
-    ifaces_.push_back({address, type, underlying_vpn_adapter_type});
+    ifaces_.push_back(
+        {.socket_address = address,
+         .adapter_type = type,
+         .underlying_vpn_adapter_type = underlying_vpn_adapter_type});
     DoUpdateNetworks();
   }
 
@@ -75,12 +92,18 @@ class FakeNetworkManager : public NetworkManagerBase {
   }
 
   void StartUpdating() override {
+    RTC_DCHECK_RUN_ON(network_thread_);
+    if (!safety_flag_) {
+      safety_flag_ = PendingTaskSafetyFlag::Create();
+    }
     ++start_count_;
     if (start_count_ == 1) {
       sent_first_update_ = false;
-      Thread::Current()->PostTask([this] { DoUpdateNetworks(); });
+      network_thread_->PostTask(
+          SafeTask(safety_flag_, [this] { DoUpdateNetworks(); }));
     } else if (sent_first_update_) {
-      Thread::Current()->PostTask([this] { SignalNetworksChanged(); });
+      network_thread_->PostTask(
+          SafeTask(safety_flag_, [this] { NotifyNetworksChanged(); }));
     }
   }
 
@@ -89,7 +112,7 @@ class FakeNetworkManager : public NetworkManagerBase {
   using NetworkManagerBase::set_default_local_addresses;
   using NetworkManagerBase::set_enumeration_permission;
 
-  // webrtc::NetworkManager override.
+  // NetworkManager override.
   MdnsResponderInterface* GetMdnsResponder() const override {
     return mdns_responder_.get();
   }
@@ -111,8 +134,7 @@ class FakeNetworkManager : public NetworkManagerBase {
       } else if (it->socket_address.ipaddr().family() == AF_INET6) {
         prefix_length = kFakeIPv6NetworkPrefixLength;
       }
-      IPAddress prefix =
-          webrtc::TruncateIP(it->socket_address.ipaddr(), prefix_length);
+      IPAddress prefix = TruncateIP(it->socket_address.ipaddr(), prefix_length);
       auto net = std::make_unique<Network>(
           it->socket_address.hostname(), it->socket_address.hostname(), prefix,
           prefix_length, it->adapter_type);
@@ -126,10 +148,13 @@ class FakeNetworkManager : public NetworkManagerBase {
     bool changed;
     MergeNetworkList(std::move(networks), &changed);
     if (changed || !sent_first_update_) {
-      SignalNetworksChanged();
+      NotifyNetworksChanged();
       sent_first_update_ = true;
     }
   }
+
+  Thread* const network_thread_;
+  scoped_refptr<PendingTaskSafetyFlag> safety_flag_;
 
   IfaceList ifaces_;
   int next_index_ = 0;
@@ -141,14 +166,5 @@ class FakeNetworkManager : public NetworkManagerBase {
 
 }  //  namespace webrtc
 
-// Re-export symbols from the webrtc namespace for backwards compatibility.
-// TODO(bugs.webrtc.org/4222596): Remove once all references are updated.
-#ifdef WEBRTC_ALLOW_DEPRECATED_NAMESPACES
-namespace rtc {
-using ::webrtc::FakeNetworkManager;
-using ::webrtc::kFakeIPv4NetworkPrefixLength;
-using ::webrtc::kFakeIPv6NetworkPrefixLength;
-}  // namespace rtc
-#endif  // WEBRTC_ALLOW_DEPRECATED_NAMESPACES
 
 #endif  // RTC_BASE_FAKE_NETWORK_H_

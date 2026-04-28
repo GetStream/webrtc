@@ -68,10 +68,8 @@ class RTC_EXPORT EncodedImageCallback {
   // kDroppedByMediaOptimizations - dropped by MediaOptimizations (for rate
   // limiting purposes).
   // kDroppedByEncoder - dropped by encoder's internal rate limiter.
-  // TODO(bugs.webrtc.org/10164): Delete this enum? It duplicates the more
-  // general VideoStreamEncoderObserver::DropReason. Also,
-  // kDroppedByMediaOptimizations is not produced by any encoder, but by
-  // VideoStreamEncoder.
+  // TODO: bugs.webrtc.org/467444018 - Deprecate and remove after a transition
+  // period.
   enum class DropReason : uint8_t {
     kDroppedByMediaOptimizations,
     kDroppedByEncoder
@@ -82,7 +80,22 @@ class RTC_EXPORT EncodedImageCallback {
       const EncodedImage& encoded_image,
       const CodecSpecificInfo* codec_specific_info) = 0;
 
+  // TODO: bugs.webrtc.org/467444018 - Deprecate and remove after a transition
+  // period.
   virtual void OnDroppedFrame(DropReason /* reason */) {}
+
+  // Callback function called when an encoder has decided to drop a frame.
+  // This is usually either because of rate control buffer overflow or because
+  // the rate allocation of a given spatial index is set to zero, disabling it.
+  // The `rtp_timestamp` parameter uniquely identifier the temporal unit and
+  // thus the corresponding input frame. If `is_end_of_temporal_unit` is true,
+  // it means that no further callback to neither `OnEncodedImage()` nor
+  // `OnFrameDropped()` is expected for this RTP timestamp.
+  // TODO: bugs.webrtc.org/467444018 - Make pure virtual when all implementors
+  // have had time to update.
+  virtual void OnFrameDropped(uint32_t rtp_timestamp,
+                              int spatial_id,
+                              bool is_end_of_temporal_unit) {}
 };
 
 class RTC_EXPORT VideoEncoder {
@@ -150,6 +163,12 @@ class RTC_EXPORT VideoEncoder {
     bool operator!=(const ResolutionBitrateLimits& rhs) const {
       return !(*this == rhs);
     }
+  };
+
+  struct RTC_EXPORT Resolution {
+    Resolution(int width, int height) : width(width), height(height) {}
+    int width = 0;
+    int height = 0;
   };
 
   // Struct containing metadata about the encoder implementing this interface.
@@ -266,6 +285,14 @@ class RTC_EXPORT VideoEncoder {
     // configuration. This may be used to determine if the encoder has reached
     // its target video quality for static screenshare content.
     std::optional<int> min_qp;
+
+    // Maximum resolution accessed by software encoder,
+    // i.e. resolution needed for cpu readable image.
+    // This has to be set by software encoders.
+    // If it's not set, mapping will happen during the
+    // encode time, otherwise more optimal implementation
+    // specific path may be used.
+    std::optional<Resolution> mapped_resolution;
   };
 
   struct RTC_EXPORT RateControlParameters {

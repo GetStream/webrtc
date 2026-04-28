@@ -23,14 +23,13 @@
 namespace webrtc {
 namespace {
 
+using rtcp::Nack;
 using ::testing::_;
 using ::testing::ElementsAre;
 using ::testing::ElementsAreArray;
-using ::testing::Invoke;
 using ::testing::make_tuple;
 using ::testing::MockFunction;
 using ::testing::UnorderedElementsAreArray;
-using ::webrtc::rtcp::Nack;
 
 constexpr uint32_t kSenderSsrc = 0x12345678;
 constexpr uint32_t kRemoteSsrc = 0x23456789;
@@ -136,20 +135,20 @@ TEST(RtcpPacketNackTest, CreateFragmented) {
 
   MockFunction<void(ArrayView<const uint8_t>)> callback;
   EXPECT_CALL(callback, Call(_))
-      .WillOnce(Invoke([&](ArrayView<const uint8_t> packet) {
+      .WillOnce([&](ArrayView<const uint8_t> packet) {
         Nack nack;
         EXPECT_TRUE(test::ParseSinglePacket(packet, &nack));
         EXPECT_EQ(kSenderSsrc, nack.sender_ssrc());
         EXPECT_EQ(kRemoteSsrc, nack.media_ssrc());
         EXPECT_THAT(nack.packet_ids(), ElementsAre(1, 100, 200));
-      }))
-      .WillOnce(Invoke([&](ArrayView<const uint8_t> packet) {
+      })
+      .WillOnce([&](ArrayView<const uint8_t> packet) {
         Nack nack;
         EXPECT_TRUE(test::ParseSinglePacket(packet, &nack));
         EXPECT_EQ(kSenderSsrc, nack.sender_ssrc());
         EXPECT_EQ(kRemoteSsrc, nack.media_ssrc());
         EXPECT_THAT(nack.packet_ids(), ElementsAre(300, 400));
-      }));
+      });
 
   EXPECT_TRUE(nack.Build(kBufferSize, callback.AsStdFunction()));
 }

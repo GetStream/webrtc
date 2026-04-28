@@ -8,7 +8,9 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "rtc_base/ref_count.h"
+#include <jni.h>
+
+#include "api/ref_count.h"
 #include "sdk/android/generated_base_jni/JniCommon_jni.h"
 #include "sdk/android/src/jni/jni_helpers.h"
 #include "third_party/jni_zero/jni_zero.h"
@@ -35,7 +37,7 @@ static jni_zero::ScopedJavaLocalRef<jobject> JNI_JniCommon_AllocateByteBuffer(
 
 static void JNI_JniCommon_FreeByteBuffer(
     JNIEnv* jni,
-    const jni_zero::JavaParamRef<jobject>& byte_buffer) {
+    const jni_zero::JavaRef<jobject>& byte_buffer) {
   void* data = jni->GetDirectBufferAddress(byte_buffer.obj());
   ::operator delete(data);
 }

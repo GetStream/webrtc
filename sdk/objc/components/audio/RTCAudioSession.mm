@@ -241,9 +241,7 @@ ABSL_CONST_INIT thread_local bool mutex_locked = false;
     return;
   }
   @synchronized(self) {
-    _delegates.erase(
-        std::remove(_delegates.begin(), _delegates.end(), delegate),
-        _delegates.end());
+    std::erase(_delegates, delegate);
     [self removeZeroedDelegates];
   }
 }
@@ -662,11 +660,8 @@ ABSL_CONST_INIT thread_local bool mutex_locked = false;
 
 - (void)removeZeroedDelegates {
   @synchronized(self) {
-    _delegates.erase(
-        std::remove_if(_delegates.begin(),
-                       _delegates.end(),
-                       [](id delegate) -> bool { return delegate == nil; }),
-        _delegates.end());
+    std::erase_if(_delegates,
+                  [](id delegate) -> bool { return delegate == nil; });
   }
 }
 

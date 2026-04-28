@@ -42,7 +42,6 @@
 #include "rtc_base/socket_address.h"
 #include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/task_queue_for_test.h"
-#include "rtc_base/third_party/sigslot/sigslot.h"
 #include "rtc_base/thread.h"
 #include "rtc_base/thread_annotations.h"
 #include "test/gmock.h"
@@ -62,11 +61,12 @@ constexpr TimeDelta kNetworkPacketWaitTimeout = TimeDelta::Millis(100);
 constexpr TimeDelta kStatsWaitTimeout = TimeDelta::Seconds(1);
 constexpr int kOverheadIpv4Udp = 20 + 8;
 
-class SocketReader : public sigslot::has_slots<> {
+class SocketReader {
  public:
   explicit SocketReader(Socket* socket, Thread* network_thread)
       : socket_(socket), network_thread_(network_thread) {
-    socket_->SignalReadEvent.connect(this, &SocketReader::OnReadEvent);
+    socket_->SubscribeReadEvent(
+        this, [this](Socket* socket) { OnReadEvent(socket); });
   }
 
   void OnReadEvent(Socket* socket) {
@@ -86,7 +86,7 @@ class SocketReader : public sigslot::has_slots<> {
     return received_count_;
   }
 
-  webrtc::EcnMarking LastEcnMarking() const {
+  EcnMarking LastEcnMarking() const {
     MutexLock lock(&lock_);
     return last_ecn_mark_;
   }
@@ -95,7 +95,7 @@ class SocketReader : public sigslot::has_slots<> {
   Socket* const socket_;
   Thread* const network_thread_;
   Buffer payload_;
-  webrtc::EcnMarking last_ecn_mark_;
+  EcnMarking last_ecn_mark_;
 
   mutable Mutex lock_;
   int received_count_ RTC_GUARDED_BY(lock_) = 0;
@@ -440,7 +440,7 @@ TEST(NetworkEmulationManagerTest, EcnMarkingIsPropagated) {
   network_manager.time_controller()->AdvanceTime(TimeDelta::Seconds(1));
 
   EXPECT_EQ(r2.ReceivedCount(), 1);
-  EXPECT_EQ(r2.LastEcnMarking(), webrtc::EcnMarking::kEct1);
+  EXPECT_EQ(r2.LastEcnMarking(), EcnMarking::kEct1);
 
   std::atomic<int> received_stats_count{0};
   nt1->GetStats([&](EmulatedNetworkStats st) {

@@ -10,21 +10,27 @@
 
 #include "modules/desktop_capture/linux/x11/screen_capturer_x11.h"
 
+#include <X11/X.h>
 #include <X11/Xlib.h>
 #include <X11/extensions/Xdamage.h>
 #include <X11/extensions/Xfixes.h>
+#include <X11/extensions/Xrandr.h>
 #include <X11/extensions/damagewire.h>
+#include <X11/extensions/randr.h>
 #include <dlfcn.h>
-#include <stdint.h>
-#include <string.h>
 
+#include <cstdint>
+#include <cstring>
 #include <memory>
 #include <utility>
 
+#include "media/base/video_common.h"
 #include "modules/desktop_capture/desktop_capture_options.h"
+#include "modules/desktop_capture/desktop_capture_types.h"
 #include "modules/desktop_capture/desktop_capturer.h"
 #include "modules/desktop_capture/desktop_frame.h"
 #include "modules/desktop_capture/desktop_geometry.h"
+#include "modules/desktop_capture/desktop_region.h"
 #include "modules/desktop_capture/linux/x11/x_server_pixel_buffer.h"
 #include "modules/desktop_capture/screen_capture_frame_queue.h"
 #include "modules/desktop_capture/screen_capturer_helper.h"
@@ -67,8 +73,8 @@ bool ScreenCapturerX11::Init(const DesktopCaptureOptions& options) {
     return false;
   }
 
-  gc_ = XCreateGC(display(), root_window_, 0, NULL);
-  if (gc_ == NULL) {
+  gc_ = XCreateGC(display(), root_window_, 0, nullptr);
+  if (gc_ == nullptr) {
     RTC_LOG(LS_ERROR) << "Unable to get graphics context";
     DeinitXlib();
     return false;
@@ -133,7 +139,7 @@ void ScreenCapturerX11::InitXDamage() {
   }
 
   // Create an XFixes server-side region to collate damage into.
-  damage_region_ = XFixesCreateRegion(display(), 0, 0);
+  damage_region_ = XFixesCreateRegion(display(), nullptr, 0);
   if (!damage_region_) {
     XDamageDestroy(display(), damage_handle_);
     RTC_LOG(LS_ERROR) << "Unable to create XFixes region.";
@@ -264,7 +270,7 @@ void ScreenCapturerX11::CaptureFrame() {
   // may still be reading from them.
   if (!queue_.current_frame()) {
     std::unique_ptr<DesktopFrame> frame(
-        new BasicDesktopFrame(selected_monitor_rect_.size()));
+        new BasicDesktopFrame(selected_monitor_rect_.size(), FOURCC_ARGB));
 
     // We set the top-left of the frame so the mouse cursor will be composited
     // properly, and our frame buffer will not be overrun while blitting.
@@ -287,7 +293,7 @@ void ScreenCapturerX11::CaptureFrame() {
 }
 
 bool ScreenCapturerX11::GetSourceList(SourceList* sources) {
-  RTC_DCHECK(sources->size() == 0);
+  RTC_DCHECK(sources->empty());
   if (!use_randr_) {
     sources->push_back({});
     return true;
@@ -302,7 +308,8 @@ bool ScreenCapturerX11::GetSourceList(SourceList* sources) {
     char* monitor_title = XGetAtomName(display(), m.name);
 
     // Note name is an X11 Atom used to id the monitor.
-    sources->push_back({static_cast<SourceId>(m.name), monitor_title});
+    sources->push_back(
+        {.id = static_cast<SourceId>(m.name), .title = monitor_title});
     XFree(monitor_title);
   }
 
@@ -506,8 +513,13 @@ std::unique_ptr<DesktopCapturer> ScreenCapturerX11::CreateRawScreenCapturer(
   if (!options.x_display())
     return nullptr;
 
+  RTC_LOG(LS_INFO) << "ScreenCapturerX11::CreateRawScreenCapturer creates "
+                      "DesktopCapturer of type ScreenCapturerX11";
   std::unique_ptr<ScreenCapturerX11> capturer(new ScreenCapturerX11());
-  if (!capturer.get()->Init(options)) {
+  if (!capturer->Init(options)) {
+    RTC_LOG(LS_INFO)
+        << "ScreenCapturerX11::CreateRawScreenCapturer "
+           "DesktopCapturer is null because it can not be initiated";
     return nullptr;
   }
 

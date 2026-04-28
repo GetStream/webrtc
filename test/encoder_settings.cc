@@ -10,11 +10,20 @@
 #include "test/encoder_settings.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <string>
+#include <vector>
 
+#include "api/field_trials_view.h"
+#include "api/make_ref_counted.h"
 #include "api/scoped_refptr.h"
+#include "api/video/video_codec_type.h"
 #include "api/video_codecs/sdp_video_format.h"
 #include "call/rtp_config.h"
+#include "call/video_receive_stream.h"
+#include "call/video_send_stream.h"
 #include "rtc_base/checks.h"
+#include "video/config/video_encoder_config.h"
 
 namespace webrtc {
 namespace test {
@@ -29,7 +38,7 @@ const int DefaultVideoStreamFactory::kDefaultMinBitratePerStream[] = {
 std::vector<VideoStream> CreateVideoStreams(
     int width,
     int height,
-    const webrtc::VideoEncoderConfig& encoder_config) {
+    const VideoEncoderConfig& encoder_config) {
   RTC_DCHECK(encoder_config.number_of_streams <=
              DefaultVideoStreamFactory::kMaxNumberOfStreams);
 
@@ -109,7 +118,7 @@ std::vector<VideoStream> DefaultVideoStreamFactory::CreateEncoderStreams(
     const FieldTrialsView& /*field_trials*/,
     int frame_width,
     int frame_height,
-    const webrtc::VideoEncoderConfig& encoder_config) {
+    const VideoEncoderConfig& encoder_config) {
   return CreateVideoStreams(frame_width, frame_height, encoder_config);
 }
 

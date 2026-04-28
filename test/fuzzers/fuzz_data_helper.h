@@ -11,10 +11,15 @@
 #ifndef TEST_FUZZERS_FUZZ_DATA_HELPER_H_
 #define TEST_FUZZERS_FUZZ_DATA_HELPER_H_
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <limits>
+#include <type_traits>
 
 #include "api/array_view.h"
 #include "modules/rtp_rtcp/source/byte_io.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 namespace test {
@@ -68,6 +73,15 @@ class FuzzDataHelper {
     // Read an index between 0 and select_from.size() - 1 from the fuzzer data.
     uint8_t index = ReadOrDefaultValue<uint8_t>(0) % N;
     return select_from[index];
+  }
+
+  // Same as `SelectOneOf` but move the selected item from the array.
+  template <typename T, size_t N>
+  T MoveOneOf(T (&select_from)[N]) {
+    static_assert(N <= std::numeric_limits<uint8_t>::max(), "");
+    // Read an index between 0 and select_from.size() - 1 from the fuzzer data.
+    uint8_t index = ReadOrDefaultValue<uint8_t>(0) % N;
+    return std::move(select_from[index]);
   }
 
   ArrayView<const uint8_t> ReadByteArray(size_t bytes) {

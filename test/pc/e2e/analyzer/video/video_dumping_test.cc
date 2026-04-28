@@ -11,12 +11,15 @@
 
 #include <stdio.h>
 
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <memory>
-#include <optional>
 #include <string>
 #include <vector>
 
 #include "api/scoped_refptr.h"
+#include "api/test/video/video_frame_writer.h"
 #include "api/video/i420_buffer.h"
 #include "api/video/video_frame.h"
 #include "api/video/video_frame_buffer.h"
@@ -63,11 +66,11 @@ std::vector<uint8_t> AsVector(const uint8_t* data, size_t size) {
   return out;
 }
 
-void AssertFramesEqual(scoped_refptr<webrtc::I420BufferInterface> actual,
+void AssertFramesEqual(scoped_refptr<I420BufferInterface> actual,
                        scoped_refptr<VideoFrameBuffer> expected) {
   ASSERT_THAT(actual->width(), Eq(expected->width()));
   ASSERT_THAT(actual->height(), Eq(expected->height()));
-  scoped_refptr<webrtc::I420BufferInterface> expected_i420 = expected->ToI420();
+  scoped_refptr<I420BufferInterface> expected_i420 = expected->ToI420();
 
   int height = actual->height();
 
@@ -102,10 +105,10 @@ class VideoDumpingTest : public Test {
   ~VideoDumpingTest() override = default;
 
   void SetUp() override {
-    video_filename_ = webrtc::test::TempFilename(webrtc::test::OutputPath(),
-                                                 "video_dumping_test");
-    ids_filename_ = webrtc::test::TempFilename(webrtc::test::OutputPath(),
-                                               "video_dumping_test");
+    video_filename_ =
+        test::TempFilename(test::OutputPath(), "video_dumping_test");
+    ids_filename_ =
+        test::TempFilename(test::OutputPath(), "video_dumping_test");
   }
 
   void TearDown() override {

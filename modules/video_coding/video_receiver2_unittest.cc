@@ -14,6 +14,7 @@
 #include <memory>
 #include <utility>
 
+#include "api/field_trials.h"
 #include "api/test/mock_video_decoder.h"
 #include "api/units/timestamp.h"
 #include "api/video/encoded_frame.h"
@@ -24,9 +25,9 @@
 #include "modules/video_coding/include/video_error_codes.h"
 #include "modules/video_coding/timing/timing.h"
 #include "system_wrappers/include/clock.h"
+#include "test/create_test_field_trials.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
-#include "test/scoped_key_value_config.h"
 
 namespace webrtc {
 namespace {
@@ -54,7 +55,7 @@ class TestEncodedFrame : public EncodedFrame {
     SetPacketInfos(CreatePacketInfos(3));
   }
 
-  void SetReceivedTime(webrtc::Timestamp received_time) {
+  void SetReceivedTime(Timestamp received_time) {
     received_time_ = received_time;
   }
 
@@ -63,7 +64,7 @@ class TestEncodedFrame : public EncodedFrame {
   int64_t RenderTime() const override { return _renderTimeMs; }
 
  private:
-  webrtc::Timestamp received_time_ = webrtc::Timestamp::Millis(0);
+  Timestamp received_time_ = Timestamp::Millis(0);
 };
 
 class VideoReceiver2Test : public ::testing::Test {
@@ -82,7 +83,7 @@ class VideoReceiver2Test : public ::testing::Test {
     receiver_.RegisterReceiveCodec(payload_type, settings);
   }
 
-  test::ScopedKeyValueConfig field_trials_;
+  FieldTrials field_trials_ = CreateTestFieldTrials();
   SimulatedClock clock_{Timestamp::Millis(1337)};
   VCMTiming timing_{&clock_, field_trials_};
   NiceMock<MockVCMReceiveCallback> receive_callback_;

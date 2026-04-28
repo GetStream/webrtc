@@ -27,6 +27,9 @@ namespace webrtc {
 
 namespace {
 
+// TODO(peah): Rationale
+static_assert(AudioDecoder::kMaxNumberOfChannels <= 255, "");
+
 class OldStyleEncodedFrame final : public AudioDecoder::EncodedAudioFrame {
  public:
   OldStyleEncodedFrame(AudioDecoder* decoder, Buffer&& payload)
@@ -45,7 +48,8 @@ class OldStyleEncodedFrame final : public AudioDecoder::EncodedAudioFrame {
         decoded.size() * sizeof(int16_t), decoded.data(), &speech_type);
     return ret < 0 ? std::nullopt
                    : std::optional<DecodeResult>(
-                         {static_cast<size_t>(ret), speech_type});
+                         {.num_decoded_samples = static_cast<size_t>(ret),
+                          .speech_type = speech_type});
   }
 
  private:
@@ -171,5 +175,4 @@ AudioDecoder::SpeechType AudioDecoder::ConvertSpeechType(int16_t type) {
   }
 }
 
-constexpr int AudioDecoder::kMaxNumberOfChannels;
 }  // namespace webrtc

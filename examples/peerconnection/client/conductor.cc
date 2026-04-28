@@ -10,20 +10,21 @@
 
 #include "examples/peerconnection/client/conductor.h"
 
-#include <stddef.h>
-
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "absl/base/nullability.h"
 #include "absl/memory/memory.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "api/audio_codecs/builtin_audio_encoder_factory.h"
 #include "api/audio_options.h"
-#include "api/create_peerconnection_factory.h"
+#include "api/create_modular_peer_connection_factory.h"
 #include "api/enable_media.h"
+#include "api/environment/environment.h"
 #include "api/jsep.h"
 #include "api/make_ref_counted.h"
 #include "api/media_stream_interface.h"
@@ -32,7 +33,6 @@
 #include "api/rtp_receiver_interface.h"
 #include "api/rtp_sender_interface.h"
 #include "api/scoped_refptr.h"
-#include "api/task_queue/default_task_queue_factory.h"
 #include "api/task_queue/task_queue_factory.h"
 #include "api/test/create_frame_generator.h"
 #include "api/video/video_frame.h"
@@ -59,6 +59,7 @@
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/strings/json.h"
+#include "rtc_base/thread.h"
 #include "system_wrappers/include/clock.h"
 #include "test/frame_generator_capturer.h"
 #include "test/platform_video_capturer.h"
@@ -82,8 +83,8 @@ class DummySetSessionDescriptionObserver
   static webrtc::scoped_refptr<DummySetSessionDescriptionObserver> Create() {
     return webrtc::make_ref_counted<DummySetSessionDescriptionObserver>();
   }
-  virtual void OnSuccess() { RTC_LOG(LS_INFO) << __FUNCTION__; }
-  virtual void OnFailure(webrtc::RTCError error) {
+  void OnSuccess() override { RTC_LOG(LS_INFO) << __FUNCTION__; }
+  void OnFailure(webrtc::RTCError error) override {
     RTC_LOG(LS_INFO) << __FUNCTION__ << " " << ToString(error.type()) << ": "
                      << error.message();
   }
@@ -96,17 +97,18 @@ std::unique_ptr<TestVideoCapturer> CreateCapturer(
   const size_t kFps = 30;
   std::unique_ptr<webrtc::VideoCaptureModule::DeviceInfo> info(
       webrtc::VideoCaptureFactory::CreateDeviceInfo());
-  if (!info) {
-    return nullptr;
-  }
-  int num_devices = info->NumberOfDevices();
-  for (int i = 0; i < num_devices; ++i) {
-    std::unique_ptr<TestVideoCapturer> capturer =
-        webrtc::test::CreateVideoCapturer(kWidth, kHeight, kFps, i);
-    if (capturer) {
-      return capturer;
+  if (info) {
+    int num_devices = info->NumberOfDevices();
+    for (int i = 0; i < num_devices; ++i) {
+      std::unique_ptr<TestVideoCapturer> capturer =
+          webrtc::test::CreateVideoCapturer(kWidth, kHeight, kFps, i);
+      if (capturer) {
+        return capturer;
+      }
     }
   }
+  RTC_LOG(LS_WARNING)
+      << "No video capture device found; using synthetic video.";
   auto frame_generator = webrtc::test::CreateSquareFrameGenerator(
       kWidth, kHeight, std::nullopt, std::nullopt);
   return std::make_unique<webrtc::test::FrameGeneratorCapturer>(
@@ -130,6 +132,8 @@ class CapturerTrackSource : public webrtc::VideoTrackSource {
   explicit CapturerTrackSource(std::unique_ptr<TestVideoCapturer> capturer)
       : VideoTrackSource(/*remote=*/false), capturer_(std::move(capturer)) {}
 
+  ~CapturerTrackSource() override = default;
+
  private:
   webrtc::VideoSourceInterface<webrtc::VideoFrame>* source() override {
     return capturer_.get();
@@ -140,8 +144,14 @@ class CapturerTrackSource : public webrtc::VideoTrackSource {
 
 }  // namespace
 
-Conductor::Conductor(PeerConnectionClient* client, MainWindow* main_wnd)
-    : peer_id_(-1), loopback_(false), client_(client), main_wnd_(main_wnd) {
+Conductor::Conductor(const webrtc::Environment& env,
+                     PeerConnectionClient* absl_nonnull client,
+                     MainWindow* absl_nonnull main_wnd)
+    : peer_id_(-1),
+      loopback_(false),
+      env_(env),
+      client_(client),
+      main_wnd_(main_wnd) {
   client_->RegisterObserver(this);
   main_wnd->RegisterObserver(this);
 }
@@ -163,14 +173,14 @@ bool Conductor::InitializePeerConnection() {
   RTC_DCHECK(!peer_connection_factory_);
   RTC_DCHECK(!peer_connection_);
 
-  if (!signaling_thread_.get()) {
+  if (!signaling_thread_) {
     signaling_thread_ = webrtc::Thread::CreateWithSocketServer();
     signaling_thread_->Start();
   }
 
   webrtc::PeerConnectionFactoryDependencies deps;
   deps.signaling_thread = signaling_thread_.get();
-  deps.task_queue_factory = webrtc::CreateDefaultTaskQueueFactory(),
+  deps.env = env_,
   deps.audio_encoder_factory = webrtc::CreateBuiltinAudioEncoderFactory();
   deps.audio_decoder_factory = webrtc::CreateBuiltinAudioDecoderFactory();
   deps.video_encoder_factory =
@@ -186,7 +196,6 @@ bool Conductor::InitializePeerConnection() {
           webrtc::OpenH264DecoderTemplateAdapter,
           webrtc::Dav1dDecoderTemplateAdapter>>();
   webrtc::EnableMedia(deps);
-  task_queue_factory_ = deps.task_queue_factory.get();
   peer_connection_factory_ =
       webrtc::CreateModularPeerConnectionFactory(std::move(deps));
 
@@ -253,6 +262,7 @@ void Conductor::DeletePeerConnection() {
   main_wnd_->StopRemoteRenderer();
   peer_connection_ = nullptr;
   peer_connection_factory_ = nullptr;
+  local_video_source_ = nullptr;
   peer_id_ = -1;
   loopback_ = false;
 }
@@ -284,7 +294,7 @@ void Conductor::OnRemoveTrack(
   main_wnd_->QueueUIThreadCallback(TRACK_REMOVED, receiver->track().release());
 }
 
-void Conductor::OnIceCandidate(const webrtc::IceCandidateInterface* candidate) {
+void Conductor::OnIceCandidate(const webrtc::IceCandidate* candidate) {
   RTC_LOG(LS_INFO) << __FUNCTION__ << " " << candidate->sdp_mline_index();
   // For loopback test. To save some connecting delay.
   if (loopback_) {
@@ -297,12 +307,7 @@ void Conductor::OnIceCandidate(const webrtc::IceCandidateInterface* candidate) {
   Json::Value jmessage;
   jmessage[kCandidateSdpMidName] = candidate->sdp_mid();
   jmessage[kCandidateSdpMlineIndexName] = candidate->sdp_mline_index();
-  std::string sdp;
-  if (!candidate->ToString(&sdp)) {
-    RTC_LOG(LS_ERROR) << "Failed to serialize candidate";
-    return;
-  }
-  jmessage[kCandidateSdpName] = sdp;
+  jmessage[kCandidateSdpName] = candidate->ToString();
 
   Json::StreamWriterBuilder factory;
   SendMessage(Json::writeString(factory, jmessage));
@@ -337,7 +342,7 @@ void Conductor::OnPeerDisconnected(int id) {
   RTC_LOG(LS_INFO) << __FUNCTION__;
   if (id == peer_id_) {
     RTC_LOG(LS_INFO) << "Our peer disconnected";
-    main_wnd_->QueueUIThreadCallback(PEER_CONNECTION_CLOSED, NULL);
+    main_wnd_->QueueUIThreadCallback(PEER_CONNECTION_CLOSED, nullptr);
   } else {
     // Refresh the list if we're showing it.
     if (main_wnd_->current_ui() == MainWindow::LIST_PEERS)
@@ -349,7 +354,7 @@ void Conductor::OnMessageFromPeer(int peer_id, const std::string& message) {
   RTC_DCHECK(peer_id_ == peer_id || peer_id_ == -1);
   RTC_DCHECK(!message.empty());
 
-  if (!peer_connection_.get()) {
+  if (!peer_connection_) {
     RTC_DCHECK(peer_id_ == -1);
     peer_id_ = peer_id;
 
@@ -436,9 +441,9 @@ void Conductor::OnMessageFromPeer(int peer_id, const std::string& message) {
       return;
     }
     webrtc::SdpParseError error;
-    std::unique_ptr<webrtc::IceCandidateInterface> candidate(
+    std::unique_ptr<webrtc::IceCandidate> candidate(
         webrtc::CreateIceCandidate(sdp_mid, sdp_mlineindex, sdp, &error));
-    if (!candidate.get()) {
+    if (!candidate) {
       RTC_LOG(LS_WARNING) << "Can't parse received candidate message. "
                              "SdpParseError was: "
                           << error.description;
@@ -454,7 +459,7 @@ void Conductor::OnMessageFromPeer(int peer_id, const std::string& message) {
 
 void Conductor::OnMessageSent(int err) {
   // Process the next pending message if any.
-  main_wnd_->QueueUIThreadCallback(SEND_MESSAGE_TO_PEER, NULL);
+  main_wnd_->QueueUIThreadCallback(SEND_MESSAGE_TO_PEER, nullptr);
 }
 
 void Conductor::OnServerConnectionFailure() {
@@ -482,7 +487,7 @@ void Conductor::ConnectToPeer(int peer_id) {
   RTC_DCHECK(peer_id_ == -1);
   RTC_DCHECK(peer_id != -1);
 
-  if (peer_connection_.get()) {
+  if (peer_connection_) {
     main_wnd_->MessageBox(
         "Error", "We only support connecting to one peer at a time", true);
     return;
@@ -513,11 +518,11 @@ void Conductor::AddTracks() {
                       << result_or_error.error().message();
   }
 
-  webrtc::scoped_refptr<CapturerTrackSource> video_device =
-      CapturerTrackSource::Create(*task_queue_factory_);
-  if (video_device) {
+  local_video_source_ = CapturerTrackSource::Create(env_.task_queue_factory());
+  if (local_video_source_) {
     webrtc::scoped_refptr<webrtc::VideoTrackInterface> video_track_(
-        peer_connection_factory_->CreateVideoTrack(video_device, kVideoLabel));
+        peer_connection_factory_->CreateVideoTrack(local_video_source_,
+                                                   kVideoLabel));
     main_wnd_->StartLocalRenderer(video_track_.get());
 
     result_or_error = peer_connection_->AddTrack(video_track_, {kStreamId});
@@ -526,7 +531,8 @@ void Conductor::AddTracks() {
                         << result_or_error.error().message();
     }
   } else {
-    RTC_LOG(LS_ERROR) << "OpenVideoCaptureDevice failed";
+    RTC_LOG(LS_WARNING)
+        << "No local video track; proceeding without local video";
   }
 
   main_wnd_->SwitchToStreamingUI();
@@ -534,7 +540,7 @@ void Conductor::AddTracks() {
 
 void Conductor::DisconnectFromCurrentPeer() {
   RTC_LOG(LS_INFO) << __FUNCTION__;
-  if (peer_connection_.get()) {
+  if (peer_connection_) {
     client_->SendHangUp(peer_id_);
     DeletePeerConnection();
   }
@@ -581,7 +587,7 @@ void Conductor::UIThreadCallback(int msg_id, void* data) {
         delete msg;
       }
 
-      if (!peer_connection_.get())
+      if (!peer_connection_)
         peer_id_ = -1;
 
       break;
@@ -600,6 +606,9 @@ void Conductor::UIThreadCallback(int msg_id, void* data) {
     case TRACK_REMOVED: {
       // Remote peer stopped sending a track.
       auto* track = reinterpret_cast<webrtc::MediaStreamTrackInterface*>(data);
+      // Ensure we detach our renderer before releasing the track to avoid
+      // referencing a destroyed track from the renderer.
+      main_wnd_->StopRemoteRenderer();
       track->Release();
       break;
     }

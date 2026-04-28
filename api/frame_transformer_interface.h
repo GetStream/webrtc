@@ -22,7 +22,7 @@
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
 #include "api/video/video_frame_metadata.h"
-#include "modules/rtp_rtcp/source/rtp_video_header.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/system/rtc_export.h"
 
 namespace webrtc {
@@ -52,6 +52,8 @@ class TransformableFrameInterface {
   virtual void SetData(ArrayView<const uint8_t> data) = 0;
 
   virtual uint8_t GetPayloadType() const = 0;
+  virtual bool CanSetPayloadType() const { return false; }
+  virtual void SetPayloadType(uint8_t payload_type) { RTC_DCHECK_NOTREACHED(); }
   virtual uint32_t GetSsrc() const = 0;
   virtual uint32_t GetTimestamp() const = 0;
   virtual void SetRTPTimestamp(uint32_t timestamp) = 0;
@@ -86,11 +88,17 @@ class TransformableFrameInterface {
   virtual std::optional<Timestamp> ReceiveTime() const = 0;
 
   // Timestamp at which the frame was captured in the capturer system.
-  // The timestamp is expressed in the capturer system's clock relative to the
-  // NTP epoch (January 1st 1970 00:00 UTC)
-  // Accessible only if the absolute capture timestamp header extension is
+  // For receiver frames, the timestamp is expressed in the capturer system's
+  // clock relative to the NTP epoch (January 1st 1970 00:00 UTC) and is
+  // available only if the absolute capture timestamp header extension is
   // enabled.
+  // For sender frames, the timestamp is expressed relative to the local
+  // system clock's default epoch.
   virtual std::optional<Timestamp> CaptureTime() const = 0;
+  virtual bool CanSetCaptureTime() const { return false; }
+  virtual void SetCaptureTime(std::optional<Timestamp> capture_time) {
+    RTC_DCHECK_NOTREACHED();
+  }
 
   // Offset between the sender system's clock and the capturer system's clock.
   // Can be used to express the capture time in the local system's clock as
@@ -104,21 +112,18 @@ class TransformableFrameInterface {
 class TransformableVideoFrameInterface : public TransformableFrameInterface {
  public:
   RTC_EXPORT explicit TransformableVideoFrameInterface(Passkey passkey);
-  virtual ~TransformableVideoFrameInterface() = default;
+  ~TransformableVideoFrameInterface() override = default;
   virtual bool IsKeyFrame() const = 0;
-
+  virtual std::optional<std::string> Rid() const { return std::nullopt; }
   virtual VideoFrameMetadata Metadata() const = 0;
-
   virtual void SetMetadata(const VideoFrameMetadata&) = 0;
-
-  virtual const RTPVideoHeader& header () const = 0;
 };
 
 // Extends the TransformableFrameInterface to expose audio-specific information.
 class TransformableAudioFrameInterface : public TransformableFrameInterface {
  public:
   RTC_EXPORT explicit TransformableAudioFrameInterface(Passkey passkey);
-  virtual ~TransformableAudioFrameInterface() = default;
+  ~TransformableAudioFrameInterface() override = default;
 
   virtual ArrayView<const uint32_t> GetContributingSources() const = 0;
 
@@ -137,6 +142,10 @@ class TransformableAudioFrameInterface : public TransformableFrameInterface {
   // dBov. 127 represents digital silence. Only present on remote frames if
   // the audio level header extension was included.
   virtual std::optional<uint8_t> AudioLevel() const = 0;
+  virtual bool CanSetAudioLevel() const { return false; }
+  virtual void SetAudioLevel(std::optional<uint8_t> audio_level_dbov) {
+    RTC_DCHECK_NOTREACHED();
+  }
 };
 
 // Objects implement this interface to be notified with the transformed frame.

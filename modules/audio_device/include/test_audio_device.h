@@ -10,18 +10,15 @@
 #ifndef MODULES_AUDIO_DEVICE_INCLUDE_TEST_AUDIO_DEVICE_H_
 #define MODULES_AUDIO_DEVICE_INCLUDE_TEST_AUDIO_DEVICE_H_
 
-#include <stddef.h>
-#include <stdint.h>
-
+#include <cstddef>
+#include <cstdint>
 #include <memory>
-#include <string>
 
 #include "absl/strings/string_view.h"
 #include "api/array_view.h"
 #include "api/audio/audio_device.h"
-#include "api/audio/audio_device_defines.h"
+#include "api/environment/environment.h"
 #include "api/scoped_refptr.h"
-#include "api/task_queue/task_queue_factory.h"
 #include "rtc_base/buffer.h"
 
 namespace webrtc {
@@ -82,7 +79,7 @@ class TestAudioDeviceModule {
   // played out. Can be nullptr if this device is never used for playing.
   // Use one of the Create... functions to get these instances.
   static scoped_refptr<AudioDeviceModule> Create(
-      TaskQueueFactory* task_queue_factory,
+      const Environment& env,
       std::unique_ptr<Capturer> capturer,
       std::unique_ptr<Renderer> renderer,
       float speed = 1);

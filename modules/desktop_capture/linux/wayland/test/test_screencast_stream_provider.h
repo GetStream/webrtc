@@ -12,11 +12,15 @@
 #define MODULES_DESKTOP_CAPTURE_LINUX_WAYLAND_TEST_TEST_SCREENCAST_STREAM_PROVIDER_H_
 
 #include <pipewire/pipewire.h>
-#include <spa/param/video/format-utils.h>
+#include <spa/param/video/raw.h>
+#include <spa/utils/hook.h>
+
+#include <cstdint>
+#include <memory>
 
 #include "modules/desktop_capture/linux/wayland/screencast_stream_utils.h"
 #include "modules/desktop_capture/rgba_color.h"
-#include "rtc_base/random.h"
+#include "modules/portal/pipewire_utils.h"
 
 namespace webrtc {
 
@@ -59,6 +63,7 @@ class TestScreenCastStreamProvider {
   uint32_t pw_node_id_ = 0;
 
   // PipeWire types
+  std::unique_ptr<PipeWireInitializer> pw_initializer_;
   struct pw_context* pw_context_ = nullptr;
   struct pw_core* pw_core_ = nullptr;
   struct pw_stream* pw_stream_ = nullptr;
