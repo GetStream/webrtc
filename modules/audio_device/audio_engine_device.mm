@@ -1064,9 +1064,42 @@ int32_t AudioEngineDevice::RegisterAudioCallback(AudioTransport* audioCallback) 
   LOGI() << "RegisterAudioCallback";
   RTC_DCHECK_RUN_ON(thread_);
   RTC_DCHECK(audio_device_buffer_ != nullptr);
-  RTC_DCHECK(audioCallback != nullptr);
 
-  return audio_device_buffer_->RegisterAudioCallback(audioCallback);
+  const bool was_playing = audio_device_buffer_->IsPlaying();
+  const bool was_recording = audio_device_buffer_->IsRecording();
+  const bool needs_restart = was_playing || was_recording;
+  const EngineState previous_state = engine_state_;
+
+  // M145 registers the ADM audio transport after default audio options are
+  // applied. Stream's custom ADM can already be running by then, while
+  // AudioDeviceBuffer rejects callback changes during playout/recording.
+  if (needs_restart) {
+    LOGW() << "RegisterAudioCallback while active. Restarting audio buffer.";
+    int32_t stop_result = ModifyEngineState([](EngineState state) -> EngineState {
+      state.output_enabled = false;
+      state.output_running = false;
+      state.input_enabled = false;
+      state.input_running = false;
+      return state;
+    });
+    if (stop_result != 0) {
+      return stop_result;
+    }
+  }
+
+  int32_t result = audio_device_buffer_->RegisterAudioCallback(audioCallback);
+
+  if (needs_restart) {
+    int32_t restart_result =
+        ModifyEngineState([previous_state](EngineState /*state*/) -> EngineState {
+          return previous_state;
+        });
+    if (restart_result != 0) {
+      return restart_result;
+    }
+  }
+
+  return result;
 }
 
 // ----------------------------------------------------------------------------------------------------
