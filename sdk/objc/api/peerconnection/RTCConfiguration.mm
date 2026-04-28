@@ -525,9 +525,9 @@
 + (webrtc::KeyType)nativeEncryptionKeyTypeForKeyType:(RTC_OBJC_TYPE(RTCEncryptionKeyType))keyType {
   switch (keyType) {
     case RTC_OBJC_TYPE(RTCEncryptionKeyTypeRSA):
-      return rtc::KT_RSA;
+      return webrtc::KT_RSA;
     case RTC_OBJC_TYPE(RTCEncryptionKeyTypeECDSA):
-      return rtc::KT_ECDSA;
+      return webrtc::KT_ECDSA;
   }
 }
 

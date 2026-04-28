@@ -10,6 +10,7 @@
 
 #include "audio_device_module.h"
 
+#include "api/environment/environment_factory.h"
 #include "api/make_ref_counted.h"
 #include "rtc_base/logging.h"
 
@@ -23,9 +24,16 @@ namespace webrtc {
 
 webrtc::scoped_refptr<AudioDeviceModule> CreateAudioDeviceModule(
     bool bypass_voice_processing) {
+  return CreateAudioDeviceModule(CreateEnvironment(), bypass_voice_processing);
+}
+
+webrtc::scoped_refptr<AudioDeviceModule> CreateAudioDeviceModule(
+    const Environment& env,
+    bool bypass_voice_processing) {
   RTC_DLOG(LS_INFO) << __FUNCTION__;
 #if defined(WEBRTC_IOS)
   return webrtc::make_ref_counted<ios_adm::AudioDeviceModuleIOS>(
+      env,
       bypass_voice_processing,
       /*muted_speech_event_handler=*/nullptr,
       /*error_handler=*/nullptr);
@@ -39,8 +47,18 @@ webrtc::scoped_refptr<AudioDeviceModule> CreateAudioDeviceModule(
 webrtc::scoped_refptr<AudioDeviceModule> CreateMutedDetectAudioDeviceModule(
     AudioDeviceModule::MutedSpeechEventHandler muted_speech_event_handler,
     bool bypass_voice_processing) {
-  RTC_DLOG(LS_INFO) << __FUNCTION__;
-  return CreateMutedDetectAudioDeviceModule(muted_speech_event_handler,
+  return CreateMutedDetectAudioDeviceModule(CreateEnvironment(),
+                                            muted_speech_event_handler,
+                                            /*error_handler=*/nullptr,
+                                            bypass_voice_processing);
+}
+
+webrtc::scoped_refptr<AudioDeviceModule> CreateMutedDetectAudioDeviceModule(
+    const Environment& env,
+    AudioDeviceModule::MutedSpeechEventHandler muted_speech_event_handler,
+    bool bypass_voice_processing) {
+  return CreateMutedDetectAudioDeviceModule(env,
+                                            muted_speech_event_handler,
                                             /*error_handler=*/nullptr,
                                             bypass_voice_processing);
 }
@@ -49,10 +67,21 @@ webrtc::scoped_refptr<AudioDeviceModule> CreateMutedDetectAudioDeviceModule(
     AudioDeviceModule::MutedSpeechEventHandler muted_speech_event_handler,
     ADMErrorHandler error_handler,
     bool bypass_voice_processing) {
+  return CreateMutedDetectAudioDeviceModule(CreateEnvironment(),
+                                            muted_speech_event_handler,
+                                            error_handler,
+                                            bypass_voice_processing);
+}
+
+webrtc::scoped_refptr<AudioDeviceModule> CreateMutedDetectAudioDeviceModule(
+    const Environment& env,
+    AudioDeviceModule::MutedSpeechEventHandler muted_speech_event_handler,
+    ADMErrorHandler error_handler,
+    bool bypass_voice_processing) {
   RTC_DLOG(LS_INFO) << __FUNCTION__;
 #if defined(WEBRTC_IOS)
   return webrtc::make_ref_counted<ios_adm::AudioDeviceModuleIOS>(
-      bypass_voice_processing, muted_speech_event_handler, error_handler);
+      env, bypass_voice_processing, muted_speech_event_handler, error_handler);
 #else
   RTC_LOG(LS_ERROR)
       << "current platform is not supported => this module will self destruct!";

@@ -27,6 +27,7 @@
 #endif
 #import "RTCH265ProfileLevelId.h"
 
+#include "api/video/video_timing.h"
 #include "common_video/h265/h265_bitstream_parser.h"
 #include "common_video/include/bitrate_adjuster.h"
 #include "libyuv/convert_from.h"
@@ -287,7 +288,8 @@ void compressionOutputCallback(void* encoder, void* params, OSStatus status,
     }
   }
 
-  CMTime presentationTimeStamp = CMTimeMake(frame.timeStampNs / rtc::kNumNanosecsPerMillisec, 1000);
+  CMTime presentationTimeStamp =
+      CMTimeMake(frame.timeStampNs / webrtc::kNumNanosecsPerMillisec, 1000);
   CFDictionaryRef frameProperties = nullptr;
   if (isKeyframeRequired) {
     // Reuse a static dictionary to avoid per-frame allocations.
@@ -303,7 +305,8 @@ void compressionOutputCallback(void* encoder, void* params, OSStatus status,
 
   std::unique_ptr<RTC_OBJC_TYPE(RTCFrameEncodeParams)> encodeParams;
   encodeParams.reset(new RTC_OBJC_TYPE(RTCFrameEncodeParams)(
-      self, _width, _height, frame.timeStampNs / rtc::kNumNanosecsPerMillisec, frame.timeStamp,
+      self, _width, _height,
+      frame.timeStampNs / webrtc::kNumNanosecsPerMillisec, frame.timeStamp,
       frame.rotation));
 
   // Update the bitrate if needed.

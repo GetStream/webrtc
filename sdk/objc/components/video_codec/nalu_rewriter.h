@@ -20,6 +20,7 @@
 
 #include "api/array_view.h"
 #include "common_video/h264/h264_common.h"
+#include "common_video/h265/h265_common.h"
 #include "rtc_base/buffer.h"
 
 using webrtc::H264::NaluIndex;
@@ -30,6 +31,10 @@ namespace webrtc {
 // suitable for RTP. The sample buffer is in avcc format whereas the rtp buffer
 // needs to be in Annex B format. Data is written directly to `annexb_buffer`.
 bool H264CMSampleBufferToAnnexBBuffer(CMSampleBufferRef avcc_sample_buffer,
+                                      bool is_keyframe,
+                                      webrtc::Buffer* annexb_buffer);
+
+bool H265CMSampleBufferToAnnexBBuffer(CMSampleBufferRef hvcc_sample_buffer,
                                       bool is_keyframe,
                                       webrtc::Buffer* annexb_buffer);
 
@@ -44,10 +49,17 @@ bool H264AnnexBBufferToCMSampleBuffer(ArrayView<const uint8_t> annexb_buffer,
                                       CMSampleBufferRef* out_sample_buffer,
                                       CMMemoryPoolRef memory_pool);
 
+bool H265AnnexBBufferToCMSampleBuffer(ArrayView<const uint8_t> annexb_buffer,
+                                      CMVideoFormatDescriptionRef video_format,
+                                      CMSampleBufferRef* out_sample_buffer);
+
 // Returns a video format description created from the sps/pps information in
 // the Annex B buffer. If there is no such information, nullptr is returned.
 // The caller is responsible for releasing the description.
 CMVideoFormatDescriptionRef CreateVideoFormatDescription(
+    ArrayView<const uint8_t> annexb_buffer);
+
+CMVideoFormatDescriptionRef CreateH265VideoFormatDescription(
     ArrayView<const uint8_t> annexb_buffer);
 
 // Helper class for reading NALUs from an RTP Annex B buffer.

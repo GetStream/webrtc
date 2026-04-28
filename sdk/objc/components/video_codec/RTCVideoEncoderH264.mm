@@ -466,7 +466,8 @@ NSUInteger GetMaxSampleRate(
     return WEBRTC_VIDEO_CODEC_UNINITIALIZED;
   }
 
-  CMTime presentationTimeStamp = CMTimeMake(frame.timeStampNs / rtc::kNumNanosecsPerMillisec, 1000);
+  CMTime presentationTimeStamp =
+      CMTimeMake(frame.timeStampNs / webrtc::kNumNanosecsPerMillisec, 1000);
   if (CMTimeCompare(presentationTimeStamp, _previousPresentationTimeStamp) == 0) {
     // Same PTS
     return WEBRTC_VIDEO_CODEC_NO_OUTPUT;
@@ -690,25 +691,8 @@ NSUInteger GetMaxSampleRate(
     if (![compressionSessionPixelFormats
             containsObject:[NSNumber numberWithLong:framePixelFormat]]) {
       resetCompressionSession = YES;
-    } else {
-      NSDictionary *poolAttributes =
-          (__bridge NSDictionary *)CVPixelBufferPoolGetPixelBufferAttributes(
-              pixelBufferPool);
-      id pixelFormats = [poolAttributes
-          objectForKey:(__bridge NSString *)kCVPixelBufferPixelFormatTypeKey];
-      NSArray<NSNumber *> *compressionSessionPixelFormats = nil;
-      if ([pixelFormats isKindOfClass:[NSArray class]]) {
-        compressionSessionPixelFormats = (NSArray *)pixelFormats;
-      } else if ([pixelFormats isKindOfClass:[NSNumber class]]) {
-        compressionSessionPixelFormats = @[ (NSNumber *)pixelFormats ];
-      }
-
-      if (![compressionSessionPixelFormats
-              containsObject:[NSNumber numberWithLong:framePixelFormat]]) {
-        resetCompressionSession = YES;
-        RTC_LOG(LS_INFO) << "Resetting compression session due to non-matching "
-                            "pixel format.";
-      }
+      RTC_LOG(LS_INFO) << "Resetting compression session due to non-matching "
+                          "pixel format.";
     }
   } else {
     resetCompressionSession = YES;

@@ -440,6 +440,7 @@ bool PeerConnectionInterface::RTCConfiguration::operator==(
     bool disable_ipv6_on_wifi;
     int max_ipv6_networks;
     bool disable_link_local_networks;
+    bool enable_any_address_ports;
     std::optional<int> screencast_min_bitrate;
     TcpCandidatePolicy tcp_candidate_policy;
     CandidateNetworkPolicy candidate_network_policy;
@@ -505,6 +506,7 @@ bool PeerConnectionInterface::RTCConfiguration::operator==(
          disable_ipv6_on_wifi == o.disable_ipv6_on_wifi &&
          max_ipv6_networks == o.max_ipv6_networks &&
          disable_link_local_networks == o.disable_link_local_networks &&
+         enable_any_address_ports == o.enable_any_address_ports &&
          screencast_min_bitrate == o.screencast_min_bitrate &&
          ice_candidate_pool_size == o.ice_candidate_pool_size &&
          prune_turn_ports == o.prune_turn_ports &&
@@ -2342,7 +2344,7 @@ PeerConnection::InitializePortAllocator_n(
   }
 
   if (configuration.enable_any_address_ports) {
-    port_allocator_flags |= cricket::PORTALLOCATOR_ENABLE_ANY_ADDRESS_PORTS;
+    port_allocator_flags |= PORTALLOCATOR_ENABLE_ANY_ADDRESS_PORTS;
     RTC_LOG(LS_INFO) << "Enable gathering on any address ports.";
   }
 

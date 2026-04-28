@@ -12,9 +12,9 @@
 
 #include <stddef.h>
 
+#include "api/environment/environment_factory.h"
 #include "api/make_ref_counted.h"
 #include "api/scoped_refptr.h"
-#include "modules/audio_device/audio_device_config.h"  // IWYU pragma: keep
 #include "modules/audio_device/audio_device_generic.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
@@ -96,7 +96,9 @@ scoped_refptr<AudioDeviceModuleForTest> AudioDeviceModule::CreateForTest(
 
   // Create the generic reference counted (platform independent) implementation.
   auto audio_device = webrtc::make_ref_counted<AudioDeviceModuleImpl>(
-      audio_layer, task_queue_factory, bypass_voice_processing);
+      audio_layer,
+      task_queue_factory,
+      bypass_voice_processing);
 
   // Ensure that the current platform is supported.
   if (audio_device->CheckPlatform() == -1) {
@@ -117,15 +119,51 @@ scoped_refptr<AudioDeviceModuleForTest> AudioDeviceModule::CreateForTest(
   return audio_device;
 }
 
+// static
+scoped_refptr<AudioDeviceModuleImpl> AudioDeviceModuleImpl::Create(
+    const Environment& env,
+    AudioLayer audio_layer) {
+  RTC_DLOG(LS_INFO) << __FUNCTION__;
+
+  auto audio_device =
+      webrtc::make_ref_counted<AudioDeviceModuleImpl>(env, audio_layer);
+
+  if (audio_device->CheckPlatform() == -1) {
+    return nullptr;
+  }
+
+  if (audio_device->CreatePlatformSpecificObjects() == -1) {
+    return nullptr;
+  }
+
+  if (audio_device->AttachAudioBuffer() == -1) {
+    return nullptr;
+  }
+
+  return audio_device;
+}
+
 AudioDeviceModuleImpl::AudioDeviceModuleImpl(
     AudioLayer audio_layer,
     TaskQueueFactory* task_queue_factory,
     bool bypass_voice_processing)
     : audio_layer_(audio_layer),
+      env_(CreateEnvironment(task_queue_factory)),
 #if defined(WEBRTC_IOS)
-    bypass_voice_processing_(bypass_voice_processing),
+      bypass_voice_processing_(bypass_voice_processing),
 #endif
-    audio_device_buffer_(task_queue_factory) {
+      audio_device_buffer_(env_) {
+  RTC_DLOG(LS_INFO) << __FUNCTION__;
+}
+
+AudioDeviceModuleImpl::AudioDeviceModuleImpl(const Environment& env,
+                                             AudioLayer audio_layer)
+    : audio_layer_(audio_layer),
+      env_(env),
+#if defined(WEBRTC_IOS)
+      bypass_voice_processing_(false),
+#endif
+      audio_device_buffer_(env_) {
   RTC_DLOG(LS_INFO) << __FUNCTION__;
 }
 
@@ -135,7 +173,8 @@ AudioDeviceModuleImpl::AudioDeviceModuleImpl(
     TaskQueueFactory* task_queue_factory,
     bool create_detached)
     : audio_layer_(audio_layer),
-      audio_device_buffer_(task_queue_factory, create_detached),
+      env_(CreateEnvironment(task_queue_factory)),
+      audio_device_buffer_(env_, create_detached),
       audio_device_(std::move(audio_device)) {
   RTC_DLOG(LS_INFO) << __FUNCTION__;
 }
@@ -249,6 +288,7 @@ int32_t AudioDeviceModuleImpl::CreatePlatformSpecificObjects() {
 #if defined(WEBRTC_IOS)
   if (audio_layer == kPlatformDefaultAudio) {
     audio_device_.reset(new ios_adm::AudioDeviceIOS(
+        env_,
         /*bypass_voice_processing=*/bypass_voice_processing_,
         /*muted_speech_event_handler=*/nullptr,
         /*render_error_handler=*/nullptr));

@@ -458,6 +458,9 @@ class RTC_EXPORT PeerConnectionInterface : public RefCountInterface {
     // from consideration for gathering ICE candidates.
     bool disable_link_local_networks = false;
 
+    // Allow ICE gathering on any-address ports.
+    bool enable_any_address_ports = false;
+
     // Minimum bitrate at which screencast video tracks will be encoded at.
     // This means adding padding bits up to this bitrate, which can help
     // when switching from a static scene to one with motion.

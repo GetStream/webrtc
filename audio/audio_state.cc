@@ -177,6 +177,18 @@ void AudioState::SetStereoChannelSwapping(bool enable) {
   audio_transport_.SetStereoChannelSwapping(enable);
 }
 
+void AudioState::OnMuteStreamChanged() {
+  RTC_DCHECK_RUN_ON(&thread_checker_);
+  auto* adm = config_.audio_device_module.get();
+  if (recording_enabled_ && ShouldRecord()) {
+    if (!adm->Recording() && adm->InitRecording() == 0) {
+      adm->StartRecording();
+    }
+  } else {
+    adm->StopRecording();
+  }
+}
+
 void AudioState::UpdateAudioTransportWithSendingStreams() {
   RTC_DCHECK(thread_checker_.IsCurrent());
   std::vector<AudioSender*> audio_senders;

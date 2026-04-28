@@ -153,10 +153,7 @@ std::string SocketAddress::HostAsSensitiveURIString() const {
 }
 
 std::string SocketAddress::PortAsString() const {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-  return rtc::ToString(port_);
-#pragma clang diagnostic pop
+  return std::to_string(port_);
 }
 
 std::string SocketAddress::ToString() const {

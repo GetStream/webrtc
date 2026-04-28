@@ -301,7 +301,7 @@
   [renderEncoder endEncoding];
 
   if (textureRefsToRetain.count > 0) {
-    [commandBuffer addCompletedHandler:^(__unused id<MTLCommandBuffer> buffer) {
+    [commandBuffer addCompletedHandler:^(__unused id<MTLCommandBuffer> completedBuffer) {
       (void)textureRefsToRetain;
     }];
   }

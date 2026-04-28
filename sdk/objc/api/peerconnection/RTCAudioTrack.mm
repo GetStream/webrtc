@@ -23,7 +23,7 @@
 #include "rtc_base/checks.h"
 
 @implementation RTC_OBJC_TYPE (RTCAudioTrack) {
-  rtc::Thread *_signalingThread;
+  webrtc::Thread *_signalingThread;
   NSMutableArray *_adapters;
 }
 

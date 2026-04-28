@@ -335,6 +335,7 @@ class AudioDeviceIOS : public AudioDeviceGeneric,
   std::atomic<uint64_t> total_playout_delay_ms_;
   std::atomic<double> hw_output_latency_;
   int last_hw_output_latency_update_sample_count_;
+  double machTickUnitsToNanoseconds_;
 };
 }  // namespace ios_adm
 }  // namespace webrtc
