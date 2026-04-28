@@ -5,7 +5,6 @@
 #import "RTCNativeVideoEncoder.h"
 #import "RTCNativeVideoEncoderBuilder+Native.h"
 #import "api/peerconnection/RTCVideoCodecInfo+Private.h"
-#include "api/transport/field_trial_based_config.h"
 
 #include "native/api/video_encoder_factory.h"
 #include "media/engine/simulcast_encoder_adapter.h"
