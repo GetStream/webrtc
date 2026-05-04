@@ -40,5 +40,4 @@ generate_jni("generated_external_jni") {
         "java/src/org/webrtc/NativeExternalAudioProcessingFactory.java",
     ]
     namespace = "external"
-    jni_generator_include = "//sdk/android/src/jni/jni_generator_helper.h"
 }
