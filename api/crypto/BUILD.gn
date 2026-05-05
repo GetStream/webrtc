@@ -24,15 +24,27 @@ rtc_library("frame_crypto_transformer") {
   ]
 
   deps = [
+    "..:array_view",
     "..:frame_transformer_interface",
     "..:make_ref_counted",
     "..:rtc_error",
+    "..:scoped_refptr",
+    "../units:timestamp",
+    "../video:video_frame_metadata",
+    "../../common_video:common_video",
+    "../../modules/rtp_rtcp:rtp_rtcp",
     "../../rtc_base:buffer",
+    "../../rtc_base:byte_buffer",
+    "../../rtc_base:crypto_random",
+    "../../rtc_base:logging",
     "../../rtc_base:threading",
+    "../../rtc_base:timeutils",
     "../../rtc_base/synchronization:mutex",
     "../../rtc_base/system:rtc_export",
     "../task_queue",
     "../task_queue:pending_task_safety_flag",
+    "//third_party/abseil-cpp/absl/container:inlined_vector",
+    "//third_party/abseil-cpp/absl/types:variant",
   ]
 
   if (rtc_build_ssl) {
