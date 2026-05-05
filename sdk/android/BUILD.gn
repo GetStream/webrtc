@@ -185,6 +185,15 @@ if (is_android) {
     ]
   }
 
+  rtc_android_library("environment_java") {
+    visibility = [ "*" ]
+    sources = [ "api/org/webrtc/Environment.java" ]
+    deps = [
+      ":generated_environment_jni_java",
+      "//third_party/androidx:androidx_annotation_annotation_java",
+    ]
+  }
+
   rtc_android_library("audio_api_java") {
     visibility = [ "*" ]
     sources = [
@@ -275,6 +284,7 @@ if (is_android) {
     visibility = [ "*" ]
     sources = [
       "api/org/webrtc/AddIceObserver.java",
+      "api/org/webrtc/AudioFrameProcessor.java",
       "api/org/webrtc/AudioProcessingFactory.java",
       "api/org/webrtc/AudioSource.java",
       "api/org/webrtc/AudioTrack.java",
@@ -343,6 +353,7 @@ if (is_android) {
       ":base_java",
       ":builtin_audio_codecs_java",
       ":default_video_codec_factory_java",
+      ":environment_java",
       ":generated_base_jni_java",
       ":generated_peerconnection_jni_java",
 
@@ -1360,6 +1371,11 @@ if (current_os == "linux" || is_android) {
       "java/util/ArrayList.class",
       "java/lang/Enum.class",
     ]
+  }
+
+  generate_jni("generated_environment_jni") {
+    sources = [ "api/org/webrtc/Environment.java" ]
+    namespace = "webrtc::jni"
   }
 
   generate_jni("generated_metrics_jni") {
