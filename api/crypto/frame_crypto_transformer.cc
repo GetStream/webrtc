@@ -178,7 +178,7 @@ uint8_t get_unencrypted_bytes(webrtc::TransformableFrameInterface* frame,
       } else if (codec == webrtc::VideoCodecType::kVideoCodecVP8) {
         unencrypted_bytes = videoFrame->IsKeyFrame() ? 10 : 3;
       } else if (codec == webrtc::VideoCodecType::kVideoCodecH264) {
-        webArrayView<const uint8_t> data_in = frame->GetData();
+        webrtc::ArrayView<const uint8_t> data_in = frame->GetData();
         std::vector<webrtc::H264::NaluIndex> nalu_indices =
             webrtc::H264::FindNaluIndices(data_in);
 
@@ -201,7 +201,7 @@ uint8_t get_unencrypted_bytes(webrtc::TransformableFrameInterface* frame,
           }
         }
       } else if (codec == webrtc::VideoCodecType::kVideoCodecH265) {
-        webArrayView<const uint8_t> data_in = frame->GetData();
+        webrtc::ArrayView<const uint8_t> data_in = frame->GetData();
         std::vector<webrtc::H265::NaluIndex> nalu_indices =
             webrtc::H265::FindNaluIndices(data_in);
 
@@ -260,10 +260,10 @@ int DerivePBKDF2KeyFromRawKey(const std::vector<uint8_t> raw_key,
 
 int AesGcmEncryptDecrypt(EncryptOrDecrypt mode,
                          const std::vector<uint8_t> raw_key,
-                         const webArrayView<uint8_t> data,
+                         const webrtc::ArrayView<uint8_t> data,
                          unsigned int tag_length_bytes,
-                         webArrayView<uint8_t> iv,
-                         webArrayView<uint8_t> additional_data,
+                         webrtc::ArrayView<uint8_t> iv,
+                         webrtc::ArrayView<uint8_t> additional_data,
                          const EVP_AEAD* aead_alg,
                          std::vector<uint8_t>* buffer) {
   bssl::ScopedEVP_AEAD_CTX ctx;
@@ -314,9 +314,9 @@ int AesGcmEncryptDecrypt(EncryptOrDecrypt mode,
 int AesEncryptDecrypt(EncryptOrDecrypt mode,
                       webrtc::FrameCryptorTransformer::Algorithm algorithm,
                       const std::vector<uint8_t>& raw_key,
-                      webArrayView<uint8_t> iv,
-                      webArrayView<uint8_t> additional_data,
-                      const webArrayView<uint8_t> data,
+                      webrtc::ArrayView<uint8_t> iv,
+                      webrtc::ArrayView<uint8_t> additional_data,
+                      const webrtc::ArrayView<uint8_t> data,
                       std::vector<uint8_t>* buffer) {
   switch (algorithm) {
     case webrtc::FrameCryptorTransformer::Algorithm::kAesGcm: {
