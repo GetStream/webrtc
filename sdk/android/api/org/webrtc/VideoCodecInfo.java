@@ -48,10 +48,6 @@ public class VideoCodecInfo {
     this.scalabilityModes = scalabilityModes;
   }
 
-  public VideoCodecInfo(String name, Map<String, String> params) {
-    this(name, params, new ArrayList<>());
-  }
-
   @Deprecated
   public VideoCodecInfo(int payload, String name, Map<String, String> params) {
     this.payload = payload;
