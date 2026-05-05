@@ -31,8 +31,8 @@ rtc_library("frame_crypto_transformer") {
     "../../rtc_base:threading",
     "../../rtc_base/synchronization:mutex",
     "../../rtc_base/system:rtc_export",
+    "../task_queue",
     "../task_queue:pending_task_safety_flag",
-    "../task_queue:task_queue_base",
   ]
 
   if (rtc_build_ssl) {
