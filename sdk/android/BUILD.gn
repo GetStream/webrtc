@@ -58,7 +58,9 @@ if (is_android) {
       ":video_java",
       "../../rtc_base:base_java",
       "../../third_party/jni_zero:jni_zero_java",
-      "../../extensions/android-external-audio-processing:external_java",
+      "../../extensions/android-external-audio-processing:external_java",  # STREAM-CUSTOM
+      "../../extensions/android-livekit-audio-processing:livekit_audio_java",  # STREAM-CUSTOM
+      "../../extensions/android-simulcast:simulcast_java",  # STREAM-CUSTOM
     ]
   }
 
@@ -147,7 +149,8 @@ if (is_android) {
       "../../rtc_base:ssl_adapter",
       "//third_party/jni_zero",
       "../../rtc_base:ssl",
-      "../../extensions/android-external-audio-processing:external_processing",
+      "../../extensions/android-external-audio-processing:external_processing",  # STREAM-CUSTOM
+      "../../extensions/android-livekit-audio-processing:livekit_audio_processing",  # STREAM-CUSTOM
     ]
     output_extension = "so"
   }
@@ -260,7 +263,7 @@ if (is_android) {
       "api/org/webrtc/WrappedNativeVideoEncoder.java",
       "api/org/webrtc/YuvConverter.java",
       "api/org/webrtc/YuvHelper.java",
-      "api/org/webrtc/ResolutionAdjustment.java",
+      "api/org/webrtc/ResolutionAdjustment.java",  # STREAM-CUSTOM
       "src/java/org/webrtc/EglBase10Impl.java",
       "src/java/org/webrtc/EglBase14Impl.java",
       "src/java/org/webrtc/GlGenericDrawer.java",
@@ -290,19 +293,18 @@ if (is_android) {
       "api/org/webrtc/AudioProcessingFactory.java",
       "api/org/webrtc/AudioSource.java",
       "api/org/webrtc/AudioTrack.java",
-      "api/org/webrtc/AudioTrackSink.java",
+      "api/org/webrtc/AudioTrackSink.java",  # STREAM-CUSTOM (LiveKit)
       "api/org/webrtc/CallSessionFileRotatingLogSink.java",
       "api/org/webrtc/CandidatePairChangeEvent.java",
       "api/org/webrtc/CryptoOptions.java",
       "api/org/webrtc/DataChannel.java",
       "api/org/webrtc/DtmfSender.java",
-      "api/org/webrtc/ExternalAudioProcessingFactory.java",
       "api/org/webrtc/FecControllerFactoryFactoryInterface.java",
       "api/org/webrtc/FrameDecryptor.java",
       "api/org/webrtc/FrameEncryptor.java",
       "api/org/webrtc/IceCandidate.java",
       "api/org/webrtc/IceCandidateErrorEvent.java",
-      "api/org/webrtc/ManagedAudioProcessingFactory.java",
+      "api/org/webrtc/ManagedAudioProcessingFactory.java",  # STREAM-CUSTOM (LiveKit)
       "api/org/webrtc/MediaConstraints.java",
       "api/org/webrtc/MediaSource.java",
       "api/org/webrtc/MediaStream.java",
@@ -401,9 +403,7 @@ if (is_android) {
       "api/org/webrtc/DefaultVideoDecoderFactory.java",
       "api/org/webrtc/DefaultVideoEncoderFactory.java",
       "api/org/webrtc/WrappedVideoDecoderFactory.java",
-      "api/org/webrtc/DefaultBlacklistedVideoDecoderFactory.java",
-      "api/org/webrtc/DefaultAlignedVideoEncoderFactory.java",
-      "api/org/webrtc/SimulcastAlignedVideoEncoderFactory.java",
+      "api/org/webrtc/DefaultBlacklistedVideoDecoderFactory.java",  # STREAM-CUSTOM
     ]
 
     deps = [
@@ -582,8 +582,6 @@ if (is_android) {
     sources = [
       "api/org/webrtc/SoftwareVideoDecoderFactory.java",
       "api/org/webrtc/SoftwareVideoEncoderFactory.java",
-      "api/org/webrtc/SimulcastVideoEncoder.java",
-      "api/org/webrtc/SimulcastVideoEncoderFactory.java",
     ]
 
     deps = [
@@ -777,11 +775,6 @@ if (current_os == "linux" || is_android) {
       "src/jni/pc/data_channel.cc",
       "src/jni/pc/data_channel.h",
       "src/jni/pc/dtmf_sender.cc",
-      "src/jni/pc/external_audio_processing_factory.cc",
-      "src/jni/pc/external_audio_processing_factory.h",
-      "src/jni/pc/external_audio_processing_interface.h",
-      "src/jni/pc/external_audio_processor.cc",
-      "src/jni/pc/external_audio_processor.h",
       "src/jni/pc/ice_candidate.cc",
       "src/jni/pc/ice_candidate.h",
       "src/jni/pc/media_constraints.cc",
@@ -961,22 +954,6 @@ if (current_os == "linux" || is_android) {
     ]
   }
 
-  rtc_library("simulcast_jni") {
-    visibility = [ "*" ]
-    allow_poison = [ "software_video_codecs" ]
-    sources = [
-      "src/jni/simulcast_video_encoder.cc",
-      "src/jni/simulcast_video_encoder.h",
-      "src/jni/simulcast_video_encoder_factory.cc",
-      "src/jni/simulcast_video_encoder_factory.h"
-    ]
-    deps = [
-      ":base_jni",
-      ":video_jni",
-      ":native_api_codecs",
-      "../../media:rtc_simulcast_encoder_adapter"
-    ]
-  }
 
   rtc_library("swcodecs_jni") {
     visibility = [ "*" ]
@@ -991,7 +968,7 @@ if (current_os == "linux" || is_android) {
       ":libvpx_vp8_jni",
       ":libvpx_vp9_jni",
       ":native_api_jni",
-      ":simulcast_jni",
+      "../../extensions/android-simulcast:simulcast_jni",  # STREAM-CUSTOM
       ":video_jni",
       "../../api/environment",
       "../../api/video_codecs:builtin_video_decoder_factory",
@@ -1480,13 +1457,12 @@ if (current_os == "linux" || is_android) {
     sources = [
       "api/org/webrtc/AddIceObserver.java",
       "api/org/webrtc/AudioTrack.java",
-      "api/org/webrtc/AudioTrackSink.java",
+      "api/org/webrtc/AudioTrackSink.java",  # STREAM-CUSTOM (LiveKit)
       "api/org/webrtc/CallSessionFileRotatingLogSink.java",
       "api/org/webrtc/CandidatePairChangeEvent.java",
       "api/org/webrtc/CryptoOptions.java",
       "api/org/webrtc/DataChannel.java",
       "api/org/webrtc/DtmfSender.java",
-      "api/org/webrtc/ExternalAudioProcessingFactory.java",
       "api/org/webrtc/IceCandidate.java",
       "api/org/webrtc/IceCandidateErrorEvent.java",
       "api/org/webrtc/MediaConstraints.java",

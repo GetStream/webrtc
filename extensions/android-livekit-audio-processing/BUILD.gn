@@ -1,0 +1,47 @@
+import("../../webrtc.gni")
+import("//build/config/android/config.gni")
+import("//build/config/android/rules.gni")
+import("//third_party/jni_zero/jni_zero.gni")
+
+rtc_library("livekit_audio_processing") {
+  visibility = [ "*" ]
+  allow_poison = [ "environment_construction" ]
+  sources = [
+    "src/external_audio_processing_factory.cc",
+    "src/external_audio_processing_factory.h",
+    "src/external_audio_processing_interface.h",
+    "src/external_audio_processor.cc",
+    "src/external_audio_processor.h",
+  ]
+  deps = [
+    ":generated_livekit_audio_jni",
+    "../../api/audio:audio_processing",
+    "../../api/audio:builtin_audio_processing_builder",
+    "../../api/environment:environment_factory",
+    "../../api:make_ref_counted",
+    "../../modules/audio_processing:audio_processing",
+    "../../rtc_base:logging",
+    "../../rtc_base:refcount",
+    "../../rtc_base/synchronization:mutex",
+    "../../sdk/android:native_api_jni",
+    "//third_party/jni_zero",
+  ]
+}
+
+rtc_android_library("livekit_audio_java") {
+  visibility = [ "*" ]
+  sources = [
+    "java/org/webrtc/ExternalAudioProcessingFactory.java",
+  ]
+  deps = [
+    "../../sdk/android:peerconnection_java",
+    "//third_party/androidx:androidx_annotation_annotation_java",
+  ]
+}
+
+generate_jni("generated_livekit_audio_jni") {
+  sources = [
+    "java/org/webrtc/ExternalAudioProcessingFactory.java",
+  ]
+  namespace = "webrtc::jni"
+}
