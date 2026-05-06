@@ -18,7 +18,7 @@ rtc_library("simulcast_jni") {
     "../../sdk/android:native_api_codecs",
     "../../media:rtc_simulcast_encoder_adapter",
     "../../modules/video_coding/codecs/av1:av1_svc_config",
-    "../../modules/video_coding/codecs/vp9:libvpx_vp9",
+    "../../modules/video_coding:webrtc_vp9",
     "../../media:rtc_media_base",
     "../../api/video_codecs:video_codecs_api",
     "../../api:rtp_parameters",
