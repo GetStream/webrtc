@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "extensions/android-livekit-audio-processing/src/external_audio_processor.h"
+#include "extensions/android-audio-processing/src/external_audio_processor.h"
 
 namespace webrtc {
 

@@ -1,0 +1,95 @@
+import("../../webrtc.gni")
+import("//build/config/android/config.gni")
+import("//build/config/android/rules.gni")
+import("//third_party/jni_zero/jni_zero.gni")
+
+# Native plugin loader — loads .so libraries (e.g. Krisp noise cancellation)
+rtc_library("native_plugin") {
+  visibility = [ "*" ]
+  allow_poison = [ "environment_construction" ]
+  configs += [ "../../modules/audio_processing:apm_debug_dump" ]
+  configs += [ "//build/config/android:hide_all_but_jni" ]
+  defines = [
+    "WEBRTC_ANDROID",
+    "WEBRTC_POSIX",
+  ]
+  sources = [
+    "src/include/external_processor.hpp",
+    "src/external_processing.hpp",
+    "src/external_processing.cc",
+    "src/external_processing_factory_jni.cc",
+  ]
+  lib_dirs = []
+  deps = [
+    ":generated_native_plugin_jni",
+    ":native_plugin_java",
+    "../../api/audio:builtin_audio_processing_builder",
+    "../../api/environment:environment_factory",
+    "../../rtc_base:logging",
+    "../../sdk/android:native_api_jni",
+    "../../modules/audio_processing:audio_processing",
+  ]
+}
+
+# Java-based audio effects — post-APM capture/render processing hooks
+rtc_library("audio_effects") {
+  visibility = [ "*" ]
+  allow_poison = [ "environment_construction" ]
+  sources = [
+    "src/external_audio_processing_factory.cc",
+    "src/external_audio_processing_factory.h",
+    "src/external_audio_processing_interface.h",
+    "src/external_audio_processor.cc",
+    "src/external_audio_processor.h",
+  ]
+  deps = [
+    ":generated_effects_jni",
+    "../../api/audio:audio_processing",
+    "../../api/audio:builtin_audio_processing_builder",
+    "../../api/environment:environment_factory",
+    "../../api:make_ref_counted",
+    "../../modules/audio_processing:audio_processing",
+    "../../rtc_base:logging",
+    "../../rtc_base:refcount",
+    "../../rtc_base/synchronization:mutex",
+    "../../sdk/android:base_jni",
+    "../../sdk/android:native_api_jni",
+    "//third_party/jni_zero",
+  ]
+}
+
+# Java: NativeExternalAudioProcessingFactory (for native .so plugin loading)
+rtc_android_library("native_plugin_java") {
+  visibility = [ "*" ]
+  sources = [
+    "java/org/webrtc/NativeExternalAudioProcessingFactory.java",
+  ]
+  deps = [ "//sdk/android:peerconnection_java" ]
+}
+
+# Java: ExternalAudioProcessingFactory (for Java-based capture/render hooks)
+rtc_android_library("audio_effects_java") {
+  visibility = [ "*" ]
+  sources = [
+    "java/org/webrtc/ExternalAudioProcessingFactory.java",
+  ]
+  deps = [
+    "../../sdk/android:base_java",
+    "../../sdk/android:peerconnection_java",
+    "//third_party/androidx:androidx_annotation_annotation_java",
+  ]
+}
+
+generate_jni("generated_native_plugin_jni") {
+  sources = [
+    "java/org/webrtc/NativeExternalAudioProcessingFactory.java",
+  ]
+  namespace = "external"
+}
+
+generate_jni("generated_effects_jni") {
+  sources = [
+    "java/org/webrtc/ExternalAudioProcessingFactory.java",
+  ]
+  namespace = "webrtc::jni"
+}

@@ -20,8 +20,8 @@
 
 #include "rtc_base/ref_counted_object.h"
 #include "sdk/android/native_api/jni/scoped_java_ref.h"
-#include "extensions/android-livekit-audio-processing/src/external_audio_processor.h"
-#include "extensions/android-livekit-audio-processing/src/external_audio_processing_interface.h"
+#include "extensions/android-audio-processing/src/external_audio_processor.h"
+#include "extensions/android-audio-processing/src/external_audio_processing_interface.h"
 
 namespace webrtc {
 namespace jni {

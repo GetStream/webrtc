@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "extensions/android-livekit-audio-processing/src/external_audio_processing_factory.h"
+#include "extensions/android-audio-processing/src/external_audio_processing_factory.h"
 
 #include <jni.h>
 #include <syslog.h>
@@ -23,11 +23,11 @@
 #include "api/environment/environment_factory.h"
 #include "api/make_ref_counted.h"
 #include "rtc_base/ref_counted_object.h"
-#include "extensions/android-livekit-audio-processing/generated_livekit_audio_jni/ExternalAudioProcessingFactory_jni.h"
+#include "extensions/android-audio-processing/generated_effects_jni/ExternalAudioProcessingFactory_jni.h"
 #include "sdk/android/native_api/jni/java_types.h"
 #include "sdk/android/native_api/jni/scoped_java_ref.h"
 #include "sdk/android/src/jni/jni_helpers.h"
-#include "extensions/android-livekit-audio-processing/src/external_audio_processor.h"
+#include "extensions/android-audio-processing/src/external_audio_processor.h"
 
 namespace webrtc {
 namespace jni {

@@ -14,15 +14,15 @@
  * limitations under the License.
  */
 
-#ifndef EXTENSIONS_ANDROID_LIVEKIT_AUDIO_PROCESSING_SRC_EXTERNAL_AUDIO_PROCESSOR_H_
-#define EXTENSIONS_ANDROID_LIVEKIT_AUDIO_PROCESSING_SRC_EXTERNAL_AUDIO_PROCESSOR_H_
+#ifndef EXTENSIONS_ANDROID_AUDIO_PROCESSING_SRC_EXTERNAL_AUDIO_PROCESSOR_H_
+#define EXTENSIONS_ANDROID_AUDIO_PROCESSING_SRC_EXTERNAL_AUDIO_PROCESSOR_H_
 
 #define WEBRTC_APM_DEBUG_DUMP 0
 
 #include "modules/audio_processing/audio_buffer.h"
 #include "modules/audio_processing/audio_processing_impl.h"
 #include "modules/audio_processing/include/audio_processing.h"
-#include "extensions/android-livekit-audio-processing/src/external_audio_processing_interface.h"
+#include "extensions/android-audio-processing/src/external_audio_processing_interface.h"
 
 namespace webrtc {
 
@@ -54,4 +54,4 @@ class ExternalAudioProcessor : public webrtc::CustomProcessing {
 
 }  // namespace webrtc
 
-#endif  // EXTENSIONS_ANDROID_LIVEKIT_AUDIO_PROCESSING_SRC_EXTERNAL_AUDIO_PROCESSOR_H_
+#endif  // EXTENSIONS_ANDROID_AUDIO_PROCESSING_SRC_EXTERNAL_AUDIO_PROCESSOR_H_
