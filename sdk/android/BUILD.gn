@@ -58,9 +58,10 @@ if (is_android) {
       ":video_java",
       "../../rtc_base:base_java",
       "../../third_party/jni_zero:jni_zero_java",
-      "../../extensions/android-audio-processing:native_plugin_java",  # STREAM-CUSTOM
-      "../../extensions/android-audio-processing:audio_effects_java",  # STREAM-CUSTOM
-      "../../extensions/android-simulcast:simulcast_java",  # STREAM-CUSTOM
+      "../../extensions/android/audio-processing:native_plugin_java",  # STREAM-CUSTOM
+      "../../extensions/android/audio-processing:audio_effects_java",  # STREAM-CUSTOM
+      "../../extensions/android/simulcast:simulcast_java",  # STREAM-CUSTOM
+      "../../extensions/android/utilities:utilities_java",  # STREAM-CUSTOM
     ]
   }
 
@@ -149,8 +150,8 @@ if (is_android) {
       "../../rtc_base:ssl_adapter",
       "//third_party/jni_zero",
       "../../rtc_base:ssl",
-      "../../extensions/android-audio-processing:native_plugin",  # STREAM-CUSTOM
-      "../../extensions/android-audio-processing:audio_effects",  # STREAM-CUSTOM
+      "../../extensions/android/audio-processing:native_plugin",  # STREAM-CUSTOM
+      "../../extensions/android/audio-processing:audio_effects",  # STREAM-CUSTOM
     ]
     output_extension = "so"
   }
@@ -263,7 +264,6 @@ if (is_android) {
       "api/org/webrtc/WrappedNativeVideoEncoder.java",
       "api/org/webrtc/YuvConverter.java",
       "api/org/webrtc/YuvHelper.java",
-      "api/org/webrtc/ResolutionAdjustment.java",  # STREAM-CUSTOM
       "src/java/org/webrtc/EglBase10Impl.java",
       "src/java/org/webrtc/EglBase14Impl.java",
       "src/java/org/webrtc/GlGenericDrawer.java",
@@ -304,7 +304,6 @@ if (is_android) {
       "api/org/webrtc/FrameEncryptor.java",
       "api/org/webrtc/IceCandidate.java",
       "api/org/webrtc/IceCandidateErrorEvent.java",
-      "api/org/webrtc/ManagedAudioProcessingFactory.java",  # STREAM-CUSTOM (LiveKit)
       "api/org/webrtc/MediaConstraints.java",
       "api/org/webrtc/MediaSource.java",
       "api/org/webrtc/MediaStream.java",
@@ -403,7 +402,6 @@ if (is_android) {
       "api/org/webrtc/DefaultVideoDecoderFactory.java",
       "api/org/webrtc/DefaultVideoEncoderFactory.java",
       "api/org/webrtc/WrappedVideoDecoderFactory.java",
-      "api/org/webrtc/DefaultBlacklistedVideoDecoderFactory.java",  # STREAM-CUSTOM
     ]
 
     deps = [
@@ -968,7 +966,7 @@ if (current_os == "linux" || is_android) {
       ":libvpx_vp8_jni",
       ":libvpx_vp9_jni",
       ":native_api_jni",
-      "../../extensions/android-simulcast:simulcast_jni",  # STREAM-CUSTOM
+      "../../extensions/android/simulcast:simulcast_jni",  # STREAM-CUSTOM
       ":video_jni",
       "../../api/environment",
       "../../api/video_codecs:builtin_video_decoder_factory",

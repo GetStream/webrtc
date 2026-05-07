@@ -22,7 +22,7 @@
 #include "modules/audio_processing/audio_buffer.h"
 #include "modules/audio_processing/audio_processing_impl.h"
 #include "modules/audio_processing/include/audio_processing.h"
-#include "extensions/android-audio-processing/src/external_audio_processing_interface.h"
+#include "extensions/android/audio-processing/src/external_audio_processing_interface.h"
 
 namespace webrtc {
 

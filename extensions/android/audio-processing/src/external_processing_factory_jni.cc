@@ -4,7 +4,7 @@
 
 #include "api/audio/builtin_audio_processing_builder.h"
 #include "api/environment/environment_factory.h"
-#include "extensions/android-audio-processing/generated_native_plugin_jni/NativeExternalAudioProcessingFactory_jni.h"
+#include "extensions/android/audio-processing/generated_native_plugin_jni/NativeExternalAudioProcessingFactory_jni.h"
 #include "external_processing.hpp"
 #include "rtc_base/checks.h"
 #include "rtc_base/ref_counted_object.h"

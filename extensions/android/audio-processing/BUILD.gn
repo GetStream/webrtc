@@ -1,4 +1,4 @@
-import("../../webrtc.gni")
+import("../../../webrtc.gni")
 import("//build/config/android/config.gni")
 import("//build/config/android/rules.gni")
 import("//third_party/jni_zero/jni_zero.gni")
@@ -7,7 +7,7 @@ import("//third_party/jni_zero/jni_zero.gni")
 rtc_library("native_plugin") {
   visibility = [ "*" ]
   allow_poison = [ "environment_construction" ]
-  configs += [ "../../modules/audio_processing:apm_debug_dump" ]
+  configs += [ "../../../modules/audio_processing:apm_debug_dump" ]
   configs += [ "//build/config/android:hide_all_but_jni" ]
   defines = [
     "WEBRTC_ANDROID",
@@ -23,11 +23,11 @@ rtc_library("native_plugin") {
   deps = [
     ":generated_native_plugin_jni",
     ":native_plugin_java",
-    "../../api/audio:builtin_audio_processing_builder",
-    "../../api/environment:environment_factory",
-    "../../rtc_base:logging",
-    "../../sdk/android:native_api_jni",
-    "../../modules/audio_processing:audio_processing",
+    "../../../api/audio:builtin_audio_processing_builder",
+    "../../../api/environment:environment_factory",
+    "../../../rtc_base:logging",
+    "../../../sdk/android:native_api_jni",
+    "../../../modules/audio_processing:audio_processing",
   ]
 }
 
@@ -44,16 +44,16 @@ rtc_library("audio_effects") {
   ]
   deps = [
     ":generated_effects_jni",
-    "../../api/audio:audio_processing",
-    "../../api/audio:builtin_audio_processing_builder",
-    "../../api/environment:environment_factory",
-    "../../api:make_ref_counted",
-    "../../modules/audio_processing:audio_processing",
-    "../../rtc_base:logging",
-    "../../rtc_base:refcount",
-    "../../rtc_base/synchronization:mutex",
-    "../../sdk/android:base_jni",
-    "../../sdk/android:native_api_jni",
+    "../../../api/audio:audio_processing",
+    "../../../api/audio:builtin_audio_processing_builder",
+    "../../../api/environment:environment_factory",
+    "../../../api:make_ref_counted",
+    "../../../modules/audio_processing:audio_processing",
+    "../../../rtc_base:logging",
+    "../../../rtc_base:refcount",
+    "../../../rtc_base/synchronization:mutex",
+    "../../../sdk/android:base_jni",
+    "../../../sdk/android:native_api_jni",
     "//third_party/jni_zero",
   ]
 }
@@ -74,8 +74,8 @@ rtc_android_library("audio_effects_java") {
     "java/org/webrtc/ExternalAudioProcessingFactory.java",
   ]
   deps = [
-    "../../sdk/android:base_java",
-    "../../sdk/android:peerconnection_java",
+    "../../../sdk/android:base_java",
+    "../../../sdk/android:peerconnection_java",
     "//third_party/androidx:androidx_annotation_annotation_java",
   ]
 }

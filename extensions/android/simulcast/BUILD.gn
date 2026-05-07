@@ -1,4 +1,4 @@
-import("../../webrtc.gni")
+import("../../../webrtc.gni")
 import("//build/config/android/config.gni")
 import("//build/config/android/rules.gni")
 import("//third_party/jni_zero/jni_zero.gni")
@@ -13,16 +13,16 @@ rtc_library("simulcast_jni") {
     "src/simulcast_video_encoder_factory.h",
   ]
   deps = [
-    "../../sdk/android:base_jni",
-    "../../sdk/android:video_jni",
-    "../../sdk/android:native_api_codecs",
-    "../../media:rtc_simulcast_encoder_adapter",
-    "../../modules/video_coding/codecs/av1:av1_svc_config",
-    "../../modules/video_coding:webrtc_vp9",
-    "../../media:rtc_media_base",
-    "../../api/video_codecs:video_codecs_api",
-    "../../api:rtp_parameters",
-    "../../rtc_base:logging",
+    "../../../sdk/android:base_jni",
+    "../../../sdk/android:video_jni",
+    "../../../sdk/android:native_api_codecs",
+    "../../../media:rtc_simulcast_encoder_adapter",
+    "../../../modules/video_coding/codecs/av1:av1_svc_config",
+    "../../../modules/video_coding:webrtc_vp9",
+    "../../../media:rtc_media_base",
+    "../../../api/video_codecs:video_codecs_api",
+    "../../../api:rtp_parameters",
+    "../../../rtc_base:logging",
     "//third_party/abseil-cpp/absl/container:inlined_vector",
     "//third_party/jni_zero",
   ]
@@ -37,10 +37,10 @@ rtc_android_library("simulcast_java") {
     "java/org/webrtc/DefaultAlignedVideoEncoderFactory.java",
   ]
   deps = [
-    "../../sdk/android:hwcodecs_java",
-    "../../sdk/android:swcodecs_java",
-    "../../sdk/android:video_api_java",
-    "../../sdk/android:video_java",
+    "../../../sdk/android:hwcodecs_java",
+    "../../../sdk/android:swcodecs_java",
+    "../../../sdk/android:video_api_java",
+    "../../../sdk/android:video_java",
     "//third_party/androidx:androidx_annotation_annotation_java",
   ]
 }
