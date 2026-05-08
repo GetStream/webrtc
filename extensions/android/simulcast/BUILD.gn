@@ -37,6 +37,7 @@ rtc_android_library("simulcast_java") {
     "java/org/webrtc/DefaultAlignedVideoEncoderFactory.java",
   ]
   deps = [
+    "../../../extensions/android/utilities:utilities_java",
     "../../../sdk/android:hwcodecs_java",
     "../../../sdk/android:swcodecs_java",
     "../../../sdk/android:video_api_java",
