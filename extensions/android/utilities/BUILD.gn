@@ -10,8 +10,10 @@ rtc_android_library("utilities_java") {
     "java/org/webrtc/DefaultBlacklistedVideoDecoderFactory.java",
   ]
   deps = [
+    "../../../rtc_base:base_java",
     "../../../sdk/android:peerconnection_java",
     "../../../sdk/android:video_java",
+    "../../../sdk/android:video_api_java",
     "../../../sdk/android:hwcodecs_java",
     "../../../sdk/android:swcodecs_java",
     "//third_party/androidx:androidx_annotation_annotation_java",
