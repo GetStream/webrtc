@@ -17,7 +17,7 @@ public class NativeExternalAudioProcessingFactory implements AudioProcessingFact
   }
 
   @Override
-  public long createNative() {
+  public long createNative(long webrtcEnvRef) {
     return nativeCreateAudioProcessingModule(libname);
   }
 

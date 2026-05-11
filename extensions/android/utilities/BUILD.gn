@@ -1,0 +1,21 @@
+import("../../../webrtc.gni")
+import("//build/config/android/config.gni")
+import("//build/config/android/rules.gni")
+
+rtc_android_library("utilities_java") {
+  visibility = [ "*" ]
+  sources = [
+    "java/org/webrtc/ResolutionAdjustment.java",
+    "java/org/webrtc/ManagedAudioProcessingFactory.java",
+    "java/org/webrtc/DefaultBlacklistedVideoDecoderFactory.java",
+  ]
+  deps = [
+    "../../../rtc_base:base_java",
+    "../../../sdk/android:peerconnection_java",
+    "../../../sdk/android:video_java",
+    "../../../sdk/android:video_api_java",
+    "../../../sdk/android:hwcodecs_java",
+    "../../../sdk/android:swcodecs_java",
+    "//third_party/androidx:androidx_annotation_annotation_java",
+  ]
+}
