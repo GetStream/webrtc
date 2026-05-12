@@ -218,6 +218,8 @@ jobs:
         run: >-
           bundle exec fastlane ios test
           "root:${{ github.workspace }}/webrtc-tree"
+          "builder_config:ios_debug_bot_arm64"
+          "config_file:${{ github.workspace }}/webrtc-tree/tools_webrtc/mb/mb_config.pyl"
 
   mac_catalyst_build:
     name: Mac Catalyst build validation
