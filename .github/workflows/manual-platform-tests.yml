@@ -201,6 +201,8 @@ jobs:
       - name: CI verification (fan-out does not run gclient sync)
         run: |
           echo "ios test uses only the restored tree; Fastlane lane :test does not call configure_google_client."
+          test -f "${{ github.workspace }}/webrtc-tree/.output/src/tools/mb/mb.py"
+          test -f "${{ github.workspace }}/webrtc-tree/.output/src/tools_webrtc/mb/mb_config.pyl"
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
@@ -226,9 +228,9 @@ jobs:
         working-directory: release-pipeline
         run: >-
           bundle exec fastlane ios test
-          "root:${{ github.workspace }}/webrtc-tree"
+          "root:${{ github.workspace }}/webrtc-tree/.output/src"
           "builder_config:ios_debug_bot_arm64"
-          "config_file:${{ github.workspace }}/webrtc-tree/tools_webrtc/mb/mb_config.pyl"
+          "config_file:${{ github.workspace }}/webrtc-tree/.output/src/tools_webrtc/mb/mb_config.pyl"
 
   mac_catalyst_build:
     name: Mac Catalyst build validation
@@ -279,7 +281,7 @@ jobs:
         working-directory: release-pipeline
         run: >-
           bundle exec fastlane ios build
-          "root:${{ github.workspace }}/webrtc-tree"
+          "root:${{ github.workspace }}/webrtc-tree/.output/src"
           configure_google_client_skip:true
           prepare_signing_skip:false
           sign_product_skip:true
@@ -337,4 +339,4 @@ jobs:
         working-directory: release-pipeline
         run: >-
           bundle exec fastlane macos test
-          "root:${{ github.workspace }}/webrtc-tree"
+          "root:${{ github.workspace }}/webrtc-tree/.output/src"
