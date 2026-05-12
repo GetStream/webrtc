@@ -132,6 +132,26 @@ jobs:
             webrtc-gclient-src-git-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os }}-
             webrtc-gclient-src-git-${{ runner.os }}-${{ runner.arch }}-
 
+      - name: Materialize cached WebRTC source checkout
+        if: steps.gclient-cache.outputs.cache-hit == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GIT_ASKPASS: ${{ github.workspace }}/.github-git-askpass
+          GIT_TERMINAL_PROMPT: "0"
+          GIT_CONFIG_COUNT: "2"
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: "git@github.com:"
+          GIT_CONFIG_KEY_1: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_1: "ssh://git@github.com/"
+        run: |
+          set -euo pipefail
+          src="${GITHUB_WORKSPACE}/.output/src"
+          git -C "${src}" remote set-url origin https://github.com/GetStream/webrtc.git
+          git -C "${src}" fetch --prune origin "${{ inputs.webrtc_ref }}"
+          git -C "${src}" checkout --force FETCH_HEAD
+          git -C "${src}" reset --hard FETCH_HEAD
+          git -C "${src}" clean -ffdx
+
       - name: Install depot_tools
         run: |
           if [[ ! -d "${HOME}/depot_tools" ]]; then
