@@ -122,6 +122,15 @@ jobs:
           EOF
           chmod +x "${GITHUB_WORKSPACE}/.github-git-askpass"
 
+      - name: Restore gclient checkout cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.output
+          key: webrtc-gclient-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os }}-${{ hashFiles('DEPS') }}
+          restore-keys: |
+            webrtc-gclient-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os }}-
+            webrtc-gclient-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Install depot_tools
         run: |
           if [[ ! -d "${HOME}/depot_tools" ]]; then
