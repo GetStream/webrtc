@@ -122,15 +122,15 @@ jobs:
           EOF
           chmod +x "${GITHUB_WORKSPACE}/.github-git-askpass"
 
-      - name: Restore gclient checkout cache
+      - name: Restore gclient source Git cache
         id: gclient-cache
         uses: actions/cache/restore@v4
         with:
-          path: ${{ github.workspace }}/.output
-          key: webrtc-gclient-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os }}-${{ hashFiles('DEPS') }}
+          path: ${{ github.workspace }}/.output/src/.git
+          key: webrtc-gclient-src-git-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os }}-${{ hashFiles('DEPS') }}
           restore-keys: |
-            webrtc-gclient-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os }}-
-            webrtc-gclient-${{ runner.os }}-${{ runner.arch }}-
+            webrtc-gclient-src-git-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os }}-
+            webrtc-gclient-src-git-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install depot_tools
         run: |
@@ -156,11 +156,11 @@ jobs:
           "root:${{ github.workspace }}"
           "target_os:${{ steps.flags.outputs.gclient_target_os }}"
 
-      - name: Save gclient checkout cache
+      - name: Save gclient source Git cache
         if: steps.gclient-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: ${{ github.workspace }}/.output
+          path: ${{ github.workspace }}/.output/src/.git
           key: ${{ steps.gclient-cache.outputs.cache-primary-key }}
 
       - name: Archive prepared WebRTC tree
