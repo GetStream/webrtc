@@ -132,16 +132,6 @@ jobs:
             webrtc-gclient-src-git-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os }}-
             webrtc-gclient-src-git-${{ runner.os }}-${{ runner.arch }}-
 
-      - name: Restore gclient dependency Git cache
-        id: gclient-deps-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ github.workspace }}/.gclient-git-cache
-          key: webrtc-gclient-deps-git-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os }}-${{ hashFiles('DEPS') }}
-          restore-keys: |
-            webrtc-gclient-deps-git-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os }}-
-            webrtc-gclient-deps-git-${{ runner.os }}-${{ runner.arch }}-
-
       - name: Materialize cached WebRTC source checkout
         if: steps.gclient-cache.outputs.cache-hit == 'true'
         env:
@@ -186,13 +176,33 @@ jobs:
           bundle exec fastlane deps sync
           "root:${{ github.workspace }}"
           "target_os:${{ steps.flags.outputs.gclient_target_os }}"
+          run_hooks:false
 
-      - name: Save gclient dependency Git cache
-        if: steps.gclient-deps-cache.outputs.cache-hit != 'true'
+      - name: Restore gclient hook download cache
+        id: gclient-hook-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ github.workspace }}/.output/src/resources
+            ${{ github.workspace }}/.output/src/tools/clang/dsymutil/bin
+          key: webrtc-gclient-hook-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('DEPS', 'resources/**/*.sha1', 'tools/clang/dsymutil/bin/*.sha1') }}
+          restore-keys: |
+            webrtc-gclient-hook-downloads-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: gclient runhooks (deps lane)
+        working-directory: release-pipeline
+        run: >-
+          bundle exec fastlane deps runhooks
+          "root:${{ github.workspace }}"
+
+      - name: Save gclient hook download cache
+        if: steps.gclient-hook-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: ${{ github.workspace }}/.gclient-git-cache
-          key: ${{ steps.gclient-deps-cache.outputs.cache-primary-key }}
+          path: |
+            ${{ github.workspace }}/.output/src/resources
+            ${{ github.workspace }}/.output/src/tools/clang/dsymutil/bin
+          key: ${{ steps.gclient-hook-cache.outputs.cache-primary-key }}
 
       - name: Save gclient source Git cache
         if: steps.gclient-cache.outputs.cache-hit != 'true'
