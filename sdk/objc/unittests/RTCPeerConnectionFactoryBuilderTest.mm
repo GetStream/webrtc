@@ -28,6 +28,8 @@ extern "C" {
 #include "api/video_codecs/video_decoder_factory.h"
 #include "api/video_codecs/video_encoder_factory.h"
 
+#include <utility>
+
 #include "rtc_base/gunit.h"
 #include "rtc_base/system/unused.h"
 
@@ -42,7 +44,7 @@ extern "C" {
   OCMExpect([factoryMock alloc]).andReturn(factoryMock);
   webrtc::PeerConnectionFactoryDependencies default_deps;
   RTC_UNUSED([[[[factoryMock expect] andReturn:factoryMock]
-      ignoringNonObjectArgs] initWithMediaAndDependencies:default_deps]);
+      ignoringNonObjectArgs] initWithMediaAndDependencies:std::move(default_deps)]);
   RTCPeerConnectionFactoryBuilder* builder =
       [[RTCPeerConnectionFactoryBuilder alloc] init];
   RTC_OBJC_TYPE(RTCPeerConnectionFactory)* peerConnectionFactory =
@@ -57,7 +59,7 @@ extern "C" {
   OCMExpect([factoryMock alloc]).andReturn(factoryMock);
   webrtc::PeerConnectionFactoryDependencies default_deps;
   RTC_UNUSED([[[[factoryMock expect] andReturn:factoryMock]
-      ignoringNonObjectArgs] initWithMediaAndDependencies:default_deps]);
+      ignoringNonObjectArgs] initWithMediaAndDependencies:std::move(default_deps)]);
   RTCPeerConnectionFactoryBuilder* builder =
       [RTCPeerConnectionFactoryBuilder builder];
   __block int calledAdmBuilder = 0;
@@ -78,7 +80,7 @@ extern "C" {
   OCMExpect([factoryMock alloc]).andReturn(factoryMock);
   webrtc::PeerConnectionFactoryDependencies default_deps;
   RTC_UNUSED([[[[factoryMock expect] andReturn:factoryMock]
-      ignoringNonObjectArgs] initWithMediaAndDependencies:default_deps]);
+      ignoringNonObjectArgs] initWithMediaAndDependencies:std::move(default_deps)]);
   RTCPeerConnectionFactoryBuilder* builder =
       [RTCPeerConnectionFactoryBuilder defaultBuilder];
   RTC_OBJC_TYPE(RTCPeerConnectionFactory)* peerConnectionFactory =
