@@ -132,6 +132,16 @@ jobs:
             webrtc-gclient-src-git-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os }}-
             webrtc-gclient-src-git-${{ runner.os }}-${{ runner.arch }}-
 
+      - name: Restore gclient dependency Git cache
+        id: gclient-deps-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/.gclient-git-cache
+          key: webrtc-gclient-deps-git-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os }}-${{ hashFiles('DEPS') }}
+          restore-keys: |
+            webrtc-gclient-deps-git-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os }}-
+            webrtc-gclient-deps-git-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Materialize cached WebRTC source checkout
         if: steps.gclient-cache.outputs.cache-hit == 'true'
         env:
@@ -171,10 +181,18 @@ jobs:
           GIT_CONFIG_VALUE_0: "git@github.com:"
           GIT_CONFIG_KEY_1: url.https://github.com/.insteadOf
           GIT_CONFIG_VALUE_1: "ssh://git@github.com/"
+          GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
         run: >-
           bundle exec fastlane deps sync
           "root:${{ github.workspace }}"
           "target_os:${{ steps.flags.outputs.gclient_target_os }}"
+
+      - name: Save gclient dependency Git cache
+        if: steps.gclient-deps-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/.gclient-git-cache
+          key: ${{ steps.gclient-deps-cache.outputs.cache-primary-key }}
 
       - name: Save gclient source Git cache
         if: steps.gclient-cache.outputs.cache-hit != 'true'
@@ -189,6 +207,7 @@ jobs:
           cd "${{ github.workspace }}"
           COPYFILE_DISABLE=1 tar -czf "${{ github.workspace }}/webrtc-src-prepared.tar.gz" \
             --exclude='./release-pipeline' \
+            --exclude='./.gclient-git-cache' \
             --exclude='./webrtc-src-prepared.tar.gz' \
             --exclude='./.git' \
             .
