@@ -232,13 +232,38 @@ jobs:
           echo "PATH=${HOME}/depot_tools:${PATH}" >> "${GITHUB_ENV}"
           echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
 
+      - name: Generate local iOS mb config
+        run: |
+          python3 - <<'PY'
+          import ast
+          import pathlib
+          import pprint
+
+          base_path = pathlib.Path("${{ github.workspace }}/webrtc-tree/.output/src/tools_webrtc/mb/mb_config.pyl")
+          output_path = pathlib.Path("${{ github.workspace }}/release-pipeline/fastlane/mb_configs/local_ios.pyl")
+          config = ast.literal_eval(base_path.read_text(encoding="utf-8"))
+
+          mixins = dict(config.get("mixins", {}))
+          mixins["stream_local_ios_tests"] = {
+              "gn_args": "use_siso=false use_remoteexec=false use_reclient=false",
+          }
+          config["mixins"] = mixins
+
+          configs = {name: list(value) for name, value in config.get("configs", {}).items()}
+          configs["ios_debug_local_bot_arm64"] = configs["ios_debug_bot_arm64"] + ["stream_local_ios_tests"]
+          config["configs"] = configs
+
+          output_path.parent.mkdir(parents=True, exist_ok=True)
+          output_path.write_text(f"{pprint.pformat(config, width=120)}\n", encoding="utf-8")
+          PY
+
       - name: Run iOS tests (no gclient sync in lane)
         working-directory: release-pipeline
         run: >-
           bundle exec fastlane ios test
           "root:${{ github.workspace }}/webrtc-tree/.output/src"
-          "builder_config:ios_debug_bot_arm64"
-          "config_file:${{ github.workspace }}/webrtc-tree/.output/src/tools_webrtc/mb/mb_config.pyl"
+          "builder_config:ios_debug_local_bot_arm64"
+          "config_file:${{ github.workspace }}/release-pipeline/fastlane/mb_configs/local_ios.pyl"
 
   mac_catalyst_build:
     name: Mac Catalyst build validation
