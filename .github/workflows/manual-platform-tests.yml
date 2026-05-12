@@ -1,5 +1,5 @@
 # Manual WebRTC platform tests with a single gclient sync, then fan-out jobs.
-# Requires BOT_SSH_PRIVATE_KEY if DEPS fetch private git URLs (same as other GetStream macOS workflows).
+# Uses HTTPS GitHub authentication so gclient can fetch private GetStream repos without SSH keys.
 # This workflow lives at repo root (the WebRTC `src` tree).
 #
 # Fixed behavior (no workflow inputs): gclient sync uses default -j8; iOS/macOS tests use Fastlane
@@ -75,11 +75,6 @@ jobs:
           IFS=','
           echo "gclient_target_os=${os_list[*]}" >> "${GITHUB_OUTPUT}"
 
-      - name: Set up SSH for gclient / git
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.BOT_SSH_PRIVATE_KEY }}
-
       - name: Check out this repository (WebRTC tree)
         uses: actions/checkout@v4
         with:
@@ -90,6 +85,7 @@ jobs:
         with:
           repository: GetStream/stream-webrtc-release-pipeline
           path: release-pipeline
+          token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
@@ -103,10 +99,17 @@ jobs:
         with:
           python-version: "3.x"
 
-      - name: Git authentication (avoid luci credential prompts)
+      - name: Git authentication for HTTPS fetches
         run: |
           git config --global credential.helper store
-          echo "https://${GITHUB_ACTOR}:${{ secrets.GITHUB_TOKEN }}@github.com" > ~/.git-credentials
+          git credential approve <<EOF
+          protocol=https
+          host=github.com
+          username=x-access-token
+          password=${{ github.token }}
+          EOF
+          git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "git@github.com:"
+          git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "ssh://git@github.com/"
 
       - name: Install depot_tools
         run: |
@@ -148,16 +151,12 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 180
     steps:
-      - name: Set up SSH (match / codesign not used; kept for consistency with private DEPS)
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.BOT_SSH_PRIVATE_KEY }}
-
       - name: Check out stream-webrtc-release-pipeline
         uses: actions/checkout@v4
         with:
           repository: GetStream/stream-webrtc-release-pipeline
           path: release-pipeline
+          token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
 
       - name: Download prepared WebRTC tree
         uses: actions/download-artifact@v4
@@ -207,16 +206,12 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 240
     steps:
-      - name: Set up SSH
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.BOT_SSH_PRIVATE_KEY }}
-
       - name: Check out stream-webrtc-release-pipeline
         uses: actions/checkout@v4
         with:
           repository: GetStream/stream-webrtc-release-pipeline
           path: release-pipeline
+          token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
 
       - name: Download prepared WebRTC tree
         uses: actions/download-artifact@v4
@@ -269,16 +264,12 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 180
     steps:
-      - name: Set up SSH
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.BOT_SSH_PRIVATE_KEY }}
-
       - name: Check out stream-webrtc-release-pipeline
         uses: actions/checkout@v4
         with:
           repository: GetStream/stream-webrtc-release-pipeline
           path: release-pipeline
+          token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
 
       - name: Download prepared WebRTC tree
         uses: actions/download-artifact@v4
