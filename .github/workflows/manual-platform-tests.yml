@@ -100,16 +100,27 @@ jobs:
           python-version: "3.x"
 
       - name: Git authentication for HTTPS fetches
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           git config --global credential.helper store
           git credential approve <<EOF
           protocol=https
           host=github.com
           username=x-access-token
-          password=${{ github.token }}
+          password=${GITHUB_TOKEN}
           EOF
-          git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "git@github.com:"
-          git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "ssh://git@github.com/"
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+          cat > "${GITHUB_WORKSPACE}/.github-git-askpass" <<'EOF'
+          #!/usr/bin/env bash
+          case "$1" in
+            *Username*) echo "x-access-token" ;;
+            *Password*) echo "${GITHUB_TOKEN}" ;;
+            *) echo "" ;;
+          esac
+          EOF
+          chmod +x "${GITHUB_WORKSPACE}/.github-git-askpass"
 
       - name: Install depot_tools
         run: |
@@ -121,6 +132,15 @@ jobs:
 
       - name: gclient sync (deps lane)
         working-directory: release-pipeline
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GIT_ASKPASS: ${{ github.workspace }}/.github-git-askpass
+          GIT_TERMINAL_PROMPT: "0"
+          GIT_CONFIG_COUNT: "2"
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: "git@github.com:"
+          GIT_CONFIG_KEY_1: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_1: "ssh://git@github.com/"
         run: >-
           bundle exec fastlane deps sync
           "root:${{ github.workspace }}"
