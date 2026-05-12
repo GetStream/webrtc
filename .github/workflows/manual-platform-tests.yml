@@ -1,0 +1,318 @@
+# Manual WebRTC platform tests with a single gclient sync, then fan-out jobs.
+# Requires BOT_SSH_PRIVATE_KEY if DEPS fetch private git URLs (same as other GetStream macOS workflows).
+# This workflow lives at repo root (the WebRTC `src` tree).
+#
+# Fixed behavior (no workflow inputs): gclient sync uses default -j8; iOS/macOS tests use Fastlane
+# default targets and simulator auto-selection; Xcode is the runner image default.
+
+name: Manual platform tests
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      webrtc_ref:
+        description: Branch, tag, or SHA for this repo (GetStream/webrtc)
+        required: true
+        default: main
+      platform_ios:
+        description: Run iOS simulator tests
+        type: boolean
+        default: true
+      platform_mac_catalyst:
+        description: Run Mac Catalyst build validation
+        type: boolean
+        default: false
+      platform_macos:
+        description: Run macOS host tests
+        type: boolean
+        default: false
+
+jobs:
+  prepare_deps:
+    name: Prepare WebRTC dependencies
+    runs-on: macos-14
+    timeout-minutes: 360
+    outputs:
+      run_ios: ${{ steps.flags.outputs.run_ios }}
+      run_mac_catalyst: ${{ steps.flags.outputs.run_mac_catalyst }}
+      run_macos: ${{ steps.flags.outputs.run_macos }}
+      gclient_target_os: ${{ steps.flags.outputs.gclient_target_os }}
+    steps:
+      - id: flags
+        name: Resolve platform flags and gclient target_os
+        run: |
+          set -euo pipefail
+          ios='${{ inputs.platform_ios }}'
+          catalyst='${{ inputs.platform_mac_catalyst }}'
+          macos='${{ inputs.platform_macos }}'
+          if [[ "${ios}" != "true" && "${catalyst}" != "true" && "${macos}" != "true" ]]; then
+            echo "Select at least one platform (enable one or more checkboxes above)."
+            exit 1
+          fi
+          echo "run_ios=${ios}" >> "${GITHUB_OUTPUT}"
+          echo "run_mac_catalyst=${catalyst}" >> "${GITHUB_OUTPUT}"
+          echo "run_macos=${macos}" >> "${GITHUB_OUTPUT}"
+
+          need_ios=false
+          need_mac=false
+          if [[ "${ios}" == "true" || "${catalyst}" == "true" ]]; then
+            need_ios=true
+          fi
+          if [[ "${catalyst}" == "true" || "${macos}" == "true" ]]; then
+            need_mac=true
+          fi
+
+          os_list=()
+          if [[ "${need_ios}" == "true" ]]; then os_list+=("ios"); fi
+          if [[ "${need_mac}" == "true" ]]; then os_list+=("mac"); fi
+          if [[ ${#os_list[@]} -eq 0 ]]; then
+            echo "No platforms selected for dependency sync."
+            exit 1
+          fi
+          IFS=','
+          echo "gclient_target_os=${os_list[*]}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up SSH for gclient / git
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.BOT_SSH_PRIVATE_KEY }}
+
+      - name: Check out this repository (WebRTC tree)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.webrtc_ref }}
+
+      - name: Check out stream-webrtc-release-pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: GetStream/stream-webrtc-release-pipeline
+          path: release-pipeline
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          working-directory: release-pipeline
+          bundler-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Git authentication (avoid luci credential prompts)
+        run: |
+          git config --global credential.helper store
+          echo "https://${GITHUB_ACTOR}:${{ secrets.GITHUB_TOKEN }}@github.com" > ~/.git-credentials
+
+      - name: Install depot_tools
+        run: |
+          if [[ ! -d "${HOME}/depot_tools" ]]; then
+            git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "${HOME}/depot_tools"
+          fi
+          echo "PATH=${HOME}/depot_tools:${PATH}" >> "${GITHUB_ENV}"
+          echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
+
+      - name: gclient sync (deps lane)
+        working-directory: release-pipeline
+        run: >-
+          bundle exec fastlane deps sync
+          "root:${{ github.workspace }}"
+          "target_os:${{ steps.flags.outputs.gclient_target_os }}"
+
+      - name: Archive prepared WebRTC tree
+        run: |
+          set -euo pipefail
+          cd "${{ github.workspace }}"
+          COPYFILE_DISABLE=1 tar -czf "${{ github.workspace }}/webrtc-src-prepared.tar.gz" \
+            --exclude='./release-pipeline' \
+            --exclude='./webrtc-src-prepared.tar.gz' \
+            --exclude='./.git' \
+            .
+
+      - name: Upload dependency artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: webrtc-src-prepared
+          path: webrtc-src-prepared.tar.gz
+          retention-days: 2
+          compression-level: 0
+
+  ios_test:
+    name: iOS tests
+    needs: prepare_deps
+    if: needs.prepare_deps.outputs.run_ios == 'true'
+    runs-on: macos-14
+    timeout-minutes: 180
+    steps:
+      - name: Set up SSH (match / codesign not used; kept for consistency with private DEPS)
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.BOT_SSH_PRIVATE_KEY }}
+
+      - name: Check out stream-webrtc-release-pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: GetStream/stream-webrtc-release-pipeline
+          path: release-pipeline
+
+      - name: Download prepared WebRTC tree
+        uses: actions/download-artifact@v4
+        with:
+          name: webrtc-src-prepared
+
+      - name: Extract WebRTC tree
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ github.workspace }}/webrtc-tree"
+          tar -xzf webrtc-src-prepared.tar.gz -C "${{ github.workspace }}/webrtc-tree"
+
+      - name: CI verification (fan-out does not run gclient sync)
+        run: |
+          echo "ios test uses only the restored tree; Fastlane lane :test does not call configure_google_client."
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          working-directory: release-pipeline
+          bundler-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install depot_tools
+        run: |
+          if [[ ! -d "${HOME}/depot_tools" ]]; then
+            git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "${HOME}/depot_tools"
+          fi
+          echo "PATH=${HOME}/depot_tools:${PATH}" >> "${GITHUB_ENV}"
+          echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
+
+      - name: Run iOS tests (no gclient sync in lane)
+        working-directory: release-pipeline
+        run: >-
+          bundle exec fastlane ios test
+          "root:${{ github.workspace }}/webrtc-tree"
+
+  mac_catalyst_build:
+    name: Mac Catalyst build validation
+    needs: prepare_deps
+    if: needs.prepare_deps.outputs.run_mac_catalyst == 'true'
+    runs-on: macos-14
+    timeout-minutes: 240
+    steps:
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.BOT_SSH_PRIVATE_KEY }}
+
+      - name: Check out stream-webrtc-release-pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: GetStream/stream-webrtc-release-pipeline
+          path: release-pipeline
+
+      - name: Download prepared WebRTC tree
+        uses: actions/download-artifact@v4
+        with:
+          name: webrtc-src-prepared
+
+      - name: Extract WebRTC tree
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ github.workspace }}/webrtc-tree"
+          tar -xzf webrtc-src-prepared.tar.gz -C "${{ github.workspace }}/webrtc-tree"
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          working-directory: release-pipeline
+          bundler-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install depot_tools
+        run: |
+          if [[ ! -d "${HOME}/depot_tools" ]]; then
+            git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "${HOME}/depot_tools"
+          fi
+          echo "PATH=${HOME}/depot_tools:${PATH}" >> "${GITHUB_ENV}"
+          echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
+
+      - name: Build iOS libs with Catalyst (skips gclient + signing)
+        working-directory: release-pipeline
+        run: >-
+          bundle exec fastlane ios build
+          "root:${{ github.workspace }}/webrtc-tree"
+          configure_google_client_skip:true
+          prepare_signing_skip:false
+          sign_product_skip:true
+          verify_signatures_skip:true
+          zip_product_skip:true
+          skip_licenses:true
+          maccatalyst_support:true
+
+  macos_test:
+    name: macOS host tests
+    needs: prepare_deps
+    if: needs.prepare_deps.outputs.run_macos == 'true'
+    runs-on: macos-14
+    timeout-minutes: 180
+    steps:
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.BOT_SSH_PRIVATE_KEY }}
+
+      - name: Check out stream-webrtc-release-pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: GetStream/stream-webrtc-release-pipeline
+          path: release-pipeline
+
+      - name: Download prepared WebRTC tree
+        uses: actions/download-artifact@v4
+        with:
+          name: webrtc-src-prepared
+
+      - name: Extract WebRTC tree
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ github.workspace }}/webrtc-tree"
+          tar -xzf webrtc-src-prepared.tar.gz -C "${{ github.workspace }}/webrtc-tree"
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          working-directory: release-pipeline
+          bundler-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install depot_tools
+        run: |
+          if [[ ! -d "${HOME}/depot_tools" ]]; then
+            git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "${HOME}/depot_tools"
+          fi
+          echo "PATH=${HOME}/depot_tools:${PATH}" >> "${GITHUB_ENV}"
+          echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
+
+      - name: Run macOS host tests (no gclient sync in lane)
+        working-directory: release-pipeline
+        run: >-
+          bundle exec fastlane macos test
+          "root:${{ github.workspace }}/webrtc-tree"
