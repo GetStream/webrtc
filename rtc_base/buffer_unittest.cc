@@ -10,11 +10,14 @@
 
 #include "rtc_base/buffer.h"
 
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <utility>
 
 #include "absl/strings/string_view.h"
 #include "api/array_view.h"
+#include "rtc_base/checks.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 
@@ -25,10 +28,8 @@ namespace {
 using ::testing::ElementsAre;
 using ::testing::ElementsAreArray;
 
-// clang-format off
-const uint8_t kTestData[] = {0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7,
-                             0x8, 0x9, 0xa, 0xb, 0xc, 0xd, 0xe, 0xf};
-// clang-format on
+constexpr uint8_t kTestData[] = {0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7,
+                                 0x8, 0x9, 0xa, 0xb, 0xc, 0xd, 0xe, 0xf};
 
 void TestBuf(const Buffer& b1, size_t size, size_t capacity) {
   EXPECT_EQ(b1.size(), size);
@@ -40,7 +41,7 @@ void TestBuf(const Buffer& b1, size_t size, size_t capacity) {
 TEST(BufferTest, TestConstructEmpty) {
   TestBuf(Buffer(), 0, 0);
   TestBuf(Buffer(Buffer()), 0, 0);
-  TestBuf(Buffer(0), 0, 0);
+  TestBuf(Buffer::CreateUninitializedWithSize(0), 0, 0);
 
   // We can't use a literal 0 for the first argument, because C++ will allow
   // that to be considered a null pointer, which makes the call ambiguous.
@@ -366,7 +367,7 @@ TEST(BufferTest, TestBracketReadConst) {
 }
 
 TEST(BufferTest, TestBracketWrite) {
-  Buffer buf(7);
+  Buffer buf = Buffer::CreateUninitializedWithSize(7);
   EXPECT_EQ(buf.size(), 7u);
   EXPECT_EQ(buf.capacity(), 7u);
   EXPECT_NE(buf.data(), nullptr);
@@ -441,12 +442,13 @@ TEST(BufferTest, TestStruct) {
     bool blood;
     const char* stone;
   };
-  BufferT<BloodStone> buf(4);
+  BufferT<BloodStone> buf = BufferT<BloodStone>::CreateUninitializedWithSize(4);
   EXPECT_EQ(buf.size(), 4u);
   EXPECT_EQ(buf.capacity(), 4u);
   EXPECT_NE(buf.data(), nullptr);
   EXPECT_FALSE(buf.empty());
-  BufferT<BloodStone*> buf2(4);
+  BufferT<BloodStone*> buf2 =
+      BufferT<BloodStone*>::CreateUninitializedWithSize(4);
   for (size_t i = 0; i < buf2.size(); ++i) {
     buf2[i] = &buf[i];
   }
@@ -456,7 +458,7 @@ TEST(BufferTest, TestStruct) {
 }
 
 TEST(BufferDeathTest, DieOnUseAfterMove) {
-  Buffer buf(17);
+  Buffer buf = Buffer::CreateUninitializedWithSize(17);
   Buffer buf2 = std::move(buf);
   EXPECT_EQ(buf2.size(), 17u);
 #if RTC_DCHECK_IS_ON

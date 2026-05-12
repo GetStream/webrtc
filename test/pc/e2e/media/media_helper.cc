@@ -9,17 +9,30 @@
  */
 #include "test/pc/e2e/media/media_helper.h"
 
+#include <cstddef>
+#include <memory>
 #include <string>
 #include <utility>
 #include <variant>
+#include <vector>
 
+#include "api/make_ref_counted.h"
 #include "api/media_stream_interface.h"
-#include "api/test/create_frame_generator.h"
+#include "api/rtc_error.h"
+#include "api/rtp_parameters.h"
+#include "api/rtp_sender_interface.h"
+#include "api/scoped_refptr.h"
+#include "api/test/frame_generator_interface.h"
 #include "api/test/pclf/media_configuration.h"
+#include "api/test/pclf/media_quality_test_params.h"
 #include "api/test/pclf/peer_configurer.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/logging.h"
 #include "test/frame_generator_capturer.h"
+#include "test/pc/e2e/media/test_video_capturer_video_track_source.h"
+#include "test/pc/e2e/test_peer.h"
 #include "test/platform_video_capturer.h"
-#include "test/testsupport/file_utils.h"
+#include "test/test_video_capturer.h"
 
 namespace webrtc {
 namespace webrtc_pc_e2e {
@@ -39,7 +52,7 @@ void MediaHelper::MaybeAddAudio(TestPeer* peer) {
     return;
   }
   const AudioConfig& audio_config = peer->params().audio_config.value();
-  scoped_refptr<webrtc::AudioSourceInterface> source =
+  scoped_refptr<AudioSourceInterface> source =
       peer->pc_factory()->CreateAudioSource(audio_config.audio_options);
   scoped_refptr<AudioTrackInterface> track =
       peer->pc_factory()->CreateAudioTrack(*audio_config.stream_label,

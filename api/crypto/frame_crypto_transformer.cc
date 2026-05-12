@@ -31,6 +31,8 @@
 #include "absl/types/optional.h"
 #include "absl/types/variant.h"
 #include "api/array_view.h"
+#include "api/units/timestamp.h"
+#include "api/video/video_frame_metadata.h"
 #include "common_video/h264/h264_common.h"
 #include "common_video/h265/h265_common.h"
 #include "modules/rtp_rtcp/source/rtp_format_h264.h"
@@ -51,7 +53,7 @@ webrtc::VideoCodecType get_video_codec_type(
     webrtc::TransformableFrameInterface* frame) {
   auto videoFrame =
       static_cast<webrtc::TransformableVideoFrameInterface*>(frame);
-  return videoFrame->header().codec;
+  return videoFrame->Metadata().GetCodec();
 }
 
 webrtc::H264PacketizationMode get_h264_packetization_mode(
@@ -59,7 +61,7 @@ webrtc::H264PacketizationMode get_h264_packetization_mode(
   auto video_frame =
       static_cast<webrtc::TransformableVideoFrameInterface*>(frame);
   const auto& h264_header = absl::get<webrtc::RTPVideoHeaderH264>(
-      video_frame->header().video_type_header);
+      video_frame->Metadata().GetRTPVideoHeaderCodecSpecifics());
   return h264_header.packetization_mode;
 }
 
@@ -91,7 +93,7 @@ inline bool FrameIsH264(webrtc::TransformableFrameInterface* frame,
     case webrtc::FrameCryptorTransformer::MediaType::kVideoFrame: {
       auto videoFrame =
           static_cast<webrtc::TransformableVideoFrameInterface*>(frame);
-      return videoFrame->header().codec ==
+      return videoFrame->Metadata().GetCodec() ==
              webrtc::VideoCodecType::kVideoCodecH264;
     }
     default:
@@ -105,7 +107,7 @@ inline bool FrameIsH265(webrtc::TransformableFrameInterface* frame,
     case webrtc::FrameCryptorTransformer::MediaType::kVideoFrame: {
       auto videoFrame =
           static_cast<webrtc::TransformableVideoFrameInterface*>(frame);
-      return videoFrame->header().codec ==
+      return videoFrame->Metadata().GetCodec() ==
              webrtc::VideoCodecType::kVideoCodecH265;
     }
     default:
@@ -170,15 +172,13 @@ uint8_t get_unencrypted_bytes(webrtc::TransformableFrameInterface* frame,
     case webrtc::FrameCryptorTransformer::MediaType::kVideoFrame: {
       auto videoFrame =
           static_cast<webrtc::TransformableVideoFrameInterface*>(frame);
-      if (videoFrame->header().codec ==
-          webrtc::VideoCodecType::kVideoCodecAV1) {
+      auto codec = videoFrame->Metadata().GetCodec();
+      if (codec == webrtc::VideoCodecType::kVideoCodecAV1) {
         unencrypted_bytes = 0;
-      } else if (videoFrame->header().codec ==
-                 webrtc::VideoCodecType::kVideoCodecVP8) {
+      } else if (codec == webrtc::VideoCodecType::kVideoCodecVP8) {
         unencrypted_bytes = videoFrame->IsKeyFrame() ? 10 : 3;
-      } else if (videoFrame->header().codec ==
-                 webrtc::VideoCodecType::kVideoCodecH264) {
-        rtc::ArrayView<const uint8_t> data_in = frame->GetData();
+      } else if (codec == webrtc::VideoCodecType::kVideoCodecH264) {
+        webrtc::ArrayView<const uint8_t> data_in = frame->GetData();
         std::vector<webrtc::H264::NaluIndex> nalu_indices =
             webrtc::H264::FindNaluIndices(data_in);
 
@@ -200,9 +200,8 @@ uint8_t get_unencrypted_bytes(webrtc::TransformableFrameInterface* frame,
               break;
           }
         }
-      } else if (videoFrame->header().codec ==
-                 webrtc::VideoCodecType::kVideoCodecH265) {
-        rtc::ArrayView<const uint8_t> data_in = frame->GetData();
+      } else if (codec == webrtc::VideoCodecType::kVideoCodecH265) {
+        webrtc::ArrayView<const uint8_t> data_in = frame->GetData();
         std::vector<webrtc::H265::NaluIndex> nalu_indices =
             webrtc::H265::FindNaluIndices(data_in);
 
@@ -261,10 +260,10 @@ int DerivePBKDF2KeyFromRawKey(const std::vector<uint8_t> raw_key,
 
 int AesGcmEncryptDecrypt(EncryptOrDecrypt mode,
                          const std::vector<uint8_t> raw_key,
-                         const rtc::ArrayView<uint8_t> data,
+                         const webrtc::ArrayView<uint8_t> data,
                          unsigned int tag_length_bytes,
-                         rtc::ArrayView<uint8_t> iv,
-                         rtc::ArrayView<uint8_t> additional_data,
+                         webrtc::ArrayView<uint8_t> iv,
+                         webrtc::ArrayView<uint8_t> additional_data,
                          const EVP_AEAD* aead_alg,
                          std::vector<uint8_t>* buffer) {
   bssl::ScopedEVP_AEAD_CTX ctx;
@@ -315,9 +314,9 @@ int AesGcmEncryptDecrypt(EncryptOrDecrypt mode,
 int AesEncryptDecrypt(EncryptOrDecrypt mode,
                       webrtc::FrameCryptorTransformer::Algorithm algorithm,
                       const std::vector<uint8_t>& raw_key,
-                      rtc::ArrayView<uint8_t> iv,
-                      rtc::ArrayView<uint8_t> additional_data,
-                      const rtc::ArrayView<uint8_t> data,
+                      webrtc::ArrayView<uint8_t> iv,
+                      webrtc::ArrayView<uint8_t> additional_data,
+                      const webrtc::ArrayView<uint8_t> data,
                       std::vector<uint8_t>* buffer) {
   switch (algorithm) {
     case webrtc::FrameCryptorTransformer::Algorithm::kAesGcm: {
@@ -338,13 +337,13 @@ int AesEncryptDecrypt(EncryptOrDecrypt mode,
 namespace webrtc {
 
 FrameCryptorTransformer::FrameCryptorTransformer(
-    rtc::Thread* signaling_thread,
+    webrtc::Thread* signaling_thread,
     const std::string participant_id,
     MediaType type,
     Algorithm algorithm,
     webrtc::scoped_refptr<KeyProvider> key_provider)
     : signaling_thread_(signaling_thread),
-      thread_(rtc::Thread::Create()),
+      thread_(webrtc::Thread::Create()),
       participant_id_(participant_id),
       type_(type),
       algorithm_(algorithm),
@@ -413,7 +412,7 @@ void FrameCryptorTransformer::encryptFrame(
     return;
   }
 
-  rtc::ArrayView<const uint8_t> data_in = frame->GetData();
+  ArrayView<const uint8_t> data_in = frame->GetData();
   if (data_in.size() == 0 || !enabled_cryption) {
     RTC_LOG(LS_WARNING) << "FrameCryptorTransformer::encryptFrame() "
                            "data_in.size() == 0 || enabled_cryption == false";
@@ -443,17 +442,17 @@ void FrameCryptorTransformer::encryptFrame(
   auto key_set = key_handler->GetKeySet(key_index_);
   uint8_t unencrypted_bytes = get_unencrypted_bytes(frame.get(), type_);
 
-  rtc::Buffer frame_header(unencrypted_bytes);
+  Buffer frame_header(unencrypted_bytes);
   for (size_t i = 0; i < unencrypted_bytes; i++) {
     frame_header[i] = data_in[i];
   }
 
-  rtc::Buffer frame_trailer(2);
+  Buffer frame_trailer(2);
   frame_trailer[0] = getIvSize();
   frame_trailer[1] = key_index_;
-  rtc::Buffer iv = makeIv(frame->GetSsrc(), frame->GetTimestamp());
+  Buffer iv = makeIv(frame->GetSsrc(), frame->GetTimestamp());
 
-  rtc::Buffer payload(data_in.size() - unencrypted_bytes);
+  Buffer payload(data_in.size() - unencrypted_bytes);
   for (size_t i = unencrypted_bytes; i < data_in.size(); i++) {
     payload[i - unencrypted_bytes] = data_in[i];
   }
@@ -462,15 +461,15 @@ void FrameCryptorTransformer::encryptFrame(
   if (AesEncryptDecrypt(EncryptOrDecrypt::kEncrypt, algorithm_,
                         key_set->encryption_key, iv, frame_header, payload,
                         &buffer) == Success) {
-    rtc::Buffer encrypted_payload(buffer.data(), buffer.size());
-    rtc::Buffer tag(encrypted_payload.data() + encrypted_payload.size() - 16,
+    Buffer encrypted_payload(buffer.data(), buffer.size());
+    Buffer tag(encrypted_payload.data() + encrypted_payload.size() - 16,
                     16);
-    rtc::Buffer data_without_header;
+    Buffer data_without_header;
     data_without_header.AppendData(encrypted_payload);
     data_without_header.AppendData(iv);
     data_without_header.AppendData(frame_trailer);
 
-    rtc::Buffer data_out;
+    Buffer data_out;
     data_out.AppendData(frame_header);
 
     if (FrameIsH264(frame.get(), type_)) {
@@ -527,7 +526,7 @@ void FrameCryptorTransformer::decryptFrame(
     return;
   }
 
-  rtc::ArrayView<const uint8_t> data_in = frame->GetData();
+  ArrayView<const uint8_t> data_in = frame->GetData();
 
   if (data_in.size() == 0 || !enabled_cryption) {
     RTC_LOG(LS_WARNING) << "FrameCryptorTransformer::decryptFrame() "
@@ -556,7 +555,7 @@ void FrameCryptorTransformer::decryptFrame(
 
       // magic bytes detected, this is a non-encrypted frame, skip frame
       // decryption.
-      rtc::Buffer data_out;
+      Buffer data_out;
       data_out.AppendData(
           data_in.subview(0, data_in.size() - uncrypted_magic_bytes.size()));
       frame->SetData(data_out);
@@ -567,12 +566,12 @@ void FrameCryptorTransformer::decryptFrame(
 
   uint8_t unencrypted_bytes = get_unencrypted_bytes(frame.get(), type_);
 
-  rtc::Buffer frame_header(unencrypted_bytes);
+  Buffer frame_header(unencrypted_bytes);
   for (size_t i = 0; i < unencrypted_bytes; i++) {
     frame_header[i] = data_in[i];
   }
 
-  rtc::Buffer frame_trailer(2);
+  Buffer frame_trailer(2);
   frame_trailer[0] = data_in[data_in.size() - 2];
   frame_trailer[1] = data_in[data_in.size() - 1];
   uint8_t ivLength = frame_trailer[0];
@@ -614,12 +613,12 @@ void FrameCryptorTransformer::decryptFrame(
 
   auto key_set = key_handler->GetKeySet(key_index);
 
-  rtc::Buffer iv = rtc::Buffer(ivLength);
+  Buffer iv = Buffer(ivLength);
   for (size_t i = 0; i < ivLength; i++) {
     iv[i] = data_in[data_in.size() - 2 - ivLength + i];
   }
 
-  rtc::Buffer encrypted_buffer(data_in.size() - unencrypted_bytes);
+  Buffer encrypted_buffer(data_in.size() - unencrypted_bytes);
   for (size_t i = unencrypted_bytes; i < data_in.size(); i++) {
     encrypted_buffer[i - unencrypted_bytes] = data_in[i];
   }
@@ -635,12 +634,12 @@ void FrameCryptorTransformer::decryptFrame(
         H265::ParseRbsp(encrypted_buffer.data(), encrypted_buffer.size()));
   }
 
-  rtc::Buffer encrypted_payload(encrypted_buffer.size() - ivLength - 2);
+  Buffer encrypted_payload(encrypted_buffer.size() - ivLength - 2);
   for (size_t i = 0; i < encrypted_payload.size(); i++) {
     encrypted_payload[i] = encrypted_buffer[i];
   }
 
-  rtc::Buffer tag(encrypted_payload.data() + encrypted_payload.size() - 16, 16);
+  Buffer tag(encrypted_payload.data() + encrypted_payload.size() - 16, 16);
   std::vector<uint8_t> buffer;
 
   int ratchet_count = 0;
@@ -709,8 +708,8 @@ void FrameCryptorTransformer::decryptFrame(
     return;
   }
 
-  rtc::Buffer payload(buffer.data(), buffer.size());
-  rtc::Buffer data_out;
+  Buffer payload(buffer.data(), buffer.size());
+  Buffer data_out;
   data_out.AppendData(frame_header);
   data_out.AppendData(payload);
   frame->SetData(data_out);
@@ -734,14 +733,14 @@ void FrameCryptorTransformer::onFrameCryptionStateChanged(
   }
 }
 
-rtc::Buffer FrameCryptorTransformer::makeIv(uint32_t ssrc, uint32_t timestamp) {
+Buffer FrameCryptorTransformer::makeIv(uint32_t ssrc, uint32_t timestamp) {
   uint32_t send_count = 0;
   if (send_counts_.find(ssrc) == send_counts_.end()) {
     send_counts_[ssrc] = floor(CreateRandomNonZeroId() * 0xFFFF);
   } else {
     send_count = send_counts_[ssrc];
   }
-  rtc::ByteBufferWriter buf;
+  ByteBufferWriter buf;
   buf.WriteUInt32(ssrc);
   buf.WriteUInt32(timestamp);
   buf.WriteUInt32(timestamp - (send_count % 0xFFFF));
@@ -749,7 +748,7 @@ rtc::Buffer FrameCryptorTransformer::makeIv(uint32_t ssrc, uint32_t timestamp) {
 
   RTC_CHECK_EQ(buf.Length(), getIvSize());
 
-  return rtc::Buffer(buf.Data(), buf.Length());
+  return Buffer(buf.Data(), buf.Length());
 }
 
 uint8_t FrameCryptorTransformer::getIvSize() {
@@ -790,13 +789,13 @@ RTCErrorOr<webrtc::scoped_refptr<EncryptedPacket>> DataPacketCryptor::Encrypt(
   }
 
   auto key_set = key_handler->GetKeySet(key_index);
-  auto timestamp = Timestamp::Millis(rtc::TimeMillis())
+  auto timestamp = Timestamp::Millis(TimeMillis())
                        .ms();   // use current time millis as timestamp
   auto iv = makeIv(timestamp);  // for data packets, ssrc is always 0
 
   std::vector<uint8_t> buffer;
-  rtc::Buffer payload(data.data(), data.size());
-  auto frame_header = rtc::Buffer(0);  // no frame header for data packets
+  Buffer payload(data.data(), data.size());
+  auto frame_header = Buffer(0);  // no frame header for data packets
   if (AesEncryptDecrypt(EncryptOrDecrypt::kEncrypt, algorithm_,
                         key_set->encryption_key, iv, frame_header, payload,
                         &buffer) == Success) {
@@ -829,10 +828,10 @@ RTCErrorOr<std::vector<uint8_t>> DataPacketCryptor::Decrypt(
   }
   
   std::vector<uint8_t> buffer;
-  rtc::Buffer encrypted_payload(encryptedPacket->data.data(),
+  Buffer encrypted_payload(encryptedPacket->data.data(),
                                 encryptedPacket->data.size());
-  rtc::Buffer iv(encryptedPacket->iv.data(), encryptedPacket->iv.size());
-  auto frame_header = rtc::Buffer(0);  // no frame header for data packets
+  Buffer iv(encryptedPacket->iv.data(), encryptedPacket->iv.size());
+  auto frame_header = Buffer(0);  // no frame header for data packets
 
   auto key_set = key_handler->GetKeySet(key_index);
   auto initialKeyMaterial = key_set->material;
@@ -897,11 +896,11 @@ RTCErrorOr<std::vector<uint8_t>> DataPacketCryptor::Decrypt(
                   "DataPacketCryptor::Decrypt() failed");
 }
 
-rtc::Buffer DataPacketCryptor::makeIv(uint32_t timestamp) {
+Buffer DataPacketCryptor::makeIv(uint32_t timestamp) {
   if (send_count_ == 0) {
     send_count_ = floor(CreateRandomNonZeroId() * 0xFFFF);
   }
-  rtc::ByteBufferWriter buf;
+  ByteBufferWriter buf;
   uint32_t random_u32 = CreateRandomId();
   buf.WriteUInt32(random_u32);
   buf.WriteUInt32(timestamp);
@@ -910,7 +909,7 @@ rtc::Buffer DataPacketCryptor::makeIv(uint32_t timestamp) {
 
   RTC_CHECK_EQ(buf.Length(), 12);
 
-  return rtc::Buffer(buf.Data(), buf.Length());
+  return Buffer(buf.Data(), buf.Length());
 }
 
 }  // namespace webrtc

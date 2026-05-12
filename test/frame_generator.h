@@ -10,20 +10,22 @@
 #ifndef TEST_FRAME_GENERATOR_H_
 #define TEST_FRAME_GENERATOR_H_
 
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
 #include <memory>
-#include <string>
+#include <optional>
 #include <vector>
 
 #include "api/scoped_refptr.h"
 #include "api/test/frame_generator_interface.h"
 #include "api/video/i420_buffer.h"
 #include "api/video/nv12_buffer.h"
-#include "api/video/video_frame.h"
 #include "api/video/video_frame_buffer.h"
-#include "api/video/video_source_interface.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/random.h"
 #include "rtc_base/synchronization/mutex.h"
+#include "rtc_base/thread_annotations.h"
 #include "system_wrappers/include/clock.h"
 
 namespace webrtc {
@@ -76,7 +78,7 @@ class YuvFileGenerator : public FrameGeneratorInterface {
                    size_t height,
                    int frame_repeat_count);
 
-  ~YuvFileGenerator();
+  ~YuvFileGenerator() override;
 
   VideoFrameData NextFrame() override;
   void ChangeResolution(size_t width, size_t height) override {
@@ -110,7 +112,7 @@ class NV12FileGenerator : public FrameGeneratorInterface {
                     size_t height,
                     int frame_repeat_count);
 
-  ~NV12FileGenerator();
+  ~NV12FileGenerator() override;
 
   VideoFrameData NextFrame() override;
   void ChangeResolution(size_t width, size_t height) override {

@@ -19,7 +19,6 @@
 #include <optional>
 #include <string>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #include "absl/algorithm/container.h"
@@ -51,8 +50,6 @@
 #include "call/rtp_packet_sink_interface.h"
 #include "call/syncable.h"
 #include "call/video_receive_stream.h"
-#include "common_video/corruption_detection_converters.h"
-#include "common_video/frame_instrumentation_data.h"
 #include "media/base/media_constants.h"
 #include "modules/include/module_common_types.h"
 #include "modules/pacing/packet_router.h"
@@ -62,6 +59,7 @@
 #include "modules/rtp_rtcp/include/rtcp_statistics.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/absolute_capture_time_interpolator.h"
+#include "modules/rtp_rtcp/source/capture_clock_offset_updater.h"
 #include "modules/rtp_rtcp/source/corruption_detection_extension.h"
 #include "modules/rtp_rtcp/source/create_video_rtp_depacketizer.h"
 #include "modules/rtp_rtcp/source/frame_object.h"
@@ -185,7 +183,7 @@ std::unique_ptr<UlpfecReceiver> MaybeConstructUlpfecReceiver(
                                           callback, clock);
 }
 
-static const int kPacketLogIntervalMs = 10000;
+const int kPacketLogIntervalMs = 10000;
 
 }  // namespace
 
@@ -393,7 +391,7 @@ RtpVideoStreamReceiver2::~RtpVideoStreamReceiver2() {
 void RtpVideoStreamReceiver2::AddReceiveCodec(
     uint8_t payload_type,
     VideoCodecType video_codec,
-    const webrtc::CodecParameterMap& codec_params,
+    const CodecParameterMap& codec_params,
     bool raw_payload) {
   RTC_DCHECK_RUN_ON(&packet_sequence_checker_);
   if (codec_params.count(kH264FmtpSpsPpsIdrInKeyframe) > 0 ||
@@ -426,15 +424,14 @@ std::optional<Syncable::Info> RtpVideoStreamReceiver2::GetSyncInfo() const {
   if (!last_sr.has_value()) {
     return std::nullopt;
   }
-  info.capture_time_ntp_secs = last_sr->last_remote_ntp_timestamp.seconds();
-  info.capture_time_ntp_frac = last_sr->last_remote_ntp_timestamp.fractions();
-  info.capture_time_source_clock = last_sr->last_remote_rtp_timestamp;
+  info.capture_time_ntp = last_sr->last_remote_ntp_timestamp;
+  info.capture_time_rtp = last_sr->last_remote_rtp_timestamp;
 
   if (!last_received_rtp_timestamp_ || !last_received_rtp_system_time_) {
     return std::nullopt;
   }
-  info.latest_received_capture_timestamp = *last_received_rtp_timestamp_;
-  info.latest_receive_time_ms = last_received_rtp_system_time_->ms();
+  info.latest_received_capture_rtp_timestamp = *last_received_rtp_timestamp_;
+  info.latest_receive_time = *last_received_rtp_system_time_;
 
   // Leaves info.current_delay_ms uninitialized.
   return info;
@@ -494,7 +491,8 @@ RtpVideoStreamReceiver2::ParseGenericDependenciesExtension(
     // Save it if there is a (potentially) new structure.
     if (dependency_descriptor.attached_structure) {
       RTC_DCHECK(dependency_descriptor.first_packet_in_frame);
-      if (video_structure_frame_id_ > frame_id) {
+      if (video_structure_frame_id_.has_value() &&
+          video_structure_frame_id_ > frame_id) {
         RTC_LOG(LS_WARNING)
             << "Arrived key frame with id " << frame_id << " and structure id "
             << dependency_descriptor.attached_structure->structure_id
@@ -546,23 +544,6 @@ RtpVideoStreamReceiver2::ParseGenericDependenciesExtension(
   return kHasGenericDescriptor;
 }
 
-void RtpVideoStreamReceiver2::SetLastCorruptionDetectionIndex(
-    const std::variant<FrameInstrumentationSyncData, FrameInstrumentationData>&
-        frame_instrumentation_data,
-    int spatial_idx) {
-  if (const auto* sync_data = std::get_if<FrameInstrumentationSyncData>(
-          &frame_instrumentation_data)) {
-    last_corruption_detection_state_by_layer_[spatial_idx].sequence_index =
-        sync_data->sequence_index;
-  } else if (const auto* data = std::get_if<FrameInstrumentationData>(
-                 &frame_instrumentation_data)) {
-    last_corruption_detection_state_by_layer_[spatial_idx].sequence_index =
-        data->sequence_index + data->sample_values.size();
-  } else {
-    RTC_DCHECK_NOTREACHED();
-  }
-}
-
 bool RtpVideoStreamReceiver2::OnReceivedPayloadData(
     CopyOnWriteBuffer codec_payload,
     const RtpPacketReceived& rtp_packet,
@@ -595,7 +576,7 @@ bool RtpVideoStreamReceiver2::OnReceivedPayloadData(
           rtp_packet.GetExtension<AbsoluteCaptureTimeExtension>()));
   if (packet_info.absolute_capture_time().has_value()) {
     packet_info.set_local_capture_clock_offset(
-        capture_clock_offset_updater_.ConvertsToTimeDela(
+        CaptureClockOffsetUpdater::ConvertToTimeDelta(
             capture_clock_offset_updater_.AdjustEstimatedCaptureClockOffset(
                 packet_info.absolute_capture_time()
                     ->estimated_capture_clock_offset)));
@@ -634,9 +615,9 @@ bool RtpVideoStreamReceiver2::OnReceivedPayloadData(
     Timestamp now = env_.clock().CurrentTime();
     if (now - last_logged_failed_to_parse_dd_ > TimeDelta::Seconds(1)) {
       last_logged_failed_to_parse_dd_ = now;
-      RTC_LOG(LS_WARNING) << "ssrc: " << rtp_packet.Ssrc()
-                          << ", timestamp: " << rtp_packet.Timestamp()
-                          << " Failed to parse dependency descriptor.";
+      RTC_LOG(LS_WARNING) << "Failed to parse dependency descriptor for "
+                          << "ssrc: " << rtp_packet.Ssrc()
+                          << ", timestamp: " << rtp_packet.Timestamp();
     }
     if (video_structure_ == nullptr &&
         next_keyframe_request_for_missing_video_structure_ < now) {
@@ -667,7 +648,7 @@ bool RtpVideoStreamReceiver2::OnReceivedPayloadData(
       spatial_id = video_header.generic->spatial_index;
       if (spatial_id >= kMaxSpatialLayers) {
         RTC_LOG(LS_WARNING) << "Invalid spatial id: " << *spatial_id
-                            << ". Ignoring corruption detection mesaage.";
+                            << " in generic descriptor.";
         spatial_id.reset();
       }
     } else {
@@ -677,33 +658,10 @@ bool RtpVideoStreamReceiver2::OnReceivedPayloadData(
     std::optional<CorruptionDetectionMessage> message =
         rtp_packet.GetExtension<CorruptionDetectionExtension>();
     if (message.has_value() && spatial_id.has_value()) {
-      if (message->sample_values().empty()) {
-        video_header.frame_instrumentation_data =
-            ConvertCorruptionDetectionMessageToFrameInstrumentationSyncData(
-                *message, last_corruption_detection_state_by_layer_[*spatial_id]
-                              .sequence_index);
-      } else {
-        // `OnReceivedPayloadData` might be called several times, however, we
-        // don't want to increase the sequence index each time.
-        if (!last_corruption_detection_state_by_layer_[*spatial_id]
-                 .timestamp.has_value() ||
-            rtp_packet.Timestamp() !=
-                last_corruption_detection_state_by_layer_[*spatial_id]
-                    .timestamp) {
-          video_header.frame_instrumentation_data =
-              ConvertCorruptionDetectionMessageToFrameInstrumentationData(
-                  *message,
-                  last_corruption_detection_state_by_layer_[*spatial_id]
-                      .sequence_index);
-          last_corruption_detection_state_by_layer_[*spatial_id].timestamp =
-              rtp_packet.Timestamp();
-        }
-      }
-
-      if (video_header.frame_instrumentation_data.has_value()) {
-        SetLastCorruptionDetectionIndex(
-            *video_header.frame_instrumentation_data, *spatial_id);
-      }
+      RTC_CHECK_GE(*spatial_id, 0);
+      video_header.frame_instrumentation_data =
+          last_corruption_detection_state_by_layer_[*spatial_id].ParseMessage(
+              *message);
     }
   }
   video_header.video_frame_tracking_id =
@@ -736,7 +694,7 @@ bool RtpVideoStreamReceiver2::OnReceivedPayloadData(
 
   packet->times_nacked = times_nacked;
 
-  if (codec_payload.size() == 0) {
+  if (codec_payload.empty()) {
     NotifyReceiverOfEmptyPacket(packet->seq_num(),
                                 GetCodecFromPayloadType(packet->payload_type));
     rtcp_feedback_buffer_.SendBufferedRtcpFeedback();
@@ -944,6 +902,7 @@ void RtpVideoStreamReceiver2::OnInsertedPacket(
           last_packet.video_header.frame_instrumentation_data,     //
           RtpPacketInfos(std::move(packet_infos)),                 //
           std::move(bitstream)));
+      packet_infos.clear();
     }
   }
   if (result.buffer_cleared) {
@@ -1231,7 +1190,9 @@ void RtpVideoStreamReceiver2::ReceivePacket(const RtpPacketReceived& packet) {
     std::optional<VideoRtpDepacketizer::ParsedRtpPayload> parsed_payload =
         type_it->second->Parse(packet.PayloadBuffer());
     if (parsed_payload == std::nullopt) {
-      RTC_LOG(LS_WARNING) << "Failed parsing payload.";
+      RTC_LOG(LS_WARNING) << " Failed to parse payload for "
+                          << "ssrc: " << packet.Ssrc()
+                          << ", timestamp: " << packet.Timestamp();
       return false;
     }
 
@@ -1317,15 +1278,15 @@ void RtpVideoStreamReceiver2::NotifyReceiverOfEmptyPacket(
   }
 }
 
-bool RtpVideoStreamReceiver2::DeliverRtcp(const uint8_t* rtcp_packet,
-                                          size_t rtcp_packet_length) {
+bool RtpVideoStreamReceiver2::DeliverRtcp(
+    ArrayView<const uint8_t> rtcp_packet) {
   RTC_DCHECK_RUN_ON(&packet_sequence_checker_);
 
   if (!receiving_) {
     return false;
   }
 
-  rtp_rtcp_->IncomingRtcpPacket(MakeArrayView(rtcp_packet, rtcp_packet_length));
+  rtp_rtcp_->IncomingRtcpPacket((rtcp_packet));
 
   std::optional<TimeDelta> rtt = rtp_rtcp_->LastRtt();
   if (!rtt.has_value()) {

@@ -34,7 +34,6 @@ using ::testing::Each;
 using ::testing::ElementsAre;
 using ::testing::ElementsAreArray;
 using ::testing::Eq;
-using ::testing::IsEmpty;
 using ::testing::SizeIs;
 
 constexpr RtpPacketToSend::ExtensionManager* kNoExtensions = nullptr;
@@ -55,7 +54,7 @@ struct NalUnitHeader {
 // Creates Buffer that looks like nal unit of given header and size.
 Buffer GenerateNalUnit(NalUnitHeader header, size_t size) {
   RTC_CHECK_GT(size, 0);
-  Buffer buffer(size);
+  Buffer buffer = Buffer::CreateUninitializedWithSize(size);
   buffer[0] = (header.nal_unit_type << 1) | (header.nuh_layer_id >> 5);
   buffer[1] = (header.nuh_layer_id << 3) | header.nuh_temporal_id_plus1;
   for (size_t i = 2; i < size; ++i) {
@@ -70,8 +69,9 @@ Buffer GenerateNalUnit(NalUnitHeader header, size_t size) {
 // Create frame consisting of nalus of given size.
 Buffer CreateFrame(std::initializer_list<size_t> nalu_sizes) {
   static constexpr int kStartCodeSize = 3;
-  Buffer frame(absl::c_accumulate(nalu_sizes, size_t{0}) +
-               kStartCodeSize * nalu_sizes.size());
+  Buffer frame = Buffer::CreateUninitializedWithSize(
+      absl::c_accumulate(nalu_sizes, size_t{0}) +
+      kStartCodeSize * nalu_sizes.size());
   size_t offset = 0;
   for (size_t nalu_size : nalu_sizes) {
     EXPECT_GE(nalu_size, 1u);
@@ -97,7 +97,7 @@ Buffer CreateFrame(ArrayView<const Buffer> nalus) {
   for (const Buffer& nalu : nalus) {
     frame_size += (kStartCodeSize + nalu.size());
   }
-  Buffer frame(frame_size);
+  Buffer frame = Buffer::CreateUninitializedWithSize(frame_size);
   size_t offset = 0;
   for (const Buffer& nalu : nalus) {
     // Insert nalu start code
@@ -211,18 +211,30 @@ TEST(RtpPacketizerH265Test,
   EXPECT_THAT(packets[2].payload(), ElementsAreArray(nalus[2]));
 }
 
-TEST(RtpPacketizerH265Test,
-     SingleNaluFirstAndLastPacketReductionSumsForSinglePacket) {
+TEST(RtpPacketizerH265Test, SingleNaluUsesSinglePacketReductionLen) {
   RtpPacketizer::PayloadSizeLimits limits;
   limits.max_payload_len = 200;
   limits.first_packet_reduction_len = 20;
+  limits.single_packet_reduction_len = 40;
   limits.last_packet_reduction_len = 30;
-  Buffer frame = CreateFrame({150});
+  Buffer frame = CreateFrame({160});
 
   RtpPacketizerH265 packetizer(frame, limits);
-  std::vector<RtpPacketToSend> packets = FetchAllPackets(&packetizer);
 
-  EXPECT_THAT(packets, SizeIs(1));
+  EXPECT_THAT(FetchAllPackets(&packetizer), SizeIs(1));
+}
+
+TEST(RtpPacketizerH265Test, FragmentsNalUnitWhenDoesntFitIntoSinglePacket) {
+  RtpPacketizer::PayloadSizeLimits limits;
+  limits.max_payload_len = 200;
+  limits.first_packet_reduction_len = 10;
+  limits.single_packet_reduction_len = 40;
+  limits.last_packet_reduction_len = 10;
+  Buffer frame = CreateFrame({170});
+
+  RtpPacketizerH265 packetizer(frame, limits);
+
+  EXPECT_THAT(FetchAllPackets(&packetizer), SizeIs(2));
 }
 
 // Aggregation tests.
@@ -325,6 +337,19 @@ TEST(RtpPacketizerH265Test, ApRespectsLayerIdAndTemporalId) {
               ElementsAreArray(nalus[2]));
 }
 
+TEST(RtpPacketizerH265Test, ApRespectsSinglePacketReduction) {
+  RtpPacketizer::PayloadSizeLimits limits;
+  limits.max_payload_len = 200;
+  limits.first_packet_reduction_len = 5;
+  limits.single_packet_reduction_len = 40;
+  limits.last_packet_reduction_len = 5;
+  Buffer frame = CreateFrame({60, 60, 60});
+
+  RtpPacketizerH265 packetizer(frame, limits);
+
+  EXPECT_THAT(FetchAllPackets(&packetizer), SizeIs(2));
+}
+
 TEST(RtpPacketizerH265Test, ApRespectsFirstPacketReduction) {
   RtpPacketizer::PayloadSizeLimits limits;
   limits.max_payload_len = 1000;
@@ -368,7 +393,13 @@ TEST(RtpPacketizerH265Test, ApRespectsLastPacketReduction) {
   limits.last_packet_reduction_len = 100;
   const size_t kLastFragmentSize =
       limits.max_payload_len - limits.last_packet_reduction_len;
-  Buffer nalus[] = {GenerateNalUnit({.nal_unit_type = H265::NaluType::kIdrNLp,
+  // First nalu forces packetizer to consider last packet reduction len instead
+  // of single packet reduction len when aggregating last 3 nalus.
+  Buffer nalus[] = {GenerateNalUnit({.nal_unit_type = H265::NaluType::kSps,
+                                     .nuh_layer_id = 32,
+                                     .nuh_temporal_id_plus1 = 2},
+                                    /*size=*/999),
+                    GenerateNalUnit({.nal_unit_type = H265::NaluType::kIdrNLp,
                                      .nuh_layer_id = 32,
                                      .nuh_temporal_id_plus1 = 2},
                                     /*size=*/3),
@@ -385,14 +416,16 @@ TEST(RtpPacketizerH265Test, ApRespectsLastPacketReduction) {
   RtpPacketizerH265 packetizer(frame, limits);
   std::vector<RtpPacketToSend> packets = FetchAllPackets(&packetizer);
 
-  ASSERT_THAT(packets, SizeIs(2));
-  // Expect 1st packet is aggregate of 1st two fragments.
-  EXPECT_THAT(packets[0].payload(),
+  ASSERT_THAT(packets, SizeIs(3));
+  // Expect 1st packet is single nalu with the 1st fragment.
+  EXPECT_THAT(packets[0].payload(), ElementsAreArray(nalus[0]));
+  // Expect 2nd packet is aggregate of 2nd and 3rd fragments.
+  EXPECT_THAT(packets[1].payload(),
               ElementsAre(97, 2,                                        //
-                          0, 3, nalus[0][0], nalus[0][1], nalus[0][2],  //
-                          0, 3, nalus[1][0], nalus[1][1], nalus[1][2]));
-  // Expect 2nd packet is single nalu.
-  EXPECT_THAT(packets[1].payload(), ElementsAreArray(nalus[2]));
+                          0, 3, nalus[1][0], nalus[1][1], nalus[1][2],  //
+                          0, 3, nalus[2][0], nalus[2][1], nalus[2][2]));
+  // Expect 3rd packet is single nalu with the last fragment.
+  EXPECT_THAT(packets[2].payload(), ElementsAreArray(nalus[3]));
 }
 
 TEST(RtpPacketizerH265Test, TooSmallForApHeaders) {
@@ -533,6 +566,14 @@ TEST(RtpPacketizerH265Test, FuBig) {
   EXPECT_THAT(
       TestFu(10 * (1200 - kFuHeaderSizeBytes), limits),
       ElementsAre(1197, 1197, 1197, 1197, 1197, 1197, 1197, 1197, 1197, 1197));
+}
+
+// Invalid input tests.
+TEST(RtpPacketizerH265Test, TooShortNalUnitHeader) {
+  const uint8_t kFrame[] = {0, 0, 0, 1, 15};
+  RtpPacketizer::PayloadSizeLimits limits;
+  RtpPacketizerH265 packetizer(kFrame, limits);
+  EXPECT_EQ(packetizer.NumPackets(), 0u);
 }
 
 struct PacketInfo {

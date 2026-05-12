@@ -59,11 +59,11 @@ struct RTC_EXPORT RtpTransceiverInit final {
 //
 // WebRTC specification for RTCRtpTransceiver, the JavaScript analog:
 // https://w3c.github.io/webrtc-pc/#dom-rtcrtptransceiver
-class RTC_EXPORT RtpTransceiverInterface : public webrtc::RefCountInterface {
+class RTC_EXPORT RtpTransceiverInterface : public RefCountInterface {
  public:
   // Media type of the transceiver. Any sender(s)/receiver(s) will have this
   // type as well.
-  virtual webrtc::MediaType media_type() const = 0;
+  virtual MediaType media_type() const = 0;
 
   // The mid attribute is the mid negotiated and present in the local and
   // remote descriptions. Before negotiation is complete, the mid value may be
@@ -115,6 +115,12 @@ class RTC_EXPORT RtpTransceiverInterface : public webrtc::RefCountInterface {
   virtual void SetDirection(RtpTransceiverDirection new_direction);
   virtual RTCError SetDirectionWithError(RtpTransceiverDirection new_direction);
 
+  // The receptive attributes indicates whether the receiver is expecting to
+  // receive RTP data. See [[Receptive]] in
+  // https://w3c.github.io/webrtc-pc/#dfn-receptive
+  // TODO: issues.chromium.org/issues/40821064 - make pure virtual.
+  virtual bool receptive() const;
+
   // The current_direction attribute indicates the current direction negotiated
   // for this transceiver. If this transceiver has never been represented in an
   // offer/answer exchange, or if the transceiver is stopped, the value is null.
@@ -165,7 +171,7 @@ class RTC_EXPORT RtpTransceiverInterface : public webrtc::RefCountInterface {
   // The SetHeaderExtensionsToNegotiate method modifies the next SDP negotiation
   // so that it negotiates use of header extensions which are not kStopped.
   // https://w3c.github.io/webrtc-extensions/#rtcrtptransceiver-interface
-  virtual webrtc::RTCError SetHeaderExtensionsToNegotiate(
+  virtual RTCError SetHeaderExtensionsToNegotiate(
       ArrayView<const RtpHeaderExtensionCapability> header_extensions) = 0;
 
  protected:

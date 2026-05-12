@@ -54,7 +54,7 @@
     }
 
     auto av1Format = webrtc::SdpVideoFormat(
-         cricket::kAv1CodecName, webrtc::CodecParameterMap(),
+         webrtc::kAv1CodecName, webrtc::CodecParameterMap(),
          webrtc::LibaomAv1EncoderSupportedScalabilityModes());
     RTC_OBJC_TYPE(RTCVideoCodecInfo) *av1Codec = [[RTC_OBJC_TYPE(RTCVideoCodecInfo) alloc] initWithNativeSdpVideoFormat: av1Format];
     [addingCodecs addObject: av1Codec];

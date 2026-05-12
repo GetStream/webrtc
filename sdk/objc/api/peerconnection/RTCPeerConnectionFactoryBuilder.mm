@@ -15,11 +15,14 @@
 #include "api/audio/audio_processing.h"
 #include "api/audio_codecs/audio_decoder_factory.h"
 #include "api/audio_codecs/audio_encoder_factory.h"
+#include "api/environment/environment_factory.h"
 #include "api/transport/network_control.h"
 #include "api/video_codecs/video_decoder_factory.h"
 #include "api/video_codecs/video_encoder_factory.h"
 
 @implementation RTC_OBJC_TYPE(RTCPeerConnectionFactoryBuilder) {
+  webrtc::scoped_refptr<webrtc::AudioDeviceModule> (^_audioDeviceModuleBuilder)(
+      const webrtc::Environment &);
   webrtc::PeerConnectionFactoryDependencies _dependencies;
 }
 
@@ -28,12 +31,18 @@
 }
 
 - (RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)createPeerConnectionFactory {
+  if (_audioDeviceModuleBuilder != nil) {
+    if (!_dependencies.env.has_value()) {
+      _dependencies.env = webrtc::CreateEnvironment();
+    }
+    _dependencies.adm = _audioDeviceModuleBuilder(*_dependencies.env);
+  }
   return [[RTC_OBJC_TYPE(RTCPeerConnectionFactory) alloc]
       initWithMediaAndDependencies:std::move(_dependencies)];
 }
 
 - (void)setFieldTrials:(std::unique_ptr<webrtc::FieldTrialsView>)fieldTrials {
-  _dependencies.trials = std::move(fieldTrials);
+  _dependencies.env = webrtc::CreateEnvironment(std::move(fieldTrials));
 }
 
 - (void)setVideoEncoderFactory:
@@ -58,7 +67,15 @@
 
 - (void)setAudioDeviceModule:
     (webrtc::scoped_refptr<webrtc::AudioDeviceModule>)audioDeviceModule {
-  _dependencies.adm = std::move(audioDeviceModule);
+  _audioDeviceModuleBuilder = ^(const webrtc::Environment &) {
+    return audioDeviceModule;
+  };
+}
+
+- (void)setAudioDeviceModuleBuilder:
+    (webrtc::scoped_refptr<webrtc::AudioDeviceModule> (^)(
+        const webrtc::Environment &))audioDeviceModuleBuilder {
+  _audioDeviceModuleBuilder = audioDeviceModuleBuilder;
 }
 
 - (void)setAudioProcessingModule:

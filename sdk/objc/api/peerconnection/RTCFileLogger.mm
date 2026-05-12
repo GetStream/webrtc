@@ -96,8 +96,8 @@ const char * RTC_CONSTANT_TYPE(RTCFileLoggerRotatingLogPrefix) = "rotating_log";
       break;
     case RTC_OBJC_TYPE(RTCFileLoggerTypeCall):
       _logSink.reset(
-          new rtc::CallSessionFileRotatingLogSink(_dirPath.UTF8String,
-                                                  _maxFileSize));
+          new webrtc::CallSessionFileRotatingLogSink(_dirPath.UTF8String,
+                                                     _maxFileSize));
       break;
   }
   if (!_logSink->Init()) {

@@ -8,15 +8,17 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <stdint.h>
 #include <stdio.h>
 
+#include <cstdio>
 #include <memory>
 #include <string>
+#include <tuple>
+#include <vector>
 
 #include "absl/strings/string_view.h"
 #include "api/scoped_refptr.h"
-#include "api/video/i420_buffer.h"
+#include "api/video/resolution.h"
 #include "api/video/video_frame_buffer.h"
 #include "test/gtest.h"
 #include "test/testsupport/file_utils.h"
@@ -41,8 +43,8 @@ class Y4mFrameReaderTest : public ::testing::Test {
   ~Y4mFrameReaderTest() override = default;
 
   void SetUp() override {
-    filepath_ = webrtc::test::TempFilename(webrtc::test::OutputPath(),
-                                           "y4m_frame_reader_unittest");
+    filepath_ =
+        test::TempFilename(test::OutputPath(), "y4m_frame_reader_unittest");
     FILE* file = fopen(filepath_.c_str(), "wb");
     fwrite(kFileHeader, 1, sizeof(kFileHeader) - 1, file);
     for (int n = 0; n < kNumFrames; ++n) {

@@ -12,7 +12,6 @@
 // PeerConnection and the underlying media engine, as well as tests that check
 // the media-related aspects of SDP.
 
-#include <algorithm>
 #include <functional>
 #include <iterator>
 #include <memory>
@@ -24,6 +23,7 @@
 #include <vector>
 
 #include "absl/algorithm/container.h"
+#include "api/create_modular_peer_connection_factory.h"
 #include "api/environment/environment_factory.h"
 #include "api/jsep.h"
 #include "api/media_types.h"
@@ -35,7 +35,6 @@
 #include "api/rtp_transceiver_direction.h"
 #include "api/rtp_transceiver_interface.h"
 #include "api/scoped_refptr.h"
-#include "api/task_queue/default_task_queue_factory.h"
 #include "media/base/codec.h"
 #include "media/base/fake_media_engine.h"
 #include "media/base/media_channel.h"
@@ -169,7 +168,6 @@ class PeerConnectionMediaBaseTest : public ::testing::Test {
     factory_dependencies.network_thread = Thread::Current();
     factory_dependencies.worker_thread = Thread::Current();
     factory_dependencies.signaling_thread = Thread::Current();
-    factory_dependencies.task_queue_factory = CreateDefaultTaskQueueFactory();
     EnableFakeMedia(factory_dependencies, std::move(media_engine));
     factory_dependencies.event_log_factory =
         std::make_unique<RtcEventLogFactory>();
@@ -237,7 +235,7 @@ class PeerConnectionMediaBaseTest : public ::testing::Test {
 
   RtpTransceiverDirection GetMediaContentDirection(
       const SessionDescriptionInterface* sdesc,
-      webrtc::MediaType media_type) {
+      MediaType media_type) {
     auto* content = GetFirstMediaContent(sdesc->description(), media_type);
     RTC_DCHECK(content);
     return content->media_description()->direction();
@@ -389,9 +387,10 @@ TEST_F(PeerConnectionMediaTestPlanB, SimulcastOffer) {
   auto caller_video_track = caller->AddVideoTrack("v");
   RTCOfferAnswerOptions options;
   options.num_simulcast_layers = 3;
-  auto offer = caller->CreateOffer(options);
+  std::unique_ptr<SessionDescriptionInterface> offer =
+      caller->CreateOffer(options);
   auto* description =
-      GetFirstMediaContent(offer->description(), webrtc::MediaType::VIDEO)
+      GetFirstMediaContent(offer->description(), MediaType::VIDEO)
           ->media_description();
   ASSERT_EQ(1u, description->streams().size());
   ASSERT_TRUE(description->streams()[0].get_ssrc_group("SIM"));
@@ -401,7 +400,7 @@ TEST_F(PeerConnectionMediaTestPlanB, SimulcastOffer) {
   caller->SetLocalDescription(std::move(offer));
   auto senders = caller->pc()->GetSenders();
   ASSERT_EQ(1u, senders.size());
-  EXPECT_EQ(webrtc::MediaType::VIDEO, senders[0]->media_type());
+  EXPECT_EQ(MediaType::VIDEO, senders[0]->media_type());
   EXPECT_EQ(3u, senders[0]->GetParameters().encodings.size());
 }
 
@@ -410,15 +409,16 @@ TEST_F(PeerConnectionMediaTestPlanB, SimulcastOffer) {
 TEST_F(PeerConnectionMediaTestPlanB, SimulcastAnswer) {
   auto caller = CreatePeerConnection();
   caller->AddVideoTrack("v0");
-  auto offer = caller->CreateOffer();
+  std::unique_ptr<SessionDescriptionInterface> offer = caller->CreateOffer();
   auto callee = CreatePeerConnection();
   auto callee_video_track = callee->AddVideoTrack("v1");
   ASSERT_TRUE(callee->SetRemoteDescription(std::move(offer)));
   RTCOfferAnswerOptions options;
   options.num_simulcast_layers = 3;
-  auto answer = callee->CreateAnswer(options);
+  std::unique_ptr<SessionDescriptionInterface> answer =
+      callee->CreateAnswer(options);
   auto* description =
-      GetFirstMediaContent(answer->description(), webrtc::MediaType::VIDEO)
+      GetFirstMediaContent(answer->description(), MediaType::VIDEO)
           ->media_description();
   ASSERT_EQ(1u, description->streams().size());
   ASSERT_TRUE(description->streams()[0].get_ssrc_group("SIM"));
@@ -428,7 +428,7 @@ TEST_F(PeerConnectionMediaTestPlanB, SimulcastAnswer) {
   callee->SetLocalDescription(std::move(answer));
   auto senders = callee->pc()->GetSenders();
   ASSERT_EQ(1u, senders.size());
-  EXPECT_EQ(webrtc::MediaType::VIDEO, senders[0]->media_type());
+  EXPECT_EQ(MediaType::VIDEO, senders[0]->media_type());
   EXPECT_EQ(3u, senders[0]->GetParameters().encodings.size());
 }
 
@@ -553,7 +553,7 @@ TEST_P(PeerConnectionMediaTest,
   auto caller = CreatePeerConnectionWithAudioVideo();
   auto callee = CreatePeerConnection();
   ASSERT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
-  auto answer = callee->CreateAnswer();
+  std::unique_ptr<SessionDescriptionInterface> answer = callee->CreateAnswer();
 
   const auto* audio_content = GetFirstAudioContent(answer->description());
   ASSERT_TRUE(audio_content);
@@ -576,7 +576,8 @@ TEST_P(PeerConnectionMediaTest, RawPacketizationNotSetInOffer) {
   caller_fake_engine->SetVideoCodecs(fake_codecs);
 
   auto caller = CreatePeerConnectionWithVideo(std::move(caller_fake_engine));
-  auto offer = caller->CreateOfferAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> offer =
+      caller->CreateOfferAndSetAsLocal();
   auto* offer_description =
       GetFirstVideoContentDescription(offer->description());
   for (const auto& codec : offer_description->codecs()) {
@@ -602,7 +603,8 @@ TEST_P(PeerConnectionMediaTest, RawPacketizationSetInOfferAndAnswer) {
   options.raw_packetization_for_video = true;
 
   auto caller = CreatePeerConnectionWithVideo(std::move(caller_fake_engine));
-  auto offer = caller->CreateOfferAndSetAsLocal(options);
+  std::unique_ptr<SessionDescriptionInterface> offer =
+      caller->CreateOfferAndSetAsLocal(options);
   auto* offer_description =
       GetFirstVideoContentDescription(offer->description());
   for (const auto& codec : offer_description->codecs()) {
@@ -613,7 +615,8 @@ TEST_P(PeerConnectionMediaTest, RawPacketizationSetInOfferAndAnswer) {
 
   auto callee = CreatePeerConnectionWithVideo(std::move(callee_fake_engine));
   ASSERT_TRUE(callee->SetRemoteDescription(std::move(offer)));
-  auto answer = callee->CreateAnswerAndSetAsLocal(options);
+  std::unique_ptr<SessionDescriptionInterface> answer =
+      callee->CreateAnswerAndSetAsLocal(options);
   auto* answer_description =
       GetFirstVideoContentDescription(answer->description());
   for (const auto& codec : answer_description->codecs()) {
@@ -646,11 +649,13 @@ TEST_P(PeerConnectionMediaTest,
   callee_options.raw_packetization_for_video = true;
 
   auto caller = CreatePeerConnectionWithVideo(std::move(caller_fake_engine));
-  auto offer = caller->CreateOfferAndSetAsLocal(caller_options);
+  std::unique_ptr<SessionDescriptionInterface> offer =
+      caller->CreateOfferAndSetAsLocal(caller_options);
 
   auto callee = CreatePeerConnectionWithVideo(std::move(callee_fake_engine));
   ASSERT_TRUE(callee->SetRemoteDescription(std::move(offer)));
-  auto answer = callee->CreateAnswerAndSetAsLocal(callee_options);
+  std::unique_ptr<SessionDescriptionInterface> answer =
+      callee->CreateAnswerAndSetAsLocal(callee_options);
 
   auto* answer_description =
       GetFirstVideoContentDescription(answer->description());
@@ -690,10 +695,10 @@ TEST_P(PeerConnectionMediaOfferDirectionTest, VerifyDirection) {
 
   RTCOfferAnswerOptions options;
   options.offer_to_receive_audio = offer_to_receive_;
-  auto offer = caller->CreateOffer(options);
+  std::unique_ptr<SessionDescriptionInterface> offer =
+      caller->CreateOffer(options);
 
-  auto* content =
-      GetFirstMediaContent(offer->description(), webrtc::MediaType::AUDIO);
+  auto* content = GetFirstMediaContent(offer->description(), MediaType::AUDIO);
   if (expected_direction_ == RtpTransceiverDirection::kInactive) {
     EXPECT_FALSE(content);
   } else {
@@ -747,7 +752,7 @@ TEST_P(PeerConnectionMediaAnswerDirectionTest, VerifyDirection) {
   caller->AddAudioTrack("a");
 
   // Create the offer with an audio section and set its direction.
-  auto offer = caller->CreateOffer();
+  std::unique_ptr<SessionDescriptionInterface> offer = caller->CreateOffer();
   GetFirstAudioContentDescription(offer->description())
       ->set_direction(offer_direction_);
 
@@ -760,7 +765,8 @@ TEST_P(PeerConnectionMediaAnswerDirectionTest, VerifyDirection) {
   // Create the answer according to the test parameters.
   RTCOfferAnswerOptions options;
   options.offer_to_receive_audio = offer_to_receive_;
-  auto answer = callee->CreateAnswer(options);
+  std::unique_ptr<SessionDescriptionInterface> answer =
+      callee->CreateAnswer(options);
 
   // The expected direction in the answer is the intersection of each side's
   // capability to send/recv media.
@@ -779,7 +785,7 @@ TEST_P(PeerConnectionMediaAnswerDirectionTest, VerifyDirection) {
   auto expected_direction =
       RtpTransceiverDirectionFromSendRecv(negotiate_send, negotiate_recv);
   EXPECT_EQ(expected_direction,
-            GetMediaContentDirection(answer.get(), webrtc::MediaType::AUDIO));
+            GetMediaContentDirection(answer.get(), MediaType::AUDIO));
 }
 
 // Tests that the media section is rejected if and only if the callee has no
@@ -797,7 +803,7 @@ TEST_P(PeerConnectionMediaAnswerDirectionTest, VerifyRejected) {
   caller->AddAudioTrack("a");
 
   // Create the offer with an audio section and set its direction.
-  auto offer = caller->CreateOffer();
+  std::unique_ptr<SessionDescriptionInterface> offer = caller->CreateOffer();
   GetFirstAudioContentDescription(offer->description())
       ->set_direction(offer_direction_);
 
@@ -810,7 +816,8 @@ TEST_P(PeerConnectionMediaAnswerDirectionTest, VerifyRejected) {
   // Create the answer according to the test parameters.
   RTCOfferAnswerOptions options;
   options.offer_to_receive_audio = offer_to_receive_;
-  auto answer = callee->CreateAnswer(options);
+  std::unique_ptr<SessionDescriptionInterface> answer =
+      callee->CreateAnswer(options);
 
   // The media section is rejected if and only if offer_to_receive is explicitly
   // set to 0 and there is no media to send.
@@ -837,12 +844,13 @@ TEST_P(PeerConnectionMediaTest, OfferHasDifferentDirectionForAudioVideo) {
   RTCOfferAnswerOptions options;
   options.offer_to_receive_audio = 1;
   options.offer_to_receive_video = 0;
-  auto offer = caller->CreateOffer(options);
+  std::unique_ptr<SessionDescriptionInterface> offer =
+      caller->CreateOffer(options);
 
   EXPECT_EQ(RtpTransceiverDirection::kRecvOnly,
-            GetMediaContentDirection(offer.get(), webrtc::MediaType::AUDIO));
+            GetMediaContentDirection(offer.get(), MediaType::AUDIO));
   EXPECT_EQ(RtpTransceiverDirection::kSendOnly,
-            GetMediaContentDirection(offer.get(), webrtc::MediaType::VIDEO));
+            GetMediaContentDirection(offer.get(), MediaType::VIDEO));
 }
 
 TEST_P(PeerConnectionMediaTest, AnswerHasDifferentDirectionsForAudioVideo) {
@@ -861,12 +869,13 @@ TEST_P(PeerConnectionMediaTest, AnswerHasDifferentDirectionsForAudioVideo) {
   RTCOfferAnswerOptions options;
   options.offer_to_receive_audio = 1;
   options.offer_to_receive_video = 0;
-  auto answer = callee->CreateAnswer(options);
+  std::unique_ptr<SessionDescriptionInterface> answer =
+      callee->CreateAnswer(options);
 
   EXPECT_EQ(RtpTransceiverDirection::kRecvOnly,
-            GetMediaContentDirection(answer.get(), webrtc::MediaType::AUDIO));
+            GetMediaContentDirection(answer.get(), MediaType::AUDIO));
   EXPECT_EQ(RtpTransceiverDirection::kSendOnly,
-            GetMediaContentDirection(answer.get(), webrtc::MediaType::VIDEO));
+            GetMediaContentDirection(answer.get(), MediaType::VIDEO));
 }
 
 void AddComfortNoiseCodecsToSend(FakeMediaEngine* media_engine) {
@@ -922,7 +931,8 @@ TEST_P(PeerConnectionMediaTest,
 
   RTCOfferAnswerOptions options;
   options.voice_activity_detection = false;
-  auto offer = caller->CreateOffer(options);
+  std::unique_ptr<SessionDescriptionInterface> offer =
+      caller->CreateOffer(options);
 
   EXPECT_FALSE(HasAnyComfortNoiseCodecs(offer->description()));
 }
@@ -935,7 +945,8 @@ TEST_P(PeerConnectionMediaTest,
 
   RTCOfferAnswerOptions options;
   options.voice_activity_detection = true;
-  auto offer = caller->CreateOffer(options);
+  std::unique_ptr<SessionDescriptionInterface> offer =
+      caller->CreateOffer(options);
 
   EXPECT_TRUE(HasAnyComfortNoiseCodecs(offer->description()));
 }
@@ -953,7 +964,8 @@ TEST_P(PeerConnectionMediaTest,
 
   RTCOfferAnswerOptions options;
   options.voice_activity_detection = true;
-  auto answer = callee->CreateAnswer(options);
+  std::unique_ptr<SessionDescriptionInterface> answer =
+      callee->CreateAnswer(options);
 
   EXPECT_FALSE(HasAnyComfortNoiseCodecs(answer->description()));
 }
@@ -974,7 +986,8 @@ TEST_P(PeerConnectionMediaTest,
 
   RTCOfferAnswerOptions options;
   options.voice_activity_detection = false;
-  auto answer = callee->CreateAnswer(options);
+  std::unique_ptr<SessionDescriptionInterface> answer =
+      callee->CreateAnswer(options);
 
   EXPECT_FALSE(HasAnyComfortNoiseCodecs(answer->description()));
 }
@@ -984,11 +997,11 @@ TEST_P(PeerConnectionMediaTest,
 
 class PeerConnectionMediaInvalidMediaTest
     : public PeerConnectionMediaBaseTest,
-      public ::testing::WithParamInterface<std::tuple<
-          SdpSemantics,
-          std::tuple<std::string,
-                     std::function<void(webrtc::SessionDescription*)>,
-                     std::string>>> {
+      public ::testing::WithParamInterface<
+          std::tuple<SdpSemantics,
+                     std::tuple<std::string,
+                                std::function<void(SessionDescription*)>,
+                                std::string>>> {
  protected:
   PeerConnectionMediaInvalidMediaTest()
       : PeerConnectionMediaBaseTest(std::get<0>(GetParam())) {
@@ -997,7 +1010,7 @@ class PeerConnectionMediaInvalidMediaTest
     expected_error_ = std::get<2>(param);
   }
 
-  std::function<void(webrtc::SessionDescription*)> mutator_;
+  std::function<void(SessionDescription*)> mutator_;
   std::string expected_error_;
 };
 
@@ -1007,7 +1020,7 @@ TEST_P(PeerConnectionMediaInvalidMediaTest, FailToSetRemoteAnswer) {
 
   ASSERT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
 
-  auto answer = callee->CreateAnswer();
+  std::unique_ptr<SessionDescriptionInterface> answer = callee->CreateAnswer();
   mutator_(answer->description());
 
   std::string error;
@@ -1021,7 +1034,7 @@ TEST_P(PeerConnectionMediaInvalidMediaTest, FailToSetLocalAnswer) {
 
   ASSERT_TRUE(callee->SetRemoteDescription(caller->CreateOfferAndSetAsLocal()));
 
-  auto answer = callee->CreateAnswer();
+  std::unique_ptr<SessionDescriptionInterface> answer = callee->CreateAnswer();
   mutator_(answer->description());
 
   std::string error;
@@ -1032,7 +1045,7 @@ TEST_P(PeerConnectionMediaInvalidMediaTest, FailToSetLocalAnswer) {
 void RemoveVideoContentAndUnbundle(SessionDescription* desc) {
   // Removing BUNDLE is easier than removing the content in there.
   desc->RemoveGroupByName("BUNDLE");
-  auto content_name = GetFirstVideoContent(desc)->mid();
+  std::string content_name = GetFirstVideoContent(desc)->mid();
   desc->RemoveContentByName(content_name);
   desc->RemoveTransportInfoByName(content_name);
 }
@@ -1052,7 +1065,7 @@ void ReverseMediaContent(SessionDescription* desc) {
 }
 
 void ChangeMediaTypeAudioToVideo(SessionDescription* desc) {
-  auto audio_mid = GetFirstAudioContent(desc)->mid();
+  std::string audio_mid = GetFirstAudioContent(desc)->mid();
   desc->RemoveContentByName(audio_mid);
   auto* video_content = GetFirstVideoContent(desc);
   desc->AddContent(audio_mid, video_content->type,
@@ -1128,7 +1141,7 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan,
 }
 
 void RenameContent(SessionDescription* desc,
-                   webrtc::MediaType media_type,
+                   MediaType media_type,
                    const std::string& new_name) {
   auto* content = GetFirstMediaContent(desc, media_type);
   RTC_DCHECK(content);
@@ -1154,12 +1167,12 @@ TEST_P(PeerConnectionMediaTest, AnswerHasSameMidsAsOffer) {
   auto caller = CreatePeerConnectionWithAudioVideo();
   auto callee = CreatePeerConnectionWithAudioVideo();
 
-  auto offer = caller->CreateOffer();
-  RenameContent(offer->description(), webrtc::MediaType::AUDIO, kAudioMid);
-  RenameContent(offer->description(), webrtc::MediaType::VIDEO, kVideoMid);
+  std::unique_ptr<SessionDescriptionInterface> offer = caller->CreateOffer();
+  RenameContent(offer->description(), MediaType::AUDIO, kAudioMid);
+  RenameContent(offer->description(), MediaType::VIDEO, kVideoMid);
   ASSERT_TRUE(callee->SetRemoteDescription(std::move(offer)));
 
-  auto answer = callee->CreateAnswer();
+  std::unique_ptr<SessionDescriptionInterface> answer = callee->CreateAnswer();
   EXPECT_EQ(kAudioMid, GetFirstAudioContent(answer->description())->mid());
   EXPECT_EQ(kVideoMid, GetFirstVideoContent(answer->description())->mid());
 }
@@ -1173,9 +1186,9 @@ TEST_P(PeerConnectionMediaTest, ReOfferHasSameMidsAsFirstOffer) {
   auto caller = CreatePeerConnectionWithAudioVideo();
   auto callee = CreatePeerConnectionWithAudioVideo();
 
-  auto offer = caller->CreateOffer();
-  RenameContent(offer->description(), webrtc::MediaType::AUDIO, kAudioMid);
-  RenameContent(offer->description(), webrtc::MediaType::VIDEO, kVideoMid);
+  std::unique_ptr<SessionDescriptionInterface> offer = caller->CreateOffer();
+  RenameContent(offer->description(), MediaType::AUDIO, kAudioMid);
+  RenameContent(offer->description(), MediaType::VIDEO, kVideoMid);
   ASSERT_TRUE(callee->SetRemoteDescription(std::move(offer)));
   ASSERT_TRUE(callee->SetLocalDescription(callee->CreateAnswer()));
 
@@ -1190,9 +1203,9 @@ TEST_P(PeerConnectionMediaTest, SetRemoteDescriptionFailsWithDuplicateMids) {
   auto caller = CreatePeerConnectionWithAudioVideo();
   auto callee = CreatePeerConnectionWithAudioVideo();
 
-  auto offer = caller->CreateOffer();
-  RenameContent(offer->description(), webrtc::MediaType::AUDIO, "same");
-  RenameContent(offer->description(), webrtc::MediaType::VIDEO, "same");
+  std::unique_ptr<SessionDescriptionInterface> offer = caller->CreateOffer();
+  RenameContent(offer->description(), MediaType::AUDIO, "same");
+  RenameContent(offer->description(), MediaType::VIDEO, "same");
 
   std::string error;
   EXPECT_FALSE(callee->SetRemoteDescription(std::move(offer), &error));
@@ -1206,14 +1219,17 @@ TEST_P(PeerConnectionMediaTest, SetRemoteDescriptionFailsWithDuplicateMids) {
 // fmtp line is modified to refer to the correct payload type.
 TEST_P(PeerConnectionMediaTest, RedFmtpPayloadTypeReassigned) {
   std::vector<Codec> caller_fake_codecs;
-  caller_fake_codecs.push_back(CreateAudioCodec(100, "foo", 0, 1));
+  caller_fake_codecs.push_back(
+      CreateAudioCodec(100, "foo", kDefaultAudioClockRateHz, 1));
   auto caller_fake_engine = std::make_unique<FakeMediaEngine>();
   caller_fake_engine->SetAudioCodecs(caller_fake_codecs);
   auto caller = CreatePeerConnectionWithAudio(std::move(caller_fake_engine));
 
   std::vector<Codec> callee_fake_codecs;
-  callee_fake_codecs.push_back(CreateAudioCodec(120, "foo", 0, 1));
-  callee_fake_codecs.push_back(CreateAudioCodec(121, kRedCodecName, 0, 1));
+  callee_fake_codecs.push_back(
+      CreateAudioCodec(120, "foo", kDefaultAudioClockRateHz, 1));
+  callee_fake_codecs.push_back(
+      CreateAudioCodec(121, kRedCodecName, kDefaultAudioClockRateHz, 1));
   callee_fake_codecs.back().SetParam(kCodecParamNotInNameValueFormat,
                                      "120/120");
   auto callee_fake_engine = std::make_unique<FakeMediaEngine>();
@@ -1221,9 +1237,11 @@ TEST_P(PeerConnectionMediaTest, RedFmtpPayloadTypeReassigned) {
   auto callee = CreatePeerConnectionWithAudio(std::move(callee_fake_engine));
 
   // Offer from the caller establishes 100 as the "foo" payload type.
-  auto offer = caller->CreateOfferAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> offer =
+      caller->CreateOfferAndSetAsLocal();
   callee->SetRemoteDescription(std::move(offer));
-  auto answer = callee->CreateAnswerAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> answer =
+      callee->CreateAnswerAndSetAsLocal();
   auto answer_description =
       GetFirstAudioContentDescription(answer->description());
   ASSERT_EQ(1u, answer_description->codecs().size());
@@ -1248,24 +1266,30 @@ TEST_P(PeerConnectionMediaTest, RedFmtpPayloadTypeReassigned) {
 // Test that RED without fmtp does match RED without fmtp.
 TEST_P(PeerConnectionMediaTest, RedFmtpPayloadTypeNoFmtpMatchNoFmtp) {
   std::vector<Codec> caller_fake_codecs;
-  caller_fake_codecs.push_back(CreateAudioCodec(100, "foo", 0, 1));
-  caller_fake_codecs.push_back(CreateAudioCodec(101, kRedCodecName, 0, 1));
+  caller_fake_codecs.push_back(
+      CreateAudioCodec(100, "foo", kDefaultAudioClockRateHz, 1));
+  caller_fake_codecs.push_back(
+      CreateAudioCodec(101, kRedCodecName, kDefaultAudioClockRateHz, 1));
   auto caller_fake_engine = std::make_unique<FakeMediaEngine>();
   caller_fake_engine->SetAudioCodecs(caller_fake_codecs);
   auto caller = CreatePeerConnectionWithAudio(std::move(caller_fake_engine));
 
   std::vector<Codec> callee_fake_codecs;
-  callee_fake_codecs.push_back(CreateAudioCodec(120, "foo", 0, 1));
-  callee_fake_codecs.push_back(CreateAudioCodec(121, kRedCodecName, 0, 1));
+  callee_fake_codecs.push_back(
+      CreateAudioCodec(120, "foo", kDefaultAudioClockRateHz, 1));
+  callee_fake_codecs.push_back(
+      CreateAudioCodec(121, kRedCodecName, kDefaultAudioClockRateHz, 1));
   auto callee_fake_engine = std::make_unique<FakeMediaEngine>();
   callee_fake_engine->SetAudioCodecs(callee_fake_codecs);
   auto callee = CreatePeerConnectionWithAudio(std::move(callee_fake_engine));
 
   // Offer from the caller establishes 100 as the "foo" payload type.
   // Red (without fmtp) is negotiated.
-  auto offer = caller->CreateOfferAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> offer =
+      caller->CreateOfferAndSetAsLocal();
   callee->SetRemoteDescription(std::move(offer));
-  auto answer = callee->CreateAnswerAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> answer =
+      callee->CreateAnswerAndSetAsLocal();
   auto answer_description =
       GetFirstAudioContentDescription(answer->description());
   ASSERT_EQ(2u, answer_description->codecs().size());
@@ -1288,15 +1312,19 @@ TEST_P(PeerConnectionMediaTest, RedFmtpPayloadTypeNoFmtpMatchNoFmtp) {
 // Test that RED without fmtp does not match RED with fmtp.
 TEST_P(PeerConnectionMediaTest, RedFmtpPayloadTypeNoFmtpNoMatchFmtp) {
   std::vector<Codec> caller_fake_codecs;
-  caller_fake_codecs.push_back(CreateAudioCodec(100, "foo", 0, 1));
-  caller_fake_codecs.push_back(CreateAudioCodec(101, kRedCodecName, 0, 1));
+  caller_fake_codecs.push_back(
+      CreateAudioCodec(100, "foo", kDefaultAudioClockRateHz, 1));
+  caller_fake_codecs.push_back(
+      CreateAudioCodec(101, kRedCodecName, kDefaultAudioClockRateHz, 1));
   auto caller_fake_engine = std::make_unique<FakeMediaEngine>();
   caller_fake_engine->SetAudioCodecs(caller_fake_codecs);
   auto caller = CreatePeerConnectionWithAudio(std::move(caller_fake_engine));
 
   std::vector<Codec> callee_fake_codecs;
-  callee_fake_codecs.push_back(CreateAudioCodec(120, "foo", 0, 1));
-  callee_fake_codecs.push_back(CreateAudioCodec(121, kRedCodecName, 0, 1));
+  callee_fake_codecs.push_back(
+      CreateAudioCodec(120, "foo", kDefaultAudioClockRateHz, 1));
+  callee_fake_codecs.push_back(
+      CreateAudioCodec(121, kRedCodecName, kDefaultAudioClockRateHz, 1));
   callee_fake_codecs.back().SetParam(kCodecParamNotInNameValueFormat,
                                      "120/120");
   auto callee_fake_engine = std::make_unique<FakeMediaEngine>();
@@ -1305,9 +1333,11 @@ TEST_P(PeerConnectionMediaTest, RedFmtpPayloadTypeNoFmtpNoMatchFmtp) {
 
   // Offer from the caller establishes 100 as the "foo" payload type.
   // It should not negotiate RED.
-  auto offer = caller->CreateOfferAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> offer =
+      caller->CreateOfferAndSetAsLocal();
   callee->SetRemoteDescription(std::move(offer));
-  auto answer = callee->CreateAnswerAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> answer =
+      callee->CreateAnswerAndSetAsLocal();
   auto answer_description =
       GetFirstAudioContentDescription(answer->description());
   ASSERT_EQ(1u, answer_description->codecs().size());
@@ -1332,8 +1362,10 @@ TEST_P(PeerConnectionMediaTest, RedFmtpPayloadTypeNoFmtpNoMatchFmtp) {
 // Test that RED with fmtp must match base codecs.
 TEST_P(PeerConnectionMediaTest, RedFmtpPayloadTypeMustMatchBaseCodecs) {
   std::vector<Codec> caller_fake_codecs;
-  caller_fake_codecs.push_back(CreateAudioCodec(100, "foo", 0, 1));
-  caller_fake_codecs.push_back(CreateAudioCodec(101, kRedCodecName, 0, 1));
+  caller_fake_codecs.push_back(
+      CreateAudioCodec(100, "foo", kDefaultAudioClockRateHz, 1));
+  caller_fake_codecs.push_back(
+      CreateAudioCodec(101, kRedCodecName, kDefaultAudioClockRateHz, 1));
   caller_fake_codecs.back().SetParam(kCodecParamNotInNameValueFormat,
                                      "100/100");
   auto caller_fake_engine = std::make_unique<FakeMediaEngine>();
@@ -1341,9 +1373,12 @@ TEST_P(PeerConnectionMediaTest, RedFmtpPayloadTypeMustMatchBaseCodecs) {
   auto caller = CreatePeerConnectionWithAudio(std::move(caller_fake_engine));
 
   std::vector<Codec> callee_fake_codecs;
-  callee_fake_codecs.push_back(CreateAudioCodec(120, "foo", 0, 1));
-  callee_fake_codecs.push_back(CreateAudioCodec(121, kRedCodecName, 0, 1));
-  callee_fake_codecs.push_back(CreateAudioCodec(122, "bar", 0, 1));
+  callee_fake_codecs.push_back(
+      CreateAudioCodec(120, "foo", kDefaultAudioClockRateHz, 1));
+  callee_fake_codecs.push_back(
+      CreateAudioCodec(121, kRedCodecName, kDefaultAudioClockRateHz, 1));
+  callee_fake_codecs.push_back(
+      CreateAudioCodec(122, "bar", kDefaultAudioClockRateHz, 1));
   callee_fake_codecs.back().SetParam(kCodecParamNotInNameValueFormat,
                                      "122/122");
   auto callee_fake_engine = std::make_unique<FakeMediaEngine>();
@@ -1352,9 +1387,11 @@ TEST_P(PeerConnectionMediaTest, RedFmtpPayloadTypeMustMatchBaseCodecs) {
 
   // Offer from the caller establishes 100 as the "foo" payload type.
   // It should not negotiate RED since RED is associated with foo, not bar.
-  auto offer = caller->CreateOfferAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> offer =
+      caller->CreateOfferAndSetAsLocal();
   callee->SetRemoteDescription(std::move(offer));
-  auto answer = callee->CreateAnswerAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> answer =
+      callee->CreateAnswerAndSetAsLocal();
   auto answer_description =
       GetFirstAudioContentDescription(answer->description());
   ASSERT_EQ(1u, answer_description->codecs().size());
@@ -1364,9 +1401,12 @@ TEST_P(PeerConnectionMediaTest, RedFmtpPayloadTypeMustMatchBaseCodecs) {
 // which is not supported.
 TEST_P(PeerConnectionMediaTest, RedFmtpPayloadMixed) {
   std::vector<Codec> caller_fake_codecs;
-  caller_fake_codecs.push_back(CreateAudioCodec(100, "foo", 0, 1));
-  caller_fake_codecs.push_back(CreateAudioCodec(102, "bar", 0, 1));
-  caller_fake_codecs.push_back(CreateAudioCodec(101, kRedCodecName, 0, 1));
+  caller_fake_codecs.push_back(
+      CreateAudioCodec(100, "foo", kDefaultAudioClockRateHz, 1));
+  caller_fake_codecs.push_back(
+      CreateAudioCodec(102, "bar", kDefaultAudioClockRateHz, 1));
+  caller_fake_codecs.push_back(
+      CreateAudioCodec(101, kRedCodecName, kDefaultAudioClockRateHz, 1));
   caller_fake_codecs.back().SetParam(kCodecParamNotInNameValueFormat,
                                      "100/102");
   auto caller_fake_engine = std::make_unique<FakeMediaEngine>();
@@ -1374,8 +1414,10 @@ TEST_P(PeerConnectionMediaTest, RedFmtpPayloadMixed) {
   auto caller = CreatePeerConnectionWithAudio(std::move(caller_fake_engine));
 
   std::vector<Codec> callee_fake_codecs;
-  callee_fake_codecs.push_back(CreateAudioCodec(120, "foo", 0, 1));
-  callee_fake_codecs.push_back(CreateAudioCodec(121, kRedCodecName, 0, 1));
+  callee_fake_codecs.push_back(
+      CreateAudioCodec(120, "foo", kDefaultAudioClockRateHz, 1));
+  callee_fake_codecs.push_back(
+      CreateAudioCodec(121, kRedCodecName, kDefaultAudioClockRateHz, 1));
   callee_fake_codecs.back().SetParam(kCodecParamNotInNameValueFormat,
                                      "120/120");
   auto callee_fake_engine = std::make_unique<FakeMediaEngine>();
@@ -1383,9 +1425,11 @@ TEST_P(PeerConnectionMediaTest, RedFmtpPayloadMixed) {
   auto callee = CreatePeerConnectionWithAudio(std::move(callee_fake_engine));
 
   // Offer from the caller establishes 100 as the "foo" payload type.
-  auto offer = caller->CreateOfferAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> offer =
+      caller->CreateOfferAndSetAsLocal();
   callee->SetRemoteDescription(std::move(offer));
-  auto answer = callee->CreateAnswerAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> answer =
+      callee->CreateAnswerAndSetAsLocal();
   auto answer_description =
       GetFirstAudioContentDescription(answer->description());
   // RED is not negotiated.
@@ -1396,8 +1440,10 @@ TEST_P(PeerConnectionMediaTest, RedFmtpPayloadMixed) {
 // redundancy.
 TEST_P(PeerConnectionMediaTest, RedFmtpPayloadDifferentRedundancy) {
   std::vector<Codec> caller_fake_codecs;
-  caller_fake_codecs.push_back(CreateAudioCodec(100, "foo", 0, 1));
-  caller_fake_codecs.push_back(CreateAudioCodec(101, kRedCodecName, 0, 1));
+  caller_fake_codecs.push_back(
+      CreateAudioCodec(100, "foo", kDefaultAudioClockRateHz, 1));
+  caller_fake_codecs.push_back(
+      CreateAudioCodec(101, kRedCodecName, kDefaultAudioClockRateHz, 1));
   caller_fake_codecs.back().SetParam(kCodecParamNotInNameValueFormat,
                                      "100/100");
   auto caller_fake_engine = std::make_unique<FakeMediaEngine>();
@@ -1405,8 +1451,10 @@ TEST_P(PeerConnectionMediaTest, RedFmtpPayloadDifferentRedundancy) {
   auto caller = CreatePeerConnectionWithAudio(std::move(caller_fake_engine));
 
   std::vector<Codec> callee_fake_codecs;
-  callee_fake_codecs.push_back(CreateAudioCodec(120, "foo", 0, 1));
-  callee_fake_codecs.push_back(CreateAudioCodec(121, kRedCodecName, 0, 1));
+  callee_fake_codecs.push_back(
+      CreateAudioCodec(120, "foo", kDefaultAudioClockRateHz, 1));
+  callee_fake_codecs.push_back(
+      CreateAudioCodec(121, kRedCodecName, kDefaultAudioClockRateHz, 1));
   callee_fake_codecs.back().SetParam(kCodecParamNotInNameValueFormat,
                                      "120/120/120");
   auto callee_fake_engine = std::make_unique<FakeMediaEngine>();
@@ -1414,9 +1462,11 @@ TEST_P(PeerConnectionMediaTest, RedFmtpPayloadDifferentRedundancy) {
   auto callee = CreatePeerConnectionWithAudio(std::move(callee_fake_engine));
 
   // Offer from the caller establishes 100 as the "foo" payload type.
-  auto offer = caller->CreateOfferAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> offer =
+      caller->CreateOfferAndSetAsLocal();
   callee->SetRemoteDescription(std::move(offer));
-  auto answer = callee->CreateAnswerAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> answer =
+      callee->CreateAnswerAndSetAsLocal();
   auto answer_description =
       GetFirstAudioContentDescription(answer->description());
   // RED is negotiated.
@@ -1471,15 +1521,16 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan,
        SetCodecPreferencesAudioMissingRecvCodec) {
   auto fake_engine = std::make_unique<FakeMediaEngine>();
   auto send_codecs = fake_engine->voice().LegacySendCodecs();
-  send_codecs.push_back(
-      CreateAudioCodec(send_codecs.back().id + 1, "send_only_codec", 0, 1));
+  send_codecs.push_back(CreateAudioCodec(send_codecs.back().id + 1,
+                                         "send_only_codec",
+                                         kDefaultAudioClockRateHz, 1));
   fake_engine->SetAudioSendCodecs(send_codecs);
 
   auto caller = CreatePeerConnectionWithAudio(std::move(fake_engine));
 
   auto transceiver = caller->pc()->GetTransceivers().front();
   auto capabilities =
-      caller->pc_factory()->GetRtpSenderCapabilities(webrtc::MediaType::AUDIO);
+      caller->pc_factory()->GetRtpSenderCapabilities(MediaType::AUDIO);
 
   std::vector<RtpCodecCapability> codecs;
   absl::c_copy_if(capabilities.codecs, std::back_inserter(codecs),
@@ -1497,12 +1548,10 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan,
   auto caller = CreatePeerConnectionWithAudio();
 
   auto transceiver = caller->pc()->GetTransceivers().front();
-  auto video_codecs = caller->pc_factory()
-                          ->GetRtpSenderCapabilities(webrtc::MediaType::VIDEO)
-                          .codecs;
-  auto codecs = caller->pc_factory()
-                    ->GetRtpSenderCapabilities(webrtc::MediaType::AUDIO)
-                    .codecs;
+  auto video_codecs =
+      caller->pc_factory()->GetRtpSenderCapabilities(MediaType::VIDEO).codecs;
+  auto codecs =
+      caller->pc_factory()->GetRtpSenderCapabilities(MediaType::AUDIO).codecs;
   codecs.insert(codecs.end(), video_codecs.begin(), video_codecs.end());
   auto result = transceiver->SetCodecPreferences(codecs);
   EXPECT_EQ(RTCErrorType::INVALID_MODIFICATION, result.type());
@@ -1514,27 +1563,25 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan,
   auto audio_codecs = fake_engine->voice().LegacySendCodecs();
   audio_codecs.push_back(
       CreateAudioRtxCodec(audio_codecs.back().id + 1, audio_codecs.back().id));
-  audio_codecs.push_back(
-      CreateAudioCodec(audio_codecs.back().id + 1, kRedCodecName, 0, 1));
-  audio_codecs.push_back(
-      CreateAudioCodec(audio_codecs.back().id + 1, kUlpfecCodecName, 0, 1));
+  audio_codecs.push_back(CreateAudioCodec(
+      audio_codecs.back().id + 1, kRedCodecName, kDefaultAudioClockRateHz, 1));
+  audio_codecs.push_back(CreateAudioCodec(audio_codecs.back().id + 1,
+                                          kUlpfecCodecName,
+                                          kDefaultAudioClockRateHz, 1));
   fake_engine->SetAudioCodecs(audio_codecs);
 
   auto caller = CreatePeerConnectionWithAudio(std::move(fake_engine));
 
   auto transceiver =
       RtpTransceiverInternal(caller->pc()->GetTransceivers().front());
-  auto codecs = caller->pc_factory()
-                    ->GetRtpSenderCapabilities(webrtc::MediaType::AUDIO)
-                    .codecs;
+  auto codecs =
+      caller->pc_factory()->GetRtpSenderCapabilities(MediaType::AUDIO).codecs;
   auto codecs_only_rtx_red_fec = codecs;
-  auto it = std::remove_if(
-      codecs_only_rtx_red_fec.begin(), codecs_only_rtx_red_fec.end(),
-      [](const RtpCodecCapability& codec) {
+  std::erase_if(
+      codecs_only_rtx_red_fec, [](const RtpCodecCapability& codec) {
         return !(codec.name == kRtxCodecName || codec.name == kRedCodecName ||
                  codec.name == kUlpfecCodecName);
       });
-  codecs_only_rtx_red_fec.erase(it, codecs_only_rtx_red_fec.end());
   ASSERT_THAT(codecs_only_rtx_red_fec.size(), Gt(0));
   auto result = transceiver->SetCodecPreferences(codecs_only_rtx_red_fec);
   EXPECT_EQ(RTCErrorType::INVALID_MODIFICATION, result.type());
@@ -1544,15 +1591,13 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan, SetCodecPreferencesAllAudioCodecs) {
   auto caller = CreatePeerConnectionWithAudio();
 
   auto sender_audio_codecs =
-      caller->pc_factory()
-          ->GetRtpSenderCapabilities(webrtc::MediaType::AUDIO)
-          .codecs;
+      caller->pc_factory()->GetRtpSenderCapabilities(MediaType::AUDIO).codecs;
 
   auto audio_transceiver = caller->pc()->GetTransceivers().front();
 
   // Normal case, set all capabilities as preferences
   EXPECT_TRUE(audio_transceiver->SetCodecPreferences(sender_audio_codecs).ok());
-  auto offer = caller->CreateOffer();
+  std::unique_ptr<SessionDescriptionInterface> offer = caller->CreateOffer();
   auto codecs =
       offer->description()->contents()[0].media_description()->codecs();
   EXPECT_TRUE(CompareCodecs(sender_audio_codecs, codecs));
@@ -1563,16 +1608,14 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan,
   auto caller = CreatePeerConnectionWithAudio();
 
   auto sender_audio_codecs =
-      caller->pc_factory()
-          ->GetRtpSenderCapabilities(webrtc::MediaType::AUDIO)
-          .codecs;
+      caller->pc_factory()->GetRtpSenderCapabilities(MediaType::AUDIO).codecs;
   std::vector<RtpCodecCapability> empty_codecs = {};
 
   auto audio_transceiver = caller->pc()->GetTransceivers().front();
 
   // Normal case, reset codec preferences
   EXPECT_TRUE(audio_transceiver->SetCodecPreferences(empty_codecs).ok());
-  auto offer = caller->CreateOffer();
+  std::unique_ptr<SessionDescriptionInterface> offer = caller->CreateOffer();
   auto codecs =
       offer->description()->contents()[0].media_description()->codecs();
   EXPECT_TRUE(CompareCodecs(sender_audio_codecs, codecs));
@@ -1583,12 +1626,10 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan,
   auto caller = CreatePeerConnectionWithVideo();
 
   auto transceiver = caller->pc()->GetTransceivers().front();
-  auto audio_codecs = caller->pc_factory()
-                          ->GetRtpSenderCapabilities(webrtc::MediaType::AUDIO)
-                          .codecs;
-  auto codecs = caller->pc_factory()
-                    ->GetRtpSenderCapabilities(webrtc::MediaType::VIDEO)
-                    .codecs;
+  auto audio_codecs =
+      caller->pc_factory()->GetRtpSenderCapabilities(MediaType::AUDIO).codecs;
+  auto codecs =
+      caller->pc_factory()->GetRtpSenderCapabilities(MediaType::VIDEO).codecs;
   codecs.insert(codecs.end(), audio_codecs.begin(), audio_codecs.end());
   auto result = transceiver->SetCodecPreferences(codecs);
   EXPECT_EQ(RTCErrorType::INVALID_MODIFICATION, result.type());
@@ -1609,17 +1650,14 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan,
   auto caller = CreatePeerConnectionWithVideo(std::move(fake_engine));
 
   auto transceiver = caller->pc()->GetTransceivers().front();
-  auto codecs = caller->pc_factory()
-                    ->GetRtpSenderCapabilities(webrtc::MediaType::VIDEO)
-                    .codecs;
+  auto codecs =
+      caller->pc_factory()->GetRtpSenderCapabilities(MediaType::VIDEO).codecs;
   auto codecs_only_rtx_red_fec = codecs;
-  auto it = std::remove_if(
-      codecs_only_rtx_red_fec.begin(), codecs_only_rtx_red_fec.end(),
-      [](const RtpCodecCapability& codec) {
+  std::erase_if(
+      codecs_only_rtx_red_fec, [](const RtpCodecCapability& codec) {
         return !(codec.name == kRtxCodecName || codec.name == kRedCodecName ||
                  codec.name == kUlpfecCodecName);
       });
-  codecs_only_rtx_red_fec.erase(it, codecs_only_rtx_red_fec.end());
 
   auto result = transceiver->SetCodecPreferences(codecs_only_rtx_red_fec);
   EXPECT_EQ(RTCErrorType::INVALID_MODIFICATION, result.type());
@@ -1629,15 +1667,13 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan, SetCodecPreferencesAllVideoCodecs) {
   auto caller = CreatePeerConnectionWithVideo();
 
   auto sender_video_codecs =
-      caller->pc_factory()
-          ->GetRtpSenderCapabilities(webrtc::MediaType::VIDEO)
-          .codecs;
+      caller->pc_factory()->GetRtpSenderCapabilities(MediaType::VIDEO).codecs;
 
   auto video_transceiver = caller->pc()->GetTransceivers().front();
 
   // Normal case, setting preferences to normal capabilities
   EXPECT_TRUE(video_transceiver->SetCodecPreferences(sender_video_codecs).ok());
-  auto offer = caller->CreateOffer();
+  std::unique_ptr<SessionDescriptionInterface> offer = caller->CreateOffer();
   auto codecs =
       offer->description()->contents()[0].media_description()->codecs();
   EXPECT_TRUE(CompareCodecs(sender_video_codecs, codecs));
@@ -1648,9 +1684,7 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan,
   auto caller = CreatePeerConnectionWithVideo();
 
   auto sender_video_codecs =
-      caller->pc_factory()
-          ->GetRtpSenderCapabilities(webrtc::MediaType::VIDEO)
-          .codecs;
+      caller->pc_factory()->GetRtpSenderCapabilities(MediaType::VIDEO).codecs;
 
   std::vector<RtpCodecCapability> empty_codecs = {};
 
@@ -1658,7 +1692,7 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan,
 
   // Normal case, resetting preferences with empty list of codecs
   EXPECT_TRUE(video_transceiver->SetCodecPreferences(empty_codecs).ok());
-  auto offer = caller->CreateOffer();
+  std::unique_ptr<SessionDescriptionInterface> offer = caller->CreateOffer();
   auto codecs =
       offer->description()->contents()[0].media_description()->codecs();
   EXPECT_TRUE(CompareCodecs(sender_video_codecs, codecs));
@@ -1669,9 +1703,7 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan,
   auto caller = CreatePeerConnectionWithVideo();
 
   auto sender_video_codecs =
-      caller->pc_factory()
-          ->GetRtpSenderCapabilities(webrtc::MediaType::VIDEO)
-          .codecs;
+      caller->pc_factory()->GetRtpSenderCapabilities(MediaType::VIDEO).codecs;
 
   auto video_transceiver = caller->pc()->GetTransceivers().front();
 
@@ -1684,7 +1716,7 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan,
   duplicate_codec.push_back(duplicate_codec.front());
 
   EXPECT_TRUE(video_transceiver->SetCodecPreferences(duplicate_codec).ok());
-  auto offer = caller->CreateOffer();
+  std::unique_ptr<SessionDescriptionInterface> offer = caller->CreateOffer();
   auto codecs =
       offer->description()->contents()[0].media_description()->codecs();
   EXPECT_TRUE(CompareCodecs(single_codec, codecs));
@@ -1706,26 +1738,21 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan, SetCodecPreferencesVideoWithRtx) {
   auto caller = CreatePeerConnectionWithVideo(std::move(caller_fake_engine));
 
   auto sender_video_codecs =
-      caller->pc_factory()
-          ->GetRtpSenderCapabilities(webrtc::MediaType::VIDEO)
-          .codecs;
+      caller->pc_factory()->GetRtpSenderCapabilities(MediaType::VIDEO).codecs;
 
   auto video_transceiver = caller->pc()->GetTransceivers().front();
 
   // Check that RTX codec is properly added
   auto video_codecs_vpx_rtx = sender_video_codecs;
-  auto it = std::remove_if(
-      video_codecs_vpx_rtx.begin(), video_codecs_vpx_rtx.end(),
-      [](const RtpCodecCapability& codec) {
-        return codec.name != kRtxCodecName && codec.name != kVp8CodecName &&
-               codec.name != kVp9CodecName;
-      });
-  video_codecs_vpx_rtx.erase(it, video_codecs_vpx_rtx.end());
+  std::erase_if(video_codecs_vpx_rtx, [](const RtpCodecCapability& codec) {
+    return codec.name != kRtxCodecName && codec.name != kVp8CodecName &&
+           codec.name != kVp9CodecName;
+  });
   absl::c_reverse(video_codecs_vpx_rtx);
   EXPECT_EQ(video_codecs_vpx_rtx.size(), 3u);  // VP8, VP9, RTX
   EXPECT_TRUE(
       video_transceiver->SetCodecPreferences(video_codecs_vpx_rtx).ok());
-  auto offer = caller->CreateOffer();
+  std::unique_ptr<SessionDescriptionInterface> offer = caller->CreateOffer();
   auto codecs =
       offer->description()->contents()[0].media_description()->codecs();
 
@@ -1753,23 +1780,20 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan,
   auto caller = CreatePeerConnectionWithVideo(std::move(caller_fake_engine));
   auto callee = CreatePeerConnection(std::move(callee_fake_engine));
 
-  auto video_codecs = caller->pc_factory()
-                          ->GetRtpSenderCapabilities(webrtc::MediaType::VIDEO)
-                          .codecs;
+  auto video_codecs =
+      caller->pc_factory()->GetRtpSenderCapabilities(MediaType::VIDEO).codecs;
 
   auto send_transceiver = caller->pc()->GetTransceivers().front();
 
   auto video_codecs_vpx = video_codecs;
-  auto it = std::remove_if(video_codecs_vpx.begin(), video_codecs_vpx.end(),
-                           [](const RtpCodecCapability& codec) {
-                             return codec.name != kVp8CodecName &&
-                                    codec.name != kVp9CodecName;
-                           });
-  video_codecs_vpx.erase(it, video_codecs_vpx.end());
+  std::erase_if(video_codecs_vpx, [](const RtpCodecCapability& codec) {
+    return codec.name != kVp8CodecName && codec.name != kVp9CodecName;
+  });
   EXPECT_EQ(video_codecs_vpx.size(), 2u);  // VP8, VP9
   EXPECT_TRUE(send_transceiver->SetCodecPreferences(video_codecs_vpx).ok());
 
-  auto offer = caller->CreateOfferAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> offer =
+      caller->CreateOfferAndSetAsLocal();
   auto codecs =
       offer->description()->contents()[0].media_description()->codecs();
 
@@ -1780,17 +1804,15 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan,
 
   auto recv_transceiver = callee->pc()->GetTransceivers().front();
   auto video_codecs_vp8_rtx = video_codecs;
-  it = std::remove_if(video_codecs_vp8_rtx.begin(), video_codecs_vp8_rtx.end(),
-                      [](const RtpCodecCapability& codec) {
-                        bool r = codec.name != kVp8CodecName &&
-                                 codec.name != kRtxCodecName;
-                        return r;
-                      });
-  video_codecs_vp8_rtx.erase(it, video_codecs_vp8_rtx.end());
+  std::erase_if(video_codecs_vp8_rtx, [](const RtpCodecCapability& codec) {
+    bool r = codec.name != kVp8CodecName && codec.name != kRtxCodecName;
+    return r;
+  });
   EXPECT_EQ(video_codecs_vp8_rtx.size(), 2u);  // VP8, RTX
   recv_transceiver->SetCodecPreferences(video_codecs_vp8_rtx);
 
-  auto answer = callee->CreateAnswerAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> answer =
+      callee->CreateAnswerAndSetAsLocal();
 
   auto recv_codecs =
       answer->description()->contents()[0].media_description()->codecs();
@@ -1817,26 +1839,23 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan,
   auto caller = CreatePeerConnectionWithVideo(std::move(caller_fake_engine));
   auto callee = CreatePeerConnection(std::move(callee_fake_engine));
 
-  auto video_codecs = caller->pc_factory()
-                          ->GetRtpSenderCapabilities(webrtc::MediaType::VIDEO)
-                          .codecs;
+  auto video_codecs =
+      caller->pc_factory()->GetRtpSenderCapabilities(MediaType::VIDEO).codecs;
 
   auto send_transceiver = caller->pc()->GetTransceivers().front();
 
   auto video_codecs_vpx = video_codecs;
-  auto it = std::remove_if(video_codecs_vpx.begin(), video_codecs_vpx.end(),
-                           [](const RtpCodecCapability& codec) {
-                             return codec.name != kVp8CodecName &&
-                                    codec.name != kVp9CodecName;
-                           });
-  video_codecs_vpx.erase(it, video_codecs_vpx.end());
+  std::erase_if(video_codecs_vpx, [](const RtpCodecCapability& codec) {
+    return codec.name != kVp8CodecName && codec.name != kVp9CodecName;
+  });
   EXPECT_EQ(video_codecs_vpx.size(), 2u);  // VP8, VP9
   EXPECT_TRUE(send_transceiver->SetCodecPreferences(video_codecs_vpx).ok());
 
   auto video_codecs_vpx_reverse = video_codecs_vpx;
   absl::c_reverse(video_codecs_vpx_reverse);
 
-  auto offer = caller->CreateOfferAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> offer =
+      caller->CreateOfferAndSetAsLocal();
   auto codecs =
       offer->description()->contents()[0].media_description()->codecs();
   EXPECT_EQ(codecs.size(), 2u);  // VP9, VP8
@@ -1847,7 +1866,8 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan,
   auto recv_transceiver = callee->pc()->GetTransceivers().front();
   recv_transceiver->SetCodecPreferences(video_codecs_vpx_reverse);
 
-  auto answer = callee->CreateAnswerAndSetAsLocal();
+  std::unique_ptr<SessionDescriptionInterface> answer =
+      callee->CreateAnswerAndSetAsLocal();
 
   auto recv_codecs =
       answer->description()->contents()[0].media_description()->codecs();
@@ -1862,12 +1882,13 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan,
   auto caller = CreatePeerConnectionWithAudio(std::move(fake_engine));
 
   RTCOfferAnswerOptions options;
-  auto offer = caller->CreateOffer(options);
+  std::unique_ptr<SessionDescriptionInterface> offer =
+      caller->CreateOffer(options);
   EXPECT_TRUE(HasAnyComfortNoiseCodecs(offer->description()));
 
   auto transceiver = caller->pc()->GetTransceivers().front();
   auto capabilities =
-      caller->pc_factory()->GetRtpSenderCapabilities(webrtc::MediaType::AUDIO);
+      caller->pc_factory()->GetRtpSenderCapabilities(MediaType::AUDIO);
   EXPECT_TRUE(transceiver->SetCodecPreferences(capabilities.codecs).ok());
 
   options.voice_activity_detection = false;
@@ -1884,7 +1905,8 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan,
   auto fake_engine = std::make_unique<FakeMediaEngine>();
 
   std::vector<Codec> audio_codecs;
-  audio_codecs.emplace_back(CreateAudioCodec(100, "foo", 0, 1));
+  audio_codecs.emplace_back(
+      CreateAudioCodec(100, "foo", kDefaultAudioClockRateHz, 1));
   audio_codecs.emplace_back(CreateAudioRtxCodec(101, 100));
   fake_engine->SetAudioCodecs(audio_codecs);
 
@@ -1899,16 +1921,17 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan,
 
   auto audio_transceiver = caller->pc()->GetTransceivers()[0];
   auto capabilities =
-      caller->pc_factory()->GetRtpSenderCapabilities(webrtc::MediaType::AUDIO);
+      caller->pc_factory()->GetRtpSenderCapabilities(MediaType::AUDIO);
   EXPECT_TRUE(audio_transceiver->SetCodecPreferences(capabilities.codecs).ok());
 
   auto video_transceiver = caller->pc()->GetTransceivers()[1];
   capabilities =
-      caller->pc_factory()->GetRtpSenderCapabilities(webrtc::MediaType::VIDEO);
+      caller->pc_factory()->GetRtpSenderCapabilities(MediaType::VIDEO);
   EXPECT_TRUE(video_transceiver->SetCodecPreferences(capabilities.codecs).ok());
 
   RTCOfferAnswerOptions options;
-  auto offer = caller->CreateOffer(options);
+  std::unique_ptr<SessionDescriptionInterface> offer =
+      caller->CreateOffer(options);
   EXPECT_FALSE(HasPayloadTypeConflict(offer->description()));
   // Sanity check that we got the primary codec and RTX.
   EXPECT_EQ(
@@ -1925,7 +1948,8 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan,
   auto fake_engine = std::make_unique<FakeMediaEngine>();
 
   std::vector<Codec> audio_codecs;
-  audio_codecs.emplace_back(CreateAudioCodec(100, "foo", 0, 1));
+  audio_codecs.emplace_back(
+      CreateAudioCodec(100, "foo", kDefaultAudioClockRateHz, 1));
   audio_codecs.emplace_back(CreateAudioRtxCodec(101, 100));
   fake_engine->SetAudioCodecs(audio_codecs);
 
@@ -1944,15 +1968,16 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan,
 
   auto audio_transceiver = caller->pc()->GetTransceivers()[0];
   auto capabilities =
-      caller->pc_factory()->GetRtpSenderCapabilities(webrtc::MediaType::AUDIO);
+      caller->pc_factory()->GetRtpSenderCapabilities(MediaType::AUDIO);
   EXPECT_TRUE(audio_transceiver->SetCodecPreferences(capabilities.codecs).ok());
 
   auto video_transceiver = caller->pc()->GetTransceivers()[1];
   capabilities =
-      caller->pc_factory()->GetRtpSenderCapabilities(webrtc::MediaType::VIDEO);
+      caller->pc_factory()->GetRtpSenderCapabilities(MediaType::VIDEO);
   EXPECT_TRUE(video_transceiver->SetCodecPreferences(capabilities.codecs).ok());
 
-  auto answer = caller->CreateAnswer(options);
+  std::unique_ptr<SessionDescriptionInterface> answer =
+      caller->CreateAnswer(options);
 
   EXPECT_FALSE(HasPayloadTypeConflict(answer->description()));
   // Sanity check that we got the primary codec and RTX.
@@ -1970,7 +1995,8 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan,
   auto fake_engine = std::make_unique<FakeMediaEngine>();
 
   std::vector<Codec> audio_codecs;
-  audio_codecs.emplace_back(CreateAudioCodec(100, "foo", 0, 1));
+  audio_codecs.emplace_back(
+      CreateAudioCodec(100, "foo", kDefaultAudioClockRateHz, 1));
   audio_codecs.emplace_back(CreateAudioRtxCodec(101, 100));
   fake_engine->SetAudioCodecs(audio_codecs);
 
@@ -1990,12 +2016,12 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan,
 
   auto audio_transceiver = caller->pc()->GetTransceivers()[0];
   auto capabilities =
-      caller->pc_factory()->GetRtpSenderCapabilities(webrtc::MediaType::AUDIO);
+      caller->pc_factory()->GetRtpSenderCapabilities(MediaType::AUDIO);
   EXPECT_TRUE(audio_transceiver->SetCodecPreferences(capabilities.codecs).ok());
 
   auto video_transceiver = caller->pc()->GetTransceivers()[1];
   capabilities =
-      caller->pc_factory()->GetRtpSenderCapabilities(webrtc::MediaType::VIDEO);
+      caller->pc_factory()->GetRtpSenderCapabilities(MediaType::VIDEO);
   EXPECT_TRUE(video_transceiver->SetCodecPreferences(capabilities.codecs).ok());
 
   auto reoffer = caller->CreateOffer(options);
@@ -2016,7 +2042,8 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan,
   auto fake_engine = std::make_unique<FakeMediaEngine>();
 
   std::vector<Codec> audio_codecs;
-  audio_codecs.emplace_back(CreateAudioCodec(100, "foo", 0, 1));
+  audio_codecs.emplace_back(
+      CreateAudioCodec(100, "foo", kDefaultAudioClockRateHz, 1));
   fake_engine->SetAudioRecvCodecs(audio_codecs);
 
   auto caller = CreatePeerConnectionWithAudio(std::move(fake_engine));
@@ -2028,8 +2055,8 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan,
   auto error = audio_transceiver->SetDirectionWithError(
       RtpTransceiverDirection::kSendOnly);
   ASSERT_TRUE(error.ok());
-  auto capabilities = caller->pc_factory()->GetRtpReceiverCapabilities(
-      webrtc::MediaType::AUDIO);
+  auto capabilities =
+      caller->pc_factory()->GetRtpReceiverCapabilities(MediaType::AUDIO);
   EXPECT_TRUE(audio_transceiver->SetCodecPreferences(capabilities.codecs).ok());
   RTCOfferAnswerOptions options;
   EXPECT_TRUE(caller->SetLocalDescription(caller->CreateOffer(options)));
@@ -2058,18 +2085,17 @@ TEST_F(PeerConnectionMediaTestUnifiedPlan, SetCodecPreferencesVideoNoRtx) {
                   ->SetDirectionWithError(RtpTransceiverDirection::kRecvOnly)
                   .ok());
   auto capabilities =
-      caller->pc_factory()->GetRtpSenderCapabilities(webrtc::MediaType::VIDEO);
-  auto it =
-      std::remove_if(capabilities.codecs.begin(), capabilities.codecs.end(),
-                     [](const RtpCodecCapability& codec) {
-                       return codec.name == kRtxCodecName;
-                     });
-  capabilities.codecs.erase(it, capabilities.codecs.end());
+      caller->pc_factory()->GetRtpSenderCapabilities(MediaType::VIDEO);
+
+  std::erase_if(capabilities.codecs, [](const RtpCodecCapability& codec) {
+    return codec.name == kRtxCodecName;
+  });
   EXPECT_EQ(capabilities.codecs.size(), 2u);
   EXPECT_TRUE(video_transceiver->SetCodecPreferences(capabilities.codecs).ok());
 
   RTCOfferAnswerOptions options;
-  auto offer = caller->CreateOffer(options);
+  std::unique_ptr<SessionDescriptionInterface> offer =
+      caller->CreateOffer(options);
   const auto& content = offer->description()->contents()[0];
   auto& codecs = content.media_description()->codecs();
   ASSERT_EQ(codecs.size(), 2u);

@@ -14,6 +14,7 @@
 #include <memory>
 
 #include "api/task_queue/pending_task_safety_flag.h"
+#include "api/task_queue/task_queue_base.h"
 #include "p2p/base/active_ice_controller_interface.h"
 #include "p2p/base/connection.h"
 #include "p2p/base/ice_agent_interface.h"
@@ -22,7 +23,6 @@
 #include "p2p/base/ice_switch_reason.h"
 #include "p2p/base/ice_transport_internal.h"
 #include "p2p/base/transport_description.h"
-#include "rtc_base/thread.h"
 #include "rtc_base/thread_annotations.h"
 
 namespace webrtc {
@@ -45,7 +45,7 @@ class WrappingActiveIceController : public ActiveIceControllerInterface {
       IceAgentInterface* ice_agent,
       IceControllerFactoryInterface* wrapped_factory,
       const IceControllerFactoryArgs& wrapped_factory_args);
-  virtual ~WrappingActiveIceController();
+  ~WrappingActiveIceController() override;
 
   void SetIceConfig(const IceConfig& config) override;
   bool GetUseCandidateAttribute(const Connection* connection,
@@ -78,7 +78,7 @@ class WrappingActiveIceController : public ActiveIceControllerInterface {
 
   void PruneConnections();
 
-  Thread* const network_thread_;
+  TaskQueueBase* const network_thread_;
   ScopedTaskSafety task_safety_;
 
   bool started_pinging_ RTC_GUARDED_BY(network_thread_) = false;
@@ -93,12 +93,5 @@ class WrappingActiveIceController : public ActiveIceControllerInterface {
 
 }  //  namespace webrtc
 
-// Re-export symbols from the webrtc namespace for backwards compatibility.
-// TODO(bugs.webrtc.org/4222596): Remove once all references are updated.
-#ifdef WEBRTC_ALLOW_DEPRECATED_NAMESPACES
-namespace cricket {
-using ::webrtc::WrappingActiveIceController;
-}  // namespace cricket
-#endif  // WEBRTC_ALLOW_DEPRECATED_NAMESPACES
 
 #endif  // P2P_BASE_WRAPPING_ACTIVE_ICE_CONTROLLER_H_

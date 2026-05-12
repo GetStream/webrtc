@@ -54,7 +54,7 @@ class PeerConnectionDelegateAdapter : public PeerConnectionObserver {
   void OnIceGatheringChange(
       PeerConnectionInterface::IceGatheringState new_state) override;
 
-  void OnIceCandidate(const IceCandidateInterface *candidate) override;
+  void OnIceCandidate(const IceCandidate *candidate) override;
 
   void OnIceCandidateError(const std::string &address,
                            int port,
@@ -62,8 +62,7 @@ class PeerConnectionDelegateAdapter : public PeerConnectionObserver {
                            int error_code,
                            const std::string &error_text) override;
 
-  void OnIceCandidatesRemoved(
-      const std::vector<webrtc::Candidate> &candidates) override;
+  void OnIceCandidateRemoved(const webrtc::IceCandidate *candidate) override;
 
   void OnIceSelectedCandidatePairChanged(
       const webrtc::CandidatePairChangeEvent &event) override;

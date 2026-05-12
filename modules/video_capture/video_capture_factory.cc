@@ -10,7 +10,10 @@
 
 #include "modules/video_capture/video_capture_factory.h"
 
+#include "api/scoped_refptr.h"
+#include "modules/video_capture/video_capture.h"
 #include "modules/video_capture/video_capture_impl.h"
+#include "system_wrappers/include/clock.h"
 
 namespace webrtc {
 
@@ -19,7 +22,8 @@ scoped_refptr<VideoCaptureModule> VideoCaptureFactory::Create(
 #if defined(WEBRTC_ANDROID) || defined(WEBRTC_MAC)
   return nullptr;
 #else
-  return videocapturemodule::VideoCaptureImpl::Create(deviceUniqueIdUTF8);
+  return videocapturemodule::VideoCaptureImpl::Create(Clock::GetRealTimeClock(),
+                                                      deviceUniqueIdUTF8);
 #endif
 }
 
@@ -31,8 +35,8 @@ scoped_refptr<VideoCaptureModule> VideoCaptureFactory::Create(
 #if !defined(WEBRTC_LINUX) || defined(WEBRTC_ANDROID)
   return nullptr;
 #else
-  return videocapturemodule::VideoCaptureImpl::Create(options,
-                                                      deviceUniqueIdUTF8);
+  return videocapturemodule::VideoCaptureImpl::Create(
+      Clock::GetRealTimeClock(), options, deviceUniqueIdUTF8);
 #endif
 }
 

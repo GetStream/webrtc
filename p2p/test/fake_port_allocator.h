@@ -13,9 +13,11 @@
 
 #include <cstdint>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "absl/base/nullability.h"
+#include "absl/functional/any_invocable.h"
 #include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
 #include "api/candidate.h"
@@ -34,6 +36,7 @@
 #include "rtc_base/network.h"
 #include "rtc_base/socket_factory.h"
 #include "rtc_base/task_queue_for_test.h"
+#include "rtc_base/weak_ptr.h"
 
 namespace webrtc {
 
@@ -122,10 +125,10 @@ class FakePortAllocatorSession : public PortAllocatorSession {
 
   void StartGettingPorts() override {
     if (!port_) {
-      Network& network = (webrtc::HasIPv6Enabled() &&
-                          (flags() & webrtc::PORTALLOCATOR_ENABLE_IPV6))
-                             ? ipv6_network_
-                             : ipv4_network_;
+      Network& network =
+          (HasIPv6Enabled() && (flags() & PORTALLOCATOR_ENABLE_IPV6))
+              ? ipv6_network_
+              : ipv4_network_;
       port_.reset(TestUDPPort::Create({.env = env_,
                                        .network_thread = network_thread_,
                                        .socket_factory = factory_,
@@ -136,7 +139,7 @@ class FakePortAllocatorSession : public PortAllocatorSession {
       RTC_DCHECK(port_);
       port_->SetIceTiebreaker(allocator_->ice_tiebreaker());
       port_->SubscribePortDestroyed(
-          [this](PortInterface* port) { OnPortDestroyed(port); });
+          this, [this](PortInterface* port) { OnPortDestroyed(port); });
       AddPort(port_.get());
     }
     ++port_config_count_;
@@ -149,7 +152,7 @@ class FakePortAllocatorSession : public PortAllocatorSession {
   bool IsCleared() const override { return is_cleared; }
 
   void RegatherOnFailedNetworks() override {
-    SignalIceRegathering(this, IceRegatheringReason::NETWORK_FAILURE);
+    NotifyIceRegathering(this, IceRegatheringReason::NETWORK_FAILURE);
   }
 
   std::vector<PortInterface*> ReadyPorts() const override {
@@ -186,20 +189,20 @@ class FakePortAllocatorSession : public PortAllocatorSession {
   void AddPort(Port* port) {
     port->set_component(component());
     port->set_generation(generation());
-    port->SignalPortComplete.connect(this,
-                                     &FakePortAllocatorSession::OnPortComplete);
+    port->SubscribePortComplete(this,
+                                [this](Port* port) { OnPortComplete(port); });
     port->PrepareAddress();
     ready_ports_.push_back(port);
-    SignalPortReady(this, port);
+    NotifyPortReady(this, port);
     port->KeepAliveUntilPruned();
   }
   void OnPortComplete(Port* port) {
     const std::vector<Candidate>& candidates = port->Candidates();
     candidates_.insert(candidates_.end(), candidates.begin(), candidates.end());
-    SignalCandidatesReady(this, candidates);
+    NotifyCandidatesReady(this, candidates);
 
     allocation_done_ = true;
-    SignalCandidatesAllocationDone(this);
+    NotifyCandidatesAllocationDone(this);
   }
   void OnPortDestroyed(PortInterface* /* port */) {
     // Don't want to double-delete port if it deletes itself.
@@ -220,7 +223,7 @@ class FakePortAllocatorSession : public PortAllocatorSession {
   bool is_cleared = false;
   ServerAddresses stun_servers_;
   std::vector<RelayServerConfig> turn_servers_;
-  uint32_t candidate_filter_ = webrtc::CF_ALL;
+  uint32_t candidate_filter_ = CF_ALL;
   int transport_info_update_count_ = 0;
   bool running_ = false;
 };
@@ -254,27 +257,35 @@ class FakePortAllocator : public PortAllocator {
   bool MdnsObfuscationEnabled() const override {
     return mdns_obfuscation_enabled_;
   }
+
   void SetMdnsObfuscationEnabledForTesting(bool enabled) {
     mdns_obfuscation_enabled_ = enabled;
   }
+
+  void DiscardCandidatePool() override {
+    PortAllocator::DiscardCandidatePool();
+    if (on_candidate_pool_discarded_) {
+      on_candidate_pool_discarded_();
+    }
+  }
+
+  void SetOnDiscardCandidatePool(
+      absl::AnyInvocable<void()> on_candidate_pool_discarded) {
+    on_candidate_pool_discarded_ = std::move(on_candidate_pool_discarded);
+  }
+
+  WeakPtr<FakePortAllocator> NewWeakPtr() { return weak_factory_.GetWeakPtr(); }
 
  private:
   const Environment env_;
   TaskQueueBase* absl_nonnull network_thread_;
   BasicPacketSocketFactory factory_;
   bool mdns_obfuscation_enabled_ = false;
+  absl::AnyInvocable<void()> on_candidate_pool_discarded_;
+  WeakPtrFactory<FakePortAllocator> weak_factory_{this};
 };
 
 }  //  namespace webrtc
 
-// Re-export symbols from the webrtc namespace for backwards compatibility.
-// TODO(bugs.webrtc.org/4222596): Remove once all references are updated.
-#ifdef WEBRTC_ALLOW_DEPRECATED_NAMESPACES
-namespace cricket {
-using ::webrtc::FakePortAllocator;
-using ::webrtc::FakePortAllocatorSession;
-using ::webrtc::TestUDPPort;
-}  // namespace cricket
-#endif  // WEBRTC_ALLOW_DEPRECATED_NAMESPACES
 
 #endif  // P2P_TEST_FAKE_PORT_ALLOCATOR_H_

@@ -10,12 +10,17 @@
 
 #include "sdk/android/src/jni/pc/rtc_certificate.h"
 
-#include "rtc_base/ref_count.h"
+#include <jni.h>
+
+#include <cstdint>
+
+#include "api/scoped_refptr.h"
 #include "rtc_base/rtc_certificate.h"
 #include "rtc_base/rtc_certificate_generator.h"
+#include "rtc_base/ssl_identity.h"
 #include "sdk/android/generated_peerconnection_jni/RtcCertificatePem_jni.h"
 #include "sdk/android/native_api/jni/java_types.h"
-#include "sdk/android/src/jni/jni_helpers.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
 #include "sdk/android/src/jni/pc/ice_candidate.h"
 #include "third_party/jni_zero/jni_zero.h"
 
@@ -44,7 +49,7 @@ ScopedJavaLocalRef<jobject> NativeToJavaRTCCertificatePEM(
 static jni_zero::ScopedJavaLocalRef<jobject>
 JNI_RtcCertificatePem_GenerateCertificate(
     JNIEnv* jni,
-    const jni_zero::JavaParamRef<jobject>& j_key_type,
+    const jni_zero::JavaRef<jobject>& j_key_type,
     jlong j_expires) {
   KeyType key_type = JavaToNativeKeyType(jni, j_key_type);
   uint64_t expires = (uint64_t)j_expires;

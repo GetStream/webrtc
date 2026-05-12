@@ -11,18 +11,20 @@
 #ifndef VIDEO_VIDEO_STREAM_ENCODER_INTERFACE_H_
 #define VIDEO_VIDEO_STREAM_ENCODER_INTERFACE_H_
 
+#include <cstddef>
+#include <cstdint>
 #include <vector>
 
 #include "api/adaptation/resource.h"
 #include "api/fec_controller_override.h"
-#include "api/rtc_error.h"
 #include "api/rtp_parameters.h"  // For DegradationPreference.
 #include "api/rtp_sender_interface.h"
 #include "api/scoped_refptr.h"
 #include "api/units/data_rate.h"
-#include "api/video/video_bitrate_allocator.h"
+#include "api/video/video_bitrate_allocation.h"
+#include "api/video/video_frame.h"
+#include "api/video/video_frame_type.h"
 #include "api/video/video_layers_allocation.h"
-#include "api/video/video_sink_interface.h"
 #include "api/video/video_source_interface.h"
 #include "api/video_codecs/video_encoder.h"
 #include "video/config/video_encoder_config.h"
@@ -109,14 +111,10 @@ class VideoStreamEncoderInterface {
 
   // Set the currently estimated network properties. A `target_bitrate`
   // of zero pauses the encoder.
-  // `stable_target_bitrate` is a filtered version of `target_bitrate`. It  is
-  // always less or equal to it. It can be used to avoid rapid changes of
-  // expensive encoding settings, such as resolution.
   // `link_allocation` is the bandwidth available for this video stream on the
   // network link. It is always at least `target_bitrate` but may be higher
   // if we are not network constrained.
   virtual void OnBitrateUpdated(DataRate target_bitrate,
-                                DataRate stable_target_bitrate,
                                 DataRate link_allocation,
                                 uint8_t fraction_lost,
                                 int64_t round_trip_time_ms,

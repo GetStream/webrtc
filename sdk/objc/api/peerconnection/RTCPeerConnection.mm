@@ -28,7 +28,7 @@
 
 #include <memory>
 
-#include "api/jsep_ice_candidate.h"
+#include "api/jsep.h"
 #include "api/rtc_event_log_output_file.h"
 #include "api/set_local_description_observer_interface.h"
 #include "api/set_remote_description_observer_interface.h"
@@ -307,7 +307,7 @@ void PeerConnectionDelegateAdapter::OnIceGatheringChange(
 }
 
 void PeerConnectionDelegateAdapter::OnIceCandidate(
-    const IceCandidateInterface *candidate) {
+    const IceCandidate *candidate) {
   RTC_OBJC_TYPE(RTCPeerConnection) *peer_connection = peer_connection_;
   if (peer_connection == nil) {
     return;
@@ -352,8 +352,8 @@ void PeerConnectionDelegateAdapter::OnIceCandidateError(
   }
 }
 
-void PeerConnectionDelegateAdapter::OnIceCandidatesRemoved(
-    const std::vector<webrtc::Candidate> &candidates) {
+void PeerConnectionDelegateAdapter::OnIceCandidateRemoved(
+    const webrtc::IceCandidate *c) {
   RTC_OBJC_TYPE(RTCPeerConnection) *peer_connection = peer_connection_;
   if (peer_connection == nil) {
     return;
@@ -363,16 +363,10 @@ void PeerConnectionDelegateAdapter::OnIceCandidatesRemoved(
   if (delegate == nil) {
     return;
   }
-  NSMutableArray *ice_candidates =
-      [NSMutableArray arrayWithCapacity:candidates.size()];
-  for (const auto &candidate : candidates) {
-    JsepIceCandidate candidate_wrapper(
-        candidate.transport_name(), -1, candidate);
-    RTC_OBJC_TYPE(RTCIceCandidate) *ice_candidate =
-        [[RTC_OBJC_TYPE(RTCIceCandidate) alloc]
-            initWithNativeCandidate:&candidate_wrapper];
-    [ice_candidates addObject:ice_candidate];
-  }
+  NSMutableArray *ice_candidates = [NSMutableArray arrayWithCapacity:1];
+  RTC_OBJC_TYPE(RTCIceCandidate) *ice_candidate =
+      [[RTC_OBJC_TYPE(RTCIceCandidate) alloc] initWithNativeCandidate:c];
+  [ice_candidates addObject:ice_candidate];
   [delegate peerConnection:peer_connection
       didRemoveIceCandidates:ice_candidates];
 }
@@ -389,17 +383,13 @@ void PeerConnectionDelegateAdapter::OnIceSelectedCandidatePairChanged(
     return;
   }
   const auto &selected_pair = event.selected_candidate_pair;
-  JsepIceCandidate local_candidate_wrapper(
-      selected_pair.local_candidate().transport_name(),
-      -1,
-      selected_pair.local_candidate());
+  IceCandidate local_candidate_wrapper(
+      event.transport_name, -1, selected_pair.local_candidate());
   RTC_OBJC_TYPE(RTCIceCandidate) *local_candidate =
       [[RTC_OBJC_TYPE(RTCIceCandidate) alloc]
           initWithNativeCandidate:&local_candidate_wrapper];
-  JsepIceCandidate remote_candidate_wrapper(
-      selected_pair.remote_candidate().transport_name(),
-      -1,
-      selected_pair.remote_candidate());
+  IceCandidate remote_candidate_wrapper(
+      event.transport_name, -1, selected_pair.remote_candidate());
   RTC_OBJC_TYPE(RTCIceCandidate) *remote_candidate =
       [[RTC_OBJC_TYPE(RTCIceCandidate) alloc]
           initWithNativeCandidate:&remote_candidate_wrapper];
@@ -608,7 +598,7 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
 }
 
 - (void)addIceCandidate:(RTC_OBJC_TYPE(RTCIceCandidate) *)candidate {
-  std::unique_ptr<const webrtc::IceCandidateInterface> iceCandidate(
+  std::unique_ptr<const webrtc::IceCandidate> iceCandidate(
       candidate.nativeCandidate);
   _peerConnection->AddIceCandidate(iceCandidate.get());
 }
@@ -630,18 +620,12 @@ void PeerConnectionDelegateAdapter::OnRemoveTrack(
 }
 - (void)removeIceCandidates:
     (NSArray<RTC_OBJC_TYPE(RTCIceCandidate) *> *)iceCandidates {
-  std::vector<webrtc::Candidate> candidates;
   for (RTC_OBJC_TYPE(RTCIceCandidate) * iceCandidate in iceCandidates) {
-    std::unique_ptr<const webrtc::IceCandidateInterface> candidate(
+    std::unique_ptr<webrtc::IceCandidate> candidate(
         iceCandidate.nativeCandidate);
     if (candidate) {
-      candidates.push_back(candidate->candidate());
-      // Need to fill the transport name from the sdp_mid.
-      candidates.back().set_transport_name(candidate->sdp_mid());
+      _peerConnection->RemoveIceCandidate(candidate.get());
     }
-  }
-  if (!candidates.empty()) {
-    _peerConnection->RemoveIceCandidates(candidates);
   }
 }
 

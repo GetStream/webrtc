@@ -13,12 +13,15 @@
 
 #include <jni.h>
 
-#include "common_video/libyuv/include/webrtc_libyuv.h"
+#include <atomic>
+#include <optional>
+
+#include "api/scoped_refptr.h"
+#include "api/task_queue/pending_task_safety_flag.h"
 #include "media/base/adapted_video_track_source.h"
-#include "rtc_base/checks.h"
 #include "rtc_base/thread.h"
 #include "rtc_base/timestamp_aligner.h"
-#include "sdk/android/src/jni/jni_helpers.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
 
 namespace webrtc {
 namespace jni {
@@ -89,6 +92,7 @@ class AndroidVideoTrackSource : public AdaptedVideoTrackSource {
   std::atomic<bool> is_screencast_;
   TimestampAligner timestamp_aligner_;
   const bool align_timestamps_;
+  scoped_refptr<PendingTaskSafetyFlag> safety_;
 };
 
 }  // namespace jni

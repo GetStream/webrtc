@@ -45,7 +45,6 @@ class SamplesStatsCounter {
   SamplesStatsCounter& operator=(SamplesStatsCounter&&);
 
   // Adds sample to the stats in amortized O(1) time.
-  void AddSample(double value);
   void AddSample(StatsSample sample);
 
   // Adds samples from another counter.

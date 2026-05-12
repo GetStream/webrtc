@@ -11,8 +11,6 @@
 #ifndef MODULES_AUDIO_DEVICE_WIN_AUDIO_DEVICE_CORE_WIN_H_
 #define MODULES_AUDIO_DEVICE_WIN_AUDIO_DEVICE_CORE_WIN_H_
 
-#if (_MSC_VER >= 1400)  // only include for VS 2005 and higher
-
 #include <wmcodecdsp.h>  // CLSID_CWMAudioAEC
 //(must be before audioclient.h)
 
@@ -271,8 +269,8 @@ class AudioDeviceWindowsCore : public AudioDeviceGeneric {
 
   DeviceStateListener *_deviceStateListener = nullptr;
   // DirectX Media Object (DMO) for the built-in AEC.
-  webrtc::scoped_refptr<IMediaObject> _dmo;
-  webrtc::scoped_refptr<IMediaBuffer> _mediaBuffer;
+  scoped_refptr<IMediaObject> _dmo;
+  scoped_refptr<IMediaBuffer> _mediaBuffer;
   bool _builtInAecEnabled;
 
   HANDLE _hRenderSamplesReadyEvent;
@@ -324,8 +322,6 @@ class AudioDeviceWindowsCore : public AudioDeviceGeneric {
   uint16_t _inputDeviceIndex;
   uint16_t _outputDeviceIndex;
 };
-
-#endif  // #if (_MSC_VER >= 1400)
 
 }  // namespace webrtc
 

@@ -23,6 +23,7 @@
 #include "api/scoped_refptr.h"
 #include "api/test/mock_frame_transformer.h"
 #include "api/test/mock_transformable_audio_frame.h"
+#include "api/units/timestamp.h"
 #include "modules/audio_coding/include/audio_coding_module_typedefs.h"
 #include "rtc_base/task_queue_for_test.h"
 #include "test/gmock.h"
@@ -32,7 +33,6 @@ namespace webrtc {
 namespace {
 
 using ::testing::_;
-using ::testing::ElementsAre;
 using ::testing::ElementsAreArray;
 using ::testing::NiceMock;
 using ::testing::Optional;
@@ -51,9 +51,9 @@ class MockChannelSend {
               (AudioFrameType frameType,
                uint8_t payloadType,
                uint32_t rtp_timestamp,
-               webrtc::ArrayView<const uint8_t> payload,
+               ArrayView<const uint8_t> payload,
                int64_t absolute_capture_timestamp_ms,
-               webrtc::ArrayView<const uint32_t> csrcs,
+               ArrayView<const uint32_t> csrcs,
                std::optional<uint8_t> audio_level_dbov));
 
   ChannelSendFrameTransformerDelegate::SendFrameCallback callback() {
@@ -104,7 +104,7 @@ std::unique_ptr<TransformableAudioFrameInterface> CreateFrame() {
       AudioFrameType::kEmptyFrame, 0, 0, mock_data, sizeof(mock_data), 0,
       /*ssrc=*/0, /*mimeType=*/"audio/opus", /*audio_level_dbov=*/123);
   return absl::WrapUnique(
-      static_cast<webrtc::TransformableAudioFrameInterface*>(frame.release()));
+      static_cast<TransformableAudioFrameInterface*>(frame.release()));
 }
 
 // Test that the delegate registers itself with the frame transformer on Init().
@@ -200,6 +200,59 @@ TEST(ChannelSendFrameTransformerDelegateTest,
   channel_queue.WaitForPreviouslyPostedTasks();
 }
 
+// Test that CSRCs are propagated correctly from the Transform call to the frame
+// transformer.
+TEST(ChannelSendFrameTransformerDelegateTest,
+     TransformForwardsCsrcsViaFrameTransformer) {
+  TaskQueueForTest channel_queue("channel_queue");
+  scoped_refptr<MockFrameTransformer> mock_frame_transformer =
+      make_ref_counted<NiceMock<MockFrameTransformer>>();
+  MockChannelSend mock_channel;
+  scoped_refptr<ChannelSendFrameTransformerDelegate> delegate =
+      make_ref_counted<ChannelSendFrameTransformerDelegate>(
+          mock_channel.callback(), mock_frame_transformer, channel_queue.Get());
+  scoped_refptr<TransformedFrameCallback> callback;
+  EXPECT_CALL(*mock_frame_transformer, RegisterTransformedFrameCallback)
+      .WillOnce(SaveArg<0>(&callback));
+  delegate->Init();
+  ASSERT_TRUE(callback);
+
+  std::vector<uint32_t> csrcs = {123, 234, 345, 456};
+  EXPECT_CALL(mock_channel,
+              SendFrame(_, _, _, _, _, ElementsAreArray(csrcs), _));
+  ON_CALL(*mock_frame_transformer, Transform)
+      .WillByDefault(
+          [&callback](std::unique_ptr<TransformableFrameInterface> frame) {
+            callback->OnTransformedFrame(std::move(frame));
+          });
+  delegate->Transform(
+      AudioFrameType::kEmptyFrame, 0, 0, mock_data, sizeof(mock_data), 0,
+      /*ssrc=*/0, /*mimeType=*/"audio/opus", /*audio_level_dbov=*/31, csrcs);
+  channel_queue.WaitForPreviouslyPostedTasks();
+}
+
+// Test that CSRCs are propagated correctly from the Transform call to the send
+// frame callback when short circuiting is enabled.
+TEST(ChannelSendFrameTransformerDelegateTest,
+     TransformForwardsCsrcsViaShortCircuiting) {
+  TaskQueueForTest channel_queue("channel_queue");
+  scoped_refptr<MockFrameTransformer> mock_frame_transformer =
+      make_ref_counted<testing::NiceMock<MockFrameTransformer>>();
+  MockChannelSend mock_channel;
+  scoped_refptr<ChannelSendFrameTransformerDelegate> delegate =
+      make_ref_counted<ChannelSendFrameTransformerDelegate>(
+          mock_channel.callback(), mock_frame_transformer, channel_queue.Get());
+
+  std::vector<uint32_t> csrcs = {123, 234, 345, 456};
+  delegate->StartShortCircuiting();
+  EXPECT_CALL(mock_channel,
+              SendFrame(_, _, _, _, _, ElementsAreArray(csrcs), _));
+  delegate->Transform(
+      AudioFrameType::kEmptyFrame, 0, 0, mock_data, sizeof(mock_data), 0,
+      /*ssrc=*/0, /*mimeType=*/"audio/opus", /*audio_level_dbov=*/31, csrcs);
+  channel_queue.WaitForPreviouslyPostedTasks();
+}
+
 // Test that if the delegate receives a transformed frame after it has been
 // reset, it does not run the SendFrameCallback, as the channel is destroyed
 // after resetting the delegate.
@@ -238,6 +291,7 @@ TEST(ChannelSendFrameTransformerDelegateTest, ShortCircuitingSkipsTransform) {
   delegate->Transform(AudioFrameType::kEmptyFrame, 0, 0, data, sizeof(data), 0,
                       /*ssrc=*/0, /*mimeType=*/"audio/opus",
                       /*audio_level_dbov=*/std::nullopt);
+  channel_queue.WaitForPreviouslyPostedTasks();
 }
 
 TEST(ChannelSendFrameTransformerDelegateTest,
@@ -276,6 +330,38 @@ TEST(ChannelSendFrameTransformerDelegateTest, CloningReceiverFrameWithCsrcs) {
               ElementsAreArray(frame->GetContributingSources()));
   EXPECT_EQ(cloned_frame->SequenceNumber(), frame->SequenceNumber());
   EXPECT_EQ(cloned_frame->AudioLevel(), frame->AudioLevel());
+}
+
+TEST(ChannelSendFrameTransformerDelegateTest, SetCaptureTime) {
+  std::unique_ptr<TransformableAudioFrameInterface> frame = CreateFrame();
+  EXPECT_TRUE(frame->CanSetCaptureTime());
+  frame->SetCaptureTime(webrtc::Timestamp::Millis(100));
+  EXPECT_EQ(frame->CaptureTime(), webrtc::Timestamp::Millis(100));
+  frame->SetCaptureTime(std::nullopt);
+  EXPECT_FALSE(frame->CaptureTime().has_value());
+}
+
+TEST(ChannelSendFrameTransformerDelegateTest, SetPayloadType) {
+  std::unique_ptr<TransformableAudioFrameInterface> frame = CreateFrame();
+  EXPECT_TRUE(frame->CanSetPayloadType());
+  frame->SetPayloadType(45);
+  EXPECT_EQ(frame->GetPayloadType(), 45);
+}
+
+TEST(ChannelSendFrameTransformerDelegateTest, SetAudioLevel) {
+  std::unique_ptr<TransformableAudioFrameInterface> frame = CreateFrame();
+  EXPECT_TRUE(frame->CanSetAudioLevel());
+  frame->SetAudioLevel(45u);
+  EXPECT_EQ(frame->AudioLevel(), 45u);
+  frame->SetAudioLevel(std::nullopt);
+  EXPECT_FALSE(frame->AudioLevel().has_value());
+}
+
+TEST(ChannelSendFrameTransformerDelegateTest, SetAudioLevelIsClamped) {
+  std::unique_ptr<TransformableAudioFrameInterface> frame = CreateFrame();
+  EXPECT_TRUE(frame->CanSetAudioLevel());
+  frame->SetAudioLevel(128u);
+  EXPECT_EQ(frame->AudioLevel(), 127u);
 }
 
 }  // namespace

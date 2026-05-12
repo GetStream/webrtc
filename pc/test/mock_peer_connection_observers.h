@@ -24,10 +24,9 @@
 #include <utility>
 #include <vector>
 
-#include "api/candidate.h"
+#include "absl/functional/any_invocable.h"
 #include "api/data_channel_interface.h"
 #include "api/jsep.h"
-#include "api/jsep_ice_candidate.h"
 #include "api/legacy_stats_types.h"
 #include "api/make_ref_counted.h"
 #include "api/media_stream_interface.h"
@@ -36,6 +35,7 @@
 #include "api/rtp_receiver_interface.h"
 #include "api/rtp_transceiver_interface.h"
 #include "api/scoped_refptr.h"
+#include "api/sequence_checker.h"
 #include "api/set_local_description_observer_interface.h"
 #include "api/set_remote_description_observer_interface.h"
 #include "api/stats/rtc_stats_collector_callback.h"
@@ -44,6 +44,7 @@
 #include "rtc_base/checks.h"
 #include "rtc_base/string_encode.h"
 #include "rtc_base/synchronization/mutex.h"
+#include "rtc_base/thread.h"
 #include "rtc_base/thread_annotations.h"
 
 namespace webrtc {
@@ -78,7 +79,7 @@ class MockPeerConnectionObserver : public PeerConnectionObserver {
   };
 
   MockPeerConnectionObserver() : remote_streams_(StreamCollection::Create()) {}
-  virtual ~MockPeerConnectionObserver() {}
+  ~MockPeerConnectionObserver() override {}
   void SetPeerConnectionInterface(PeerConnectionInterface* pc) {
     pc_ = pc;
     if (pc) {
@@ -136,17 +137,16 @@ class MockPeerConnectionObserver : public PeerConnectionObserver {
         new_state == PeerConnectionInterface::kIceGatheringComplete;
     callback_triggered_ = true;
   }
-  void OnIceCandidate(const IceCandidateInterface* candidate) override {
+  void OnIceCandidate(const IceCandidate* candidate) override {
     RTC_DCHECK(pc_);
-    candidates_.push_back(std::make_unique<JsepIceCandidate>(
+    candidates_.push_back(std::make_unique<IceCandidate>(
         candidate->sdp_mid(), candidate->sdp_mline_index(),
         candidate->candidate()));
     callback_triggered_ = true;
   }
 
-  void OnIceCandidatesRemoved(
-      const std::vector<Candidate>& candidates) override {
-    num_candidates_removed_++;
+  void OnIceCandidateRemoved(const IceCandidate* candidate) override {
+    ++num_candidates_removed_;
     callback_triggered_ = true;
   }
 
@@ -199,17 +199,17 @@ class MockPeerConnectionObserver : public PeerConnectionObserver {
   // Returns the id of the last added stream.
   // Empty string if no stream have been added.
   std::string GetLastAddedStreamId() {
-    if (last_added_stream_.get())
+    if (last_added_stream_)
       return last_added_stream_->id();
     return "";
   }
   std::string GetLastRemovedStreamId() {
-    if (last_removed_stream_.get())
+    if (last_removed_stream_)
       return last_removed_stream_->id();
     return "";
   }
 
-  IceCandidateInterface* last_candidate() {
+  IceCandidate* last_candidate() {
     if (candidates_.empty()) {
       return nullptr;
     } else {
@@ -217,16 +217,16 @@ class MockPeerConnectionObserver : public PeerConnectionObserver {
     }
   }
 
-  std::vector<const IceCandidateInterface*> GetAllCandidates() {
-    std::vector<const IceCandidateInterface*> candidates;
+  std::vector<const IceCandidate*> GetAllCandidates() {
+    std::vector<const IceCandidate*> candidates;
     for (const auto& candidate : candidates_) {
       candidates.push_back(candidate.get());
     }
     return candidates;
   }
 
-  std::vector<IceCandidateInterface*> GetCandidatesByMline(int mline_index) {
-    std::vector<IceCandidateInterface*> candidates;
+  std::vector<IceCandidate*> GetCandidatesByMline(int mline_index) {
+    std::vector<IceCandidate*> candidates;
     for (const auto& candidate : candidates_) {
       if (candidate->sdp_mline_index() == mline_index) {
         candidates.push_back(candidate.get());
@@ -250,7 +250,7 @@ class MockPeerConnectionObserver : public PeerConnectionObserver {
 
   scoped_refptr<PeerConnectionInterface> pc_;
   PeerConnectionInterface::SignalingState state_;
-  std::vector<std::unique_ptr<IceCandidateInterface>> candidates_;
+  std::vector<std::unique_ptr<IceCandidate>> candidates_;
   scoped_refptr<DataChannelInterface> last_datachannel_;
   scoped_refptr<StreamCollection> remote_streams_;
   bool renegotiation_needed_ = false;
@@ -276,7 +276,7 @@ class MockCreateSessionDescriptionObserver
   MockCreateSessionDescriptionObserver()
       : called_(false),
         error_("MockCreateSessionDescriptionObserver not called") {}
-  virtual ~MockCreateSessionDescriptionObserver() {}
+  ~MockCreateSessionDescriptionObserver() override {}
   void OnSuccess(SessionDescriptionInterface* desc) override {
     MutexLock lock(&mutex_);
     called_ = true;
@@ -353,42 +353,72 @@ class MockSetSessionDescriptionObserver : public SetSessionDescriptionObserver {
   std::string error_;
 };
 
-class FakeSetLocalDescriptionObserver
-    : public SetLocalDescriptionObserverInterface {
+// Base implementation class for fake local/remote description
+// observer classes. Handles the case where the usage of the observer class
+// is not on the same thread as the callback comes in on. In that case
+// a task is posted to the original test thread to set the error variable.
+// This is to be compatible with polling `WaitUntil` loops that poll the
+// `called()` state from the test thread. If the callback were to be
+// allowed to change the called() state, then we'd be checking and modifying
+// the state of the `error_` variable on two different thread without
+// synchronization, which is a problem.
+class FakeDescriptionObserver {
  public:
-  bool called() const { return error_.has_value(); }
+  FakeDescriptionObserver() : thread_(Thread::Current()) {
+    RTC_DCHECK(thread_);
+  }
+
+  bool called() const {
+    RTC_DCHECK_RUN_ON(thread_);
+    return error_.has_value();
+  }
+
   RTCError& error() {
+    RTC_DCHECK_RUN_ON(thread_);
     RTC_DCHECK(error_.has_value());
     return *error_;
   }
 
-  // SetLocalDescriptionObserverInterface implementation.
-  void OnSetLocalDescriptionComplete(RTCError error) override {
-    error_ = std::move(error);
+ protected:
+  void OnCallback(RTCError error) {
+    if (Thread::Current() == thread_) {
+      RTC_DCHECK_RUN_ON(thread_);
+      error_ = std::move(error);
+    } else {
+      thread_->PostTask([this, error = std::move(error)]() {
+        RTC_DCHECK_RUN_ON(thread_);
+        error_ = std::move(error);
+      });
+    }
   }
 
  private:
-  // Set on complete, on success this is set to an RTCError::OK() error.
-  std::optional<RTCError> error_;
+  Thread* const thread_;
+  std::optional<RTCError> error_ RTC_GUARDED_BY(thread_);
+};
+
+class FakeSetLocalDescriptionObserver
+    : public SetLocalDescriptionObserverInterface,
+      public FakeDescriptionObserver {
+ public:
+  FakeSetLocalDescriptionObserver() = default;
+
+ private:
+  void OnSetLocalDescriptionComplete(RTCError error) override {
+    OnCallback(std::move(error));
+  }
 };
 
 class FakeSetRemoteDescriptionObserver
-    : public SetRemoteDescriptionObserverInterface {
+    : public SetRemoteDescriptionObserverInterface,
+      public FakeDescriptionObserver {
  public:
-  bool called() const { return error_.has_value(); }
-  RTCError& error() {
-    RTC_DCHECK(error_.has_value());
-    return *error_;
-  }
-
-  // SetRemoteDescriptionObserverInterface implementation.
-  void OnSetRemoteDescriptionComplete(RTCError error) override {
-    error_ = std::move(error);
-  }
+  FakeSetRemoteDescriptionObserver() = default;
 
  private:
-  // Set on complete, on success this is set to an RTCError::OK() error.
-  std::optional<RTCError> error_;
+  void OnSetRemoteDescriptionComplete(RTCError error) override {
+    OnCallback(std::move(error));
+  }
 };
 
 class MockDataChannelObserver : public DataChannelObserver {
@@ -403,7 +433,7 @@ class MockDataChannelObserver : public DataChannelObserver {
     channel_->RegisterObserver(this);
     states_.push_back(channel_->state());
   }
-  virtual ~MockDataChannelObserver() { channel_->UnregisterObserver(); }
+  ~MockDataChannelObserver() override { channel_->UnregisterObserver(); }
 
   void OnBufferedAmountChange(uint64_t previous_amount) override {}
 
@@ -416,8 +446,11 @@ class MockDataChannelObserver : public DataChannelObserver {
 
   void OnMessage(const DataBuffer& buffer) override {
     messages_.push_back(
-        {std::string(buffer.data.data<char>(), buffer.data.size()),
-         buffer.binary});
+        {.data = std::string(buffer.data.data<char>(), buffer.data.size()),
+         .binary = buffer.binary});
+    if (on_message_callback_) {
+      on_message_callback_(buffer);
+    }
   }
 
   bool IsOpen() const { return state() == DataChannelInterface::kOpen; }
@@ -445,19 +478,25 @@ class MockDataChannelObserver : public DataChannelObserver {
     state_change_callback_ = std::move(func);
   }
 
+  void set_on_message_callback(
+      absl::AnyInvocable<void(const DataBuffer&)> func) {
+    on_message_callback_ = std::move(func);
+  }
+
  private:
   scoped_refptr<DataChannelInterface> channel_;
   std::vector<DataChannelInterface::DataState> states_;
   std::vector<Message> messages_;
   std::function<void(DataChannelInterface::DataState)> state_change_callback_;
+  absl::AnyInvocable<void(const DataBuffer&)> on_message_callback_;
 };
 
 class MockStatsObserver : public StatsObserver {
  public:
   MockStatsObserver() : called_(false), stats_() {}
-  virtual ~MockStatsObserver() {}
+  ~MockStatsObserver() override {}
 
-  virtual void OnComplete(const StatsReports& reports) {
+  void OnComplete(const StatsReports& reports) override {
     RTC_CHECK(!called_);
     called_ = true;
     stats_.Clear();

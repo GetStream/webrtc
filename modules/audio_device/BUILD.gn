@@ -50,10 +50,6 @@ rtc_source_set("audio_device_api") {
   deps = [ "../../api/audio:audio_device" ]
 }
 
-rtc_library("audio_device_config") {
-  sources = [ "audio_device_config.h" ]
-}
-
 rtc_library("audio_device_buffer") {
   sources = [
     "audio_device_buffer.cc",
@@ -65,7 +61,9 @@ rtc_library("audio_device_buffer") {
     "../../api:array_view",
     "../../api:sequence_checker",
     "../../api/audio:audio_device",
+    "../../api/environment",
     "../../api/task_queue",
+    "../../api/units:time_delta",
     "../../common_audio:common_audio_c",
     "../../rtc_base:buffer",
     "../../rtc_base:checks",
@@ -76,6 +74,7 @@ rtc_library("audio_device_buffer") {
     "../../rtc_base:timestamp_aligner",
     "../../rtc_base:timeutils",
     "../../rtc_base/synchronization:mutex",
+    "../../rtc_base/system:no_unique_address",
     "../../system_wrappers",
     "../../system_wrappers:metrics",
   ]
@@ -101,7 +100,7 @@ rtc_library("audio_device_name") {
   deps = [ "//third_party/abseil-cpp/absl/strings:string_view" ]
 }
 
-rtc_source_set("windows_core_audio_utility") {
+rtc_library("windows_core_audio_utility") {
   if (is_win && !build_with_chromium) {
     sources = [
       "win/core_audio_utility_win.cc",
@@ -114,11 +113,10 @@ rtc_source_set("windows_core_audio_utility") {
       "../../api/units:time_delta",
       "../../rtc_base:checks",
       "../../rtc_base:logging",
-      "../../rtc_base:macromagic",
       "../../rtc_base:platform_thread_types",
       "../../rtc_base:stringutils",
       "../../rtc_base/win:windows_version",
-      "//third_party/abseil-cpp/absl/strings:strings",
+      "//third_party/abseil-cpp/absl/strings",
     ]
 
     libs = [ "oleaut32.lib" ]
@@ -129,7 +127,7 @@ rtc_source_set("windows_core_audio_utility") {
 # audio_device_impl target. The goal is to use this new structure and
 # gradually phase out the old design.
 # TODO(henrika): currently only supported on Windows.
-rtc_source_set("audio_device_module_from_input_and_output") {
+rtc_library("audio_device_module_from_input_and_output") {
   visibility = [ "*" ]
   if (is_win && !build_with_chromium) {
     sources = [
@@ -149,22 +147,26 @@ rtc_source_set("audio_device_module_from_input_and_output") {
 
     deps = [
       ":audio_device_buffer",
+      ":audio_device_name",
       ":windows_core_audio_utility",
+      "../../api:array_view",
       "../../api:make_ref_counted",
       "../../api:scoped_refptr",
       "../../api:sequence_checker",
       "../../api/audio:audio_device",
+      "../../api/environment",
       "../../api/task_queue",
+      "../../api/units:time_delta",
       "../../rtc_base:checks",
       "../../rtc_base:logging",
-      "../../rtc_base:macromagic",
       "../../rtc_base:platform_thread",
       "../../rtc_base:safe_conversions",
       "../../rtc_base:stringutils",
       "../../rtc_base:timeutils",
+      "../../rtc_base:zero_memory",
       "../../rtc_base/win:scoped_com_initializer",
       "../../rtc_base/win:windows_version",
-      "//third_party/abseil-cpp/absl/strings:strings",
+      "//third_party/abseil-cpp/absl/strings",
     ]
   }
 }
@@ -178,6 +180,7 @@ if (!build_with_chromium) {
       "test_audio_device_impl.cc",
       "test_audio_device_impl.h",
     ]
+
     deps = [
       ":audio_device_buffer",
       ":audio_device_default",
@@ -187,6 +190,7 @@ if (!build_with_chromium) {
       "../../api:make_ref_counted",
       "../../api:scoped_refptr",
       "../../api/audio:audio_device",
+      "../../api/environment",
       "../../api/task_queue",
       "../../api/units:time_delta",
       "../../common_audio",
@@ -200,6 +204,7 @@ if (!build_with_chromium) {
       "../../rtc_base:safe_conversions",
       "../../rtc_base:timeutils",
       "../../rtc_base/synchronization:mutex",
+      "../../rtc_base/system:file_wrapper",
       "../../rtc_base/task_utils:repeating_task",
       "//third_party/abseil-cpp/absl/strings:string_view",
     ]
@@ -233,15 +238,18 @@ if (!build_with_chromium) {
       defines += [ "WEBRTC_DUMMY_FILE_DEVICES" ]
     }
     deps = [
+      ":audio_device_buffer",
       ":audio_device_generic",
+      "../../api/audio:audio_device",
+      "../../api/environment",
       "../../rtc_base:checks",
       "../../rtc_base:logging",
       "../../rtc_base:platform_thread",
       "../../rtc_base:stringutils",
+      "../../rtc_base:threading",
       "../../rtc_base:timeutils",
       "../../rtc_base/synchronization:mutex",
       "../../rtc_base/system:file_wrapper",
-      "../../system_wrappers",
       "//third_party/abseil-cpp/absl/strings:string_view",
     ]
   }
@@ -253,16 +261,17 @@ rtc_library("audio_device_impl") {
   visibility = [ "*" ]
   deps = [
     ":audio_device_buffer",
-    ":audio_device_config",
     ":audio_device_default",
     ":audio_device_dummy",
     ":audio_device_generic",
     "../../api:array_view",
     "../../api:make_ref_counted",
+    "../../api:ref_count",
     "../../api:refcountedbase",
     "../../api:scoped_refptr",
     "../../api:sequence_checker",
     "../../api/audio:audio_device",
+    "../../api/environment",
     "../../api/task_queue",
     "../../api/units:time_delta",
     "../../common_audio",
@@ -276,16 +285,16 @@ rtc_library("audio_device_impl") {
     "../../rtc_base:rtc_event",
     "../../rtc_base:safe_conversions",
     "../../rtc_base:stringutils",
+    "../../rtc_base:threading",
     "../../rtc_base:timeutils",
     "../../rtc_base/synchronization:mutex",
     "../../rtc_base/system:arch",
     "../../rtc_base/system:file_wrapper",
     "../../rtc_base/task_utils:repeating_task",
-    "../../system_wrappers",
-    "../../system_wrappers:field_trial",
     "../../system_wrappers:metrics",
     "../utility",
     "//third_party/abseil-cpp/absl/base:core_headers",
+    "//third_party/abseil-cpp/absl/base:nullability",
     "//third_party/abseil-cpp/absl/strings:string_view",
   ]
   if (rtc_include_internal_audio_device && is_ios) {
@@ -317,8 +326,6 @@ rtc_library("audio_device_impl") {
       "include/audio_device_data_observer.h",
     ]
     if (is_android) {
-      deps += [ "../../sdk/android:native_api_audio_device_module" ]
-
       if (build_with_mozilla) {
         include_dirs += [
           "/config/external/nspr",
@@ -445,6 +452,7 @@ rtc_source_set("mock_audio_device") {
     ":audio_device_buffer",
     ":audio_device_impl",
     "../../api:make_ref_counted",
+    "../../api:scoped_refptr",
     "../../api/audio:audio_device",
     "../../test:test_support",
   ]
@@ -470,6 +478,9 @@ if (rtc_include_tests && !build_with_chromium) {
       "../../api:scoped_refptr",
       "../../api:sequence_checker",
       "../../api/audio:audio_device",
+      "../../api/audio:create_audio_device_module",
+      "../../api/environment",
+      "../../api/environment:environment_factory",
       "../../api/task_queue",
       "../../api/task_queue:default_task_queue_factory",
       "../../api/units:time_delta",
@@ -482,9 +493,11 @@ if (rtc_include_tests && !build_with_chromium) {
       "../../rtc_base:race_checker",
       "../../rtc_base:rtc_event",
       "../../rtc_base:safe_conversions",
+      "../../rtc_base:task_queue_for_test",
       "../../rtc_base:timeutils",
       "../../rtc_base/synchronization:mutex",
       "../../system_wrappers",
+      "../../test:create_test_environment",
       "../../test:fileutils",
       "../../test:test_support",
       "../../test/time_controller",

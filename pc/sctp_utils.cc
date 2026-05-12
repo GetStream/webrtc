@@ -10,8 +10,7 @@
 
 #include "pc/sctp_utils.h"
 
-#include <stddef.h>
-
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -50,7 +49,7 @@ enum DataChannelPriority {
 bool IsOpenMessage(const CopyOnWriteBuffer& payload) {
   // Format defined at
   // https://www.rfc-editor.org/rfc/rfc8832#section-5.1
-  if (payload.size() < 1) {
+  if (payload.empty()) {
     RTC_DLOG(LS_WARNING) << "Could not read OPEN message type.";
     return false;
   }
@@ -139,7 +138,7 @@ bool ParseDataChannelOpenMessage(const CopyOnWriteBuffer& payload,
 }
 
 bool ParseDataChannelOpenAckMessage(const CopyOnWriteBuffer& payload) {
-  if (payload.size() < 1) {
+  if (payload.empty()) {
     RTC_LOG(LS_WARNING) << "Could not read OPEN_ACK message type.";
     return false;
   }
@@ -197,7 +196,7 @@ bool WriteDataChannelOpenMessage(const std::string& label,
     }
   }
 
-  ByteBufferWriter buffer(NULL, 20 + label.length() + protocol.length());
+  ByteBufferWriter buffer(nullptr, 20 + label.length() + protocol.length());
   // TODO(tommi): Add error handling and check resulting length.
   buffer.WriteUInt8(DATA_CHANNEL_OPEN_MESSAGE_TYPE);
   buffer.WriteUInt8(channel_type);

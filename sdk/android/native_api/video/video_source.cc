@@ -10,6 +10,19 @@
 
 #include "sdk/android/native_api/video/video_source.h"
 
+#include <jni.h>
+
+#include <optional>
+
+#include "api/make_ref_counted.h"
+#include "api/media_stream_interface.h"
+#include "api/scoped_refptr.h"
+#include "api/video/recordable_encoded_frame.h"
+#include "api/video/video_frame.h"
+#include "api/video/video_sink_interface.h"
+#include "api/video/video_source_interface.h"
+#include "rtc_base/thread.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
 #include "sdk/android/src/jni/android_video_track_source.h"
 #include "sdk/android/src/jni/native_capturer_observer.h"
 
@@ -92,9 +105,9 @@ class JavaVideoTrackSourceImpl : public JavaVideoTrackSourceInterface {
   bool SupportsEncodedOutput() const override { return false; }
   void GenerateKeyFrame() override {}
   void AddEncodedSink(
-      VideoSinkInterface<webrtc::RecordableEncodedFrame>* sink) override {}
+      VideoSinkInterface<RecordableEncodedFrame>* sink) override {}
   void RemoveEncodedSink(
-      VideoSinkInterface<webrtc::RecordableEncodedFrame>* sink) override {}
+      VideoSinkInterface<RecordableEncodedFrame>* sink) override {}
 
   scoped_refptr<jni::AndroidVideoTrackSource> android_video_track_source_;
   ScopedJavaGlobalRef<jobject> native_capturer_observer_;

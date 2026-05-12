@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "absl/strings/string_view.h"
 #include "media/base/codec.h"
 
 namespace webrtc {
@@ -46,7 +47,7 @@ enum class RidDirection { kSend, kReceive };
 // See: https://w3c.github.io/webrtc-svc/ for more details.
 struct RidDescription final {
   RidDescription();
-  RidDescription(const std::string& rid, RidDirection direction);
+  RidDescription(absl::string_view rid, RidDirection direction);
   RidDescription(const RidDescription& other);
   ~RidDescription();
   RidDescription& operator=(const RidDescription& other);
@@ -94,13 +95,5 @@ struct RidDescription final {
 
 }  //  namespace webrtc
 
-// Re-export symbols from the webrtc namespace for backwards compatibility.
-// TODO(bugs.webrtc.org/4222596): Remove once all references are updated.
-#ifdef WEBRTC_ALLOW_DEPRECATED_NAMESPACES
-namespace cricket {
-using ::webrtc::RidDescription;
-using ::webrtc::RidDirection;
-}  // namespace cricket
-#endif  // WEBRTC_ALLOW_DEPRECATED_NAMESPACES
 
 #endif  // MEDIA_BASE_RID_DESCRIPTION_H_

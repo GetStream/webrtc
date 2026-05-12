@@ -301,7 +301,7 @@
   [renderEncoder endEncoding];
 
   if (textureRefsToRetain.count > 0) {
-    [commandBuffer addCompletedHandler:^(__unused id<MTLCommandBuffer> buffer) {
+    [commandBuffer addCompletedHandler:^(__unused id<MTLCommandBuffer> completedBuffer) {
       (void)textureRefsToRetain;
     }];
   }
@@ -374,18 +374,30 @@
     }
   } else {
     // Center-crop by trimming texture coordinates.
+    // Under rotation 90/270, V maps to screen-X and U to screen-Y, so the
+    // displayed crop axis swaps relative to the unrotated case.
+    auto cropU = [&](CGFloat shrink) {
+      CGFloat span = uMax - uMin;
+      CGFloat crop = span * shrink;
+      uMin += (span - crop) / 2;
+      uMax = uMin + crop;
+    };
+    auto cropV = [&](CGFloat shrink) {
+      CGFloat span = vMax - vMin;
+      CGFloat crop = span * shrink;
+      vMin += (span - crop) / 2;
+      vMax = vMin + crop;
+    };
+    BOOL rotated = (rotation == RTC_OBJC_TYPE(RTCVideoRotation_90) ||
+                    rotation == RTC_OBJC_TYPE(RTCVideoRotation_270));
     if (targetAspect > sourceAspect) {
-      CGFloat vSpan = vMax - vMin;
-      CGFloat vCrop = vSpan * (sourceAspect / targetAspect);
-      CGFloat vOffset = (vSpan - vCrop) / 2;
-      vMin = vMin + vOffset;
-      vMax = vMin + vCrop;
+      // Crop the displayed vertical axis.
+      rotated ? cropU(sourceAspect / targetAspect)
+              : cropV(sourceAspect / targetAspect);
     } else {
-      CGFloat uSpan = uMax - uMin;
-      CGFloat uCrop = uSpan * (targetAspect / sourceAspect);
-      CGFloat uOffset = (uSpan - uCrop) / 2;
-      uMin = uMin + uOffset;
-      uMax = uMin + uCrop;
+      // Crop the displayed horizontal axis.
+      rotated ? cropV(targetAspect / sourceAspect)
+              : cropU(targetAspect / sourceAspect);
     }
   }
 

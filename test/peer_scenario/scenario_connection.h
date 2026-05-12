@@ -10,17 +10,20 @@
 #ifndef TEST_PEER_SCENARIO_SCENARIO_CONNECTION_H_
 #define TEST_PEER_SCENARIO_SCENARIO_CONNECTION_H_
 
-#include <functional>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "absl/strings/string_view.h"
+#include "api/array_view.h"
 #include "api/candidate.h"
 #include "api/environment/environment.h"
 #include "api/jsep.h"
+#include "api/test/network_emulation/network_emulation_interfaces.h"
 #include "p2p/base/transport_description.h"
+#include "rtc_base/copy_on_write_buffer.h"
 #include "test/network/network_emulation_manager.h"
-#include "test/scoped_key_value_config.h"
 
 namespace webrtc {
 
@@ -34,7 +37,7 @@ class ScenarioIceConnection {
     // Called on network thread.
     virtual void OnPacketReceived(CopyOnWriteBuffer packet) = 0;
     // Called on signaling thread.
-    virtual void OnIceCandidates(const std::string& mid,
+    virtual void OnIceCandidates(absl::string_view mid,
                                  const std::vector<Candidate>& candidates) = 0;
 
    protected:
@@ -57,8 +60,6 @@ class ScenarioIceConnection {
 
   virtual EmulatedEndpoint* endpoint() = 0;
   virtual const TransportDescription& transport_description() const = 0;
-
-  webrtc::test::ScopedKeyValueConfig field_trials;
 };
 
 }  // namespace webrtc

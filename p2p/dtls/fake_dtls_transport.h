@@ -21,6 +21,7 @@
 #include "absl/strings/string_view.h"
 #include "api/array_view.h"
 #include "api/dtls_transport_interface.h"
+#include "api/ice_transport_interface.h"
 #include "api/rtc_error.h"
 #include "api/scoped_refptr.h"
 #include "p2p/base/ice_transport_internal.h"
@@ -48,10 +49,12 @@ namespace webrtc {
 // sending packets.
 class FakeDtlsTransport : public DtlsTransportInternal {
  public:
-  explicit FakeDtlsTransport(FakeIceTransport* ice_transport)
-      : ice_transport_(ice_transport),
-        transport_name_(ice_transport->transport_name()),
-        component_(ice_transport->component()),
+  explicit FakeDtlsTransport(scoped_refptr<IceTransportInterface> ice_transport)
+      : ice_transport_ref_(std::move(ice_transport)),
+        ice_transport_(static_cast<FakeIceTransportInternal*>(
+            ice_transport_ref_->internal())),
+        transport_name_(ice_transport_->transport_name()),
+        component_(ice_transport_->component()),
         dtls_fingerprint_("", nullptr) {
     RTC_DCHECK(ice_transport_);
     ice_transport_->RegisterReceivedPacketCallback(
@@ -59,11 +62,12 @@ class FakeDtlsTransport : public DtlsTransportInternal {
                   const ReceivedIpPacket& packet) {
           OnIceTransportReadPacket(transport, packet);
         });
-    ice_transport_->SignalNetworkRouteChanged.connect(
-        this, &FakeDtlsTransport::OnNetworkRouteChanged);
+    ice_transport_->SubscribeNetworkRouteChanged(
+        this, [this](std::optional<NetworkRoute> network_route) {
+          OnNetworkRouteChanged(network_route);
+        });
   }
-
-  explicit FakeDtlsTransport(std::unique_ptr<FakeIceTransport> ice)
+  explicit FakeDtlsTransport(std::unique_ptr<FakeIceTransportInternal> ice)
       : owned_ice_transport_(std::move(ice)),
         transport_name_(owned_ice_transport_->transport_name()),
         component_(owned_ice_transport_->component()),
@@ -74,21 +78,24 @@ class FakeDtlsTransport : public DtlsTransportInternal {
                   const ReceivedIpPacket& packet) {
           OnIceTransportReadPacket(transport, packet);
         });
-    ice_transport_->SignalNetworkRouteChanged.connect(
-        this, &FakeDtlsTransport::OnNetworkRouteChanged);
+    ice_transport_->SubscribeNetworkRouteChanged(
+        this, [this](std::optional<NetworkRoute> network_route) {
+          OnNetworkRouteChanged(network_route);
+        });
   }
 
   // If this constructor is called, a new fake ICE transport will be created,
   // and this FakeDtlsTransport will take the ownership.
   FakeDtlsTransport(const std::string& name, int component)
-      : FakeDtlsTransport(std::make_unique<FakeIceTransport>(name, component)) {
-  }
+      : FakeDtlsTransport(
+            std::make_unique<FakeIceTransportInternal>(name, component)) {}
   FakeDtlsTransport(const std::string& name,
                     int component,
                     Thread* network_thread)
-      : FakeDtlsTransport(std::make_unique<FakeIceTransport>(name,
-                                                             component,
-                                                             network_thread)) {}
+      : FakeDtlsTransport(
+            std::make_unique<FakeIceTransportInternal>(name,
+                                                       component,
+                                                       network_thread)) {}
 
   ~FakeDtlsTransport() override {
     if (dest_ && dest_->dest_ == this) {
@@ -98,7 +105,7 @@ class FakeDtlsTransport : public DtlsTransportInternal {
   }
 
   // Get inner fake ICE transport.
-  FakeIceTransport* fake_ice_transport() { return ice_transport_; }
+  FakeIceTransportInternal* fake_ice_transport() { return ice_transport_; }
 
   // If async, will send packets by "Post"-ing to message queue instead of
   // synchronously "Send"-ing.
@@ -139,17 +146,20 @@ class FakeDtlsTransport : public DtlsTransportInternal {
         do_dtls_ = false;
         RTC_LOG(LS_INFO) << "FakeDtlsTransport is not doing DTLS";
       }
+      // If the `dtls_role_` is unset, set it to SSL_CLIENT by default.
+      if (!dtls_role_) {
+        dtls_role_ = std::move(SSL_CLIENT);
+      }
+      SetDtlsState(DtlsTransportState::kConnected);
+      // Now mark as writable. This triggers callbacks that might check the
+      // dtls state and/or role, so do this after setting that state.
       SetWritable(true);
       if (!asymmetric) {
         dest->SetDestination(this, true);
       }
-      // If the `dtls_role_` is unset, set it to SSL_CLIENT by default.
-      if (!dtls_role_) {
-        dtls_role_ = std::move(webrtc::SSL_CLIENT);
-      }
-      SetDtlsState(DtlsTransportState::kConnected);
       ice_transport_->SetDestination(
-          static_cast<FakeIceTransport*>(dest->ice_transport()), asymmetric);
+          static_cast<FakeIceTransportInternal*>(dest->ice_transport()),
+          asymmetric);
     } else {
       // Simulates loss of connectivity, by asymmetrically forgetting dest_.
       dest_ = nullptr;
@@ -166,7 +176,7 @@ class FakeDtlsTransport : public DtlsTransportInternal {
   RTCError SetRemoteParameters(absl::string_view alg,
                                const uint8_t* digest,
                                size_t digest_len,
-                               std::optional<SSLRole> role) {
+                               std::optional<SSLRole> role) override {
     if (role) {
       SetDtlsRole(*role);
     }
@@ -207,6 +217,7 @@ class FakeDtlsTransport : public DtlsTransportInternal {
     *version = 0x0102;
     return true;
   }
+  uint16_t GetSslGroupId() const override { return 0; }
   bool GetSrtpCryptoSuite(int* crypto_suite) const override {
     if (!do_dtls_) {
       return false;
@@ -231,9 +242,6 @@ class FakeDtlsTransport : public DtlsTransportInternal {
     return "FakeTlsCipherSuite";
   }
   uint16_t GetSslPeerSignatureAlgorithm() const override { return 0; }
-  scoped_refptr<RTCCertificate> GetLocalCertificate() const override {
-    return local_cert_;
-  }
   std::unique_ptr<SSLCertChain> GetRemoteSSLCertChain() const override {
     if (!remote_cert_) {
       return nullptr;
@@ -293,7 +301,7 @@ class FakeDtlsTransport : public DtlsTransportInternal {
       return;
     }
     receiving_ = receiving;
-    SignalReceivingState(this);
+    NotifyReceivingState(this);
   }
 
   void set_writable(bool writable) {
@@ -302,27 +310,28 @@ class FakeDtlsTransport : public DtlsTransportInternal {
     }
     writable_ = writable;
     if (writable_) {
-      SignalReadyToSend(this);
+      NotifyReadyToSend(this);
     }
-    SignalWritableState(this);
+    NotifyWritableState(this);
   }
 
   void OnNetworkRouteChanged(std::optional<NetworkRoute> network_route) {
-    SignalNetworkRouteChanged(network_route);
+    NotifyNetworkRouteChanged(network_route);
   }
 
-  FakeIceTransport* ice_transport_;
-  std::unique_ptr<FakeIceTransport> owned_ice_transport_;
+  scoped_refptr<IceTransportInterface> ice_transport_ref_;
+  FakeIceTransportInternal* ice_transport_;
+  std::unique_ptr<FakeIceTransportInternal> owned_ice_transport_;
   std::string transport_name_;
   int component_;
   FakeDtlsTransport* dest_ = nullptr;
   scoped_refptr<RTCCertificate> local_cert_;
   FakeSSLCertificate* remote_cert_ = nullptr;
   bool do_dtls_ = false;
-  SSLProtocolVersion ssl_max_version_ = webrtc::SSL_PROTOCOL_DTLS_12;
+  SSLProtocolVersion ssl_max_version_ = SSL_PROTOCOL_DTLS_12;
   SSLFingerprint dtls_fingerprint_;
   std::optional<SSLRole> dtls_role_;
-  int crypto_suite_ = webrtc::kSrtpAes128CmSha1_80;
+  int crypto_suite_ = kSrtpAes128CmSha1_80;
   std::optional<int> ssl_cipher_suite_;
 
   DtlsTransportState dtls_state_ = DtlsTransportState::kNew;
@@ -332,13 +341,5 @@ class FakeDtlsTransport : public DtlsTransportInternal {
 };
 
 }  //  namespace webrtc
-
-// Re-export symbols from the webrtc namespace for backwards compatibility.
-// TODO(bugs.webrtc.org/4222596): Remove once all references are updated.
-#ifdef WEBRTC_ALLOW_DEPRECATED_NAMESPACES
-namespace cricket {
-using ::webrtc::FakeDtlsTransport;
-}  // namespace cricket
-#endif  // WEBRTC_ALLOW_DEPRECATED_NAMESPACES
 
 #endif  // P2P_DTLS_FAKE_DTLS_TRANSPORT_H_

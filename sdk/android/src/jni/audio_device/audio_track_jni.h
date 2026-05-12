@@ -13,14 +13,16 @@
 
 #include <jni.h>
 
-#include <memory>
+#include <cstddef>
+#include <cstdint>
 #include <optional>
 
 #include "api/audio/audio_device_defines.h"
+#include "api/environment/environment.h"
 #include "api/sequence_checker.h"
 #include "modules/audio_device/audio_device_buffer.h"
-#include "sdk/android/src/jni/audio_device/audio_common.h"
 #include "sdk/android/src/jni/audio_device/audio_device_module.h"
+#include "third_party/jni_zero/jni_zero.h"
 
 namespace webrtc {
 
@@ -47,6 +49,7 @@ class AudioTrackJni : public AudioOutput {
       const jni_zero::JavaRef<jobject>& j_audio_manager);
 
   AudioTrackJni(JNIEnv* env,
+                const Environment& webrtc_env,
                 const AudioParameters& audio_parameters,
                 const jni_zero::JavaRef<jobject>& j_webrtc_audio_track);
   ~AudioTrackJni() override;
@@ -74,9 +77,8 @@ class AudioTrackJni : public AudioOutput {
   // `byte_buffer` in `direct_buffer_address_`. The size of the buffer
   // is also stored in `direct_buffer_capacity_in_bytes_`.
   // Called on the same thread as the creating thread.
-  void CacheDirectBufferAddress(
-      JNIEnv* env,
-      const jni_zero::JavaParamRef<jobject>& byte_buffer);
+  void CacheDirectBufferAddress(JNIEnv* env,
+                                const jni_zero::JavaRef<jobject>& byte_buffer);
   // Called periodically by the Java based WebRtcAudioTrack object when
   // playout has started. Each call indicates that `length` new bytes should
   // be written to the memory area `direct_buffer_address_` for playout.
@@ -85,6 +87,8 @@ class AudioTrackJni : public AudioOutput {
   void GetPlayoutData(JNIEnv* env, size_t length);
 
  private:
+  const Environment webrtc_env_;
+
   // Stores thread ID in constructor.
   SequenceChecker thread_checker_;
 

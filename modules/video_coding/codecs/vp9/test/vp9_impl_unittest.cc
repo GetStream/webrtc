@@ -22,6 +22,7 @@
 #include "absl/memory/memory.h"
 #include "api/array_view.h"
 #include "api/environment/environment_factory.h"
+#include "api/field_trials.h"
 #include "api/scoped_refptr.h"
 #include "api/test/create_frame_generator.h"
 #include "api/test/frame_generator_interface.h"
@@ -57,16 +58,15 @@
 #include "modules/video_coding/include/video_error_codes.h"
 #include "modules/video_coding/svc/scalability_mode_util.h"
 #include "modules/video_coding/utility/vp9_uncompressed_header_parser.h"
-#include "test/explicit_key_value_config.h"
-#include "test/field_trial.h"
+#include "test/create_test_field_trials.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 #include "test/mappable_native_buffer.h"
 #include "test/video_codec_settings.h"
-#include "vpx/vp8cx.h"
-#include "vpx/vpx_codec.h"
-#include "vpx/vpx_encoder.h"
-#include "vpx/vpx_image.h"
+#include "third_party/libvpx/source/libvpx/vpx/vp8cx.h"
+#include "third_party/libvpx/source/libvpx/vpx/vpx_codec.h"
+#include "third_party/libvpx/source/libvpx/vpx/vpx_encoder.h"
+#include "third_party/libvpx/source/libvpx/vpx/vpx_image.h"
 
 namespace webrtc {
 namespace {
@@ -93,9 +93,8 @@ using ::testing::SizeIs;
 using ::testing::TypedEq;
 using ::testing::UnorderedElementsAreArray;
 using ::testing::WithArg;
-using EncoderInfo = webrtc::VideoEncoder::EncoderInfo;
-using FramerateFractions =
-    absl::InlinedVector<uint8_t, webrtc::kMaxTemporalStreams>;
+using EncoderInfo = VideoEncoder::EncoderInfo;
+using FramerateFractions = absl::InlinedVector<uint8_t, kMaxTemporalStreams>;
 
 constexpr size_t kWidth = 1280;
 constexpr size_t kHeight = 720;
@@ -108,7 +107,7 @@ const VideoEncoder::Settings kSettings(kCapabilities,
 
 VideoCodec DefaultCodecSettings() {
   VideoCodec codec_settings;
-  webrtc::test::CodecSettings(kVideoCodecVP9, &codec_settings);
+  test::CodecSettings(kVideoCodecVP9, &codec_settings);
   codec_settings.width = kWidth;
   codec_settings.height = kHeight;
   codec_settings.startBitrate = kBitrateKbps;
@@ -145,7 +144,7 @@ class TestVp9Impl : public VideoCodecUnitTest {
   }
 
   void ModifyCodecSettings(VideoCodec* codec_settings) override {
-    webrtc::test::CodecSettings(kVideoCodecVP9, codec_settings);
+    test::CodecSettings(kVideoCodecVP9, codec_settings);
     codec_settings->width = kWidth;
     codec_settings->height = kHeight;
     ConfigureSvc(*codec_settings);
@@ -1888,12 +1887,11 @@ TEST_F(TestVp9Impl, EncoderInfoWithoutResolutionBitrateLimits) {
 }
 
 TEST_F(TestVp9Impl, EncoderInfoWithBitrateLimitsFromFieldTrial) {
-  test::ScopedFieldTrials field_trials(
-      "WebRTC-VP9-GetEncoderInfoOverride/"
-      "frame_size_pixels:123|456|789,"
-      "min_start_bitrate_bps:11000|22000|33000,"
-      "min_bitrate_bps:44000|55000|66000,"
-      "max_bitrate_bps:77000|88000|99000/");
+  field_trials_.Set("WebRTC-VP9-GetEncoderInfoOverride",
+                    "frame_size_pixels:123|456|789,"
+                    "min_start_bitrate_bps:11000|22000|33000,"
+                    "min_bitrate_bps:44000|55000|66000,"
+                    "max_bitrate_bps:77000|88000|99000");
   SetUp();
 
   EXPECT_THAT(
@@ -2072,7 +2070,7 @@ INSTANTIATE_TEST_SUITE_P(All,
 class TestVp9ImplFrameDropping : public TestVp9Impl {
  protected:
   void ModifyCodecSettings(VideoCodec* codec_settings) override {
-    webrtc::test::CodecSettings(kVideoCodecVP9, codec_settings);
+    test::CodecSettings(kVideoCodecVP9, codec_settings);
     // We need to encode quite a lot of frames in this test. Use low resolution
     // to reduce execution time.
     codec_settings->width = 64;
@@ -2228,8 +2226,7 @@ TEST_F(TestVp9ImplProfile2, EncodeDecode) {
 
 TEST_F(TestVp9Impl, EncodeWithDynamicRate) {
   // Configured dynamic rate field trial and re-create the encoder.
-  test::ScopedFieldTrials field_trials(
-      "WebRTC-VideoRateControl/vp9_dynamic_rate:true/");
+  field_trials_.Set("WebRTC-VideoRateControl", "vp9_dynamic_rate:true");
   SetUp();
 
   // Set 300kbps target with 100% headroom.
@@ -2460,7 +2457,7 @@ TEST_F(TestVp9Impl, ScalesInputToActiveResolution) {
 
 TEST(Vp9SpeedSettingsTrialsTest, NoSvcUsesGlobalSpeedFromTl0InLayerConfig) {
   // TL0 speed 8 at >= 480x270, 5 if below that.
-  test::ExplicitKeyValueConfig trials(
+  FieldTrials trials = CreateTestFieldTrials(
       "WebRTC-VP9-PerformanceFlags/"
       "use_per_layer_speed,"
       "min_pixel_count:0|129600,"
@@ -2505,7 +2502,7 @@ TEST(Vp9SpeedSettingsTrialsTest, NoSvcUsesGlobalSpeedFromTl0InLayerConfig) {
 TEST(Vp9SpeedSettingsTrialsTest,
      NoPerLayerFlagUsesGlobalSpeedFromTopLayerInConfig) {
   // TL0 speed 8 at >= 480x270, 5 if below that.
-  test::ExplicitKeyValueConfig trials(
+  FieldTrials trials = CreateTestFieldTrials(
       "WebRTC-VP9-PerformanceFlags/"
       "min_pixel_count:0|129600,"
       "base_layer_speed:4|8,"
@@ -2562,7 +2559,7 @@ TEST(Vp9SpeedSettingsTrialsTest, DefaultPerLayerFlagsWithSvc) {
   // SL1/2: TL0 = speed 7, TL1/TL2 = speed 8.
   // Deblocking-mode per spatial layer:
   // SL0: mode 1, SL1/2: mode 0.
-  test::ExplicitKeyValueConfig trials(
+  FieldTrials trials = CreateTestFieldTrials(
       "WebRTC-VP9-PerformanceFlags/"
       "use_per_layer_speed,"
       "min_pixel_count:0|129600,"
@@ -2722,10 +2719,9 @@ class TestVp9ImplSvcFrameDropConfig
 TEST_P(TestVp9ImplSvcFrameDropConfig, SvcFrameDropConfig) {
   SvcFrameDropConfigTestParameters test_params = GetParam();
   auto* const vpx = new NiceMock<MockLibvpxInterface>();
-  LibvpxVp9Encoder encoder(
-      CreateEnvironment(std::make_unique<test::ExplicitKeyValueConfig>(
-          test_params.field_trial)),
-      {}, absl::WrapUnique<LibvpxInterface>(vpx));
+  LibvpxVp9Encoder encoder(CreateEnvironment(std::make_unique<FieldTrials>(
+                               CreateTestFieldTrials(test_params.field_trial))),
+                           {}, absl::WrapUnique<LibvpxInterface>(vpx));
 
   vpx_image_t img;
   ON_CALL(*vpx, img_wrap).WillByDefault(GetWrapImageFunction(&img));

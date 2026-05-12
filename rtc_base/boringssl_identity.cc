@@ -14,9 +14,9 @@
 #include <openssl/err.h>
 #include <openssl/pem.h>
 #include <openssl/pool.h>
-#include <stdint.h>
-#include <string.h>
 
+#include <cstdint>
+#include <cstring>
 #include <ctime>
 #include <memory>
 #include <string>
@@ -116,9 +116,8 @@ std::unique_ptr<SSLIdentity> BoringSSLIdentity::CreateFromPEMStrings(
 std::unique_ptr<SSLIdentity> BoringSSLIdentity::CreateFromPEMChainStrings(
     absl::string_view private_key,
     absl::string_view certificate_chain) {
-  bssl::UniquePtr<BIO> bio(
-      BIO_new_mem_buf(certificate_chain.data(),
-                      webrtc::dchecked_cast<int>(certificate_chain.size())));
+  bssl::UniquePtr<BIO> bio(BIO_new_mem_buf(
+      certificate_chain.data(), dchecked_cast<int>(certificate_chain.size())));
   if (!bio) {
     return nullptr;
   }
@@ -176,7 +175,7 @@ const BoringSSLCertificate& BoringSSLIdentity::certificate() const {
 }
 
 const SSLCertChain& BoringSSLIdentity::cert_chain() const {
-  return *cert_chain_.get();
+  return *cert_chain_;
 }
 
 std::unique_ptr<SSLIdentity> BoringSSLIdentity::CloneInternal() const {

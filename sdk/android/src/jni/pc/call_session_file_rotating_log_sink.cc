@@ -8,7 +8,16 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <jni.h>
+
+#include <cstddef>
+#include <cstdlib>
+#include <memory>
+#include <string>
+
+#include "rtc_base/file_rotating_stream.h"
 #include "rtc_base/log_sinks.h"
+#include "rtc_base/logging.h"
 #include "sdk/android/generated_peerconnection_jni/CallSessionFileRotatingLogSink_jni.h"
 #include "sdk/android/native_api/jni/java_types.h"
 #include "sdk/android/src/jni/jni_helpers.h"
@@ -19,7 +28,7 @@ namespace jni {
 
 static jlong JNI_CallSessionFileRotatingLogSink_AddSink(
     JNIEnv* jni,
-    const jni_zero::JavaParamRef<jstring>& j_dirPath,
+    const jni_zero::JavaRef<jstring>& j_dirPath,
     jint j_maxFileSize,
     jint j_severity) {
   std::string dir_path = JavaToStdString(jni, j_dirPath);
@@ -47,14 +56,15 @@ static void JNI_CallSessionFileRotatingLogSink_DeleteSink(JNIEnv* jni,
 static jni_zero::ScopedJavaLocalRef<jbyteArray>
 JNI_CallSessionFileRotatingLogSink_GetLogData(
     JNIEnv* jni,
-    const jni_zero::JavaParamRef<jstring>& j_dirPath) {
+    const jni_zero::JavaRef<jstring>& j_dirPath) {
   std::string dir_path = JavaToStdString(jni, j_dirPath);
   CallSessionFileRotatingStreamReader file_reader(dir_path);
   size_t log_size = file_reader.GetSize();
   if (log_size == 0) {
     RTC_LOG_V(LoggingSeverity::LS_WARNING)
         << "CallSessionFileRotatingStream returns 0 size for path " << dir_path;
-    return jni_zero::ScopedJavaLocalRef<jbyteArray>(jni, jni->NewByteArray(0));
+    return jni_zero::ScopedJavaLocalRef<jbyteArray>::Adopt(
+        jni, jni->NewByteArray(0));
   }
 
   // TODO(nisse, sakal): To avoid copying, change api to use ByteBuffer.
@@ -62,7 +72,8 @@ JNI_CallSessionFileRotatingLogSink_GetLogData(
   size_t read = file_reader.ReadAll(buffer.get(), log_size);
 
   jni_zero::ScopedJavaLocalRef<jbyteArray> result =
-      jni_zero::ScopedJavaLocalRef<jbyteArray>(jni, jni->NewByteArray(read));
+      jni_zero::ScopedJavaLocalRef<jbyteArray>::Adopt(jni,
+                                                      jni->NewByteArray(read));
   jni->SetByteArrayRegion(result.obj(), 0, read, buffer.get());
 
   return result;

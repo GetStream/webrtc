@@ -10,9 +10,18 @@
 
 #include "sdk/android/src/jni/pc/rtp_receiver.h"
 
+#include <jni.h>
+
+#include "api/crypto/frame_decryptor_interface.h"
+#include "api/media_types.h"
+#include "api/rtp_parameters.h"
+#include "api/rtp_receiver_interface.h"
+#include "api/scoped_refptr.h"
 #include "sdk/android/generated_peerconnection_jni/RtpReceiver_jni.h"
 #include "sdk/android/native_api/jni/java_types.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
 #include "sdk/android/src/jni/jni_helpers.h"
+#include "sdk/android/src/jni/jvm.h"
 #include "sdk/android/src/jni/pc/media_stream_track.h"
 #include "sdk/android/src/jni/pc/rtp_parameters.h"
 #include "third_party/jni_zero/jni_zero.h"
@@ -33,10 +42,16 @@ class RtpReceiverObserverJni : public RtpReceiverObserverInterface {
 
   ~RtpReceiverObserverJni() override = default;
 
-  void OnFirstPacketReceived(webrtc::MediaType media_type) override {
+  void OnFirstPacketReceived(MediaType media_type) override {
     JNIEnv* const env = AttachCurrentThreadIfNeeded();
     Java_Observer_onFirstPacketReceived(env, j_observer_global_,
                                         NativeToJavaMediaType(env, media_type));
+  }
+  void OnFirstPacketReceivedAfterReceptiveChange(
+      MediaType media_type) override {
+    JNIEnv* const env = AttachCurrentThreadIfNeeded();
+    Java_Observer_onFirstPacketReceivedAfterReceptiveChange(
+        env, j_observer_global_, NativeToJavaMediaType(env, media_type));
   }
 
  private:
@@ -96,7 +111,7 @@ static jni_zero::ScopedJavaLocalRef<jstring> JNI_RtpReceiver_GetId(
 static jlong JNI_RtpReceiver_SetObserver(
     JNIEnv* jni,
     jlong j_rtp_receiver_pointer,
-    const jni_zero::JavaParamRef<jobject>& j_observer) {
+    const jni_zero::JavaRef<jobject>& j_observer) {
   RtpReceiverObserverJni* rtpReceiverObserver =
       new RtpReceiverObserverJni(jni, j_observer);
   reinterpret_cast<RtpReceiverInterface*>(j_rtp_receiver_pointer)

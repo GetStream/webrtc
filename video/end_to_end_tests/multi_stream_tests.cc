@@ -8,12 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <stddef.h>
-#include <stdint.h>
-
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
+#include "api/units/time_delta.h"
 #include "api/video/video_frame.h"
 #include "api/video/video_sink_interface.h"
 #include "call/rtp_config.h"

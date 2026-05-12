@@ -10,11 +10,14 @@
 
 #include "modules/audio_processing/echo_control_mobile_impl.h"
 
-#include <string.h>
-
+#include <array>
 #include <cstdint>
+#include <cstring>
+#include <vector>
 
+#include "api/array_view.h"
 #include "api/audio/audio_processing.h"
+#include "common_audio/include/audio_util.h"
 #include "modules/audio_processing/aecm/echo_control_mobile.h"
 #include "modules/audio_processing/audio_buffer.h"
 #include "rtc_base/checks.h"
@@ -191,9 +194,9 @@ int EchoControlMobileImpl::ProcessCaptureAudio(AudioBuffer* audio,
       split_bands = nullptr;
     }
 
-    if (noisy == NULL) {
+    if (noisy == nullptr) {
       noisy = clean;
-      clean = NULL;
+      clean = nullptr;
     }
     for (size_t render = 0; render < stream_properties_->num_reverse_channels;
          ++render) {

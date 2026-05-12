@@ -28,9 +28,9 @@ namespace webrtc {
 namespace rtcp {
 namespace {
 
-static constexpr int kFieldValueSize = 3;
-static constexpr int kFieldSize = 1 + kFieldValueSize;
-static constexpr DataRate kDataRateResolution = DataRate::KilobitsPerSec(1);
+constexpr int kFieldValueSize = 3;
+constexpr int kFieldSize = 1 + kFieldValueSize;
+constexpr DataRate kDataRateResolution = DataRate::KilobitsPerSec(1);
 constexpr int64_t kMaxEncoded = (1 << (kFieldValueSize * 8)) - 1;
 
 class DataRateSerializer {
@@ -86,14 +86,12 @@ class RemoteEstimateSerializerImpl : public RemoteEstimateSerializer {
 
   Buffer Serialize(const NetworkStateEstimate& src) const override {
     size_t max_size = fields_.size() * kFieldSize;
-    size_t size = 0;
-    Buffer buf(max_size);
+    Buffer buf = Buffer::CreateWithCapacity(max_size);
     for (const auto& field : fields_) {
-      if (field.Write(src, buf.data() + size)) {
-        size += kFieldSize;
-      }
+      buf.AppendData(kFieldSize, [&](ArrayView<uint8_t> dst) {
+        return field.Write(src, dst.data()) ? kFieldSize : 0;
+      });
     }
-    buf.SetSize(size);
     return buf;
   }
 

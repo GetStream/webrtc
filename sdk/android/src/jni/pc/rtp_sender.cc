@@ -10,8 +10,19 @@
 
 #include "sdk/android/src/jni/pc/rtp_sender.h"
 
+#include <jni.h>
+
+#include <string>
+
+#include "api/crypto/frame_encryptor_interface.h"
+#include "api/media_stream_interface.h"
+#include "api/media_types.h"
+#include "api/rtp_parameters.h"
+#include "api/rtp_sender_interface.h"
+#include "api/scoped_refptr.h"
 #include "sdk/android/generated_peerconnection_jni/RtpSender_jni.h"
 #include "sdk/android/native_api/jni/java_types.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
 #include "sdk/android/src/jni/jni_helpers.h"
 #include "sdk/android/src/jni/pc/rtp_parameters.h"
 #include "third_party/jni_zero/jni_zero.h"
@@ -48,7 +59,7 @@ jlong JNI_RtpSender_GetTrack(JNIEnv* jni, jlong j_rtp_sender_pointer) {
 static void JNI_RtpSender_SetStreams(
     JNIEnv* jni,
     jlong j_rtp_sender_pointer,
-    const jni_zero::JavaParamRef<jobject>& j_stream_labels) {
+    const jni_zero::JavaRef<jobject>& j_stream_labels) {
   reinterpret_cast<RtpSenderInterface*>(j_rtp_sender_pointer)
       ->SetStreams(JavaListToNativeVector<std::string, jstring>(
           jni, j_stream_labels, &JavaToNativeString));
@@ -75,7 +86,7 @@ jlong JNI_RtpSender_GetDtmfSender(JNIEnv* jni, jlong j_rtp_sender_pointer) {
 jboolean JNI_RtpSender_SetParameters(
     JNIEnv* jni,
     jlong j_rtp_sender_pointer,
-    const jni_zero::JavaParamRef<jobject>& j_parameters) {
+    const jni_zero::JavaRef<jobject>& j_parameters) {
   if (IsNull(jni, j_parameters)) {
     return false;
   }
@@ -112,11 +123,10 @@ static void JNI_RtpSender_SetFrameEncryptor(JNIEnv* jni,
 static jni_zero::ScopedJavaLocalRef<jstring> JNI_RtpSender_GetMediaType(
     JNIEnv* jni,
     jlong j_rtp_sender_pointer) {
-  webrtc::MediaType media_type =
+  MediaType media_type =
       reinterpret_cast<RtpSenderInterface*>(j_rtp_sender_pointer)->media_type();
-  return media_type == webrtc::MediaType::AUDIO
-             ? NativeToJavaString(jni, "audio")
-             : NativeToJavaString(jni, "video");
+  return media_type == MediaType::AUDIO ? NativeToJavaString(jni, "audio")
+                                        : NativeToJavaString(jni, "video");
 }
 
 }  // namespace jni

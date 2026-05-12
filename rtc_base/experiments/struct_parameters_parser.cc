@@ -10,9 +10,21 @@
 #include "rtc_base/experiments/struct_parameters_parser.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
 
+#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "api/units/data_rate.h"
+#include "api/units/data_size.h"
+#include "api/units/time_delta.h"
+#include "rtc_base/experiments/field_trial_parser.h"
+#include "rtc_base/experiments/field_trial_units.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/string_encode.h"
 
 namespace webrtc {
 namespace {
@@ -38,13 +50,13 @@ inline void StringEncode(std::string* target, unsigned val) {
   *target += absl::StrCat(val);
 }
 inline void StringEncode(std::string* target, DataRate val) {
-  *target += webrtc::ToString(val);
+  *target += ToString(val);
 }
 inline void StringEncode(std::string* target, DataSize val) {
-  *target += webrtc::ToString(val);
+  *target += ToString(val);
 }
 inline void StringEncode(std::string* target, TimeDelta val) {
-  *target += webrtc::ToString(val);
+  *target += ToString(val);
 }
 
 template <typename T>

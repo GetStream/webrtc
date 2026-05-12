@@ -14,12 +14,11 @@
 #include <mach/mach.h>   // mach_task_self()
 #include <sys/sysctl.h>  // sysctlbyname()
 
+#include <iterator>
 #include <memory>
 #include <vector>
 
-#include "modules/audio_device/audio_device_config.h"
 #include "modules/third_party/portaudio/pa_ringbuffer.h"
-#include "rtc_base/arraysize.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/platform_thread.h"
 #include "rtc_base/system/arch.h"
@@ -278,7 +277,7 @@ AudioDeviceGeneric::InitStatus AudioDeviceMac::Init() {
   AudioObjectPropertyAddress propertyAddress = {
     kAudioHardwarePropertyRunLoop,
     kAudioObjectPropertyScopeGlobal,
-    kAudioObjectPropertyElementMaster
+    kAudioObjectPropertyElementMain
   };
 
   CFRunLoopRef runLoop = NULL;
@@ -336,7 +335,7 @@ int32_t AudioDeviceMac::Terminate() {
   AudioObjectPropertyAddress propertyAddress = {
     kAudioHardwarePropertyDevices, // selector
     kAudioObjectPropertyScopeGlobal, // scope
-    kAudioObjectPropertyElementMaster // element
+    kAudioObjectPropertyElementMain // element
   };
 
   WEBRTC_CA_LOG_WARN(AudioObjectRemovePropertyListener(
@@ -1546,7 +1545,7 @@ int32_t AudioDeviceMac::GetNumberDevices(const AudioObjectPropertyScope scope,
   AudioObjectPropertyAddress propertyAddress = {
     kAudioHardwarePropertyDevices,
     kAudioObjectPropertyScopeGlobal,
-    kAudioObjectPropertyElementMaster,
+    kAudioObjectPropertyElementMain,
   };
 
   UInt32 size = 0;
@@ -1572,7 +1571,7 @@ int32_t AudioDeviceMac::GetNumberDevices(const AudioObjectPropertyScope scope,
 
   AudioObjectPropertyAddress propertyAddressDefault = {
       hardwareProperty, kAudioObjectPropertyScopeGlobal,
-      kAudioObjectPropertyElementMaster};
+      kAudioObjectPropertyElementMain};
 
   AudioDeviceID usedID;
   UInt32 uintSize = sizeof(UInt32);
@@ -1675,7 +1674,7 @@ int32_t AudioDeviceMac::GetDeviceName(const AudioObjectPropertyScope scope,
     }
     AudioObjectPropertyAddress propertyAddress = {
         hardwareProperty, kAudioObjectPropertyScopeGlobal,
-        kAudioObjectPropertyElementMaster};
+        kAudioObjectPropertyElementMain};
     UInt32 size = sizeof(UInt32);
     WEBRTC_CA_RETURN_ON_ERR(AudioObjectGetPropertyData(
         kAudioObjectSystemObject, &propertyAddress, 0, NULL, &size, &usedID));
@@ -1732,7 +1731,7 @@ int32_t AudioDeviceMac::InitDevice(const uint16_t userDeviceIndex,
 
   AudioObjectPropertyAddress propertyAddress = {
       defaultDeviceSelector, kAudioObjectPropertyScopeGlobal,
-      kAudioObjectPropertyElementMaster};
+      kAudioObjectPropertyElementMain};
 
   // Get the actual device IDs
   int numberDevices =
@@ -2552,7 +2551,7 @@ bool AudioDeviceMac::CaptureWorkerThread() {
 bool AudioDeviceMac::KeyPressed() {
   bool key_down = false;
   // Loop through all Mac virtual key constant values.
-  for (unsigned int key_index = 0; key_index < arraysize(prev_key_state_);
+  for (unsigned int key_index = 0; key_index < std::size(prev_key_state_);
        ++key_index) {
     bool keyState =
         CGEventSourceKeyState(kCGEventSourceStateHIDSystemState, key_index);

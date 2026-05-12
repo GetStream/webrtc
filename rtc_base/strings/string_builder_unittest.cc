@@ -10,17 +10,33 @@
 
 #include "rtc_base/strings/string_builder.h"
 
-#include <string.h>
+#include <cstring>
+#include <string>
 
+#include "absl/strings/string_view.h"
 #include "rtc_base/checks.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 
 namespace webrtc {
+namespace {
+
+class StructWithAbslStringify {
+ public:
+  explicit StructWithAbslStringify(absl::string_view sv) : value_(sv) {}
+
+  template <typename Sink>
+  friend void AbslStringify(Sink& sink, const StructWithAbslStringify& self) {
+    sink.Append(self.value_);
+  }
+
+ private:
+  std::string value_;
+};
 
 TEST(SimpleStringBuilder, Limit) {
   char sb_buf[10];
-  webrtc::SimpleStringBuilder sb(sb_buf);
+  SimpleStringBuilder sb(sb_buf);
   EXPECT_EQ(0u, strlen(sb.str()));
 
   // Test that for a SSB with a buffer size of 10, that we can write 9 chars
@@ -31,7 +47,7 @@ TEST(SimpleStringBuilder, Limit) {
 
 TEST(SimpleStringBuilder, NumbersAndChars) {
   char sb_buf[100];
-  webrtc::SimpleStringBuilder sb(sb_buf);
+  SimpleStringBuilder sb(sb_buf);
   sb << 1 << ':' << 2.1 << ":" << 2.2f << ':' << 78187493520ll << ':'
      << 78187493520ul;
   EXPECT_EQ(0, strcmp(sb.str(), "1:2.1:2.2:78187493520:78187493520"));
@@ -39,7 +55,7 @@ TEST(SimpleStringBuilder, NumbersAndChars) {
 
 TEST(SimpleStringBuilder, Format) {
   char sb_buf[100];
-  webrtc::SimpleStringBuilder sb(sb_buf);
+  SimpleStringBuilder sb(sb_buf);
   sb << "Here we go - ";
   sb.AppendFormat("This is a hex formatted value: 0x%08llx", 3735928559ULL);
   EXPECT_EQ(0,
@@ -49,10 +65,18 @@ TEST(SimpleStringBuilder, Format) {
 
 TEST(SimpleStringBuilder, StdString) {
   char sb_buf[100];
-  webrtc::SimpleStringBuilder sb(sb_buf);
+  SimpleStringBuilder sb(sb_buf);
   std::string str = "does this work?";
   sb << str;
   EXPECT_EQ(str, sb.str());
+}
+
+TEST(SimpleStringBuilder, CanUseAbslStringForCustomTypes) {
+  char sb_buf[100];
+  SimpleStringBuilder sb(sb_buf);
+  StructWithAbslStringify value("absl-stringify");
+  sb << value;
+  EXPECT_STREQ(sb.str(), "absl-stringify");
 }
 
 // These tests are safe to run if we have death test support or if DCHECKs are
@@ -61,7 +85,7 @@ TEST(SimpleStringBuilder, StdString) {
 
 TEST(SimpleStringBuilderDeathTest, BufferOverrunConstCharP) {
   char sb_buf[4];
-  webrtc::SimpleStringBuilder sb(sb_buf);
+  SimpleStringBuilder sb(sb_buf);
   const char* const msg = "This is just too much";
 #if RTC_DCHECK_IS_ON
   EXPECT_DEATH(sb << msg, "");
@@ -73,7 +97,7 @@ TEST(SimpleStringBuilderDeathTest, BufferOverrunConstCharP) {
 
 TEST(SimpleStringBuilderDeathTest, BufferOverrunStdString) {
   char sb_buf[4];
-  webrtc::SimpleStringBuilder sb(sb_buf);
+  SimpleStringBuilder sb(sb_buf);
   sb << 12;
   const std::string msg = "Aw, come on!";
 #if RTC_DCHECK_IS_ON
@@ -86,7 +110,7 @@ TEST(SimpleStringBuilderDeathTest, BufferOverrunStdString) {
 
 TEST(SimpleStringBuilderDeathTest, BufferOverrunInt) {
   char sb_buf[4];
-  webrtc::SimpleStringBuilder sb(sb_buf);
+  SimpleStringBuilder sb(sb_buf);
   constexpr int num = -12345;
 #if RTC_DCHECK_IS_ON
   EXPECT_DEATH(sb << num, "");
@@ -102,7 +126,7 @@ TEST(SimpleStringBuilderDeathTest, BufferOverrunInt) {
 
 TEST(SimpleStringBuilderDeathTest, BufferOverrunDouble) {
   char sb_buf[5];
-  webrtc::SimpleStringBuilder sb(sb_buf);
+  SimpleStringBuilder sb(sb_buf);
   constexpr double num = 123.456;
 #if RTC_DCHECK_IS_ON
   EXPECT_DEATH(sb << num, "");
@@ -115,7 +139,7 @@ TEST(SimpleStringBuilderDeathTest, BufferOverrunDouble) {
 
 TEST(SimpleStringBuilderDeathTest, BufferOverrunConstCharPAlreadyFull) {
   char sb_buf[4];
-  webrtc::SimpleStringBuilder sb(sb_buf);
+  SimpleStringBuilder sb(sb_buf);
   sb << 123;
   const char* const msg = "This is just too much";
 #if RTC_DCHECK_IS_ON
@@ -128,7 +152,7 @@ TEST(SimpleStringBuilderDeathTest, BufferOverrunConstCharPAlreadyFull) {
 
 TEST(SimpleStringBuilderDeathTest, BufferOverrunIntAlreadyFull) {
   char sb_buf[4];
-  webrtc::SimpleStringBuilder sb(sb_buf);
+  SimpleStringBuilder sb(sb_buf);
   sb << "xyz";
   constexpr int num = -12345;
 #if RTC_DCHECK_IS_ON
@@ -145,7 +169,7 @@ TEST(SimpleStringBuilderDeathTest, BufferOverrunIntAlreadyFull) {
 // StringBuilder.
 
 TEST(StringBuilder, Limit) {
-  webrtc::StringBuilder sb;
+  StringBuilder sb;
   EXPECT_EQ(0u, sb.str().size());
 
   sb << "012345678";
@@ -153,7 +177,7 @@ TEST(StringBuilder, Limit) {
 }
 
 TEST(StringBuilder, NumbersAndChars) {
-  webrtc::StringBuilder sb;
+  StringBuilder sb;
   sb << 1 << ":" << 2.1 << ":" << 2.2f << ":" << 78187493520ll << ":"
      << 78187493520ul;
   EXPECT_THAT(sb.str(),
@@ -161,21 +185,28 @@ TEST(StringBuilder, NumbersAndChars) {
 }
 
 TEST(StringBuilder, Format) {
-  webrtc::StringBuilder sb;
+  StringBuilder sb;
   sb << "Here we go - ";
   sb.AppendFormat("This is a hex formatted value: 0x%08llx", 3735928559ULL);
   EXPECT_EQ(sb.str(), "Here we go - This is a hex formatted value: 0xdeadbeef");
 }
 
 TEST(StringBuilder, StdString) {
-  webrtc::StringBuilder sb;
+  StringBuilder sb;
   std::string str = "does this work?";
   sb << str;
   EXPECT_EQ(str, sb.str());
 }
 
+TEST(StringBuilder, CanUseAbslStringForCustomTypes) {
+  StringBuilder sb;
+  StructWithAbslStringify value("absl-stringify");
+  sb << value;
+  EXPECT_EQ(sb.str(), "absl-stringify");
+}
+
 TEST(StringBuilder, Release) {
-  webrtc::StringBuilder sb;
+  StringBuilder sb;
   std::string str =
       "This string has to be of a moderate length, or we might "
       "run into problems with small object optimizations.";
@@ -190,7 +221,7 @@ TEST(StringBuilder, Release) {
 }
 
 TEST(StringBuilder, Reset) {
-  webrtc::StringBuilder sb("abc");
+  StringBuilder sb("abc");
   sb << "def";
   EXPECT_EQ("abcdef", sb.str());
   sb.Clear();
@@ -199,4 +230,5 @@ TEST(StringBuilder, Reset) {
   EXPECT_EQ("123!", sb.str());
 }
 
+}  // namespace
 }  // namespace webrtc

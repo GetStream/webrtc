@@ -14,19 +14,21 @@
 #include <iterator>
 #include <memory>
 #include <optional>
-#include <set>
 #include <utility>
 #include <vector>
 
+#include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
 #include "api/candidate.h"
 #include "api/transport/enums.h"
+#include "api/units/time_delta.h"
 #include "p2p/base/ice_credentials_iterator.h"
 #include "p2p/base/port.h"
 #include "p2p/base/port_interface.h"
 #include "p2p/base/transport_description.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/crypto_random.h"
+#include "rtc_base/net_helper.h"
 #include "rtc_base/socket_address.h"
 
 namespace webrtc {
@@ -58,12 +60,11 @@ RelayServerConfig::RelayServerConfig(absl::string_view address,
                                      absl::string_view password,
                                      ProtocolType proto,
                                      bool secure)
-    : RelayServerConfig(
-          address,
-          port,
-          username,
-          password,
-          (proto == webrtc::PROTO_TCP && secure ? webrtc::PROTO_TLS : proto)) {}
+    : RelayServerConfig(address,
+                        port,
+                        username,
+                        password,
+                        (proto == PROTO_TCP && secure ? PROTO_TLS : proto)) {}
 
 RelayServerConfig::RelayServerConfig(const RelayServerConfig&) = default;
 
@@ -138,7 +139,7 @@ bool PortAllocator::SetConfiguration(
     TurnCustomizer* turn_customizer,
     const std::optional<int>& stun_candidate_keepalive_interval) {
   PortPrunePolicy turn_port_prune_policy =
-      prune_turn_ports ? webrtc::PRUNE_BASED_ON_PRIORITY : webrtc::NO_PRUNE;
+      prune_turn_ports ? PRUNE_BASED_ON_PRIORITY : NO_PRUNE;
   return SetConfiguration(stun_servers, turn_servers, candidate_pool_size,
                           turn_port_prune_policy, turn_customizer,
                           stun_candidate_keepalive_interval);
@@ -185,7 +186,10 @@ bool PortAllocator::SetConfiguration(
   // in future sessions. We also update the ready ports in the pooled sessions.
   // Ports in sessions that are taken and owned by P2PTransportChannel will be
   // updated there via IceConfig.
-  stun_candidate_keepalive_interval_ = stun_candidate_keepalive_interval;
+  stun_candidate_keepalive_interval_ =
+      stun_candidate_keepalive_interval.has_value()
+          ? std::optional(TimeDelta::Millis(*stun_candidate_keepalive_interval))
+          : std::nullopt;
   for (const auto& session : pooled_sessions_) {
     session->SetStunKeepaliveIntervalForReadyPorts(
         stun_candidate_keepalive_interval_);
@@ -243,6 +247,7 @@ std::unique_ptr<PortAllocatorSession> PortAllocator::TakePooledSession(
   auto it =
       pooled_sessions_.begin() + std::distance(pooled_sessions_.cbegin(), cit);
   std::unique_ptr<PortAllocatorSession> ret = std::move(*it);
+  RTC_DCHECK(ret->pooled());
   ret->SetIceParameters(content_name, component, ice_ufrag, ice_pwd);
   ret->set_pooled(false);
   // According to JSEP, a pooled session should filter candidates only
@@ -258,9 +263,8 @@ const PortAllocatorSession* PortAllocator::GetPooledSession(
   auto it = FindPooledSession(ice_credentials);
   if (it == pooled_sessions_.end()) {
     return nullptr;
-  } else {
-    return it->get();
   }
+  return it->get();
 }
 
 std::vector<std::unique_ptr<PortAllocatorSession>>::const_iterator
@@ -287,7 +291,7 @@ void PortAllocator::SetCandidateFilter(uint32_t filter) {
   }
   uint32_t prev_filter = candidate_filter_;
   candidate_filter_ = filter;
-  SignalCandidateFilterChanged(prev_filter, filter);
+  NotifyCandidateFilterChanged(prev_filter, filter);
 }
 
 void PortAllocator::GetCandidateStatsFromPooledSessions(
@@ -331,6 +335,17 @@ Candidate PortAllocator::SanitizeCandidate(const Candidate& c) const {
        (c.is_prflx() && filter_prflx_related_address));
   return c.ToSanitizedCopy(use_hostname_address, filter_related_address,
                            /*filter_ufrag=*/false);
+}
+
+void PortAllocatorSession::SubscribePortReady(
+    absl::AnyInvocable<void(PortAllocatorSession*, PortInterface*)> callback) {
+  port_ready_callbacks_.AddReceiver(std::move(callback));
+}
+
+void PortAllocatorSession::SubscribePortReady(
+    void* tag,
+    absl::AnyInvocable<void(PortAllocatorSession*, PortInterface*)> callback) {
+  port_ready_callbacks_.AddReceiver(tag, std::move(callback));
 }
 
 }  // namespace webrtc

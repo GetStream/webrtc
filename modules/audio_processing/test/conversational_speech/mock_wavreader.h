@@ -12,7 +12,7 @@
 #define MODULES_AUDIO_PROCESSING_TEST_CONVERSATIONAL_SPEECH_MOCK_WAVREADER_H_
 
 #include <cstddef>
-#include <string>
+#include <cstdint>
 
 #include "api/array_view.h"
 #include "modules/audio_processing/test/conversational_speech/wavreader_interface.h"
@@ -25,7 +25,7 @@ namespace conversational_speech {
 class MockWavReader : public WavReaderInterface {
  public:
   MockWavReader(int sample_rate, size_t num_channels, size_t num_samples);
-  ~MockWavReader();
+  ~MockWavReader() override;
 
   MOCK_METHOD(size_t, ReadFloatSamples, (webrtc::ArrayView<float>), (override));
   MOCK_METHOD(size_t,

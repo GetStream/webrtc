@@ -10,17 +10,27 @@
 
 #include "sdk/android/src/jni/audio_device/opensles_player.h"
 
+#include <SLES/OpenSLES.h>
+#include <SLES/OpenSLES_Android.h>
+#include <SLES/OpenSLES_AndroidConfiguration.h>
 #include <android/log.h>
 
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <iterator>
 #include <memory>
+#include <optional>
+#include <utility>
 
 #include "api/array_view.h"
+#include "api/audio/audio_device_defines.h"
+#include "api/scoped_refptr.h"
 #include "modules/audio_device/fine_audio_buffer.h"
-#include "rtc_base/arraysize.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/platform_thread.h"
+#include "rtc_base/platform_thread_types.h"
 #include "rtc_base/time_utils.h"
-#include "sdk/android/src/jni/audio_device/audio_common.h"
+#include "sdk/android/src/jni/audio_device/opensles_common.h"
 
 #define TAG "OpenSLESPlayer"
 #define ALOGV(...) __android_log_print(ANDROID_LOG_VERBOSE, TAG, __VA_ARGS__)
@@ -307,7 +317,7 @@ bool OpenSLESPlayer::CreateAudioPlayer() {
   RETURN_ON_ERROR(
       (*engine_)->CreateAudioPlayer(
           engine_, player_object_.Receive(), &audio_source, &audio_sink,
-          arraysize(interface_ids), interface_ids, interface_required),
+          std::size(interface_ids), interface_ids, interface_required),
       false);
 
   // Use the Android configuration interface to set platform-specific

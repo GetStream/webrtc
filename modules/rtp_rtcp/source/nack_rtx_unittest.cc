@@ -43,16 +43,16 @@
 
 namespace webrtc {
 
-const int kVideoNackListSize = 30;
-const uint32_t kTestSsrc = 3456;
-const uint32_t kTestRtxSsrc = kTestSsrc + 1;
-const uint16_t kTestSequenceNumber = 2345;
-const uint32_t kTestNumberOfPackets = 1350;
-const int kTestNumberOfRtxPackets = 149;
-const int kNumFrames = 30;
-const int kPayloadType = 123;
-const int kRtxPayloadType = 98;
-const int64_t kMaxRttMs = 1000;
+constexpr int kVideoNackListSize = 30;
+constexpr uint32_t kTestSsrc = 3456;
+constexpr uint32_t kTestRtxSsrc = kTestSsrc + 1;
+constexpr uint16_t kTestSequenceNumber = 2345;
+constexpr uint32_t kTestNumberOfPackets = 1350;
+constexpr int kTestNumberOfRtxPackets = 149;
+constexpr int kNumFrames = 30;
+constexpr int kPayloadType = 123;
+constexpr int kRtxPayloadType = 98;
+constexpr int64_t kMaxRttMs = 1000;
 
 class VerifyingMediaStream : public RtpPacketSinkInterface {
  public:
@@ -67,7 +67,7 @@ class VerifyingMediaStream : public RtpPacketSinkInterface {
   std::list<uint16_t> sequence_numbers_;
 };
 
-class RtxLoopBackTransport : public webrtc::Transport {
+class RtxLoopBackTransport : public Transport {
  public:
   explicit RtxLoopBackTransport(uint32_t rtx_ssrc)
       : count_(0),
@@ -76,7 +76,7 @@ class RtxLoopBackTransport : public webrtc::Transport {
         consecutive_drop_end_(0),
         rtx_ssrc_(rtx_ssrc),
         count_rtx_ssrc_(0),
-        module_(NULL) {}
+        module_(nullptr) {}
 
   void SetSendModule(RtpRtcpInterface* rtpRtcpModule) {
     module_ = rtpRtcpModule;
@@ -115,7 +115,8 @@ class RtxLoopBackTransport : public webrtc::Transport {
     return true;
   }
 
-  bool SendRtcp(ArrayView<const uint8_t> data) override {
+  bool SendRtcp(ArrayView<const uint8_t> data,
+                const PacketOptions& /* options */) override {
     module_->IncomingRtcpPacket(data);
     return true;
   }

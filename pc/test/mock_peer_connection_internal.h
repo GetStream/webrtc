@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 
+#include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
 #include "api/adaptation/resource.h"
 #include "api/audio/audio_device.h"
@@ -27,6 +28,7 @@
 #include "api/data_channel_event_observer_interface.h"
 #include "api/data_channel_interface.h"
 #include "api/dtls_transport_interface.h"
+#include "api/environment/environment.h"
 #include "api/field_trials_view.h"
 #include "api/jsep.h"
 #include "api/media_stream_interface.h"
@@ -44,11 +46,11 @@
 #include "api/stats/rtc_stats_collector_callback.h"
 #include "api/transport/bandwidth_estimation_settings.h"
 #include "api/transport/bitrate_settings.h"
-#include "api/transport/network_control.h"
 #include "call/call.h"
 #include "call/payload_type_picker.h"
 #include "p2p/base/port.h"
 #include "p2p/base/port_allocator.h"
+#include "pc/channel_interface.h"
 #include "pc/data_channel_utils.h"
 #include "pc/jsep_transport_controller.h"
 #include "pc/peer_connection_internal.h"
@@ -58,6 +60,7 @@
 #include "pc/session_description.h"
 #include "pc/transport_stats.h"
 #include "pc/usage_pattern.h"
+#include "rtc_base/containers/flat_map.h"
 #include "rtc_base/rtc_certificate.h"
 #include "rtc_base/ssl_certificate.h"
 #include "rtc_base/ssl_stream_adapter.h"
@@ -69,7 +72,7 @@ namespace webrtc {
 class MockPeerConnectionInternal : public PeerConnectionInternal {
  public:
   MockPeerConnectionInternal() {}
-  ~MockPeerConnectionInternal() = default;
+  ~MockPeerConnectionInternal() override = default;
   // PeerConnectionInterface
   MOCK_METHOD(scoped_refptr<StreamCollectionInterface>,
               local_streams,
@@ -208,13 +211,10 @@ class MockPeerConnectionInternal : public PeerConnectionInternal {
               SetConfiguration,
               (const PeerConnectionInterface::RTCConfiguration&),
               (override));
+  MOCK_METHOD(bool, AddIceCandidate, (const IceCandidate*), (override));
   MOCK_METHOD(bool,
-              AddIceCandidate,
-              (const IceCandidateInterface*),
-              (override));
-  MOCK_METHOD(bool,
-              RemoveIceCandidates,
-              (const std::vector<webrtc::Candidate>&),
+              RemoveIceCandidate,
+              (const IceCandidate* candidate),
               (override));
   MOCK_METHOD(RTCError, SetBitrate, (const BitrateSettings&), (override));
   MOCK_METHOD(void,
@@ -289,7 +289,10 @@ class MockPeerConnectionInternal : public PeerConnectionInternal {
   MOCK_METHOD(DataChannelController*, data_channel_controller, (), (override));
   MOCK_METHOD(PortAllocator*, port_allocator, (), (override));
   MOCK_METHOD(LegacyStatsCollector*, legacy_stats, (), (override));
-  MOCK_METHOD(PeerConnectionObserver*, Observer, (), (const, override));
+  MOCK_METHOD(void,
+              RunWithObserver,
+              (absl::AnyInvocable<void(webrtc::PeerConnectionObserver*) &&>),
+              (override));
   MOCK_METHOD(std::optional<SSLRole>, GetSctpSslRole_n, (), (override));
   MOCK_METHOD(PeerConnectionInterface::IceConnectionState,
               ice_connection_state_internal,
@@ -305,7 +308,7 @@ class MockPeerConnectionInternal : public PeerConnectionInternal {
   MOCK_METHOD(bool,
               ValidateBundleSettings,
               (const webrtc::SessionDescription*,
-               (const std::map<std::string, const webrtc::ContentGroup*>&)),
+               (const flat_map<std::string, const webrtc::ContentGroup*>&)),
               (override));
   MOCK_METHOD(RTCErrorOr<scoped_refptr<RtpTransceiverInterface>>,
               AddTransceiver,
@@ -326,6 +329,7 @@ class MockPeerConnectionInternal : public PeerConnectionInternal {
               (absl::string_view),
               (override));
   MOCK_METHOD(void, DestroyDataChannelTransport, (RTCError error), (override));
+  MOCK_METHOD(const Environment&, env, (), (const, override));
   MOCK_METHOD(const FieldTrialsView&, trials, (), (const, override));
 
   // PeerConnectionInternal
@@ -377,10 +381,6 @@ class MockPeerConnectionInternal : public PeerConnectionInternal {
   MOCK_METHOD(void,
               OnSctpDataChannelStateChanged,
               (int channel_id, DataChannelInterface::DataState),
-              (override));
-  MOCK_METHOD(NetworkControllerInterface*,
-              GetNetworkController,
-              (),
               (override));
   MOCK_METHOD(PayloadTypePicker&, payload_type_picker, (), (override));
 };

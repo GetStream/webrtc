@@ -11,13 +11,18 @@
 #include "rtc_tools/frame_analyzer/video_quality_analysis.h"
 
 #include <algorithm>
-#include <array>
 #include <cstddef>
+#include <string>
+#include <vector>
 
 #include "api/numerics/samples_stats_counter.h"
+#include "api/scoped_refptr.h"
 #include "api/test/metrics/metric.h"
+#include "api/test/metrics/metrics_logger.h"
+#include "api/units/timestamp.h"
+#include "api/video/video_frame_buffer.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/logging.h"
+#include "rtc_tools/video_file_reader.h"
 #include "third_party/libyuv/include/libyuv/compare.h"
 
 namespace webrtc {
@@ -55,8 +60,8 @@ double Ssim(const scoped_refptr<I420BufferInterface>& ref_buffer,
 }
 
 std::vector<AnalysisResult> RunAnalysis(
-    const scoped_refptr<webrtc::test::Video>& reference_video,
-    const scoped_refptr<webrtc::test::Video>& test_video,
+    const scoped_refptr<test::Video>& reference_video,
+    const scoped_refptr<test::Video>& test_video,
     const std::vector<size_t>& test_frame_indices) {
   std::vector<AnalysisResult> results;
   for (size_t i = 0; i < test_video->number_of_frames(); ++i) {
@@ -86,7 +91,9 @@ std::vector<Cluster> CalculateFrameClusters(
       ++clusters.back().number_of_repeated_frames;
     } else {
       // Start a new cluster.
-      clusters.push_back({index, /* number_of_repeated_frames= */ 1});
+      clusters.push_back(
+          {.index = index,
+           /* number_of_repeated_frames= */ .number_of_repeated_frames = 1});
     }
   }
 
@@ -121,7 +128,7 @@ int GetTotalNumberOfSkippedFrames(const std::vector<Cluster>& clusters) {
 void PrintAnalysisResults(const std::string& label,
                           ResultsContainer& results,
                           MetricsLogger& logger) {
-  if (results.frames.size() > 0u) {
+  if (!results.frames.empty()) {
     logger.LogSingleValueMetric("Unique_frames_count", label,
                                 results.frames.size(), Unit::kUnitless,
                                 ImprovementDirection::kNeitherIsBetter);
@@ -129,8 +136,10 @@ void PrintAnalysisResults(const std::string& label,
     SamplesStatsCounter psnr_values;
     SamplesStatsCounter ssim_values;
     for (const auto& frame : results.frames) {
-      psnr_values.AddSample(frame.psnr_value);
-      ssim_values.AddSample(frame.ssim_value);
+      psnr_values.AddSample(
+          {.value = frame.psnr_value, .time = Timestamp::Zero()});
+      ssim_values.AddSample(
+          {.value = frame.ssim_value, .time = Timestamp::Zero()});
     }
 
     logger.LogMetric("PSNR_dB", label, psnr_values, Unit::kUnitless,

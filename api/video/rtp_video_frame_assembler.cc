@@ -239,7 +239,7 @@ RtpVideoFrameAssembler::Impl::UpdateWithPadding(uint16_t seq_num) {
 bool RtpVideoFrameAssembler::Impl::ParseDependenciesDescriptorExtension(
     const RtpPacketReceived& rtp_packet,
     RTPVideoHeader& video_header) {
-  webrtc::DependencyDescriptor dependency_descriptor;
+  DependencyDescriptor dependency_descriptor;
 
   if (!rtp_packet.GetExtension<RtpDependencyDescriptorExtension>(
           video_structure_.get(), &dependency_descriptor)) {
@@ -295,7 +295,8 @@ bool RtpVideoFrameAssembler::Impl::ParseDependenciesDescriptorExtension(
   // the next key frame.
   if (dependency_descriptor.attached_structure) {
     RTC_DCHECK(dependency_descriptor.first_packet_in_frame);
-    if (video_structure_frame_id_ > frame_id) {
+    if (video_structure_frame_id_.has_value() &&
+        video_structure_frame_id_ > frame_id) {
       RTC_LOG(LS_WARNING)
           << "Arrived key frame with id " << frame_id << " and structure id "
           << dependency_descriptor.attached_structure->structure_id

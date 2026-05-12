@@ -10,14 +10,16 @@
 
 #include "modules/desktop_capture/linux/wayland/shared_screencast_stream.h"
 
-#include <memory>
-#include <utility>
+#include <sys/types.h>
 
+#include <cstdint>
+#include <memory>
+
+#include "api/scoped_refptr.h"
 #include "api/units/time_delta.h"
-#include "modules/desktop_capture/desktop_capturer.h"
-#include "modules/desktop_capture/desktop_frame.h"
 #include "modules/desktop_capture/linux/wayland/test/test_screencast_stream_provider.h"
 #include "modules/desktop_capture/rgba_color.h"
+#include "modules/desktop_capture/shared_desktop_frame.h"
 #include "rtc_base/event.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
@@ -36,12 +38,23 @@ constexpr int kBytesPerPixel = 4;
 constexpr int32_t kWidth = 800;
 constexpr int32_t kHeight = 640;
 
-class PipeWireStreamTest : public ::testing::Test,
-                           public TestScreenCastStreamProvider::Observer,
-                           public SharedScreenCastStream::Observer {
+// crbug.com/webrtc/14568
+// The test fails on "MemorySanitizer: use-of-uninitialized-value in
+// libpipewire-0.3.so." or on leaks caused by loading PipeWire
+// plugins.
+#if defined(ADDRESS_SANITIZER) || defined(MEMORY_SANITIZER) || \
+    defined(THREAD_SANITIZER) || defined(UNDEFINED_SANITIZER)
+#define MAYBE_PipeWireStreamTest DISABLED_PipeWireStreamTest
+#else
+#define MAYBE_PipeWireStreamTest PipeWireStreamTest
+#endif
+
+class MAYBE_PipeWireStreamTest : public ::testing::Test,
+                                 public TestScreenCastStreamProvider::Observer,
+                                 public SharedScreenCastStream::Observer {
  public:
-  PipeWireStreamTest() = default;
-  ~PipeWireStreamTest() = default;
+  MAYBE_PipeWireStreamTest() = default;
+  ~MAYBE_PipeWireStreamTest() override = default;
 
   // FakeScreenCastPortal::Observer
   MOCK_METHOD(void, OnBufferAdded, (), (override));
@@ -72,23 +85,28 @@ class PipeWireStreamTest : public ::testing::Test,
     shared_screencast_stream_->StartScreenCastStream(stream_node_id);
   }
 
+  void TearDown() override {
+    shared_screencast_stream_ = nullptr;
+    test_screencast_stream_provider_.reset();
+  }
+
  protected:
   uint recorded_frames_ = 0;
   bool streaming_ = false;
   std::unique_ptr<TestScreenCastStreamProvider>
       test_screencast_stream_provider_;
-  webrtc::scoped_refptr<SharedScreenCastStream> shared_screencast_stream_;
+  scoped_refptr<SharedScreenCastStream> shared_screencast_stream_;
 };
 
-TEST_F(PipeWireStreamTest, TestPipeWire) {
+TEST_F(MAYBE_PipeWireStreamTest, TestPipeWire) {
   // Set expectations for PipeWire to successfully connect both streams
-  webrtc::Event waitConnectEvent;
-  webrtc::Event waitStartStreamingEvent;
-  webrtc::Event waitStreamParamChangedEvent1;
-  webrtc::Event waitStreamParamChangedEvent2;
+  Event waitConnectEvent;
+  Event waitStartStreamingEvent;
+  Event waitStreamParamChangedEvent1;
+  Event waitStreamParamChangedEvent2;
 
   EXPECT_CALL(*this, OnStreamReady(_))
-      .WillOnce(Invoke(this, &PipeWireStreamTest::StartScreenCastStream));
+      .WillOnce(Invoke(this, &MAYBE_PipeWireStreamTest::StartScreenCastStream));
   EXPECT_CALL(*this, OnStreamConfigured).WillOnce([&waitConnectEvent] {
     waitConnectEvent.Set();
   });
@@ -105,8 +123,8 @@ TEST_F(PipeWireStreamTest, TestPipeWire) {
   // Wait until we start streaming
   waitStartStreamingEvent.Wait(kShortWait);
 
-  webrtc::Event frameRetrievedEvent;
-  EXPECT_CALL(*this, OnFrameRecorded).Times(6);
+  Event frameRetrievedEvent;
+  EXPECT_CALL(*this, OnFrameRecorded).Times(8);
   EXPECT_CALL(*this, OnDesktopFrameChanged)
       .Times(3)
       .WillRepeatedly([&frameRetrievedEvent] { frameRetrievedEvent.Set(); });
@@ -147,7 +165,7 @@ TEST_F(PipeWireStreamTest, TestPipeWire) {
   EXPECT_NE(frame->data(), frame2->data());
 
   // This should result into overwriting a frame in use
-  webrtc::Event frameRecordedEvent;
+  Event frameRecordedEvent;
   RgbaColor blue_color(255, 0, 0);
   EXPECT_CALL(*this, OnFailedToProcessBuffer).WillOnce([&frameRecordedEvent] {
     frameRecordedEvent.Set();
@@ -161,7 +179,7 @@ TEST_F(PipeWireStreamTest, TestPipeWire) {
   EXPECT_EQ(RgbaColor(frame->data()), blue_color);
 
   // Check we don't process faulty buffers
-  webrtc::Event corruptedMetadataFrameEvent;
+  Event corruptedMetadataFrameEvent;
   EXPECT_CALL(*this, OnBufferCorruptedMetadata)
       .WillOnce([&corruptedMetadataFrameEvent] {
         corruptedMetadataFrameEvent.Set();
@@ -171,7 +189,7 @@ TEST_F(PipeWireStreamTest, TestPipeWire) {
       blue_color, TestScreenCastStreamProvider::CorruptedMetadata);
   corruptedMetadataFrameEvent.Wait(kShortWait);
 
-  webrtc::Event corruptedDataFrameEvent;
+  Event corruptedDataFrameEvent;
   EXPECT_CALL(*this, OnBufferCorruptedData)
       .WillOnce([&corruptedDataFrameEvent] { corruptedDataFrameEvent.Set(); });
 
@@ -179,7 +197,7 @@ TEST_F(PipeWireStreamTest, TestPipeWire) {
       blue_color, TestScreenCastStreamProvider::CorruptedData);
   corruptedDataFrameEvent.Wait(kShortWait);
 
-  webrtc::Event emptyFrameEvent;
+  Event emptyFrameEvent;
   EXPECT_CALL(*this, OnEmptyBuffer).WillOnce([&emptyFrameEvent] {
     emptyFrameEvent.Set();
   });
@@ -194,16 +212,46 @@ TEST_F(PipeWireStreamTest, TestPipeWire) {
       .WillOnce([&waitStreamParamChangedEvent1] {
         waitStreamParamChangedEvent1.Set();
       });
+  EXPECT_CALL(*this, OnStopStreaming);
   shared_screencast_stream_->UpdateScreenCastStreamFrameRate(0);
   waitStreamParamChangedEvent1.Wait(kShortWait);
+
+  // Record a frame in FakePipeWireStream
+  Event waitStartStreamingEvent2;
+  EXPECT_CALL(*this, OnStartStreaming).WillOnce([&waitStartStreamingEvent2] {
+    waitStartStreamingEvent2.Set();
+  });
+  Event emptyFrameEvent2;
+  EXPECT_CALL(*this, OnEmptyBuffer).WillOnce([&emptyFrameEvent2] {
+    emptyFrameEvent2.Set();
+  });
+  waitStartStreamingEvent2.Wait(kShortWait);
+  test_screencast_stream_provider_->RecordFrame(
+      red_color, TestScreenCastStreamProvider::EmptyData);
+  emptyFrameEvent2.Wait(kShortWait);
 
   EXPECT_CALL(*this, OnFrameRateChanged(22))
       .Times(1)
       .WillOnce([&waitStreamParamChangedEvent2] {
         waitStreamParamChangedEvent2.Set();
       });
+  EXPECT_CALL(*this, OnStopStreaming);
   shared_screencast_stream_->UpdateScreenCastStreamFrameRate(22);
   waitStreamParamChangedEvent2.Wait(kShortWait);
+
+  // Record a frame in FakePipeWireStream
+  Event waitStartStreamingEvent3;
+  EXPECT_CALL(*this, OnStartStreaming).WillOnce([&waitStartStreamingEvent3] {
+    waitStartStreamingEvent3.Set();
+  });
+  Event emptyFrameEvent3;
+  EXPECT_CALL(*this, OnEmptyBuffer).WillOnce([&emptyFrameEvent3] {
+    emptyFrameEvent3.Set();
+  });
+  waitStartStreamingEvent3.Wait(kShortWait);
+  test_screencast_stream_provider_->RecordFrame(
+      red_color, TestScreenCastStreamProvider::EmptyData);
+  emptyFrameEvent3.Wait(kShortWait);
 
   // Test disconnection from stream
   EXPECT_CALL(*this, OnStopStreaming);

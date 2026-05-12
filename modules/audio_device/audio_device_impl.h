@@ -18,6 +18,7 @@
 #include <memory>
 
 #include "api/audio/audio_device.h"
+#include "api/environment/environment.h"
 #include "api/task_queue/task_queue_factory.h"
 #include "modules/audio_device/audio_device_buffer.h"
 
@@ -42,6 +43,9 @@ class AudioDeviceModuleImpl : public AudioDeviceModuleForTest {
     kPlatformFuchsia = 7,
   };
 
+  static scoped_refptr<AudioDeviceModuleImpl> Create(const Environment& env,
+                                                     AudioLayer audio_layer);
+
   int32_t CheckPlatform();
   int32_t CreatePlatformSpecificObjects();
   int32_t AttachAudioBuffer();
@@ -49,6 +53,7 @@ class AudioDeviceModuleImpl : public AudioDeviceModuleForTest {
   AudioDeviceModuleImpl(AudioLayer audio_layer,
                         TaskQueueFactory* task_queue_factory,
                         bool bypass_voice_processing = false);
+  AudioDeviceModuleImpl(const Environment& env, AudioLayer audio_layer);
   // If `create_detached` is true, created ADM can be used on another thread
   // compared to the one on which it was created. It's useful for testing.
   AudioDeviceModuleImpl(AudioLayer audio_layer,
@@ -172,6 +177,7 @@ class AudioDeviceModuleImpl : public AudioDeviceModuleForTest {
   AudioLayer PlatformAudioLayer() const;
 
   AudioLayer audio_layer_;
+  const Environment env_;
   PlatformType platform_type_ = kPlatformNotSupported;
   bool initialized_ = false;
 #if defined(WEBRTC_IOS)

@@ -13,7 +13,7 @@
 #include <stdlib.h>
 
 #include <cstddef>
-#include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <memory>
 #include <optional>
@@ -25,20 +25,18 @@
 #include "absl/strings/string_view.h"
 #include "api/test/metrics/chrome_perf_dashboard_metrics_exporter.h"
 #include "api/test/metrics/global_metrics_logger_and_exporter.h"
+#include "api/test/metrics/metric.h"
 #include "api/test/metrics/metrics_exporter.h"
 #include "api/test/metrics/metrics_set_proto_file_exporter.h"
-#include "api/test/metrics/print_result_proxy_metrics_exporter.h"
 #include "api/test/metrics/stdout_metrics_exporter.h"
-#include "rtc_base/checks.h"
 #include "rtc_base/event_tracer.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/ssl_adapter.h"
 #include "rtc_base/ssl_stream_adapter.h"
-#include "system_wrappers/include/field_trial.h"
 #include "system_wrappers/include/metrics.h"
 #include "test/gtest.h"
 #include "test/test_flags.h"
-#include "test/testsupport/perf_test.h"
+#include "test/testsupport/file_utils.h"
 #include "test/testsupport/resources_dir_flag.h"
 
 #if defined(RTC_USE_PERFETTO)
@@ -91,6 +89,14 @@ ABSL_FLAG(bool, test_launcher_bot_mode, false, "Intentionally ignored flag.");
 #endif
 
 ABSL_FLAG(std::string,
+          webrtc_test_metrics_output_path,
+          "",
+          "Path where the test perf metrics should be stored using "
+          "api/test/metrics/metric.proto proto format. File will contain "
+          "MetricsSet as a root proto. On iOS, this MUST be a file name "
+          "and the file will be stored under NSDocumentDirectory.");
+
+ABSL_FLAG(std::string,
           isolated_script_test_output,
           "",
           "Path to output an empty JSON file which Chromium infra requires.");
@@ -141,10 +147,6 @@ class TestMainImpl : public TestMain {
     LogMessage::SetLogToStderr(absl::GetFlag(FLAGS_logs) ||
                                absl::GetFlag(FLAGS_verbose));
 
-    // InitFieldTrialsFromString stores the char*, so the char array must
-    // outlive the application.
-    field_trials_ = absl::GetFlag(FLAGS_force_fieldtrials);
-    field_trial::InitFieldTrialsFromString(field_trials_.c_str());
     metrics::Enable();
 
 #if defined(WEBRTC_WIN)
@@ -192,7 +194,6 @@ class TestMainImpl : public TestMain {
 #if defined(WEBRTC_IOS)
     test::InitTestSuite(RUN_ALL_TESTS, argc, argv,
                         absl::GetFlag(FLAGS_write_perf_output_on_ios),
-                        absl::GetFlag(FLAGS_export_perf_results_new_api),
                         absl::GetFlag(FLAGS_webrtc_test_metrics_output_path),
                         metrics_to_plot);
     test::RunTestsFromIOSApp();
@@ -201,37 +202,43 @@ class TestMainImpl : public TestMain {
     int exit_code = RUN_ALL_TESTS();
 
     std::vector<std::unique_ptr<test::MetricsExporter>> exporters;
-    if (absl::GetFlag(FLAGS_export_perf_results_new_api)) {
-      exporters.push_back(std::make_unique<test::StdoutMetricsExporter>());
-      if (!absl::GetFlag(FLAGS_webrtc_test_metrics_output_path).empty()) {
-        exporters.push_back(
-            std::make_unique<webrtc::test::MetricsSetProtoFileExporter>(
-                webrtc::test::MetricsSetProtoFileExporter::Options(
-                    absl::GetFlag(FLAGS_webrtc_test_metrics_output_path))));
-      }
-      if (!absl::GetFlag(FLAGS_isolated_script_test_perf_output).empty()) {
-        exporters.push_back(
-            std::make_unique<test::ChromePerfDashboardMetricsExporter>(
-                absl::GetFlag(FLAGS_isolated_script_test_perf_output)));
-      }
-    } else {
-      exporters.push_back(
-          std::make_unique<test::PrintResultProxyMetricsExporter>());
+    exporters.push_back(std::make_unique<test::StdoutMetricsExporter>());
+    if (!absl::GetFlag(FLAGS_webrtc_test_metrics_output_path).empty()) {
+      exporters.push_back(std::make_unique<test::MetricsSetProtoFileExporter>(
+          test::MetricsSetProtoFileExporter::Options(
+              absl::GetFlag(FLAGS_webrtc_test_metrics_output_path))));
     }
+    if (!absl::GetFlag(FLAGS_isolated_script_test_perf_output).empty()) {
+      exporters.push_back(
+          std::make_unique<test::ChromePerfDashboardMetricsExporter>(
+              absl::GetFlag(FLAGS_isolated_script_test_perf_output)));
+    }
+    // Log number of tests that should be run, are disabled or skipped and total
+    // number.
+    int total_test_count =
+        ::testing::UnitTest::GetInstance()->total_test_count();
+    int test_to_run_count =
+        ::testing::UnitTest::GetInstance()->test_to_run_count();
+    int disabled_test_count =
+        ::testing::UnitTest::GetInstance()->disabled_test_count();
+    int skipped_test_count =
+        ::testing::UnitTest::GetInstance()->skipped_test_count();
+    absl::string_view test_suite_name = test::FileName(argv[0]);
+    test::GetGlobalMetricsLogger()->LogSingleValueMetric(
+        "TotalTestCount", test_suite_name, total_test_count, test::Unit::kCount,
+        test::ImprovementDirection::kBiggerIsBetter);
+    test::GetGlobalMetricsLogger()->LogSingleValueMetric(
+        "RunTestCount", test_suite_name, test_to_run_count, test::Unit::kCount,
+        test::ImprovementDirection::kBiggerIsBetter);
+    test::GetGlobalMetricsLogger()->LogSingleValueMetric(
+        "DisabledTestCount", test_suite_name, disabled_test_count,
+        test::Unit::kCount, test::ImprovementDirection::kSmallerIsBetter);
+    test::GetGlobalMetricsLogger()->LogSingleValueMetric(
+        "SkippedTestCount", test_suite_name, skipped_test_count,
+        test::Unit::kCount, test::ImprovementDirection::kSmallerIsBetter);
+
     test::ExportPerfMetric(*test::GetGlobalMetricsLogger(),
                            std::move(exporters));
-    if (!absl::GetFlag(FLAGS_export_perf_results_new_api)) {
-      std::string perf_output_file =
-          absl::GetFlag(FLAGS_isolated_script_test_perf_output);
-      if (!perf_output_file.empty()) {
-        if (!webrtc::test::WritePerfResults(perf_output_file)) {
-          return 1;
-        }
-      }
-      if (metrics_to_plot) {
-        webrtc::test::PrintPlottableResults(*metrics_to_plot);
-      }
-    }
 
     std::string result_filename =
         absl::GetFlag(FLAGS_isolated_script_test_output);

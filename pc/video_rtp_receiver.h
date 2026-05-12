@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "absl/strings/string_view.h"
 #include "api/crypto/frame_decryptor_interface.h"
 #include "api/dtls_transport_interface.h"
 #include "api/frame_transformer_interface.h"
@@ -30,7 +31,6 @@
 #include "api/transport/rtp/rtp_source.h"
 #include "api/video/video_frame.h"
 #include "api/video/video_sink_interface.h"
-#include "api/video/video_source_interface.h"
 #include "media/base/media_channel.h"
 #include "pc/jitter_buffer_delay.h"
 #include "pc/media_stream_track_proxy.h"
@@ -49,16 +49,18 @@ class VideoRtpReceiver : public RtpReceiverInternal,
   // An SSRC of 0 will create a receiver that will match the first SSRC it
   // sees. Must be called on signaling thread.
   VideoRtpReceiver(Thread* worker_thread,
-                   std::string receiver_id,
-                   std::vector<std::string> streams_ids);
+                   absl::string_view receiver_id,
+                   std::vector<std::string> streams_ids,
+                   VideoMediaReceiveChannelInterface* media_channel = nullptr);
   // TODO(hbos): Remove this when streams() is removed.
   // https://crbug.com/webrtc/9480
   VideoRtpReceiver(
       Thread* worker_thread,
-      const std::string& receiver_id,
-      const std::vector<scoped_refptr<MediaStreamInterface>>& streams);
+      absl::string_view receiver_id,
+      const std::vector<scoped_refptr<MediaStreamInterface>>& streams,
+      VideoMediaReceiveChannelInterface* media_channel = nullptr);
 
-  virtual ~VideoRtpReceiver();
+  ~VideoRtpReceiver() override;
 
   scoped_refptr<VideoTrackInterface> video_track() const { return track_; }
 
@@ -72,9 +74,7 @@ class VideoRtpReceiver : public RtpReceiverInternal,
   scoped_refptr<DtlsTransportInterface> dtls_transport() const override;
   std::vector<std::string> stream_ids() const override;
   std::vector<scoped_refptr<MediaStreamInterface>> streams() const override;
-  webrtc::MediaType media_type() const override {
-    return webrtc::MediaType::VIDEO;
-  }
+  MediaType media_type() const override { return MediaType::VIDEO; }
 
   std::string id() const override { return id_; }
 
@@ -94,6 +94,7 @@ class VideoRtpReceiver : public RtpReceiverInternal,
   void SetupUnsignaledMediaChannel() override;
   std::optional<uint32_t> ssrc() const override;
   void NotifyFirstPacketReceived() override;
+  void NotifyFirstPacketReceivedAfterReceptiveChange() override;
   void set_stream_ids(std::vector<std::string> stream_ids) override;
   void set_transport(
       scoped_refptr<DtlsTransportInterface> dtls_transport) override;

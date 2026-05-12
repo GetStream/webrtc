@@ -16,12 +16,13 @@
 #include <utility>
 #include <vector>
 
+#include "api/array_view.h"
 #include "api/audio/audio_view.h"
 #include "modules/audio_processing/agc2/agc2_common.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/gunit.h"
 #include "rtc_base/numerics/safe_compare.h"
 #include "test/gmock.h"
+#include "test/gtest.h"
 
 namespace webrtc {
 namespace {
@@ -42,10 +43,7 @@ class MockVad : public VoiceActivityDetectorWrapper::MonoVad {
  public:
   MOCK_METHOD(int, SampleRateHz, (), (const, override));
   MOCK_METHOD(void, Reset, (), (override));
-  MOCK_METHOD(float,
-              Analyze,
-              (webrtc::ArrayView<const float> frame),
-              (override));
+  MOCK_METHOD(float, Analyze, (ArrayView<const float> frame), (override));
 };
 
 // Checks that the ctor and `Initialize()` read the sample rate of the wrapped

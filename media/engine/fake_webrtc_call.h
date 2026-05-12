@@ -31,6 +31,7 @@
 
 #include "absl/strings/string_view.h"
 #include "api/adaptation/resource.h"
+#include "api/array_view.h"
 #include "api/audio/audio_frame.h"
 #include "api/audio/audio_mixer.h"
 #include "api/audio_codecs/audio_format.h"
@@ -90,7 +91,7 @@ class FakeAudioSendStream final : public AudioSendStream {
   bool muted() const { return muted_; }
 
  private:
-  // webrtc::AudioSendStream implementation.
+  // AudioSendStream implementation.
   void Reconfigure(const AudioSendStream::Config& config,
                    SetParametersCallback callback) override;
   void Start() override { sending_ = true; }
@@ -124,10 +125,10 @@ class FakeAudioReceiveStream final : public AudioReceiveStreamInterface {
   const AudioReceiveStreamInterface::Config& GetConfig() const;
   void SetStats(const AudioReceiveStreamInterface::Stats& stats);
   int received_packets() const { return received_packets_; }
-  bool VerifyLastPacket(const uint8_t* data, size_t length) const;
+  bool VerifyLastPacket(ArrayView<const uint8_t> data) const;
   const AudioSinkInterface* sink() const { return sink_; }
   float gain() const { return gain_; }
-  bool DeliverRtp(const uint8_t* packet, size_t length, int64_t packet_time_us);
+  bool DeliverRtp(ArrayView<const uint8_t> packet, int64_t packet_time_us);
   bool started() const { return started_; }
   int base_mininum_playout_delay_ms() const {
     return base_mininum_playout_delay_ms_;
@@ -158,6 +159,8 @@ class FakeAudioReceiveStream final : public AudioReceiveStreamInterface {
       bool get_and_clear_legacy_stats) const override;
   void SetSink(AudioSinkInterface* sink) override;
   void SetGain(float gain) override;
+  void SetJitterBufferMaxPackets(size_t max_packets) override {}
+  void SetJitterBufferFastAccelerate(bool fast_accelerate) override {}
   bool SetBaseMinimumPlayoutDelayMs(int delay_ms) override {
     base_mininum_playout_delay_ms_ = delay_ms;
     return true;
@@ -206,7 +209,8 @@ class FakeVideoSendStream final : public VideoSendStream,
   int GetLastWidth() const;
   int GetLastHeight() const;
   int64_t GetLastTimestamp() const;
-  void SetStats(const VideoSendStream::Stats& stats);
+  void SetStats(const VideoSendStream::Stats& stats) override;
+  void SetCsrcs(ArrayView<const uint32_t> csrcs) override;
   int num_encoder_reconfigurations() const {
     return num_encoder_reconfigurations_;
   }
@@ -218,16 +222,16 @@ class FakeVideoSendStream final : public VideoSendStream,
   void InjectVideoSinkWants(const VideoSinkWants& wants);
 
   VideoSourceInterface<VideoFrame>* source() const { return source_; }
-  void GenerateKeyFrame(const std::vector<std::string>& rids);
+  void GenerateKeyFrame(const std::vector<std::string>& rids) override;
   const std::vector<std::string>& GetKeyFramesRequested() const {
     return keyframes_requested_by_rid_;
   }
 
  private:
-  // webrtc::VideoSinkInterface<VideoFrame> implementation.
+  // VideoSinkInterface<VideoFrame> implementation.
   void OnFrame(const VideoFrame& frame) override;
 
-  // webrtc::VideoSendStream implementation.
+  // VideoSendStream implementation.
   void Start() override;
   void Stop() override;
   bool started() override { return IsSending(); }
@@ -289,7 +293,7 @@ class FakeVideoReceiveStream final : public VideoReceiveStreamInterface {
     config_.rtp.local_ssrc = local_ssrc;
   }
 
-  void UpdateRtxSsrc(uint32_t ssrc) { config_.rtp.rtx_ssrc = ssrc; }
+  void UpdateRtxSsrc(uint32_t ssrc) override { config_.rtp.rtx_ssrc = ssrc; }
 
   void SetFrameDecryptor(scoped_refptr<FrameDecryptorInterface>
                          /* frame_decryptor */) override {}
@@ -330,7 +334,8 @@ class FakeVideoReceiveStream final : public VideoReceiveStreamInterface {
     config_.rtp.rtcp_xr = rtcp_xr;
   }
 
-  void SetAssociatedPayloadTypes(std::map<int, int> associated_payload_types) {
+  void SetAssociatedPayloadTypes(
+      std::map<int, int> associated_payload_types) override {
     config_.rtp.rtx_associated_payload_types =
         std::move(associated_payload_types);
   }
@@ -431,10 +436,12 @@ class FakeCall final : public Call, public PacketReceiver {
 
   void SetClientBitratePreferences(
       const BitrateSettings& /* preferences */) override {}
-  const FieldTrialsView& trials() const override { return env_.field_trials(); }
-  void EnableSendCongestionControlFeedbackAccordingToRfc8888() override {}
-  int FeedbackAccordingToRfc8888Count() { return 0; }
-  int FeedbackAccordingToTransportCcCount() { return 0; }
+  void SetPreferredRtcpCcAckType(
+      RtcpFeedbackType preferred_rtcp_cc_ack_type) override {}
+  std::optional<int> FeedbackAccordingToRfc8888Count() override { return 0; }
+  std::optional<int> FeedbackAccordingToTransportCcCount() override {
+    return 0;
+  }
 
  private:
   AudioSendStream* CreateAudioSendStream(
@@ -528,16 +535,4 @@ class FakeCall final : public Call, public PacketReceiver {
 
 }  //  namespace webrtc
 
-// Re-export symbols from the webrtc namespace for backwards compatibility.
-// TODO(bugs.webrtc.org/4222596): Remove once all references are updated.
-#ifdef WEBRTC_ALLOW_DEPRECATED_NAMESPACES
-namespace cricket {
-using ::webrtc::FakeAudioReceiveStream;
-using ::webrtc::FakeAudioSendStream;
-using ::webrtc::FakeCall;
-using ::webrtc::FakeFlexfecReceiveStream;
-using ::webrtc::FakeVideoReceiveStream;
-using ::webrtc::FakeVideoSendStream;
-}  // namespace cricket
-#endif  // WEBRTC_ALLOW_DEPRECATED_NAMESPACES
 #endif  // MEDIA_ENGINE_FAKE_WEBRTC_CALL_H_

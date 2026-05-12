@@ -10,10 +10,26 @@
 
 #include "sdk/android/src/jni/android_video_track_source.h"
 
+#include <jni.h>
+
+#include <cstdint>
+#include <optional>
 #include <utility>
 
+#include "api/media_stream_interface.h"
+#include "api/scoped_refptr.h"
+#include "api/task_queue/pending_task_safety_flag.h"
+#include "api/video/video_frame.h"
+#include "api/video/video_frame_buffer.h"
+#include "api/video/video_rotation.h"
+#include "media/base/adapted_video_track_source.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/thread.h"
+#include "rtc_base/time_utils.h"
 #include "sdk/android/generated_video_jni/NativeAndroidVideoTrackSource_jni.h"
+#include "sdk/android/native_api/jni/java_types.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
 #include "sdk/android/src/jni/video_frame.h"
 
 namespace webrtc {
@@ -45,7 +61,8 @@ AndroidVideoTrackSource::AndroidVideoTrackSource(Thread* signaling_thread,
     : AdaptedVideoTrackSource(kRequiredResolutionAlignment),
       signaling_thread_(signaling_thread),
       is_screencast_(is_screencast),
-      align_timestamps_(align_timestamps) {
+      align_timestamps_(align_timestamps),
+      safety_(PendingTaskSafetyFlag::Create()) {
   RTC_LOG(LS_INFO) << "AndroidVideoTrackSource ctor";
 }
 AndroidVideoTrackSource::~AndroidVideoTrackSource() = default;
@@ -64,7 +81,8 @@ void AndroidVideoTrackSource::SetState(JNIEnv* env, jboolean j_is_live) {
     if (Thread::Current() == signaling_thread_) {
       FireOnChanged();
     } else {
-      signaling_thread_->PostTask([this] { FireOnChanged(); });
+      signaling_thread_->PostTask(
+          SafeTask(safety_, [this] { FireOnChanged(); }));
     }
   }
 }

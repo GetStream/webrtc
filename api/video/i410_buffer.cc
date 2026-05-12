@@ -9,10 +9,9 @@
  */
 #include "api/video/i410_buffer.h"
 
-#include <string.h>
-
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <utility>
 
 #include "api/make_ref_counted.h"
@@ -122,12 +121,11 @@ scoped_refptr<I410Buffer> I410Buffer::Rotate(const I410BufferInterface& src,
 
   int rotated_width = src.width();
   int rotated_height = src.height();
-  if (rotation == webrtc::kVideoRotation_90 ||
-      rotation == webrtc::kVideoRotation_270) {
+  if (rotation == kVideoRotation_90 || rotation == kVideoRotation_270) {
     std::swap(rotated_width, rotated_height);
   }
 
-  scoped_refptr<webrtc::I410Buffer> buffer =
+  scoped_refptr<I410Buffer> buffer =
       I410Buffer::Create(rotated_width, rotated_height);
 
   int res = libyuv::I410Rotate(

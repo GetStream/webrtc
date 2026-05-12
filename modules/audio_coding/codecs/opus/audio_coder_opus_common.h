@@ -11,14 +11,18 @@
 #ifndef MODULES_AUDIO_CODING_CODECS_OPUS_AUDIO_CODER_OPUS_COMMON_H_
 #define MODULES_AUDIO_CODING_CODECS_OPUS_AUDIO_CODER_OPUS_COMMON_H_
 
+#include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/strings/string_view.h"
+#include "api/array_view.h"
 #include "api/audio_codecs/audio_decoder.h"
 #include "api/audio_codecs/audio_format.h"
+#include "rtc_base/buffer.h"
 #include "rtc_base/string_to_number.h"
 
 namespace webrtc {
@@ -73,7 +77,8 @@ class OpusFrame : public AudioDecoder::EncodedAudioFrame {
     if (ret < 0)
       return std::nullopt;
 
-    return DecodeResult{static_cast<size_t>(ret), speech_type};
+    return DecodeResult{.num_decoded_samples = static_cast<size_t>(ret),
+                        .speech_type = speech_type};
   }
 
  private:

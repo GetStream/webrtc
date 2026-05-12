@@ -9,21 +9,26 @@
  */
 #include "modules/audio_processing/aec3/echo_remover.h"
 
-#include <math.h>
-#include <stddef.h>
-
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <cstddef>
 #include <memory>
+#include <optional>
+#include <vector>
 
 #include "api/array_view.h"
+#include "api/audio/echo_canceller3_config.h"
+#include "api/audio/echo_control.h"
+#include "api/audio/neural_residual_echo_estimator.h"
 #include "api/environment/environment.h"
 #include "modules/audio_processing/aec3/aec3_common.h"
 #include "modules/audio_processing/aec3/aec3_fft.h"
 #include "modules/audio_processing/aec3/aec_state.h"
+#include "modules/audio_processing/aec3/block.h"
 #include "modules/audio_processing/aec3/comfort_noise_generator.h"
+#include "modules/audio_processing/aec3/delay_estimate.h"
 #include "modules/audio_processing/aec3/echo_path_variability.h"
 #include "modules/audio_processing/aec3/echo_remover_metrics.h"
 #include "modules/audio_processing/aec3/fft_data.h"
@@ -110,7 +115,8 @@ class EchoRemoverImpl final : public EchoRemover {
                   const EchoCanceller3Config& config,
                   int sample_rate_hz,
                   size_t num_render_channels,
-                  size_t num_capture_channels);
+                  size_t num_capture_channels,
+                  NeuralResidualEchoEstimator* neural_residual_echo_estimator);
   ~EchoRemoverImpl() override;
   EchoRemoverImpl(const EchoRemoverImpl&) = delete;
   EchoRemoverImpl& operator=(const EchoRemoverImpl&) = delete;
@@ -184,11 +190,13 @@ class EchoRemoverImpl final : public EchoRemover {
 
 std::atomic<int> EchoRemoverImpl::instance_count_(0);
 
-EchoRemoverImpl::EchoRemoverImpl(const Environment& env,
-                                 const EchoCanceller3Config& config,
-                                 int sample_rate_hz,
-                                 size_t num_render_channels,
-                                 size_t num_capture_channels)
+EchoRemoverImpl::EchoRemoverImpl(
+    const Environment& env,
+    const EchoCanceller3Config& config,
+    int sample_rate_hz,
+    size_t num_render_channels,
+    size_t num_capture_channels,
+    NeuralResidualEchoEstimator* neural_residual_echo_estimator)
     : config_(config),
       fft_(),
       data_dumper_(new ApmDataDumper(instance_count_.fetch_add(1) + 1)),
@@ -213,7 +221,10 @@ EchoRemoverImpl::EchoRemoverImpl(const Environment& env,
                           sample_rate_hz_,
                           num_capture_channels_),
       render_signal_analyzer_(config_),
-      residual_echo_estimator_(env, config_, num_render_channels),
+      residual_echo_estimator_(env,
+                               config_,
+                               num_render_channels,
+                               neural_residual_echo_estimator),
       aec_state_(env, config_, num_capture_channels_),
       e_old_(num_capture_channels_, {0.f}),
       y_old_(num_capture_channels_, {0.f}),
@@ -382,6 +393,12 @@ void EchoRemoverImpl::ProcessCapture(
     Y[ch].Spectrum(optimization_, Y2[ch]);
     E[ch].Spectrum(optimization_, E2[ch]);
   }
+  const auto& nearend_spectrum = aec_state_.UsableLinearEstimate() ? E2 : Y2;
+  // `y_old_` and `e_old_` now point to the current block. Though their channel
+  // layout is already suitable for residual echo estimation, an alias is
+  // created for clarity.
+  const auto& y_current = y_old_;
+  const auto& e_current = e_old_;
 
   // Optionally return the linear filter output.
   if (linear_output) {
@@ -406,7 +423,7 @@ void EchoRemoverImpl::ProcessCapture(
   data_dumper_->DumpWav("aec3_output_linear2", kBlockSize, &e[0][0], 16000, 1);
 
   // Estimate the comfort noise.
-  cng_.Compute(aec_state_.SaturatedCapture(), Y2, comfort_noise,
+  cng_.Compute(aec_state_.SaturatedCapture(), nearend_spectrum, comfort_noise,
                high_band_comfort_noise);
 
   // Only do the below processing if the output of the audio processing module
@@ -414,9 +431,9 @@ void EchoRemoverImpl::ProcessCapture(
   std::array<float, kFftLengthBy2Plus1> G;
   if (capture_output_used_) {
     // Estimate the residual echo power.
-    residual_echo_estimator_.Estimate(aec_state_, *render_buffer, S2_linear, Y2,
-                                      suppression_gain_.IsDominantNearend(), R2,
-                                      R2_unbounded);
+    residual_echo_estimator_.Estimate(
+        aec_state_, *render_buffer, y_current, e_current, S2_linear, Y2, E2,
+        suppression_gain_.IsDominantNearend(), R2, R2_unbounded);
 
     // Suppressor nearend estimate.
     if (aec_state_.UsableLinearEstimate()) {
@@ -427,7 +444,6 @@ void EchoRemoverImpl::ProcessCapture(
                        [](float a, float b) { return std::min(a, b); });
       }
     }
-    const auto& nearend_spectrum = aec_state_.UsableLinearEstimate() ? E2 : Y2;
 
     // Suppressor echo estimate.
     const auto& echo_spectrum =
@@ -519,9 +535,11 @@ std::unique_ptr<EchoRemover> EchoRemover::Create(
     const EchoCanceller3Config& config,
     int sample_rate_hz,
     size_t num_render_channels,
-    size_t num_capture_channels) {
+    size_t num_capture_channels,
+    NeuralResidualEchoEstimator* neural_residual_echo_estimator) {
   return std::make_unique<EchoRemoverImpl>(
-      env, config, sample_rate_hz, num_render_channels, num_capture_channels);
+      env, config, sample_rate_hz, num_render_channels, num_capture_channels,
+      neural_residual_echo_estimator);
 }
 
 }  // namespace webrtc

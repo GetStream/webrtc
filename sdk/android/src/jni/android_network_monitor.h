@@ -11,6 +11,7 @@
 #ifndef SDK_ANDROID_SRC_JNI_ANDROID_NETWORK_MONITOR_H_
 #define SDK_ANDROID_SRC_JNI_ANDROID_NETWORK_MONITOR_H_
 
+#include <jni.h>
 #include <stdint.h>
 
 #include <map>
@@ -20,13 +21,16 @@
 
 #include "absl/strings/string_view.h"
 #include "api/field_trials_view.h"
+#include "api/scoped_refptr.h"
 #include "api/task_queue/pending_task_safety_flag.h"
+#include "rtc_base/ip_address.h"
+#include "rtc_base/network_constants.h"
 #include "rtc_base/network_monitor.h"
 #include "rtc_base/network_monitor_factory.h"
 #include "rtc_base/string_utils.h"
 #include "rtc_base/thread.h"
 #include "rtc_base/thread_annotations.h"
-#include "sdk/android/src/jni/jni_helpers.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
 
 namespace webrtc {
 namespace test {
@@ -60,6 +64,7 @@ struct NetworkInformation {
   NetworkType type;
   NetworkType underlying_type_for_vpn;
   std::vector<IPAddress> ip_addresses;
+  NetworkSlice slice = NetworkSlice::NO_SLICE;
 
   NetworkInformation();
   NetworkInformation(const NetworkInformation&);
@@ -186,13 +191,5 @@ class AndroidNetworkMonitorFactory : public NetworkMonitorFactory {
 
 }  // namespace jni
 }  // namespace webrtc
-
-// TODO(magjed): Remove once external clients are updated.
-namespace webrtc_jni {
-
-using webrtc::jni::AndroidNetworkMonitor;
-using webrtc::jni::AndroidNetworkMonitorFactory;
-
-}  // namespace webrtc_jni
 
 #endif  // SDK_ANDROID_SRC_JNI_ANDROID_NETWORK_MONITOR_H_

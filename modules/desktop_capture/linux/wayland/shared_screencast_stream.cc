@@ -13,18 +13,51 @@
 #include <fcntl.h>
 #include <libdrm/drm_fourcc.h>
 #include <pipewire/pipewire.h>
+#include <spa/buffer/buffer.h>
+#include <spa/buffer/meta.h>
+#include <spa/debug/types.h>
+#include <spa/param/format-types.h>
+#include <spa/param/format.h>
+#include <spa/param/param.h>
 #include <spa/param/video/format-utils.h>
+#include <spa/param/video/raw.h>
+#include <spa/pod/builder.h>
+#include <spa/pod/iter.h>
+#include <spa/pod/vararg.h>
+#include <spa/support/loop.h>
+#include <spa/utils/defs.h>
+#include <spa/utils/hook.h>
+#include <spa/utils/type.h>
+#include <sys/mman.h>
+#include <sys/types.h>
 
+#include <cerrno>
+#include <cstdint>
+#include <cstring>
+#include <memory>
+#include <optional>
+#include <utility>
 #include <vector>
 
-#include "absl/memory/memory.h"
+#include "api/scoped_refptr.h"
+#include "media/base/video_common.h"
+#include "modules/desktop_capture/desktop_capture_types.h"
+#include "modules/desktop_capture/desktop_capturer.h"
+#include "modules/desktop_capture/desktop_frame.h"
+#include "modules/desktop_capture/desktop_geometry.h"
+#include "modules/desktop_capture/desktop_region.h"
 #include "modules/desktop_capture/linux/wayland/egl_dmabuf.h"
 #include "modules/desktop_capture/linux/wayland/screencast_stream_utils.h"
+#include "modules/desktop_capture/mouse_cursor.h"
+#include "modules/desktop_capture/screen_capture_frame_queue.h"
+#include "modules/desktop_capture/shared_desktop_frame.h"
 #include "modules/portal/pipewire_utils.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/sanitizer.h"
+#include "rtc_base/strings/string_builder.h"
 #include "rtc_base/synchronization/mutex.h"
+#include "rtc_base/thread_annotations.h"
 #include "rtc_base/time_utils.h"
 
 namespace webrtc {
@@ -38,8 +71,12 @@ constexpr int CursorMetaSize(int w, int h) {
           w * h * kCursorBpp);
 }
 
-constexpr PipeWireVersion kDmaBufModifierMinVersion = {0, 3, 33};
-constexpr PipeWireVersion kDropSingleModifierMinVersion = {0, 3, 40};
+constexpr PipeWireVersion kDmaBufModifierMinVersion = {.major = 0,
+                                                       .minor = 3,
+                                                       .micro = 33};
+constexpr PipeWireVersion kDropSingleModifierMinVersion = {.major = 0,
+                                                           .minor = 3,
+                                                           .micro = 40};
 
 class SharedScreenCastStreamPrivate {
  public:
@@ -80,10 +117,10 @@ class SharedScreenCastStreamPrivate {
   DesktopSize stream_size_ = {};
   DesktopSize frame_size_;
 
-  webrtc::Mutex queue_lock_;
+  Mutex queue_lock_;
   ScreenCaptureFrameQueue<SharedDesktopFrame> queue_
       RTC_GUARDED_BY(&queue_lock_);
-  webrtc::Mutex latest_frame_lock_ RTC_ACQUIRED_AFTER(queue_lock_);
+  Mutex latest_frame_lock_ RTC_ACQUIRED_AFTER(queue_lock_);
   SharedDesktopFrame* latest_available_frame_
       RTC_GUARDED_BY(&latest_frame_lock_) = nullptr;
   std::unique_ptr<MouseCursor> mouse_cursor_;
@@ -95,6 +132,7 @@ class SharedScreenCastStreamPrivate {
   std::vector<uint64_t> modifiers_;
 
   // PipeWire types
+  std::unique_ptr<PipeWireInitializer> pw_initializer_;
   struct pw_context* pw_context_ = nullptr;
   struct pw_core* pw_core_ = nullptr;
   struct pw_stream* pw_stream_ = nullptr;
@@ -128,7 +166,7 @@ class SharedScreenCastStreamPrivate {
   pw_core_events pw_core_events_ = {};
   pw_stream_events pw_stream_events_ = {};
 
-  struct spa_video_info_raw spa_video_format_;
+  struct spa_video_info_raw spa_video_format_ = {};
 
   void ProcessBuffer(pw_buffer* buffer);
   bool ProcessMemFDBuffer(pw_buffer* buffer,
@@ -186,6 +224,8 @@ void SharedScreenCastStreamPrivate::OnCoreInfo(void* data,
   RTC_DCHECK(stream);
 
   stream->pw_server_version_ = PipeWireVersion::Parse(info->version);
+  RTC_LOG(LS_INFO) << "PipeWire server version: "
+                   << stream->pw_server_version_.ToStringView();
 }
 
 void SharedScreenCastStreamPrivate::OnCoreDone(void* data,
@@ -209,6 +249,9 @@ void SharedScreenCastStreamPrivate::OnStreamStateChanged(
   SharedScreenCastStreamPrivate* that =
       static_cast<SharedScreenCastStreamPrivate*>(data);
   RTC_DCHECK(that);
+
+  RTC_LOG(LS_INFO) << "PipeWire stream state: "
+                   << pw_stream_state_as_string(state);
 
   switch (state) {
     case PW_STREAM_STATE_ERROR:
@@ -235,11 +278,25 @@ void SharedScreenCastStreamPrivate::OnStreamParamChanged(
       static_cast<SharedScreenCastStreamPrivate*>(data);
   RTC_DCHECK(that);
 
-  RTC_LOG(LS_INFO) << "PipeWire stream format changed.";
+  uint32_t media_subtype;
+  uint32_t media_type;
+  int result;
+
   if (!format || id != SPA_PARAM_Format) {
     return;
   }
 
+  result = spa_format_parse(format, &media_type, &media_subtype);
+  if (result < 0) {
+    return;
+  }
+
+  if (media_type != SPA_MEDIA_TYPE_video ||
+      media_subtype != SPA_MEDIA_SUBTYPE_raw) {
+    return;
+  }
+
+  that->spa_video_format_ = {};
   spa_format_video_raw_parse(format, &that->spa_video_format_);
 
   if (that->observer_ && that->spa_video_format_.max_framerate.denom) {
@@ -248,36 +305,44 @@ void SharedScreenCastStreamPrivate::OnStreamParamChanged(
         that->spa_video_format_.max_framerate.denom);
   }
 
-  auto width = that->spa_video_format_.size.width;
-  auto height = that->spa_video_format_.size.height;
-  auto stride = SPA_ROUND_UP_N(width * kBytesPerPixel, 4);
-  auto size = height * stride;
-
-  that->stream_size_ = DesktopSize(width, height);
-
-  uint8_t buffer[2048] = {};
-  auto builder = spa_pod_builder{buffer, sizeof(buffer)};
-
-  // Setup buffers and meta header for new format.
-
   // When SPA_FORMAT_VIDEO_modifier is present we can use DMA-BUFs as
   // the server announces support for it.
   // See https://github.com/PipeWire/pipewire/blob/master/doc/dma-buf.dox
   const bool has_modifier =
-      spa_pod_find_prop(format, nullptr, SPA_FORMAT_VIDEO_modifier);
+      spa_pod_find_prop(format, nullptr, SPA_FORMAT_VIDEO_modifier) != nullptr;
   that->modifier_ =
       has_modifier ? that->spa_video_format_.modifier : DRM_FORMAT_MOD_INVALID;
-  std::vector<const spa_pod*> params;
+  that->stream_size_ = DesktopSize(that->spa_video_format_.size.width,
+                                   that->spa_video_format_.size.height);
+
+  if (RTC_LOG_CHECK_LEVEL(LS_INFO)) {
+    StringBuilder sb;
+    sb << "PipeWire stream format changed:\n";
+    sb << "    Format: " << that->spa_video_format_.format << " ("
+       << spa_debug_type_find_name(spa_type_video_format,
+                                   that->spa_video_format_.format)
+       << ")\n";
+    if (has_modifier) {
+      sb << "    Modifier: " << that->modifier_ << "\n";
+    }
+    sb << "    Size: " << that->spa_video_format_.size.width << " x "
+       << that->spa_video_format_.size.height << "\n";
+    sb << "    Framerate: " << that->spa_video_format_.framerate.num << "/"
+       << that->spa_video_format_.framerate.denom;
+    RTC_LOG(LS_INFO) << sb.str();
+  }
+
   const int buffer_types = has_modifier
                                ? (1 << SPA_DATA_DmaBuf) | (1 << SPA_DATA_MemFd)
                                : (1 << SPA_DATA_MemFd);
 
+  uint8_t buffer[2048] = {};
+  auto builder = spa_pod_builder{.data = buffer, .size = sizeof(buffer)};
+  std::vector<const spa_pod*> params;
   params.push_back(reinterpret_cast<spa_pod*>(spa_pod_builder_add_object(
       &builder, SPA_TYPE_OBJECT_ParamBuffers, SPA_PARAM_Buffers,
-      SPA_PARAM_BUFFERS_size, SPA_POD_Int(size), SPA_PARAM_BUFFERS_stride,
-      SPA_POD_Int(stride), SPA_PARAM_BUFFERS_buffers,
-      SPA_POD_CHOICE_RANGE_Int(8, 1, 32), SPA_PARAM_BUFFERS_dataType,
-      SPA_POD_CHOICE_FLAGS_Int(buffer_types))));
+      SPA_PARAM_BUFFERS_buffers, SPA_POD_CHOICE_RANGE_Int(8, 1, 32),
+      SPA_PARAM_BUFFERS_dataType, SPA_POD_CHOICE_FLAGS_Int(buffer_types))));
   params.push_back(reinterpret_cast<spa_pod*>(spa_pod_builder_add_object(
       &builder, SPA_TYPE_OBJECT_ParamMeta, SPA_PARAM_Meta, SPA_PARAM_META_type,
       SPA_POD_Id(SPA_META_Header), SPA_PARAM_META_size,
@@ -353,7 +418,8 @@ void SharedScreenCastStreamPrivate::OnRenegotiateFormat(void* data, uint64_t) {
 
     uint8_t buffer[4096] = {};
 
-    spa_pod_builder builder = spa_pod_builder{buffer, sizeof(buffer)};
+    spa_pod_builder builder =
+        spa_pod_builder{.data = buffer, .size = sizeof(buffer)};
 
     std::vector<const spa_pod*> params;
     struct spa_rectangle resolution =
@@ -403,7 +469,7 @@ bool SharedScreenCastStreamPrivate::StartScreenCastStream(
 
   pw_stream_node_id_ = stream_node_id;
 
-  pw_init(/*argc=*/nullptr, /*argc=*/nullptr);
+  pw_initializer_ = std::make_unique<PipeWireInitializer>();
 
   pw_main_loop_ = pw_thread_loop_new("pipewire-main-loop", nullptr);
 
@@ -420,6 +486,8 @@ bool SharedScreenCastStreamPrivate::StartScreenCastStream(
   }
 
   pw_client_version_ = PipeWireVersion::Parse(pw_get_library_version());
+  RTC_LOG(LS_INFO) << "PipeWire client version: "
+                   << pw_client_version_.ToStringView();
 
   // Initialize event handlers, remote end and stream-related.
   pw_core_events_.version = PW_VERSION_CORE_EVENTS;
@@ -471,7 +539,8 @@ bool SharedScreenCastStreamPrivate::StartScreenCastStream(
                            &pw_stream_events_, this);
     uint8_t buffer[4096] = {};
 
-    spa_pod_builder builder = spa_pod_builder{buffer, sizeof(buffer)};
+    spa_pod_builder builder =
+        spa_pod_builder{.data = buffer, .size = sizeof(buffer)};
 
     std::vector<const spa_pod*> params;
     const bool has_required_pw_client_version =
@@ -489,7 +558,10 @@ bool SharedScreenCastStreamPrivate::StartScreenCastStream(
                             SPA_VIDEO_FORMAT_BGRx, SPA_VIDEO_FORMAT_RGBx}) {
       // Modifiers can be used with PipeWire >= 0.3.33
       if (has_required_pw_client_version && has_required_pw_server_version) {
-        modifiers_ = egl_dmabuf_->QueryDmaBufModifiers(format);
+        auto render_device = egl_dmabuf_->GetRenderDevice();
+        if (render_device) {
+          modifiers_ = render_device->QueryDmaBufModifiers(format);
+        }
 
         if (!modifiers_.empty()) {
           params.push_back(BuildFormat(&builder, format, modifiers_,
@@ -506,11 +578,9 @@ bool SharedScreenCastStreamPrivate::StartScreenCastStream(
     if (pw_stream_connect(pw_stream_, PW_DIRECTION_INPUT, pw_stream_node_id_,
                           PW_STREAM_FLAG_AUTOCONNECT, params.data(),
                           params.size()) != 0) {
-      RTC_LOG(LS_ERROR) << "Could not connect receiving stream.";
+      RTC_LOG(LS_ERROR) << "Could not connect receiving stream";
       return false;
     }
-
-    RTC_LOG(LS_INFO) << "PipeWire remote opened.";
   }
   return true;
 }
@@ -575,7 +645,6 @@ void SharedScreenCastStreamPrivate::StopAndCleanupStream() {
 
   // While we can stop the thread now, we cannot destroy it until we've cleaned
   // up the other members.
-  pw_thread_loop_wait(pw_main_loop_);
   pw_thread_loop_stop(pw_main_loop_);
 
   if (pw_stream_) {
@@ -584,11 +653,11 @@ void SharedScreenCastStreamPrivate::StopAndCleanupStream() {
     pw_stream_ = nullptr;
 
     {
-      webrtc::MutexLock lock(&queue_lock_);
+      MutexLock lock(&queue_lock_);
       queue_.Reset();
     }
     {
-      webrtc::MutexLock latest_frame_lock(&latest_frame_lock_);
+      MutexLock latest_frame_lock(&latest_frame_lock_);
       latest_available_frame_ = nullptr;
     }
   }
@@ -609,7 +678,7 @@ void SharedScreenCastStreamPrivate::StopAndCleanupStream() {
 
 std::unique_ptr<SharedDesktopFrame>
 SharedScreenCastStreamPrivate::CaptureFrame() {
-  webrtc::MutexLock latest_frame_lock(&latest_frame_lock_);
+  MutexLock latest_frame_lock(&latest_frame_lock_);
 
   if (!pw_stream_ || !latest_available_frame_) {
     return std::unique_ptr<SharedDesktopFrame>{};
@@ -671,7 +740,7 @@ void SharedScreenCastStreamPrivate::UpdateFrameUpdatedRegions(
 
 RTC_NO_SANITIZE("cfi-icall")
 void SharedScreenCastStreamPrivate::ProcessBuffer(pw_buffer* buffer) {
-  int64_t capture_start_time_nanos = webrtc::TimeNanos();
+  int64_t capture_start_time_nanos = TimeNanos();
   if (callback_) {
     callback_->OnFrameCaptureStart();
   }
@@ -696,8 +765,11 @@ void SharedScreenCastStreamPrivate::ProcessBuffer(pw_buffer* buffer) {
         if (bitmap && bitmap->size.width > 0 && bitmap->size.height > 0) {
           const uint8_t* bitmap_data =
               SPA_MEMBER(bitmap, bitmap->offset, uint8_t);
+          // TODO(bugs.webrtc.org/436974448): Convert `spa_video_format` to
+          // `FourCC`.
           BasicDesktopFrame* mouse_frame = new BasicDesktopFrame(
-              DesktopSize(bitmap->size.width, bitmap->size.height));
+              DesktopSize(bitmap->size.width, bitmap->size.height),
+              FOURCC_ARGB);
           mouse_frame->CopyPixelsFrom(
               bitmap_data, bitmap->stride,
               DesktopRect::MakeWH(bitmap->size.width, bitmap->size.height));
@@ -810,7 +882,7 @@ void SharedScreenCastStreamPrivate::ProcessBuffer(pw_buffer* buffer) {
           : 0;
   DesktopVector offset = DesktopVector(x_offset, y_offset);
 
-  webrtc::MutexLock lock(&queue_lock_);
+  MutexLock lock(&queue_lock_);
 
   queue_.MoveToNextFrame();
   if (queue_.current_frame() && queue_.current_frame()->IsShared()) {
@@ -824,7 +896,7 @@ void SharedScreenCastStreamPrivate::ProcessBuffer(pw_buffer* buffer) {
   if (!queue_.current_frame() ||
       !queue_.current_frame()->size().equals(frame_size_)) {
     std::unique_ptr<DesktopFrame> frame(new BasicDesktopFrame(
-        DesktopSize(frame_size_.width(), frame_size_.height())));
+        DesktopSize(frame_size_.width(), frame_size_.height()), FOURCC_ARGB));
     queue_.ReplaceCurrentFrame(SharedDesktopFrame::Wrap(std::move(frame)));
   }
 
@@ -840,11 +912,13 @@ void SharedScreenCastStreamPrivate::ProcessBuffer(pw_buffer* buffer) {
     if (observer_) {
       observer_->OnFailedToProcessBuffer();
     }
-    webrtc::MutexLock latest_frame_lock(&latest_frame_lock_);
+    MutexLock latest_frame_lock(&latest_frame_lock_);
     latest_available_frame_ = nullptr;
     return;
   }
 
+  // TODO(bugs.webrtc.org/436974448): Remove this conversion when arbitrary
+  // pixel formats are supported.
   if (spa_video_format_.format == SPA_VIDEO_FORMAT_RGBx ||
       spa_video_format_.format == SPA_VIDEO_FORMAT_RGBA) {
     uint8_t* tmp_src = queue_.current_frame()->data();
@@ -862,7 +936,7 @@ void SharedScreenCastStreamPrivate::ProcessBuffer(pw_buffer* buffer) {
 
   std::unique_ptr<SharedDesktopFrame> frame;
   {
-    webrtc::MutexLock latest_frame_lock(&latest_frame_lock_);
+    MutexLock latest_frame_lock(&latest_frame_lock_);
 
     UpdateFrameUpdatedRegions(spa_buffer, *queue_.current_frame());
     queue_.current_frame()->set_may_contain_cursor(is_cursor_embedded_);
@@ -875,9 +949,8 @@ void SharedScreenCastStreamPrivate::ProcessBuffer(pw_buffer* buffer) {
 
     frame = latest_available_frame_->Share();
     frame->set_capturer_id(DesktopCapturerId::kWaylandCapturerLinux);
-    frame->set_capture_time_ms(
-        (webrtc::TimeNanos() - capture_start_time_nanos) /
-        webrtc::kNumNanosecsPerMillisec);
+    frame->set_capture_time_ms((TimeNanos() - capture_start_time_nanos) /
+                               kNumNanosecsPerMillisec);
     if (use_damage_region_) {
       frame->mutable_updated_region()->Swap(&damage_region_);
       damage_region_.Clear();
@@ -940,16 +1013,23 @@ bool SharedScreenCastStreamPrivate::ProcessDMABuffer(
     return false;
   }
 
-  std::vector<EglDmaBuf::PlaneData> plane_datas;
+  std::vector<EglDrmDevice::PlaneData> plane_datas;
   for (uint32_t i = 0; i < n_planes; ++i) {
-    EglDmaBuf::PlaneData data = {
-        static_cast<int32_t>(spa_buffer->datas[i].fd),
-        static_cast<uint32_t>(spa_buffer->datas[i].chunk->stride),
-        static_cast<uint32_t>(spa_buffer->datas[i].chunk->offset)};
+    EglDrmDevice::PlaneData data = {
+        .fd = static_cast<int32_t>(spa_buffer->datas[i].fd),
+        .stride = static_cast<uint32_t>(spa_buffer->datas[i].chunk->stride),
+        .offset = static_cast<uint32_t>(spa_buffer->datas[i].chunk->offset)};
     plane_datas.push_back(data);
   }
 
-  const bool imported = egl_dmabuf_->ImageFromDmaBuf(
+  auto render_device = egl_dmabuf_->GetRenderDevice();
+  if (!render_device) {
+    RTC_LOG(LS_ERROR)
+        << "Failed to import image from DMA-BUF: no render device";
+    return false;
+  }
+
+  const bool imported = render_device->ImageFromDmaBuf(
       stream_size_, spa_video_format_.format, plane_datas, modifier_, offset,
       frame.size(), frame.data());
   if (!imported) {
@@ -957,9 +1037,7 @@ bool SharedScreenCastStreamPrivate::ProcessDMABuffer(
                       << " and trying to renegotiate stream parameters";
 
     if (pw_server_version_ >= kDropSingleModifierMinVersion) {
-      modifiers_.erase(
-          std::remove(modifiers_.begin(), modifiers_.end(), modifier_),
-          modifiers_.end());
+      std::erase(modifiers_, modifier_);
     } else {
       modifiers_.clear();
     }
@@ -989,8 +1067,7 @@ SharedScreenCastStream::~SharedScreenCastStream() {}
 webrtc::scoped_refptr<SharedScreenCastStream>
 SharedScreenCastStream::CreateDefault() {
   // Explicit new, to access non-public constructor.
-  return webrtc::scoped_refptr<SharedScreenCastStream>(
-      new SharedScreenCastStream());
+  return scoped_refptr<SharedScreenCastStream>(new SharedScreenCastStream());
 }
 
 bool SharedScreenCastStream::StartScreenCastStream(uint32_t stream_node_id) {

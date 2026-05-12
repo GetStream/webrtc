@@ -18,11 +18,11 @@
 
 #include "api/array_view.h"
 #include "api/audio/audio_device.h"
-#include "api/audio_codecs/audio_codec_pair_id.h"
 #include "api/audio_codecs/audio_decoder_factory.h"
 #include "api/audio_codecs/audio_encoder_factory.h"
 #include "api/audio_options.h"
 #include "api/crypto/crypto_options.h"
+#include "api/environment/environment.h"
 #include "api/field_trials_view.h"
 #include "api/rtc_error.h"
 #include "api/rtp_parameters.h"
@@ -76,14 +76,14 @@ class RtpHeaderExtensionQueryInterface {
 
   // Returns a vector of RtpHeaderExtensionCapability, whose direction is
   // kStopped if the extension is stopped (not used) by default.
-  virtual std::vector<RtpHeaderExtensionCapability> GetRtpHeaderExtensions()
-      const = 0;
+  virtual std::vector<RtpHeaderExtensionCapability> GetRtpHeaderExtensions(
+      const webrtc::FieldTrialsView* field_trials) const = 0;
 };
 
 class VoiceEngineInterface : public RtpHeaderExtensionQueryInterface {
  public:
   VoiceEngineInterface() = default;
-  virtual ~VoiceEngineInterface() = default;
+  ~VoiceEngineInterface() override = default;
 
   VoiceEngineInterface(const VoiceEngineInterface&) = delete;
   VoiceEngineInterface& operator=(const VoiceEngineInterface&) = delete;
@@ -91,23 +91,25 @@ class VoiceEngineInterface : public RtpHeaderExtensionQueryInterface {
   // Initialization
   // Starts the engine.
   virtual void Init() = 0;
+  // Stops the engine.
+  virtual void Terminate() = 0;
 
   // TODO(solenberg): Remove once VoE API refactoring is done.
   virtual scoped_refptr<AudioState> GetAudioState() const = 0;
 
   virtual std::unique_ptr<VoiceMediaSendChannelInterface> CreateSendChannel(
-      Call* /* call */,
-      const MediaConfig& /* config */,
-      const AudioOptions& /* options */,
-      const CryptoOptions& /* crypto_options */,
-      AudioCodecPairId /* codec_pair_id */) = 0;
+      const Environment& env,
+      Call* call,
+      const MediaConfig& config,
+      const AudioOptions& options,
+      const CryptoOptions& crypto_options) = 0;
 
   virtual std::unique_ptr<VoiceMediaReceiveChannelInterface>
-  CreateReceiveChannel(Call* /* call */,
-                       const MediaConfig& /* config */,
-                       const AudioOptions& /* options */,
-                       const CryptoOptions& /* crypto_options */,
-                       AudioCodecPairId /* codec_pair_id */) = 0;
+  CreateReceiveChannel(const Environment& env,
+                       Call* call,
+                       const MediaConfig& config,
+                       const AudioOptions& options,
+                       const CryptoOptions& crypto_options) = 0;
 
   // Legacy: Retrieve list of supported codecs.
   // + protection codecs, and assigns PT numbers that may have to be
@@ -140,24 +142,25 @@ class VoiceEngineInterface : public RtpHeaderExtensionQueryInterface {
 class VideoEngineInterface : public RtpHeaderExtensionQueryInterface {
  public:
   VideoEngineInterface() = default;
-  virtual ~VideoEngineInterface() = default;
+  ~VideoEngineInterface() override = default;
 
   VideoEngineInterface(const VideoEngineInterface&) = delete;
   VideoEngineInterface& operator=(const VideoEngineInterface&) = delete;
 
   virtual std::unique_ptr<VideoMediaSendChannelInterface> CreateSendChannel(
-      Call* /* call */,
-      const MediaConfig& /* config */,
-      const VideoOptions& /* options */,
-      const CryptoOptions& /* crypto_options */,
-      VideoBitrateAllocatorFactory*
-      /* video_bitrate_allocator_factory */) = 0;
+      const Environment& env,
+      Call* call,
+      const MediaConfig& config,
+      const VideoOptions& options,
+      const CryptoOptions& crypto_options,
+      VideoBitrateAllocatorFactory* video_bitrate_allocator_factory) = 0;
 
   virtual std::unique_ptr<VideoMediaReceiveChannelInterface>
-  CreateReceiveChannel(Call* /* call */,
-                       const MediaConfig& /* config */,
-                       const VideoOptions& /* options */,
-                       const CryptoOptions& /* crypto_options */) = 0;
+  CreateReceiveChannel(const Environment& env,
+                       Call* call,
+                       const MediaConfig& config,
+                       const VideoOptions& options,
+                       const CryptoOptions& crypto_options) = 0;
 
   // Legacy: Retrieve list of supported codecs.
   // + protection codecs, and assigns PT numbers that may have to be
@@ -191,8 +194,10 @@ class MediaEngineInterface {
  public:
   virtual ~MediaEngineInterface() {}
 
-  // Initialization. Needs to be called on the worker thread.
-  virtual bool Init() = 0;
+  // Init . Needs to be called on the worker thread.
+  virtual void Init() = 0;
+  // Terminate. Needs to be called on the worker thread.
+  virtual void Terminate() = 0;
 
   virtual VoiceEngineInterface& voice() = 0;
   virtual VideoEngineInterface& video() = 0;
@@ -212,8 +217,8 @@ class CompositeMediaEngine : public MediaEngineInterface {
                        std::unique_ptr<VideoEngineInterface> video_engine);
   ~CompositeMediaEngine() override;
 
-  // Always succeeds.
-  bool Init() override;
+  void Init() override;
+  void Terminate() override;
 
   VoiceEngineInterface& voice() override;
   VideoEngineInterface& video() override;
@@ -234,26 +239,10 @@ RtpParameters CreateRtpParametersWithEncodings(StreamParams sp);
 // offered by default, i.e. the list of extensions returned from
 // GetRtpHeaderExtensions() that are not kStopped.
 std::vector<RtpExtension> GetDefaultEnabledRtpHeaderExtensions(
-    const RtpHeaderExtensionQueryInterface& query_interface);
+    const RtpHeaderExtensionQueryInterface& query_interface,
+    const webrtc::FieldTrialsView* field_trials);
 
 }  //  namespace webrtc
 
-// Re-export symbols from the webrtc namespace for backwards compatibility.
-// TODO(bugs.webrtc.org/4222596): Remove once all references are updated.
-#ifdef WEBRTC_ALLOW_DEPRECATED_NAMESPACES
-namespace cricket {
-using ::webrtc::CheckRtpParametersInvalidModificationAndValues;
-using ::webrtc::CheckRtpParametersValues;
-using ::webrtc::CheckScalabilityModeValues;
-using ::webrtc::CompositeMediaEngine;
-using ::webrtc::CreateRtpParametersWithEncodings;
-using ::webrtc::CreateRtpParametersWithOneEncoding;
-using ::webrtc::GetDefaultEnabledRtpHeaderExtensions;
-using ::webrtc::MediaEngineInterface;
-using ::webrtc::RtpHeaderExtensionQueryInterface;
-using ::webrtc::VideoEngineInterface;
-using ::webrtc::VoiceEngineInterface;
-}  // namespace cricket
-#endif  // WEBRTC_ALLOW_DEPRECATED_NAMESPACES
 
 #endif  // MEDIA_BASE_MEDIA_ENGINE_H_

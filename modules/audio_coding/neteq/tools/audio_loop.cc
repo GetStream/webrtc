@@ -10,10 +10,13 @@
 
 #include "modules/audio_coding/neteq/tools/audio_loop.h"
 
-#include <stdio.h>
-#include <string.h>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <string>
 
 #include "absl/strings/string_view.h"
+#include "api/array_view.h"
 
 namespace webrtc {
 namespace test {

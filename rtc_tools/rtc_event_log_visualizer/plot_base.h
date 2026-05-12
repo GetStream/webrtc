@@ -169,10 +169,11 @@ class Plot {
 
   // Replaces PythonPlot::Draw()
   void PrintPythonCode(
+      bool show_grid = false,
       absl::string_view figure_output_path = absl::string_view()) const;
 
   // Replaces ProtobufPlot::Draw()
-  void ExportProtobuf(webrtc::analytics::Chart* chart) const;
+  void ExportProtobuf(analytics::Chart* chart) const;
 
  protected:
   float xaxis_min_;
@@ -206,10 +207,11 @@ class PlotCollection {
   // Replaces PythonPlotCollection::Draw()
   void PrintPythonCode(
       bool shared_xaxis,
+      bool show_grid_on_all_plots,
       absl::string_view figure_output_path = absl::string_view()) const;
 
   // Replaces ProtobufPlotCollections::Draw()
-  void ExportProtobuf(webrtc::analytics::ChartCollection* collection) const;
+  void ExportProtobuf(analytics::ChartCollection* collection) const;
 
  protected:
   std::vector<std::unique_ptr<Plot>> plots_;

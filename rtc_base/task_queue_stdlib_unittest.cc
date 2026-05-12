@@ -13,19 +13,21 @@
 #include <memory>
 #include <string>
 
+#include "absl/strings/string_view.h"
+#include "api/field_trials_view.h"
 #include "api/task_queue/task_queue_factory.h"
 #include "api/task_queue/task_queue_test.h"
 #include "api/units/time_delta.h"
 #include "rtc_base/event.h"
 #include "rtc_base/logging.h"
-#include "system_wrappers/include/sleep.h"
+#include "rtc_base/thread.h"
 #include "test/gtest.h"
 
 namespace webrtc {
 namespace {
 
 std::unique_ptr<TaskQueueFactory> CreateTaskQueueFactory(
-    const webrtc::FieldTrialsView*) {
+    const FieldTrialsView*) {
   return CreateTaskQueueStdlibFactory();
 }
 
@@ -54,7 +56,7 @@ TEST(TaskQueueStdlib, AvoidsSpammingLogOnInactivity) {
   auto task_queue = CreateTaskQueueStdlibFactory()->CreateTaskQueue(
       "test", TaskQueueFactory::Priority::NORMAL);
   auto wait_duration = Event::kDefaultWarnDuration + TimeDelta::Seconds(1);
-  SleepMs(wait_duration.ms());
+  Thread::SleepMs(wait_duration.ms());
   EXPECT_EQ(log_output.length(), 0u);
   task_queue = nullptr;
   LogMessage::RemoveLogToStream(&stream);

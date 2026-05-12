@@ -18,10 +18,10 @@
 #include <vector>
 
 #include "absl/strings/string_view.h"
+#include "api/environment/environment_factory.h"
 #include "api/units/time_delta.h"
 #include "logging/rtc_event_log/rtc_event_log_parser.h"
 #include "rtc_base/numerics/safe_conversions.h"
-#include "rtc_base/protobuf_utils.h"
 #include "rtc_tools/rtc_event_log_visualizer/analyzer.h"
 #include "rtc_tools/rtc_event_log_visualizer/analyzer_common.h"
 #include "rtc_tools/rtc_event_log_visualizer/plot_base.h"
@@ -82,7 +82,8 @@ void analyze_rtc_event_log(const char* log_contents,
     return;
   }
 
-  webrtc::EventLogAnalyzer analyzer(parsed_log, config);
+  webrtc::EventLogAnalyzer analyzer(webrtc::CreateEnvironment(), parsed_log,
+                                    config);
   analyzer.InitializeMapOfNamedGraphs(/*show_detector_state=*/false,
                                       /*show_alr_state=*/false,
                                       /*show_link_capacity=*/false);

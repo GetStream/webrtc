@@ -10,24 +10,30 @@
 
 #include "modules/video_capture/linux/video_capture_v4l2.h"
 
-#include <errno.h>
 #include <fcntl.h>
 #include <linux/videodev2.h>
-#include <stdio.h>
-#include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/select.h>
-#include <time.h>
 #include <unistd.h>
 
+#include <cerrno>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <new>
-#include <string>
 
-#include "api/scoped_refptr.h"
+#include "api/sequence_checker.h"
+#include "common_video/libyuv/include/webrtc_libyuv.h"
 #include "media/base/video_common.h"
-#include "modules/video_capture/video_capture.h"
+#include "modules/video_capture/video_capture_defines.h"
+#include "modules/video_capture/video_capture_impl.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/platform_thread.h"
+#include "rtc_base/race_checker.h"
+#include "rtc_base/synchronization/mutex.h"
+#include "system_wrappers/include/clock.h"
 
 // These defines are here to support building on kernel 3.16 which some
 // downstream projects, e.g. Firefox, use.
@@ -49,13 +55,13 @@
 
 namespace webrtc {
 namespace videocapturemodule {
-VideoCaptureModuleV4L2::VideoCaptureModuleV4L2()
-    : VideoCaptureImpl(),
+VideoCaptureModuleV4L2::VideoCaptureModuleV4L2(Clock* clock)
+    : VideoCaptureImpl(clock),
       _deviceId(-1),
       _deviceFd(-1),
       _buffersAllocatedByDevice(-1),
       _captureStarted(false),
-      _pool(NULL) {}
+      _pool(nullptr) {}
 
 int32_t VideoCaptureModuleV4L2::Init(const char* deviceUniqueIdUTF8) {
   RTC_DCHECK_RUN_ON(&api_checker_);
@@ -366,7 +372,7 @@ bool VideoCaptureModuleV4L2::AllocateVideoBuffers() {
       return false;
     }
 
-    _pool[i].start = mmap(NULL, buffer.length, PROT_READ | PROT_WRITE,
+    _pool[i].start = mmap(nullptr, buffer.length, PROT_READ | PROT_WRITE,
                           MAP_SHARED, _deviceFd, buffer.m.offset);
 
     if (MAP_FAILED == _pool[i].start) {
@@ -420,7 +426,7 @@ bool VideoCaptureModuleV4L2::CaptureProcess() {
   timeout.tv_usec = 0;
 
   // _deviceFd written only in StartCapture, when this thread isn't running.
-  retVal = select(_deviceFd + 1, &rSet, NULL, NULL, &timeout);
+  retVal = select(_deviceFd + 1, &rSet, nullptr, nullptr, &timeout);
 
   {
     MutexLock lock(&capture_lock_);

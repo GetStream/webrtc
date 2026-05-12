@@ -11,14 +11,18 @@
 #include "modules/audio_processing/agc2/rnn_vad/rnn_gru.h"
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
 #include "api/array_view.h"
+#include "modules/audio_processing/agc2/cpu_features.h"
 #include "modules/audio_processing/agc2/rnn_vad/test_utils.h"
 #include "modules/audio_processing/test/performance_timer.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/numerics/safe_conversions.h"
 #include "test/gtest.h"
 #include "third_party/rnnoise/src/rnn_vad_weights.h"
 
@@ -141,7 +145,7 @@ TEST_P(RnnGruParametrization, DISABLED_BenchmarkGatedRecurrentLayer) {
       input_sequence.size() / kInputLayerOutputSize;
 
   constexpr int kNumTests = 100;
-  ::webrtc::test::PerformanceTimer perf_timer(kNumTests);
+  test::PerformanceTimer perf_timer(kNumTests);
   for (int k = 0; k < kNumTests; ++k) {
     perf_timer.StartTimer();
     for (int i = 0; i < input_sequence_length; ++i) {

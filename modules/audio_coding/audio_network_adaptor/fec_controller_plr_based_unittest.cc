@@ -20,16 +20,16 @@
 #include "modules/audio_coding/audio_network_adaptor/include/audio_network_adaptor_config.h"
 #include "modules/audio_coding/audio_network_adaptor/util/threshold_curve.h"
 #include "rtc_base/checks.h"
+#include "test/create_test_environment.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 
 namespace webrtc {
+namespace {
 
 using ::testing::_;
 using ::testing::NiceMock;
 using ::testing::Return;
-
-namespace {
 
 // The test uses the following settings:
 //
@@ -66,13 +66,14 @@ FecControllerPlrBasedTestStates CreateFecControllerPlrBased(
     const ThresholdCurve& enabling_curve,
     const ThresholdCurve& disabling_curve) {
   FecControllerPlrBasedTestStates states;
-  std::unique_ptr<MockSmoothingFilter> mock_smoothing_filter(
-      new NiceMock<MockSmoothingFilter>());
+  auto mock_smoothing_filter =
+      std::make_unique<NiceMock<MockSmoothingFilter>>();
   states.packet_loss_smoother = mock_smoothing_filter.get();
-  states.controller.reset(new FecControllerPlrBased(
+  states.controller = std::make_unique<FecControllerPlrBased>(
+      CreateTestEnvironment(),
       FecControllerPlrBased::Config(initial_fec_enabled, enabling_curve,
                                     disabling_curve, 0),
-      std::move(mock_smoothing_filter)));
+      std::move(mock_smoothing_filter));
   return states;
 }
 
@@ -100,10 +101,11 @@ void UpdateNetworkMetrics(FecControllerPlrBasedTestStates* states,
   if (uplink_packet_loss) {
     Controller::NetworkMetrics network_metrics;
     network_metrics.uplink_packet_loss_fraction = uplink_packet_loss;
-    EXPECT_CALL(*states->packet_loss_smoother, AddSample(*uplink_packet_loss));
+    EXPECT_CALL(*states->packet_loss_smoother,
+                AddSample(*uplink_packet_loss, _));
     states->controller->UpdateNetworkMetrics(network_metrics);
     // This is called during CheckDecision().
-    EXPECT_CALL(*states->packet_loss_smoother, GetAverage())
+    EXPECT_CALL(*states->packet_loss_smoother, GetAverage)
         .WillOnce(Return(*uplink_packet_loss));
   }
 }
@@ -180,7 +182,7 @@ TEST(FecControllerPlrBasedTest, UpdateMultipleNetworkMetricsAtOnce) {
   Controller::NetworkMetrics network_metrics;
   network_metrics.uplink_bandwidth_bps = kEnablingBandwidthHigh;
   network_metrics.uplink_packet_loss_fraction = kEnablingPacketLossAtHighBw;
-  EXPECT_CALL(*states.packet_loss_smoother, GetAverage())
+  EXPECT_CALL(*states.packet_loss_smoother, GetAverage)
       .WillOnce(Return(kEnablingPacketLossAtHighBw));
   states.controller->UpdateNetworkMetrics(network_metrics);
   CheckDecision(&states, true, kEnablingPacketLossAtHighBw);
@@ -330,10 +332,11 @@ TEST(FecControllerPlrBasedTest, CheckBehaviorOnSpecialCurves) {
   constexpr int kEnablingBandwidth = kEnablingBandwidthLow;
   constexpr float kDisablingPacketLoss = kDisablingPacketLossAtHighBw;
   FecControllerPlrBasedTestStates states;
-  std::unique_ptr<MockSmoothingFilter> mock_smoothing_filter(
-      new NiceMock<MockSmoothingFilter>());
+  auto mock_smoothing_filter =
+      std::make_unique<NiceMock<MockSmoothingFilter>>();
   states.packet_loss_smoother = mock_smoothing_filter.get();
-  states.controller.reset(new FecControllerPlrBased(
+  states.controller = std::make_unique<FecControllerPlrBased>(
+      CreateTestEnvironment(),
       FecControllerPlrBased::Config(
           true,
           ThresholdCurve(kEnablingBandwidthLow, kEnablingPacketLossAtLowBw,
@@ -341,7 +344,7 @@ TEST(FecControllerPlrBasedTest, CheckBehaviorOnSpecialCurves) {
           ThresholdCurve(kDisablingBandwidthLow, kDisablingPacketLoss,
                          kDisablingBandwidthHigh, kDisablingPacketLossAtHighBw),
           0),
-      std::move(mock_smoothing_filter)));
+      std::move(mock_smoothing_filter));
 
   UpdateNetworkMetrics(&states, kDisablingBandwidthLow - 1, 1.0);
   CheckDecision(&states, false, 1.0);
@@ -397,25 +400,32 @@ TEST(FecControllerPlrBasedTest, SingleThresholdCurveForEnablingAndDisabling) {
   };
 
   std::vector<NetworkState> below{
-      {kBandwidthLow - 1, kPacketLossAtLowBw + 0.1f},  // B1
-      {(kBandwidthLow + kBandwidthHigh) / 2,
-       (kPacketLossAtLowBw + kPacketLossAtHighBw) / 2 - kEpsilon},  // B2
-      {kBandwidthHigh + 1, kPacketLossAtHighBw - kEpsilon}          // B3
+      {.bandwidth = kBandwidthLow - 1,
+       .packet_loss = kPacketLossAtLowBw + 0.1f},  // B1
+      {.bandwidth = (kBandwidthLow + kBandwidthHigh) / 2,
+       .packet_loss =
+           (kPacketLossAtLowBw + kPacketLossAtHighBw) / 2 - kEpsilon},  // B2
+      {.bandwidth = kBandwidthHigh + 1,
+       .packet_loss = kPacketLossAtHighBw - kEpsilon}  // B3
   };
 
   std::vector<NetworkState> on{
-      {kBandwidthLow, kPacketLossAtLowBw + 0.1f},  // O1
-      {kBandwidthLow, kPacketLossAtLowBw},         // O2
-      {(kBandwidthLow + kBandwidthHigh) / 2,
-       (kPacketLossAtLowBw + kPacketLossAtHighBw) / 2},  // O3
-      {kBandwidthHigh, kPacketLossAtHighBw},             // O4
-      {kBandwidthHigh + 1, kPacketLossAtHighBw},         // O5
+      {.bandwidth = kBandwidthLow,
+       .packet_loss = kPacketLossAtLowBw + 0.1f},                       // O1
+      {.bandwidth = kBandwidthLow, .packet_loss = kPacketLossAtLowBw},  // O2
+      {.bandwidth = (kBandwidthLow + kBandwidthHigh) / 2,
+       .packet_loss = (kPacketLossAtLowBw + kPacketLossAtHighBw) / 2},    // O3
+      {.bandwidth = kBandwidthHigh, .packet_loss = kPacketLossAtHighBw},  // O4
+      {.bandwidth = kBandwidthHigh + 1,
+       .packet_loss = kPacketLossAtHighBw},  // O5
   };
 
   std::vector<NetworkState> above{
-      {(kBandwidthLow + kBandwidthHigh) / 2,
-       (kPacketLossAtLowBw + kPacketLossAtHighBw) / 2 + kEpsilon},  // A1
-      {kBandwidthHigh + 1, kPacketLossAtHighBw + kEpsilon},         // A2
+      {.bandwidth = (kBandwidthLow + kBandwidthHigh) / 2,
+       .packet_loss =
+           (kPacketLossAtLowBw + kPacketLossAtHighBw) / 2 + kEpsilon},  // A1
+      {.bandwidth = kBandwidthHigh + 1,
+       .packet_loss = kPacketLossAtHighBw + kEpsilon},  // A2
   };
 
   // Test that FEC is turned off whenever we're below the curve, independent
@@ -475,11 +485,12 @@ TEST(FecControllerPlrBasedTest, FecAlwaysOn) {
 #if RTC_DCHECK_IS_ON && GTEST_HAS_DEATH_TEST && !defined(WEBRTC_ANDROID)
 TEST(FecControllerPlrBasedDeathTest, InvalidConfig) {
   FecControllerPlrBasedTestStates states;
-  std::unique_ptr<MockSmoothingFilter> mock_smoothing_filter(
-      new NiceMock<MockSmoothingFilter>());
+  auto mock_smoothing_filter =
+      std::make_unique<NiceMock<MockSmoothingFilter>>();
   states.packet_loss_smoother = mock_smoothing_filter.get();
   EXPECT_DEATH(
-      states.controller.reset(new FecControllerPlrBased(
+      states.controller = std::make_unique<FecControllerPlrBased>(
+          CreateTestEnvironment(),
           FecControllerPlrBased::Config(
               true,
               ThresholdCurve(kDisablingBandwidthLow - 1,
@@ -489,7 +500,7 @@ TEST(FecControllerPlrBasedDeathTest, InvalidConfig) {
                   kDisablingBandwidthLow, kDisablingPacketLossAtLowBw,
                   kDisablingBandwidthHigh, kDisablingPacketLossAtHighBw),
               0),
-          std::move(mock_smoothing_filter))),
+          std::move(mock_smoothing_filter)),
       "Check failed");
 }
 #endif

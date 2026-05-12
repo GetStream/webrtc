@@ -10,19 +10,22 @@
 
 #include <jni.h>
 
+#include <cstdint>
+
 #include "sdk/android/generated_video_jni/YuvHelper_jni.h"
-#include "sdk/android/src/jni/jni_helpers.h"
 #include "third_party/jni_zero/jni_zero.h"
 #include "third_party/libyuv/include/libyuv/convert.h"
+#include "third_party/libyuv/include/libyuv/convert_from.h"
 #include "third_party/libyuv/include/libyuv/planar_functions.h"
+#include "third_party/libyuv/include/libyuv/rotate.h"
 
 namespace webrtc {
 namespace jni {
 
 void JNI_YuvHelper_CopyPlane(JNIEnv* jni,
-                             const jni_zero::JavaParamRef<jobject>& j_src,
+                             const jni_zero::JavaRef<jobject>& j_src,
                              jint src_stride,
-                             const jni_zero::JavaParamRef<jobject>& j_dst,
+                             const jni_zero::JavaRef<jobject>& j_dst,
                              jint dst_stride,
                              jint width,
                              jint height) {
@@ -35,17 +38,17 @@ void JNI_YuvHelper_CopyPlane(JNIEnv* jni,
 }
 
 void JNI_YuvHelper_I420Copy(JNIEnv* jni,
-                            const jni_zero::JavaParamRef<jobject>& j_src_y,
+                            const jni_zero::JavaRef<jobject>& j_src_y,
                             jint src_stride_y,
-                            const jni_zero::JavaParamRef<jobject>& j_src_u,
+                            const jni_zero::JavaRef<jobject>& j_src_u,
                             jint src_stride_u,
-                            const jni_zero::JavaParamRef<jobject>& j_src_v,
+                            const jni_zero::JavaRef<jobject>& j_src_v,
                             jint src_stride_v,
-                            const jni_zero::JavaParamRef<jobject>& j_dst_y,
+                            const jni_zero::JavaRef<jobject>& j_dst_y,
                             jint dst_stride_y,
-                            const jni_zero::JavaParamRef<jobject>& j_dst_u,
+                            const jni_zero::JavaRef<jobject>& j_dst_u,
                             jint dst_stride_u,
-                            const jni_zero::JavaParamRef<jobject>& j_dst_v,
+                            const jni_zero::JavaRef<jobject>& j_dst_v,
                             jint dst_stride_v,
                             jint width,
                             jint height) {
@@ -67,20 +70,19 @@ void JNI_YuvHelper_I420Copy(JNIEnv* jni,
                    dst_v, dst_stride_v, width, height);
 }
 
-static void JNI_YuvHelper_I420ToNV12(
-    JNIEnv* jni,
-    const jni_zero::JavaParamRef<jobject>& j_src_y,
-    jint src_stride_y,
-    const jni_zero::JavaParamRef<jobject>& j_src_u,
-    jint src_stride_u,
-    const jni_zero::JavaParamRef<jobject>& j_src_v,
-    jint src_stride_v,
-    const jni_zero::JavaParamRef<jobject>& j_dst_y,
-    jint dst_stride_y,
-    const jni_zero::JavaParamRef<jobject>& j_dst_uv,
-    jint dst_stride_uv,
-    jint width,
-    jint height) {
+static void JNI_YuvHelper_I420ToNV12(JNIEnv* jni,
+                                     const jni_zero::JavaRef<jobject>& j_src_y,
+                                     jint src_stride_y,
+                                     const jni_zero::JavaRef<jobject>& j_src_u,
+                                     jint src_stride_u,
+                                     const jni_zero::JavaRef<jobject>& j_src_v,
+                                     jint src_stride_v,
+                                     const jni_zero::JavaRef<jobject>& j_dst_y,
+                                     jint dst_stride_y,
+                                     const jni_zero::JavaRef<jobject>& j_dst_uv,
+                                     jint dst_stride_uv,
+                                     jint width,
+                                     jint height) {
   const uint8_t* src_y =
       static_cast<const uint8_t*>(jni->GetDirectBufferAddress(j_src_y.obj()));
   const uint8_t* src_u =
@@ -98,17 +100,17 @@ static void JNI_YuvHelper_I420ToNV12(
 }
 
 void JNI_YuvHelper_I420Rotate(JNIEnv* jni,
-                              const jni_zero::JavaParamRef<jobject>& j_src_y,
+                              const jni_zero::JavaRef<jobject>& j_src_y,
                               jint src_stride_y,
-                              const jni_zero::JavaParamRef<jobject>& j_src_u,
+                              const jni_zero::JavaRef<jobject>& j_src_u,
                               jint src_stride_u,
-                              const jni_zero::JavaParamRef<jobject>& j_src_v,
+                              const jni_zero::JavaRef<jobject>& j_src_v,
                               jint src_stride_v,
-                              const jni_zero::JavaParamRef<jobject>& j_dst_y,
+                              const jni_zero::JavaRef<jobject>& j_dst_y,
                               jint dst_stride_y,
-                              const jni_zero::JavaParamRef<jobject>& j_dst_u,
+                              const jni_zero::JavaRef<jobject>& j_dst_u,
                               jint dst_stride_u,
-                              const jni_zero::JavaParamRef<jobject>& j_dst_v,
+                              const jni_zero::JavaRef<jobject>& j_dst_v,
                               jint dst_stride_v,
                               jint src_width,
                               jint src_height,
@@ -133,13 +135,13 @@ void JNI_YuvHelper_I420Rotate(JNIEnv* jni,
 }
 
 void JNI_YuvHelper_ABGRToI420(JNIEnv* jni,
-                              const jni_zero::JavaParamRef<jobject>& j_src,
+                              const jni_zero::JavaRef<jobject>& j_src,
                               jint src_stride,
-                              const jni_zero::JavaParamRef<jobject>& j_dst_y,
+                              const jni_zero::JavaRef<jobject>& j_dst_y,
                               jint dst_stride_y,
-                              const jni_zero::JavaParamRef<jobject>& j_dst_u,
+                              const jni_zero::JavaRef<jobject>& j_dst_u,
                               jint dst_stride_u,
-                              const jni_zero::JavaParamRef<jobject>& j_dst_v,
+                              const jni_zero::JavaRef<jobject>& j_dst_v,
                               jint dst_stride_v,
                               jint src_width,
                               jint src_height) {

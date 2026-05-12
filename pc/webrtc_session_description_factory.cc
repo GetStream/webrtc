@@ -10,8 +10,7 @@
 
 #include "pc/webrtc_session_description_factory.h"
 
-#include <stddef.h>
-
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -24,9 +23,9 @@
 #include "absl/algorithm/container.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/strings/str_cat.h"
-#include "api/field_trials_view.h"
+#include "absl/strings/string_view.h"
+#include "api/environment/environment.h"
 #include "api/jsep.h"
-#include "api/jsep_session_description.h"
 #include "api/peer_connection_interface.h"
 #include "api/rtc_error.h"
 #include "api/scoped_refptr.h"
@@ -43,23 +42,19 @@
 #include "rtc_base/rtc_certificate_generator.h"
 #include "rtc_base/ssl_identity.h"
 #include "rtc_base/ssl_stream_adapter.h"
-#include "rtc_base/unique_id_generator.h"
-
-using ::webrtc::MediaSessionOptions;
-using webrtc::UniqueRandomIdGenerator;
+#include "rtc_base/thread.h"
 
 namespace webrtc {
 namespace {
-static const char kFailedDueToIdentityFailed[] =
+const char kFailedDueToIdentityFailed[] =
     " failed because DTLS identity request failed";
-static const char kFailedDueToSessionShutdown[] =
+const char kFailedDueToSessionShutdown[] =
     " failed because the session was shut down";
 
-static const uint64_t kInitSessionVersion = 2;
+const uint64_t kInitSessionVersion = 2;
 
 // Check that each sender has a unique ID.
-static bool ValidMediaSessionOptions(
-    const MediaSessionOptions& session_options) {
+bool ValidMediaSessionOptions(const MediaSessionOptions& session_options) {
   std::vector<SenderOptions> sorted_senders;
   for (const MediaDescriptionOptions& media_description_options :
        session_options.media_description_options) {
@@ -82,7 +77,7 @@ static bool ValidMediaSessionOptions(
 // static
 void WebRtcSessionDescriptionFactory::CopyCandidatesFromSessionDescription(
     const SessionDescriptionInterface* source_desc,
-    const std::string& content_name,
+    absl::string_view content_name,
     SessionDescriptionInterface* dest_desc) {
   if (!source_desc) {
     return;
@@ -102,7 +97,7 @@ void WebRtcSessionDescriptionFactory::CopyCandidatesFromSessionDescription(
     return;
   }
   for (size_t n = 0; n < source_candidates->count(); ++n) {
-    const IceCandidateInterface* new_candidate = source_candidates->at(n);
+    const IceCandidate* new_candidate = source_candidates->at(n);
     if (!dest_candidates->HasCandidate(new_candidate)) {
       dest_desc->AddCandidate(source_candidates->at(n));
     }
@@ -116,16 +111,18 @@ WebRtcSessionDescriptionFactory::WebRtcSessionDescriptionFactory(
     bool dtls_enabled,
     std::unique_ptr<RTCCertificateGeneratorInterface> cert_generator,
     scoped_refptr<RTCCertificate> certificate,
-    std::function<void(const webrtc::scoped_refptr<webrtc::RTCCertificate>&)>
+    std::function<void(const scoped_refptr<RTCCertificate>&)>
         on_certificate_ready,
     CodecLookupHelper* codec_lookup_helper,
-    const FieldTrialsView& field_trials)
+    const Environment& env)
     : signaling_thread_(context->signaling_thread()),
-      transport_desc_factory_(field_trials),
-      session_desc_factory_(context->media_engine(),
+      transport_desc_factory_(env.field_trials()),
+      session_desc_factory_(env,
+                            context->media_engine(),
                             context->use_rtx(),
                             context->ssrc_generator(),
                             &transport_desc_factory_,
+                            context->sctp_transport_factory(),
                             codec_lookup_helper),
       // RFC 4566 suggested a Network Time Protocol (NTP) format timestamp
       // as the session id and session version. To simplify, it should be fine
@@ -181,6 +178,7 @@ WebRtcSessionDescriptionFactory::WebRtcSessionDescriptionFactory(
 
 WebRtcSessionDescriptionFactory::~WebRtcSessionDescriptionFactory() {
   RTC_DCHECK_RUN_ON(signaling_thread_);
+  RTC_DCHECK_DISALLOW_THREAD_BLOCKING_CALLS();
 
   // Fail any requests that were asked for before identity generation completed.
   FailPendingRequests(kFailedDueToSessionShutdown);
@@ -200,6 +198,7 @@ void WebRtcSessionDescriptionFactory::CreateOffer(
     CreateSessionDescriptionObserver* observer,
     const PeerConnectionInterface::RTCOfferAnswerOptions& options,
     const MediaSessionOptions& session_options) {
+  RTC_LOG_THREAD_BLOCK_COUNT();
   RTC_DCHECK_RUN_ON(signaling_thread_);
   std::string error = "CreateOffer";
   if (certificate_request_state_ == CERTIFICATE_FAILED) {
@@ -230,6 +229,7 @@ void WebRtcSessionDescriptionFactory::CreateOffer(
 void WebRtcSessionDescriptionFactory::CreateAnswer(
     CreateSessionDescriptionObserver* observer,
     const MediaSessionOptions& session_options) {
+  RTC_LOG_THREAD_BLOCK_COUNT();
   std::string error = "CreateAnswer";
   if (certificate_request_state_ == CERTIFICATE_FAILED) {
     error += kFailedDueToIdentityFailed;
@@ -302,7 +302,7 @@ void WebRtcSessionDescriptionFactory::InternalCreateOffer(
   // is created regardless if it's identical to the previous one or not.
   // The `session_version_` is a uint64_t, the wrap around should not happen.
   RTC_DCHECK(session_version_ + 1 > session_version_);
-  auto offer = std::make_unique<JsepSessionDescription>(
+  auto offer = SessionDescriptionInterface::Create(
       SdpType::kOffer, std::move(desc), session_id_,
       absl::StrCat(session_version_++));
   if (sdp_info_->local_description()) {
@@ -361,7 +361,7 @@ void WebRtcSessionDescriptionFactory::InternalCreateAnswer(
   // Get a new version number by increasing the `session_version_answer_`.
   // The `session_version_` is a uint64_t, the wrap around should not happen.
   RTC_DCHECK(session_version_ + 1 > session_version_);
-  auto answer = std::make_unique<JsepSessionDescription>(
+  auto answer = SessionDescriptionInterface::Create(
       SdpType::kAnswer, std::move(desc), session_id_,
       absl::StrCat(session_version_++));
   if (sdp_info_->local_description()) {
@@ -407,6 +407,7 @@ void WebRtcSessionDescriptionFactory::PostCreateSessionDescriptionFailed(
 void WebRtcSessionDescriptionFactory::PostCreateSessionDescriptionSucceeded(
     CreateSessionDescriptionObserver* observer,
     std::unique_ptr<SessionDescriptionInterface> description) {
+  description->RelinquishThreadOwnership();
   Post([observer = scoped_refptr<CreateSessionDescriptionObserver>(observer),
         description = std::move(description)]() mutable {
     observer->OnSuccess(description.release());

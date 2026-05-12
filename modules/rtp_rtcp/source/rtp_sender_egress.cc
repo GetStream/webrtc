@@ -21,7 +21,6 @@
 #include "api/array_view.h"
 #include "api/call/transport.h"
 #include "api/environment/environment.h"
-#include "api/field_trials_view.h"
 #include "api/rtc_event_log/rtc_event_log.h"
 #include "api/sequence_checker.h"
 #include "api/task_queue/pending_task_safety_flag.h"
@@ -128,13 +127,8 @@ RtpSenderEgress::RtpSenderEgress(const Environment& env,
       rtp_sequence_number_map_(need_rtp_packet_infos_
                                    ? std::make_unique<RtpSequenceNumberMap>(
                                          kRtpSequenceNumberMapMaxEntries)
-                                   : nullptr),
-      use_ntp_time_for_absolute_send_time_(!env_.field_trials().IsDisabled(
-          "WebRTC-UseNtpTimeAbsoluteSendTime")) {
+                                   : nullptr) {
   RTC_DCHECK(worker_queue_);
-  RTC_DCHECK(config.transport_feedback_callback == nullptr)
-      << "transport_feedback_callback is no longer used and will soon be "
-         "deleted.";
   if (bitrate_callback_) {
     update_task_ = RepeatingTaskHandle::DelayedStart(worker_queue_,
                                                      kUpdateInterval, [this]() {
@@ -232,12 +226,8 @@ void RtpSenderEgress::SendPacket(std::unique_ptr<RtpPacketToSend> packet,
     packet->SetExtension<TransmissionOffset>(kTimestampTicksPerMs * diff.ms());
   }
   if (packet->HasExtension<AbsoluteSendTime>()) {
-    if (use_ntp_time_for_absolute_send_time_) {
-      packet->SetExtension<AbsoluteSendTime>(AbsoluteSendTime::To24Bits(
-          env_.clock().ConvertTimestampToNtpTime(now)));
-    } else {
-      packet->SetExtension<AbsoluteSendTime>(AbsoluteSendTime::To24Bits(now));
-    }
+    packet->SetExtension<AbsoluteSendTime>(AbsoluteSendTime::To24Bits(
+        env_.clock().ConvertTimestampToNtpTime(now)));
   }
   if (packet->HasExtension<TransportSequenceNumber>() &&
       packet->transport_sequence_number()) {
@@ -253,7 +243,8 @@ void RtpSenderEgress::SendPacket(std::unique_ptr<RtpPacketToSend> packet,
     }
   }
 
-  auto compound_packet = Packet{std::move(packet), pacing_info, now};
+  auto compound_packet =
+      Packet{.rtp_packet = std::move(packet), .info = pacing_info, .now = now};
   if (enable_send_packet_batching_ && !is_audio_) {
     packets_to_send_.push_back(std::move(compound_packet));
   } else {

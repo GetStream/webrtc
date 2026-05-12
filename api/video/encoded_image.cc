@@ -10,9 +10,8 @@
 
 #include "api/video/encoded_image.h"
 
-#include <stdlib.h>
-
 #include <cstdint>
+#include <cstdlib>
 #include <optional>
 #include <utility>
 
@@ -24,7 +23,8 @@
 
 namespace webrtc {
 
-EncodedImageBuffer::EncodedImageBuffer(size_t size) : buffer_(size) {}
+EncodedImageBuffer::EncodedImageBuffer(size_t size)
+    : buffer_(Buffer::CreateUninitializedWithSize(size)) {}
 
 EncodedImageBuffer::EncodedImageBuffer(const uint8_t* data, size_t size)
     : buffer_(data, size) {}
@@ -77,7 +77,7 @@ void EncodedImage::SetEncodeTime(int64_t encode_start_ms,
   timing_.encode_finish_ms = encode_finish_ms;
 }
 
-webrtc::Timestamp EncodedImage::CaptureTime() const {
+Timestamp EncodedImage::CaptureTime() const {
   return capture_time_ms_ > 0 ? Timestamp::Millis(capture_time_ms_)
                               : Timestamp::MinusInfinity();
 }

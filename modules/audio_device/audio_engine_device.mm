@@ -23,6 +23,7 @@
 #include <cmath>
 
 #include "api/array_view.h"
+#include "api/environment/environment_factory.h"
 #include "api/task_queue/default_task_queue_factory.h"
 #include "api/task_queue/pending_task_safety_flag.h"
 #include "modules/audio_device/fine_audio_buffer.h"
@@ -64,7 +65,8 @@ AudioEngineDevice::AudioEngineDevice(bool voice_processing_bypassed)
   LOGI() << "voice_processing_bypassed " << voice_processing_bypassed;
 
   thread_ = webrtc::Thread::Current();
-  audio_device_buffer_.reset(new webrtc::AudioDeviceBuffer(task_queue_factory_.get()));
+  audio_device_buffer_.reset(
+      new webrtc::AudioDeviceBuffer(webrtc::CreateEnvironment(task_queue_factory_.get())));
 
 #if defined(WEBRTC_IOS)
   audio_session_observer_ =
@@ -242,7 +244,7 @@ int32_t AudioEngineDevice::Init() {
   // main thread to issue notifications.
   AudioObjectPropertyAddress propertyAddress = {kAudioHardwarePropertyRunLoop,
                                                 kAudioObjectPropertyScopeGlobal,
-                                                kAudioObjectPropertyElementMaster};
+                                                kAudioObjectPropertyElementMain};
 
   CFRunLoopRef runLoop = NULL;
   UInt32 size = sizeof(CFRunLoopRef);
@@ -301,7 +303,7 @@ int32_t AudioEngineDevice::Terminate() {
   AudioObjectPropertyAddress propertyAddress = {
       kAudioHardwarePropertyDevices,     // selector
       kAudioObjectPropertyScopeGlobal,   // scope
-      kAudioObjectPropertyElementMaster  // element
+      kAudioObjectPropertyElementMain    // element
   };
 
   OSStatus err = noErr;
@@ -1062,9 +1064,42 @@ int32_t AudioEngineDevice::RegisterAudioCallback(AudioTransport* audioCallback) 
   LOGI() << "RegisterAudioCallback";
   RTC_DCHECK_RUN_ON(thread_);
   RTC_DCHECK(audio_device_buffer_ != nullptr);
-  RTC_DCHECK(audioCallback != nullptr);
 
-  return audio_device_buffer_->RegisterAudioCallback(audioCallback);
+  const bool was_playing = audio_device_buffer_->IsPlaying();
+  const bool was_recording = audio_device_buffer_->IsRecording();
+  const bool needs_restart = was_playing || was_recording;
+  const EngineState previous_state = engine_state_;
+
+  // M145 registers the ADM audio transport after default audio options are
+  // applied. Stream's custom ADM can already be running by then, while
+  // AudioDeviceBuffer rejects callback changes during playout/recording.
+  if (needs_restart) {
+    LOGW() << "RegisterAudioCallback while active. Restarting audio buffer.";
+    int32_t stop_result = ModifyEngineState([](EngineState state) -> EngineState {
+      state.output_enabled = false;
+      state.output_running = false;
+      state.input_enabled = false;
+      state.input_running = false;
+      return state;
+    });
+    if (stop_result != 0) {
+      return stop_result;
+    }
+  }
+
+  int32_t result = audio_device_buffer_->RegisterAudioCallback(audioCallback);
+
+  if (needs_restart) {
+    int32_t restart_result =
+        ModifyEngineState([previous_state](EngineState /*state*/) -> EngineState {
+          return previous_state;
+        });
+    if (restart_result != 0) {
+      return restart_result;
+    }
+  }
+
+  return result;
 }
 
 // ----------------------------------------------------------------------------------------------------
@@ -1666,10 +1701,10 @@ int32_t AudioEngineDevice::ApplyManualEngineState(EngineStateUpdate& state) {
     }
 
     if (observer_ != nullptr) {
-      int32_t result = observer_->OnEngineDidCreate(engine_manual_input_);
-      if (result != 0) {
-        LOGE() << "Call to OnEngineDidCreate returned error: " << result;
-        return result;
+      int32_t observer_result = observer_->OnEngineDidCreate(engine_manual_input_);
+      if (observer_result != 0) {
+        LOGE() << "Call to OnEngineDidCreate returned error: " << observer_result;
+        return observer_result;
       }
     }
   }
@@ -2669,7 +2704,7 @@ void AudioEngineDevice::StartRenderLoop() {
   const size_t buffer_size = samples * kAudioSampleSize;
   const int chunk_ms =
       static_cast<int>(std::round(1000.0 * static_cast<double>(frames_per_buffer) / sample_rate));
-  int64_t next_wakeup_ms = rtc::TimeMillis();
+  int64_t next_wakeup_ms = webrtc::TimeMillis();
 
   while (!render_thread_->IsQuitting()) {
     // Read (Output)
@@ -2710,7 +2745,7 @@ void AudioEngineDevice::StartRenderLoop() {
 
     if (!render_thread_->IsQuitting()) {
       next_wakeup_ms += chunk_ms;
-      const int64_t now_ms = rtc::TimeMillis();
+      const int64_t now_ms = webrtc::TimeMillis();
       const int64_t sleep_ms = next_wakeup_ms - now_ms;
       if (sleep_ms > 0) {
         render_thread_->SleepMs(static_cast<int>(sleep_ms));

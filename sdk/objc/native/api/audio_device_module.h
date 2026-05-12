@@ -14,6 +14,7 @@
 #include <memory>
 
 #include "api/audio/audio_device.h"
+#include "api/environment/environment.h"
 #include "sdk/objc/native/api/audio_device_module_error_handler.h"
 
 namespace webrtc {
@@ -26,10 +27,19 @@ namespace webrtc {
 webrtc::scoped_refptr<AudioDeviceModule> CreateAudioDeviceModule(
     bool bypass_voice_processing = false);
 
+webrtc::scoped_refptr<AudioDeviceModule> CreateAudioDeviceModule(
+    const Environment& env,
+    bool bypass_voice_processing = false);
+
 #if defined(WEBRTC_IOS)
 // If `muted_speech_event_handler` is exist, audio unit will catch speech
 // activity while muted.
 webrtc::scoped_refptr<AudioDeviceModule> CreateMutedDetectAudioDeviceModule(
+    AudioDeviceModule::MutedSpeechEventHandler muted_speech_event_handler,
+    bool bypass_voice_processing = false);
+
+webrtc::scoped_refptr<AudioDeviceModule> CreateMutedDetectAudioDeviceModule(
+    const Environment& env,
     AudioDeviceModule::MutedSpeechEventHandler muted_speech_event_handler,
     bool bypass_voice_processing = false);
 
@@ -38,6 +48,12 @@ webrtc::scoped_refptr<AudioDeviceModule> CreateMutedDetectAudioDeviceModule(
 // Provide `error_handler` to receive callbacks on errors such as microphone
 // init failed or playout start failied.
 webrtc::scoped_refptr<AudioDeviceModule> CreateMutedDetectAudioDeviceModule(
+    AudioDeviceModule::MutedSpeechEventHandler muted_speech_event_handler,
+    ADMErrorHandler error_handler,
+    bool bypass_voice_processing = false);
+
+webrtc::scoped_refptr<AudioDeviceModule> CreateMutedDetectAudioDeviceModule(
+    const Environment& env,
     AudioDeviceModule::MutedSpeechEventHandler muted_speech_event_handler,
     ADMErrorHandler error_handler,
     bool bypass_voice_processing = false);

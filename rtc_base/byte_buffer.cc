@@ -10,9 +10,8 @@
 
 #include "rtc_base/byte_buffer.h"
 
-#include <string.h>
-
 #include <cstdint>
+#include <cstring>
 #include <string>
 
 #include "absl/strings/string_view.h"
@@ -56,7 +55,7 @@ bool ByteBufferReader::ReadUInt16(uint16_t* val) {
   if (!ReadBytes(reinterpret_cast<uint8_t*>(&v), 2)) {
     return false;
   } else {
-    *val = webrtc::NetworkToHost16(v);
+    *val = NetworkToHost16(v);
     return true;
   }
 }
@@ -72,7 +71,7 @@ bool ByteBufferReader::ReadUInt24(uint32_t* val) {
   if (!ReadBytes(read_into, 3)) {
     return false;
   } else {
-    *val = webrtc::NetworkToHost32(v);
+    *val = NetworkToHost32(v);
     return true;
   }
 }
@@ -85,7 +84,7 @@ bool ByteBufferReader::ReadUInt32(uint32_t* val) {
   if (!ReadBytes(reinterpret_cast<uint8_t*>(&v), 4)) {
     return false;
   } else {
-    *val = webrtc::NetworkToHost32(v);
+    *val = NetworkToHost32(v);
     return true;
   }
 }
@@ -98,7 +97,7 @@ bool ByteBufferReader::ReadUInt64(uint64_t* val) {
   if (!ReadBytes(reinterpret_cast<uint8_t*>(&v), 8)) {
     return false;
   } else {
-    *val = webrtc::NetworkToHost64(v);
+    *val = NetworkToHost64(v);
     return true;
   }
 }
@@ -148,7 +147,7 @@ bool ByteBufferReader::ReadStringView(absl::string_view* val, size_t len) {
 }
 
 bool ByteBufferReader::ReadBytes(ArrayView<uint8_t> val) {
-  if (val.size() == 0) {
+  if (val.empty()) {
     return true;
   }
   return ReadBytes(val.data(), val.size());

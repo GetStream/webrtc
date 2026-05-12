@@ -11,32 +11,39 @@
 #ifndef SDK_ANDROID_SRC_JNI_PC_ICE_CANDIDATE_H_
 #define SDK_ANDROID_SRC_JNI_PC_ICE_CANDIDATE_H_
 
+#include <jni.h>
+
+#include <memory>
+#include <optional>
 #include <vector>
 
-#include "api/data_channel_interface.h"
+#include "api/candidate.h"
 #include "api/jsep.h"
-#include "api/jsep_ice_candidate.h"
 #include "api/peer_connection_interface.h"
-#include "api/rtp_parameters.h"
+#include "api/transport/enums.h"
+#include "rtc_base/network_constants.h"
 #include "rtc_base/ssl_identity.h"
-#include "sdk/android/src/jni/jni_helpers.h"
+#include "sdk/android/native_api/jni/scoped_java_ref.h"
 
 namespace webrtc {
 namespace jni {
 
-Candidate JavaToNativeCandidate(JNIEnv* jni,
-                                const JavaRef<jobject>& j_candidate);
-
-ScopedJavaLocalRef<jobject> NativeToJavaCandidate(JNIEnv* env,
-                                                  const Candidate& candidate);
+std::unique_ptr<IceCandidate> JavaToNativeCandidate(
+    JNIEnv* jni,
+    const JavaRef<jobject>& j_candidate);
 
 ScopedJavaLocalRef<jobject> NativeToJavaIceCandidate(
     JNIEnv* env,
-    const IceCandidateInterface& candidate);
+    absl::string_view mid,
+    const Candidate& candidate);
+
+ScopedJavaLocalRef<jobject> NativeToJavaIceCandidate(
+    JNIEnv* env,
+    const IceCandidate& candidate);
 
 ScopedJavaLocalRef<jobjectArray> NativeToJavaCandidateArray(
     JNIEnv* jni,
-    const std::vector<Candidate>& candidates);
+    const IceCandidate* candidate);
 
 /*****************************************************
  * Below are all things that go into RTCConfiguration.

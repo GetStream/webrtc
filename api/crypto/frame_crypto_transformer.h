@@ -17,7 +17,11 @@
 #ifndef WEBRTC_FRAME_CRYPTOR_TRANSFORMER_H_
 #define WEBRTC_FRAME_CRYPTOR_TRANSFORMER_H_
 
+#include <map>
+#include <memory>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "api/frame_transformer_interface.h"
 #include "api/make_ref_counted.h"
@@ -221,7 +225,7 @@ class ParticipantKeyHandler : public webrtc::RefCountInterface {
   mutable webrtc::Mutex mutex_;
   int current_key_index_ = 0;
   KeyProvider* key_provider_;
-  std::vector<rtc::scoped_refptr<KeySet>> crypto_key_ring_;
+  std::vector<webrtc::scoped_refptr<KeySet>> crypto_key_ring_;
 };
 
 class DefaultKeyProviderImpl : public KeyProvider {
@@ -391,7 +395,7 @@ class RTC_EXPORT FrameCryptorTransformer
   };
 
   explicit FrameCryptorTransformer(
-      rtc::Thread* signaling_thread,
+      webrtc::Thread* signaling_thread,
       const std::string participant_id,
       MediaType type,
       Algorithm algorithm,
@@ -457,12 +461,12 @@ class RTC_EXPORT FrameCryptorTransformer
   void encryptFrame(std::unique_ptr<webrtc::TransformableFrameInterface> frame);
   void decryptFrame(std::unique_ptr<webrtc::TransformableFrameInterface> frame);
   void onFrameCryptionStateChanged(FrameCryptionState error);
-  rtc::Buffer makeIv(uint32_t ssrc, uint32_t timestamp);
+  webrtc::Buffer makeIv(uint32_t ssrc, uint32_t timestamp);
   uint8_t getIvSize();
 
  private:
   TaskQueueBase* const signaling_thread_;
-  std::unique_ptr<rtc::Thread> thread_;
+  std::unique_ptr<webrtc::Thread> thread_;
   std::string participant_id_;
   mutable webrtc::Mutex mutex_;
   mutable webrtc::Mutex sink_mutex_;
@@ -510,7 +514,7 @@ class RTC_EXPORT DataPacketCryptor : public webrtc::RefCountInterface {
       const webrtc::scoped_refptr<EncryptedPacket> encryptedPacket);
 
  private:
-  rtc::Buffer makeIv(uint32_t timestamp);
+  webrtc::Buffer makeIv(uint32_t timestamp);
 
  private:
   FrameCryptorTransformer::Algorithm algorithm_;

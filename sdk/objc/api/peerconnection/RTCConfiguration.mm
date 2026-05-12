@@ -131,18 +131,17 @@
     _sdpSemantics =
         [[self class] sdpSemanticsForNativeSdpSemantics:config.sdp_semantics];
     _turnCustomizer = config.turn_customizer;
-    _activeResetSrtpParams = config.active_reset_srtp_params;
-    if (config.crypto_options) {
-      _cryptoOptions = [[RTC_OBJC_TYPE(RTCCryptoOptions) alloc]
-               initWithSrtpEnableGcmCryptoSuites:config.crypto_options->srtp
-                                                     .enable_gcm_crypto_suites
-             srtpEnableAes128Sha1_32CryptoCipher:
-                 config.crypto_options->srtp.enable_aes128_sha1_32_crypto_cipher
-          srtpEnableEncryptedRtpHeaderExtensions:
-              config.crypto_options->srtp.enable_encrypted_rtp_header_extensions
-                    sframeRequireFrameEncryption:config.crypto_options->sframe
-                                                     .require_frame_encryption];
-    }
+
+    _cryptoOptions = [[RTC_OBJC_TYPE(RTCCryptoOptions) alloc]
+             initWithSrtpEnableGcmCryptoSuites:config.crypto_options.srtp
+                                                   .enable_gcm_crypto_suites
+           srtpEnableAes128Sha1_32CryptoCipher:
+               config.crypto_options.srtp.enable_aes128_sha1_32_crypto_cipher
+        srtpEnableEncryptedRtpHeaderExtensions:
+            config.crypto_options.srtp.enable_encrypted_rtp_header_extensions
+                  sframeRequireFrameEncryption:config.crypto_options.sframe
+                                                   .require_frame_encryption];
+
     _turnLoggingId =
         [NSString stringWithUTF8String:config.turn_logging_id.c_str()];
     _rtcpAudioReportIntervalMs = config.audio_rtcp_report_interval_ms();
@@ -288,8 +287,6 @@
   if (_turnCustomizer) {
     nativeConfig->turn_customizer = _turnCustomizer;
   }
-  nativeConfig->active_reset_srtp_params =
-      _activeResetSrtpParams ? true : false;
   if (_cryptoOptions) {
     webrtc::CryptoOptions nativeCryptoOptions;
     nativeCryptoOptions.srtp.enable_gcm_crypto_suites =
@@ -300,8 +297,7 @@
         _cryptoOptions.srtpEnableEncryptedRtpHeaderExtensions ? true : false;
     nativeCryptoOptions.sframe.require_frame_encryption =
         _cryptoOptions.sframeRequireFrameEncryption ? true : false;
-    nativeConfig->crypto_options =
-        std::optional<webrtc::CryptoOptions>(nativeCryptoOptions);
+    nativeConfig->crypto_options = nativeCryptoOptions;
   }
   nativeConfig->turn_logging_id = [_turnLoggingId UTF8String];
   nativeConfig->set_audio_rtcp_report_interval_ms(_rtcpAudioReportIntervalMs);
@@ -529,9 +525,9 @@
 + (webrtc::KeyType)nativeEncryptionKeyTypeForKeyType:(RTC_OBJC_TYPE(RTCEncryptionKeyType))keyType {
   switch (keyType) {
     case RTC_OBJC_TYPE(RTCEncryptionKeyTypeRSA):
-      return rtc::KT_RSA;
+      return webrtc::KT_RSA;
     case RTC_OBJC_TYPE(RTCEncryptionKeyTypeECDSA):
-      return rtc::KT_ECDSA;
+      return webrtc::KT_ECDSA;
   }
 }
 

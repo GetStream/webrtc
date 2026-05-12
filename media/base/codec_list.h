@@ -41,6 +41,13 @@ class CodecList {
   static CodecList CreateFromTrustedData(const std::vector<Codec>& codecs) {
     return CodecList(codecs);
   }
+  // Inserts a codec into the list if it was not already present.
+  // Returns true if inserted, false if the exact same codec was in the list.
+  // Will DCHECK if the IDs were the same, but codecs were not (binary) equal.
+  // This is consistent with CheckConsistency() only being effective in debug.
+  // TODO: https://issues.webrtc.org/455503439 - consider CHECK.
+  bool PushIfNotPresent(const Codec& codec);
+
   // Vector-compatible API to access the codecs.
   iterator begin() { return codecs_.begin(); }
   iterator end() { return codecs_.end(); }
@@ -85,12 +92,5 @@ class CodecList {
 
 }  //  namespace webrtc
 
-// Re-export symbols from the webrtc namespace for backwards compatibility.
-// TODO(bugs.webrtc.org/4222596): Remove once all references are updated.
-#ifdef WEBRTC_ALLOW_DEPRECATED_NAMESPACES
-namespace cricket {
-using ::webrtc::CodecList;
-}  // namespace cricket
-#endif  // WEBRTC_ALLOW_DEPRECATED_NAMESPACES
 
 #endif  // MEDIA_BASE_CODEC_LIST_H_

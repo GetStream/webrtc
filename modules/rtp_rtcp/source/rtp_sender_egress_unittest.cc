@@ -115,7 +115,10 @@ class TestTransport : public Transport {
     return true;
   }
 
-  bool SendRtcp(ArrayView<const uint8_t>) override { RTC_CHECK_NOTREACHED(); }
+  bool SendRtcp(ArrayView<const uint8_t> /* packet */,
+                const PacketOptions& /* options */) override {
+    RTC_CHECK_NOTREACHED();
+  }
 
   std::optional<TransmittedPacket> last_packet() { return last_packet_; }
 
@@ -852,7 +855,8 @@ TEST_F(RtpSenderEgressTest, SendPacketUpdatesStats) {
   const ArrayView<const RtpExtensionSize> kNoRtpHeaderExtensionSizes;
   FlexfecSender flexfec(env_, kFlexfectPayloadType, kFlexFecSsrc, kSsrc,
                         /*mid=*/"",
-                        /*header_extensions=*/{}, kNoRtpHeaderExtensionSizes,
+                        /*rtp_header_extensions=*/{},
+                        kNoRtpHeaderExtensionSizes,
                         /*rtp_state=*/nullptr);
   RtpRtcpInterface::Configuration config = DefaultConfig();
   config.fec_generator = &flexfec;

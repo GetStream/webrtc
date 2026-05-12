@@ -21,15 +21,15 @@
 #include "api/video_codecs/video_decoder.h"
 #include "modules/video_coding/codecs/vp9/include/vp9.h"
 #include "modules/video_coding/codecs/vp9/vp9_frame_buffer_pool.h"
-#include "vpx/vpx_codec.h"
-#include "vpx/vpx_image.h"
+#include "third_party/libvpx/source/libvpx/vpx/vpx_codec.h"
+#include "third_party/libvpx/source/libvpx/vpx/vpx_image.h"
 
 namespace webrtc {
 
 class LibvpxVp9Decoder : public VP9Decoder {
  public:
   LibvpxVp9Decoder();
-  virtual ~LibvpxVp9Decoder();
+  ~LibvpxVp9Decoder() override;
 
   bool Configure(const Settings& settings) override;
 
@@ -47,7 +47,7 @@ class LibvpxVp9Decoder : public VP9Decoder {
   int ReturnFrame(const vpx_image_t* img,
                   uint32_t timestamp,
                   int qp,
-                  const webrtc::ColorSpace* explicit_color_space);
+                  const ColorSpace* explicit_color_space);
 
   // Memory pool used to share buffers between libvpx and webrtc.
   Vp9FrameBufferPool libvpx_buffer_pool_;

@@ -14,12 +14,16 @@
 #include <cstdlib>
 #include <limits>
 #include <memory>
+#include <string>
 #include <utility>
 
 #include "api/scoped_refptr.h"
 #include "api/video/i420_buffer.h"
+#include "api/video/video_frame.h"
 #include "common_video/libyuv/include/webrtc_libyuv.h"
-#include "rtc_base/logging.h"
+#include "rtc_base/buffer.h"
+#include "rtc_base/checks.h"
+#include "test/testsupport/frame_writer.h"
 
 namespace webrtc {
 namespace test {
@@ -38,7 +42,7 @@ Buffer ExtractI420BufferWithSize(const VideoFrame& frame,
 
     size_t length =
         CalcBufferSize(VideoType::kI420, scaled->width(), scaled->height());
-    Buffer buffer(length);
+    Buffer buffer = Buffer::CreateUninitializedWithSize(length);
     RTC_CHECK_NE(ExtractBuffer(scaled, length, buffer.data()), -1);
     return buffer;
   }
@@ -46,7 +50,7 @@ Buffer ExtractI420BufferWithSize(const VideoFrame& frame,
   // No resize.
   size_t length =
       CalcBufferSize(VideoType::kI420, frame.width(), frame.height());
-  Buffer buffer(length);
+  Buffer buffer = Buffer::CreateUninitializedWithSize(length);
   RTC_CHECK_NE(ExtractBuffer(frame, length, buffer.data()), -1);
   return buffer;
 }
@@ -71,7 +75,7 @@ Y4mVideoFrameWriterImpl::Y4mVideoFrameWriterImpl(std::string output_file_name,
   RTC_CHECK(frame_writer_->Init());
 }
 
-bool Y4mVideoFrameWriterImpl::WriteFrame(const webrtc::VideoFrame& frame) {
+bool Y4mVideoFrameWriterImpl::WriteFrame(const VideoFrame& frame) {
   Buffer frame_buffer = ExtractI420BufferWithSize(frame, width_, height_);
   RTC_CHECK_EQ(frame_buffer.size(), frame_writer_->FrameLength());
   return frame_writer_->WriteFrame(frame_buffer.data());
@@ -97,7 +101,7 @@ YuvVideoFrameWriterImpl::YuvVideoFrameWriterImpl(std::string output_file_name,
   RTC_CHECK(frame_writer_->Init());
 }
 
-bool YuvVideoFrameWriterImpl::WriteFrame(const webrtc::VideoFrame& frame) {
+bool YuvVideoFrameWriterImpl::WriteFrame(const VideoFrame& frame) {
   Buffer frame_buffer = ExtractI420BufferWithSize(frame, width_, height_);
   RTC_CHECK_EQ(frame_buffer.size(), frame_writer_->FrameLength());
   return frame_writer_->WriteFrame(frame_buffer.data());

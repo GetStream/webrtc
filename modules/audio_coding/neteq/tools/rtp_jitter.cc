@@ -8,16 +8,19 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <stdio.h>
-
 #include <algorithm>
+#include <cstdint>
+#include <cstdio>
 #include <fstream>
 #include <iostream>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "api/array_view.h"
 #include "modules/rtp_rtcp/source/byte_io.h"
 #include "rtc_base/buffer.h"
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 namespace test {
@@ -119,7 +122,7 @@ int RunRtpJitter(int argc, char* argv[]) {
     if (packet.empty() || time_it == new_arrival_times.end()) {
       break;
     }
-    packets.push_back({std::move(packet), *time_it});
+    packets.push_back({.packet = std::move(packet), .time = *time_it});
     ++time_it;
   }
 
