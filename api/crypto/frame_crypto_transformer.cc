@@ -442,17 +442,18 @@ void FrameCryptorTransformer::encryptFrame(
   auto key_set = key_handler->GetKeySet(key_index_);
   uint8_t unencrypted_bytes = get_unencrypted_bytes(frame.get(), type_);
 
-  Buffer frame_header(unencrypted_bytes);
+  Buffer frame_header = Buffer::CreateUninitializedWithSize(unencrypted_bytes);
   for (size_t i = 0; i < unencrypted_bytes; i++) {
     frame_header[i] = data_in[i];
   }
 
-  Buffer frame_trailer(2);
+  Buffer frame_trailer = Buffer::CreateUninitializedWithSize(2);
   frame_trailer[0] = getIvSize();
   frame_trailer[1] = key_index_;
   Buffer iv = makeIv(frame->GetSsrc(), frame->GetTimestamp());
 
-  Buffer payload(data_in.size() - unencrypted_bytes);
+  Buffer payload =
+      Buffer::CreateUninitializedWithSize(data_in.size() - unencrypted_bytes);
   for (size_t i = unencrypted_bytes; i < data_in.size(); i++) {
     payload[i - unencrypted_bytes] = data_in[i];
   }
@@ -462,8 +463,7 @@ void FrameCryptorTransformer::encryptFrame(
                         key_set->encryption_key, iv, frame_header, payload,
                         &buffer) == Success) {
     Buffer encrypted_payload(buffer.data(), buffer.size());
-    Buffer tag(encrypted_payload.data() + encrypted_payload.size() - 16,
-                    16);
+    Buffer tag(encrypted_payload.data() + encrypted_payload.size() - 16, 16);
     Buffer data_without_header;
     data_without_header.AppendData(encrypted_payload);
     data_without_header.AppendData(iv);
@@ -566,12 +566,12 @@ void FrameCryptorTransformer::decryptFrame(
 
   uint8_t unencrypted_bytes = get_unencrypted_bytes(frame.get(), type_);
 
-  Buffer frame_header(unencrypted_bytes);
+  Buffer frame_header = Buffer::CreateUninitializedWithSize(unencrypted_bytes);
   for (size_t i = 0; i < unencrypted_bytes; i++) {
     frame_header[i] = data_in[i];
   }
 
-  Buffer frame_trailer(2);
+  Buffer frame_trailer = Buffer::CreateUninitializedWithSize(2);
   frame_trailer[0] = data_in[data_in.size() - 2];
   frame_trailer[1] = data_in[data_in.size() - 1];
   uint8_t ivLength = frame_trailer[0];
@@ -613,12 +613,13 @@ void FrameCryptorTransformer::decryptFrame(
 
   auto key_set = key_handler->GetKeySet(key_index);
 
-  Buffer iv = Buffer(ivLength);
+  Buffer iv = Buffer::CreateUninitializedWithSize(ivLength);
   for (size_t i = 0; i < ivLength; i++) {
     iv[i] = data_in[data_in.size() - 2 - ivLength + i];
   }
 
-  Buffer encrypted_buffer(data_in.size() - unencrypted_bytes);
+  Buffer encrypted_buffer =
+      Buffer::CreateUninitializedWithSize(data_in.size() - unencrypted_bytes);
   for (size_t i = unencrypted_bytes; i < data_in.size(); i++) {
     encrypted_buffer[i - unencrypted_bytes] = data_in[i];
   }
@@ -634,7 +635,8 @@ void FrameCryptorTransformer::decryptFrame(
         H265::ParseRbsp(encrypted_buffer.data(), encrypted_buffer.size()));
   }
 
-  Buffer encrypted_payload(encrypted_buffer.size() - ivLength - 2);
+  Buffer encrypted_payload = Buffer::CreateUninitializedWithSize(
+      encrypted_buffer.size() - ivLength - 2);
   for (size_t i = 0; i < encrypted_payload.size(); i++) {
     encrypted_payload[i] = encrypted_buffer[i];
   }
@@ -795,7 +797,8 @@ RTCErrorOr<webrtc::scoped_refptr<EncryptedPacket>> DataPacketCryptor::Encrypt(
 
   std::vector<uint8_t> buffer;
   Buffer payload(data.data(), data.size());
-  auto frame_header = Buffer(0);  // no frame header for data packets
+  auto frame_header = Buffer::CreateUninitializedWithSize(
+      0);  // no frame header for data packets
   if (AesEncryptDecrypt(EncryptOrDecrypt::kEncrypt, algorithm_,
                         key_set->encryption_key, iv, frame_header, payload,
                         &buffer) == Success) {
@@ -826,12 +829,13 @@ RTCErrorOr<std::vector<uint8_t>> DataPacketCryptor::Decrypt(
                         std::to_string(key_index) +
                         "] out of range for participant " + participant_id);
   }
-  
+
   std::vector<uint8_t> buffer;
   Buffer encrypted_payload(encryptedPacket->data.data(),
-                                encryptedPacket->data.size());
+                           encryptedPacket->data.size());
   Buffer iv(encryptedPacket->iv.data(), encryptedPacket->iv.size());
-  auto frame_header = Buffer(0);  // no frame header for data packets
+  auto frame_header = Buffer::CreateUninitializedWithSize(
+      0);  // no frame header for data packets
 
   auto key_set = key_handler->GetKeySet(key_index);
   auto initialKeyMaterial = key_set->material;

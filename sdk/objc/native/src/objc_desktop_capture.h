@@ -21,8 +21,8 @@
 
 #include "api/video/i420_buffer.h"
 #include "api/video/video_frame.h"
-#include "modules/desktop_capture/desktop_capture_options.h"
 #include "modules/desktop_capture/desktop_and_cursor_composer.h"
+#include "modules/desktop_capture/desktop_capture_options.h"
 #include "modules/desktop_capture/desktop_frame.h"
 #include "rtc_base/thread.h"
 
@@ -35,12 +35,13 @@ enum DesktopType { kScreen, kWindow };
 
 class ObjCDesktopCapturer : public DesktopCapturer::Callback {
  public:
-  enum CaptureState { CS_RUNNING, CS_STOPPED, CS_FAILED};
+  enum CaptureState { CS_RUNNING, CS_STOPPED, CS_FAILED };
 
  public:
-  ObjCDesktopCapturer(DesktopType type,
-    webrtc::DesktopCapturer::SourceId source_id,
-    id<RTC_OBJC_TYPE(RTCDesktopCapturerPrivateDelegate)> delegate);
+  ObjCDesktopCapturer(
+      DesktopType type,
+      webrtc::DesktopCapturer::SourceId source_id,
+      id<RTC_OBJC_TYPE(RTCDesktopCapturerPrivateDelegate)> delegate);
   virtual ~ObjCDesktopCapturer();
 
   virtual CaptureState Start(uint32_t fps);
@@ -50,19 +51,22 @@ class ObjCDesktopCapturer : public DesktopCapturer::Callback {
   virtual bool IsRunning();
 
  protected:
-  virtual void OnCaptureResult(webrtc::DesktopCapturer::Result result,
-                               std::unique_ptr<webrtc::DesktopFrame> frame) override;
+  virtual void OnCaptureResult(
+      webrtc::DesktopCapturer::Result result,
+      std::unique_ptr<webrtc::DesktopFrame> frame) override;
+
  private:
   void CaptureFrame();
   webrtc::DesktopCaptureOptions options_;
   std::unique_ptr<webrtc::DesktopAndCursorComposer> capturer_;
-  std::unique_ptr<rtc::Thread> thread_;
+  std::unique_ptr<webrtc::Thread> thread_;
   CaptureState capture_state_ = CS_STOPPED;
   DesktopType type_;
   webrtc::DesktopCapturer::SourceId source_id_;
   id<RTC_OBJC_TYPE(RTCDesktopCapturerPrivateDelegate)> delegate_;
-  uint32_t capture_delay_ = 1000; // 1s
-  webrtc::DesktopCapturer::Result result_ = webrtc::DesktopCapturer::Result::SUCCESS;
+  uint32_t capture_delay_ = 1000;  // 1s
+  webrtc::DesktopCapturer::Result result_ =
+      webrtc::DesktopCapturer::Result::SUCCESS;
 };
 
 }  // namespace webrtc

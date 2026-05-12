@@ -95,6 +95,7 @@ if (is_ios || is_mac) {
   rtc_library("base_objc") {
     visibility = [ "*" ]
     sources = [
+      "objc/base/RTCAudioRenderer.h",
       "objc/base/RTCCodecSpecificInfo.h",
       "objc/base/RTCEncodedImage.h",
       "objc/base/RTCEncodedImage.m",
@@ -1094,11 +1095,19 @@ if (is_ios || is_mac) {
         "objc/api/peerconnection/RTCDataChannelConfiguration+Private.h",
         "objc/api/peerconnection/RTCDataChannelConfiguration.h",
         "objc/api/peerconnection/RTCDataChannelConfiguration.mm",
+        "objc/api/peerconnection/RTCDataPacketCryptor.h",
+        "objc/api/peerconnection/RTCDataPacketCryptor.mm",
         "objc/api/peerconnection/RTCDtmfSender+Private.h",
         "objc/api/peerconnection/RTCDtmfSender.h",
         "objc/api/peerconnection/RTCDtmfSender.mm",
         "objc/api/peerconnection/RTCFieldTrials.h",
         "objc/api/peerconnection/RTCFieldTrials.mm",
+        "objc/api/peerconnection/RTCFrameCryptor+Private.h",
+        "objc/api/peerconnection/RTCFrameCryptor.h",
+        "objc/api/peerconnection/RTCFrameCryptor.mm",
+        "objc/api/peerconnection/RTCFrameCryptorKeyProvider+Private.h",
+        "objc/api/peerconnection/RTCFrameCryptorKeyProvider.h",
+        "objc/api/peerconnection/RTCFrameCryptorKeyProvider.mm",
         "objc/api/peerconnection/RTCIODevice.h",
         "objc/api/peerconnection/RTCIODevice.mm",
         "objc/api/peerconnection/RTCIceCandidate+Private.h",
@@ -1257,6 +1266,7 @@ if (is_ios || is_mac) {
         "../api/audio_codecs:audio_codecs_api",
         "../api/audio_codecs:builtin_audio_decoder_factory",
         "../api/audio_codecs:builtin_audio_encoder_factory",
+        "../api/crypto:frame_crypto_transformer",
         "../api/crypto:frame_decryptor_interface",
         "../api/crypto:frame_encryptor_interface",
         "../api/environment",
@@ -1448,6 +1458,11 @@ if (is_ios || is_mac) {
       }
     }
 
+    bundle_data("darwin_privacy_info") {
+      sources = [ "objc/PrivacyInfo.xcprivacy" ]
+      outputs = [ "{{bundle_resources_dir}}/{{source_file_part}}" ]
+    }
+
     if (is_ios) {
       apple_framework_bundle_with_umbrella_header("framework_objc") {
         info_plist = "objc/Info.plist"
@@ -1473,6 +1488,7 @@ if (is_ios || is_mac) {
           "objc/base/RTCVideoFrame.h",
           "objc/base/RTCVideoFrameBuffer.h",
           "objc/base/RTCVideoRenderer.h",
+          "objc/base/RTCAudioRenderer.h",
           "objc/base/RTCYUVPlanarBuffer.h",
           "objc/components/audio/RTCAudioDevice.h",
           "objc/components/audio/RTCAudioSession.h",
@@ -1502,6 +1518,9 @@ if (is_ios || is_mac) {
           "objc/api/peerconnection/RTCConfiguration.h",
           "objc/api/peerconnection/RTCDataChannel.h",
           "objc/api/peerconnection/RTCDataChannelConfiguration.h",
+          "objc/api/peerconnection/RTCDataPacketCryptor.h",
+          "objc/api/peerconnection/RTCFrameCryptor.h",
+          "objc/api/peerconnection/RTCFrameCryptorKeyProvider.h",
           "objc/api/peerconnection/RTCFieldTrials.h",
           "objc/api/peerconnection/RTCIceCandidate.h",
           "objc/api/peerconnection/RTCIceCandidateErrorEvent.h",
@@ -1601,6 +1620,7 @@ if (is_ios || is_mac) {
         deps = [
           ":audio_objc",
           ":base_objc",
+          ":darwin_privacy_info",
           ":default_codec_factory_objc",
           ":metal_objc",
           ":native_api",
@@ -1642,6 +1662,39 @@ if (is_ios || is_mac) {
     }
 
     if (is_mac) {
+      rtc_library("desktopcapture_objc") {
+        visibility = [ "*" ]
+        sources = [
+          "objc/components/capturer/RTCDesktopCapturer+Private.h",
+          "objc/components/capturer/RTCDesktopCapturer.h",
+          "objc/components/capturer/RTCDesktopCapturer.mm",
+          "objc/components/capturer/RTCDesktopMediaList+Private.h",
+          "objc/components/capturer/RTCDesktopMediaList.h",
+          "objc/components/capturer/RTCDesktopMediaList.mm",
+          "objc/components/capturer/RTCDesktopSource+Private.h",
+          "objc/components/capturer/RTCDesktopSource.h",
+          "objc/components/capturer/RTCDesktopSource.mm",
+          "objc/native/src/objc_desktop_capture.h",
+          "objc/native/src/objc_desktop_capture.mm",
+          "objc/native/src/objc_desktop_media_list.h",
+          "objc/native/src/objc_desktop_media_list.mm",
+        ]
+        frameworks = [ "AppKit.framework" ]
+
+        configs += [ "..:common_objc" ]
+
+        public_configs = [ ":common_config_objc" ]
+
+        deps = [
+          ":base_objc",
+          ":helpers_objc",
+          ":videoframebuffer_objc",
+          "../modules/desktop_capture",
+          "../rtc_base/system:gcd_helpers",
+          "//third_party:jpeg",
+        ]
+      }
+
       apple_framework_bundle_with_umbrella_header("mac_framework_objc") {
         info_plist = "objc/Info.plist"
         output_name = "WebRTC"
@@ -1655,8 +1708,11 @@ if (is_ios || is_mac) {
           "objc/api/peerconnection/RTCCryptoOptions.h",
           "objc/api/peerconnection/RTCDataChannel.h",
           "objc/api/peerconnection/RTCDataChannelConfiguration.h",
+          "objc/api/peerconnection/RTCDataPacketCryptor.h",
           "objc/api/peerconnection/RTCDtmfSender.h",
           "objc/api/peerconnection/RTCFieldTrials.h",
+          "objc/api/peerconnection/RTCFrameCryptor.h",
+          "objc/api/peerconnection/RTCFrameCryptorKeyProvider.h",
           "objc/api/peerconnection/RTCIODevice.h",
           "objc/api/peerconnection/RTCIceCandidate.h",
           "objc/api/peerconnection/RTCIceCandidateErrorEvent.h",
@@ -1697,6 +1753,7 @@ if (is_ios || is_mac) {
           "objc/api/video_codec/RTCVideoEncoderVP9.h",
           "objc/api/video_frame_buffer/RTCNativeI420Buffer.h",
           "objc/api/video_frame_buffer/RTCNativeMutableI420Buffer.h",
+          "objc/base/RTCAudioRenderer.h",
           "objc/base/RTCCodecSpecificInfo.h",
           "objc/base/RTCEncodedImage.h",
           "objc/base/RTCI420Buffer.h",
@@ -1718,6 +1775,9 @@ if (is_ios || is_mac) {
           "objc/base/RTCVideoRenderer.h",
           "objc/base/RTCYUVPlanarBuffer.h",
           "objc/components/capturer/RTCCameraVideoCapturer.h",
+          "objc/components/capturer/RTCDesktopCapturer.h",
+          "objc/components/capturer/RTCDesktopMediaList.h",
+          "objc/components/capturer/RTCDesktopSource.h",
           "objc/components/capturer/RTCFileVideoCapturer.h",
           "objc/components/renderer/metal/RTCMTLNSVideoView.h",
           "objc/components/renderer/opengl/RTCVideoViewShading.h",
@@ -1741,7 +1801,9 @@ if (is_ios || is_mac) {
 
         deps = [
           ":base_objc",
+          ":darwin_privacy_info",
           ":default_codec_factory_objc",
+          ":desktopcapture_objc",
           ":metal_objc",
           ":native_api",
           ":native_video",
