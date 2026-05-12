@@ -33,7 +33,7 @@ on:
 jobs:
   prepare_deps:
     name: Prepare WebRTC dependencies
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 360
     outputs:
       run_ios: ${{ steps.flags.outputs.run_ios }}
@@ -185,7 +185,7 @@ jobs:
     name: iOS tests
     needs: prepare_deps
     if: needs.prepare_deps.outputs.run_ios == 'true'
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 180
     steps:
       - name: Check out stream-webrtc-release-pipeline
@@ -269,7 +269,7 @@ jobs:
     name: Mac Catalyst build validation
     needs: prepare_deps
     if: needs.prepare_deps.outputs.run_mac_catalyst == 'true'
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 240
     steps:
       - name: Check out stream-webrtc-release-pipeline
@@ -327,7 +327,7 @@ jobs:
     name: macOS host tests
     needs: prepare_deps
     if: needs.prepare_deps.outputs.run_macos == 'true'
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 180
     steps:
       - name: Check out stream-webrtc-release-pipeline
