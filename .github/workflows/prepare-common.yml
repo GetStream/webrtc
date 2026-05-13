@@ -1,6 +1,6 @@
 # Resolves manual platform-test inputs into host-specific prepare plans.
 
-name: Prepare common platform plan
+name: Plan platform validation
 
 on:
   workflow_call:
@@ -34,7 +34,7 @@ on:
 
 jobs:
   resolve:
-    name: Resolve platform plan
+    name: Plan platform validation
     runs-on: ubuntu-latest
     outputs:
       run_ios: ${{ steps.flags.outputs.run_ios }}
@@ -47,7 +47,7 @@ jobs:
       android_target_os_cache_key: ${{ steps.flags.outputs.android_target_os_cache_key }}
     steps:
       - id: flags
-        name: Resolve platform flags and target_os
+        name: Resolve platform flags
         run: |
           set -euo pipefail
           ios='${{ inputs.platform_ios }}'

@@ -1,7 +1,7 @@
 # Manual WebRTC platform tests. Shared planning runs first, host-specific
 # prepare jobs produce platform-ready trees, then platform jobs fan out.
 
-name: Manual platform tests
+name: WebRTC Platform Validation
 
 permissions:
   contents: read
@@ -32,6 +32,7 @@ on:
 
 jobs:
   prepare_common:
+    name: Plan platform validation
     uses: ./.github/workflows/prepare-common.yml
     with:
       platform_ios: ${{ inputs.platform_ios }}
@@ -39,6 +40,7 @@ jobs:
       platform_android: ${{ inputs.platform_android }}
 
   prepare_apple:
+    name: Prepare Apple dependencies
     needs: prepare_common
     if: needs.prepare_common.outputs.run_apple == 'true'
     uses: ./.github/workflows/prepare-apple.yml
@@ -50,6 +52,7 @@ jobs:
     secrets: inherit
 
   prepare_android:
+    name: Prepare Android dependencies
     needs: prepare_common
     if: needs.prepare_common.outputs.run_android == 'true'
     uses: ./.github/workflows/prepare-android.yml
@@ -61,7 +64,7 @@ jobs:
     secrets: inherit
 
   ios_test:
-    name: iOS tests
+    name: Validate iOS simulator tests
     needs: [prepare_common, prepare_apple]
     if: needs.prepare_common.outputs.run_ios == 'true'
     runs-on: macos-26
@@ -145,7 +148,7 @@ jobs:
           "config_file:${{ github.workspace }}/release-pipeline/fastlane/mb_configs/local_ios.pyl"
 
   macos_test:
-    name: macOS host tests
+    name: Validate macOS host tests
     needs: [prepare_common, prepare_apple]
     if: needs.prepare_common.outputs.run_macos == 'true'
     runs-on: macos-26
@@ -196,7 +199,7 @@ jobs:
           "root:${{ github.workspace }}/webrtc-tree/.output/src"
 
   android_test:
-    name: Android AAR build validation
+    name: Validate Android AAR build
     needs: [prepare_common, prepare_android]
     if: needs.prepare_common.outputs.run_android == 'true'
     runs-on: runner-extra-capacity

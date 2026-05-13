@@ -1,6 +1,6 @@
 # Prepares a macOS-host WebRTC checkout for iOS/macOS fan-out jobs.
 
-name: Prepare Apple WebRTC dependencies
+name: Prepare Apple dependencies
 
 on:
   workflow_call:
@@ -20,7 +20,7 @@ on:
 
 jobs:
   prepare:
-    name: Prepare Apple WebRTC dependencies
+    name: Prepare Apple dependencies
     runs-on: macos-26
     timeout-minutes: 360
     steps:

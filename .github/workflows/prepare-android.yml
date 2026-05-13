@@ -1,6 +1,6 @@
 # Prepares a Linux-host WebRTC checkout for Android fan-out jobs.
 
-name: Prepare Android WebRTC dependencies
+name: Prepare Android dependencies
 
 on:
   workflow_call:
@@ -20,7 +20,7 @@ on:
 
 jobs:
   prepare:
-    name: Prepare Android WebRTC dependencies
+    name: Prepare Android dependencies
     runs-on: runner-extra-capacity
     timeout-minutes: 360
     steps:
