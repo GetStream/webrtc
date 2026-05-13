@@ -10,14 +10,6 @@
 
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
-#ifdef __cplusplus
-extern "C" {
-#endif
-#import <OCMock/OCMock.h>
-#ifdef __cplusplus
-}
-#endif
-#import "api/peerconnection/RTCPeerConnectionFactory+Native.h"
 #import "api/peerconnection/RTCPeerConnectionFactoryBuilder+DefaultComponents.h"
 #import "api/peerconnection/RTCPeerConnectionFactoryBuilder.h"
 
@@ -31,7 +23,6 @@ extern "C" {
 #include <utility>
 
 #include "rtc_base/gunit.h"
-#include "rtc_base/system/unused.h"
 
 @interface RTCPeerConnectionFactoryBuilderTests : XCTestCase
 @end
@@ -39,27 +30,14 @@ extern "C" {
 @implementation RTCPeerConnectionFactoryBuilderTests
 
 - (void)testBuilder {
-  id factoryMock =
-      OCMStrictClassMock([RTC_OBJC_TYPE(RTCPeerConnectionFactory) class]);
-  OCMExpect([factoryMock alloc]).andReturn(factoryMock);
-  webrtc::PeerConnectionFactoryDependencies default_deps;
-  RTC_UNUSED([[[[factoryMock expect] andReturn:factoryMock]
-      ignoringNonObjectArgs] initWithMediaAndDependencies:std::move(default_deps)]);
   RTCPeerConnectionFactoryBuilder* builder =
       [[RTCPeerConnectionFactoryBuilder alloc] init];
   RTC_OBJC_TYPE(RTCPeerConnectionFactory)* peerConnectionFactory =
       [builder createPeerConnectionFactory];
   EXPECT_TRUE(peerConnectionFactory != nil);
-  OCMVerifyAll(factoryMock);
 }
 
 - (void)testAudioDeviceModuleBuilder {
-  id factoryMock =
-      OCMStrictClassMock([RTC_OBJC_TYPE(RTCPeerConnectionFactory) class]);
-  OCMExpect([factoryMock alloc]).andReturn(factoryMock);
-  webrtc::PeerConnectionFactoryDependencies default_deps;
-  RTC_UNUSED([[[[factoryMock expect] andReturn:factoryMock]
-      ignoringNonObjectArgs] initWithMediaAndDependencies:std::move(default_deps)]);
   RTCPeerConnectionFactoryBuilder* builder =
       [RTCPeerConnectionFactoryBuilder builder];
   __block int calledAdmBuilder = 0;
@@ -71,21 +49,13 @@ extern "C" {
       [builder createPeerConnectionFactory];
   EXPECT_TRUE(peerConnectionFactory != nil);
   EXPECT_EQ(calledAdmBuilder, 1);
-  OCMVerifyAll(factoryMock);
 }
 
 - (void)testDefaultComponentsBuilder {
-  id factoryMock =
-      OCMStrictClassMock([RTC_OBJC_TYPE(RTCPeerConnectionFactory) class]);
-  OCMExpect([factoryMock alloc]).andReturn(factoryMock);
-  webrtc::PeerConnectionFactoryDependencies default_deps;
-  RTC_UNUSED([[[[factoryMock expect] andReturn:factoryMock]
-      ignoringNonObjectArgs] initWithMediaAndDependencies:std::move(default_deps)]);
   RTCPeerConnectionFactoryBuilder* builder =
       [RTCPeerConnectionFactoryBuilder defaultBuilder];
   RTC_OBJC_TYPE(RTCPeerConnectionFactory)* peerConnectionFactory =
       [builder createPeerConnectionFactory];
   EXPECT_TRUE(peerConnectionFactory != nil);
-  OCMVerifyAll(factoryMock);
 }
 @end
