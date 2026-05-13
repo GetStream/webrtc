@@ -45,7 +45,6 @@ class MockTransformableVideoFrame : public TransformableVideoFrameInterface {
               (const, override));
   MOCK_METHOD(std::string, GetMimeType, (), (const, override));
   MOCK_METHOD(VideoFrameMetadata, Metadata, (), (const, override));
-  MOCK_METHOD(RTPVideoHeader&, header, (), (const, override));
   MOCK_METHOD(std::optional<Timestamp>,
               GetPresentationTimestamp,
               (),

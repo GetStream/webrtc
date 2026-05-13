@@ -562,6 +562,14 @@ template("rtc_test") {
       }
     }
 
+    if (!build_with_chromium && rtc_include_tests &&
+        (!defined(invoker.is_xctest) || !invoker.is_xctest)) {
+      if (!defined(deps)) {
+        deps = []
+      }
+      deps += [ webrtc_root + "test:test_main" ]
+    }
+
     assert(
         !defined(absl_deps),
         "`absl_deps` has been deprecated, add your Abseil dependencies to the `deps` variable.")
