@@ -33,7 +33,7 @@ on:
 jobs:
   prepare_deps:
     name: Prepare WebRTC dependencies
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 360
     outputs:
       run_ios: ${{ steps.flags.outputs.run_ios }}
@@ -122,15 +122,35 @@ jobs:
           EOF
           chmod +x "${GITHUB_WORKSPACE}/.github-git-askpass"
 
-      - name: Restore gclient checkout cache
+      - name: Restore gclient source Git cache
         id: gclient-cache
         uses: actions/cache/restore@v4
         with:
-          path: ${{ github.workspace }}/.output
-          key: webrtc-gclient-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os }}-${{ hashFiles('DEPS') }}
+          path: ${{ github.workspace }}/.output/src/.git
+          key: webrtc-gclient-src-git-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os }}-${{ hashFiles('DEPS') }}
           restore-keys: |
-            webrtc-gclient-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os }}-
-            webrtc-gclient-${{ runner.os }}-${{ runner.arch }}-
+            webrtc-gclient-src-git-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os }}-
+            webrtc-gclient-src-git-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Materialize cached WebRTC source checkout
+        if: steps.gclient-cache.outputs.cache-hit == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GIT_ASKPASS: ${{ github.workspace }}/.github-git-askpass
+          GIT_TERMINAL_PROMPT: "0"
+          GIT_CONFIG_COUNT: "2"
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: "git@github.com:"
+          GIT_CONFIG_KEY_1: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_1: "ssh://git@github.com/"
+        run: |
+          set -euo pipefail
+          src="${GITHUB_WORKSPACE}/.output/src"
+          git -C "${src}" remote set-url origin https://github.com/GetStream/webrtc.git
+          git -C "${src}" fetch --prune origin "${{ inputs.webrtc_ref }}"
+          git -C "${src}" checkout --force FETCH_HEAD
+          git -C "${src}" reset --hard FETCH_HEAD
+          git -C "${src}" clean -ffdx
 
       - name: Install depot_tools
         run: |
@@ -151,16 +171,44 @@ jobs:
           GIT_CONFIG_VALUE_0: "git@github.com:"
           GIT_CONFIG_KEY_1: url.https://github.com/.insteadOf
           GIT_CONFIG_VALUE_1: "ssh://git@github.com/"
+          GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
         run: >-
           bundle exec fastlane deps sync
           "root:${{ github.workspace }}"
           "target_os:${{ steps.flags.outputs.gclient_target_os }}"
+          run_hooks:false
 
-      - name: Save gclient checkout cache
+      - name: Restore gclient hook download cache
+        id: gclient-hook-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ github.workspace }}/.output/src/resources
+            ${{ github.workspace }}/.output/src/tools/clang/dsymutil/bin
+          key: webrtc-gclient-hook-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('DEPS', 'resources/**/*.sha1', 'tools/clang/dsymutil/bin/*.sha1') }}
+          restore-keys: |
+            webrtc-gclient-hook-downloads-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: gclient runhooks (deps lane)
+        working-directory: release-pipeline
+        run: >-
+          bundle exec fastlane deps runhooks
+          "root:${{ github.workspace }}"
+
+      - name: Save gclient hook download cache
+        if: steps.gclient-hook-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ github.workspace }}/.output/src/resources
+            ${{ github.workspace }}/.output/src/tools/clang/dsymutil/bin
+          key: ${{ steps.gclient-hook-cache.outputs.cache-primary-key }}
+
+      - name: Save gclient source Git cache
         if: steps.gclient-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: ${{ github.workspace }}/.output
+          path: ${{ github.workspace }}/.output/src/.git
           key: ${{ steps.gclient-cache.outputs.cache-primary-key }}
 
       - name: Archive prepared WebRTC tree
@@ -169,6 +217,7 @@ jobs:
           cd "${{ github.workspace }}"
           COPYFILE_DISABLE=1 tar -czf "${{ github.workspace }}/webrtc-src-prepared.tar.gz" \
             --exclude='./release-pipeline' \
+            --exclude='./.gclient-git-cache' \
             --exclude='./webrtc-src-prepared.tar.gz' \
             --exclude='./.git' \
             .
@@ -185,7 +234,7 @@ jobs:
     name: iOS tests
     needs: prepare_deps
     if: needs.prepare_deps.outputs.run_ios == 'true'
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 180
     steps:
       - name: Check out stream-webrtc-release-pipeline
@@ -269,7 +318,7 @@ jobs:
     name: Mac Catalyst build validation
     needs: prepare_deps
     if: needs.prepare_deps.outputs.run_mac_catalyst == 'true'
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 240
     steps:
       - name: Check out stream-webrtc-release-pipeline
@@ -327,7 +376,7 @@ jobs:
     name: macOS host tests
     needs: prepare_deps
     if: needs.prepare_deps.outputs.run_macos == 'true'
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 180
     steps:
       - name: Check out stream-webrtc-release-pipeline
