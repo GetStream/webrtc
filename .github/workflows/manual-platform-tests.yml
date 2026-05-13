@@ -28,7 +28,7 @@ on:
       ignore_cache:
         description: Skip restoring dependency caches and force a fresh sync
         type: boolean
-        default: false
+        default: true
 
 jobs:
   prepare_common:
