@@ -35,6 +35,7 @@ jobs:
       run_ios: ${{ steps.flags.outputs.run_ios }}
       run_macos: ${{ steps.flags.outputs.run_macos }}
       gclient_target_os: ${{ steps.flags.outputs.gclient_target_os }}
+      gclient_target_os_cache_key: ${{ steps.flags.outputs.gclient_target_os_cache_key }}
     steps:
       - id: flags
         name: Resolve platform flags and gclient target_os
@@ -66,7 +67,9 @@ jobs:
             exit 1
           fi
           IFS=','
-          echo "gclient_target_os=${os_list[*]}" >> "${GITHUB_OUTPUT}"
+          target_os="${os_list[*]}"
+          echo "gclient_target_os=${target_os}" >> "${GITHUB_OUTPUT}"
+          echo "gclient_target_os_cache_key=${target_os//,/-}" >> "${GITHUB_OUTPUT}"
 
       - name: Check out this repository (WebRTC tree)
         uses: actions/checkout@v4
@@ -122,9 +125,9 @@ jobs:
           path: |
             ${{ github.workspace }}/.output/src/.git
             ${{ github.workspace }}/.gclient-git-cache
-          key: webrtc-gclient-src-git-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os }}-${{ hashFiles('DEPS') }}
+          key: webrtc-gclient-src-git-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os_cache_key }}-${{ hashFiles('DEPS') }}
           restore-keys: |
-            webrtc-gclient-src-git-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os }}-
+            webrtc-gclient-src-git-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os_cache_key }}-
             webrtc-gclient-src-git-v2-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Materialize cached WebRTC source checkout
