@@ -126,11 +126,13 @@ jobs:
         id: gclient-cache
         uses: actions/cache/restore@v4
         with:
-          path: ${{ github.workspace }}/.output/src/.git
-          key: webrtc-gclient-src-git-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os }}-${{ hashFiles('DEPS') }}
+          path: |
+            ${{ github.workspace }}/.output/src/.git
+            ${{ github.workspace }}/.gclient-git-cache
+          key: webrtc-gclient-src-git-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os }}-${{ hashFiles('DEPS') }}
           restore-keys: |
-            webrtc-gclient-src-git-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os }}-
-            webrtc-gclient-src-git-${{ runner.os }}-${{ runner.arch }}-
+            webrtc-gclient-src-git-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os }}-
+            webrtc-gclient-src-git-v2-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Materialize cached WebRTC source checkout
         if: steps.gclient-cache.outputs.cache-hit == 'true'
@@ -146,11 +148,31 @@ jobs:
         run: |
           set -euo pipefail
           src="${GITHUB_WORKSPACE}/.output/src"
-          git -C "${src}" remote set-url origin https://github.com/GetStream/webrtc.git
-          git -C "${src}" fetch --prune origin "${{ inputs.webrtc_ref }}"
-          git -C "${src}" checkout --force FETCH_HEAD
-          git -C "${src}" reset --hard FETCH_HEAD
-          git -C "${src}" clean -ffdx
+          if [[ ! -d "${src}/.git" ]]; then
+            echo "No cached Git checkout found at ${src}/.git; gclient sync will clone it."
+            exit 0
+          fi
+
+          alternates="${src}/.git/objects/info/alternates"
+          if [[ -f "${alternates}" ]]; then
+            while IFS= read -r alternate; do
+              [[ -z "${alternate}" ]] && continue
+              if [[ ! -d "${alternate}" ]]; then
+                echo "Discarding cached Git checkout with missing alternate object store: ${alternate}"
+                rm -rf "${src}/.git"
+                exit 0
+              fi
+            done < "${alternates}"
+          fi
+
+          if ! git -C "${src}" remote set-url origin https://github.com/GetStream/webrtc.git ||
+             ! git -C "${src}" fetch --prune origin "${{ inputs.webrtc_ref }}" ||
+             ! git -C "${src}" checkout --force FETCH_HEAD ||
+             ! git -C "${src}" reset --hard FETCH_HEAD ||
+             ! git -C "${src}" clean -ffdx; then
+            echo "Discarding unusable cached Git checkout; gclient sync will recreate it."
+            rm -rf "${src}/.git"
+          fi
 
       - name: Install depot_tools
         run: |
@@ -208,7 +230,9 @@ jobs:
         if: steps.gclient-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: ${{ github.workspace }}/.output/src/.git
+          path: |
+            ${{ github.workspace }}/.output/src/.git
+            ${{ github.workspace }}/.gclient-git-cache
           key: ${{ steps.gclient-cache.outputs.cache-primary-key }}
 
       - name: Archive prepared WebRTC tree
