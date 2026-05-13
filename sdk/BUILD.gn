@@ -254,7 +254,7 @@ if (is_ios || is_mac) {
   }
 
   if (!build_with_chromium) {
-    if (is_ios) {
+    if (is_ios || is_mac) {
       rtc_library("native_api_audio_device_module") {
         visibility = [ "*" ]
 
@@ -264,7 +264,6 @@ if (is_ios || is_mac) {
         ]
 
         deps = [
-          ":audio_device",
           ":audio_device_module_error_handler",
           "../api:make_ref_counted",
           "../api:scoped_refptr",
@@ -275,8 +274,14 @@ if (is_ios || is_mac) {
           "../rtc_base:logging",
           "../system_wrappers",
         ]
-      }
 
+        if (is_ios) {
+          deps += [ ":audio_device" ]
+        }
+      }
+    }
+
+    if (is_ios) {
       rtc_source_set("audio_session_observer") {
         visibility = [ ":*" ]
 
@@ -682,7 +687,6 @@ if (is_ios || is_mac) {
       if (is_mac) {
         sources += [
           "objc/components/renderer/metal/RTCMTLNSVideoView.h",
-          "objc/components/renderer/metal/RTCMTLNSVideoView.m",
         ]
         frameworks += [ "AppKit.framework" ]
       }
@@ -1300,10 +1304,9 @@ if (is_ios || is_mac) {
         "../system_wrappers:metrics",
       ]
 
-      if (is_ios) {
+      if (is_ios || is_mac) {
         deps += [
           ":native_api_audio_device_module",
-          "../api/transport:network_control",
         ]
       }
     }

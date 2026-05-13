@@ -1177,7 +1177,7 @@ if (is_mac || is_ios) {
       deps = [ ":create_bracket_include_headers_$this_target_name" ]
     }
 
-    if (is_mac || target_environment == "catalyst") {
+    if (is_mac) {
       headers_dir = "Versions/A/Headers"
       copy("copy_umbrella_header_$target_name") {
         sources = [ umbrella_header_path ]
