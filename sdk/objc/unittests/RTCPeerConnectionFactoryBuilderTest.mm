@@ -9,7 +9,9 @@
  */
 
 #import <Foundation/Foundation.h>
+#import <objc/runtime.h>
 #import <XCTest/XCTest.h>
+#import "api/peerconnection/RTCPeerConnectionFactory+Native.h"
 #import "api/peerconnection/RTCPeerConnectionFactoryBuilder+DefaultComponents.h"
 #import "api/peerconnection/RTCPeerConnectionFactoryBuilder.h"
 
@@ -24,6 +26,34 @@
 
 #include "rtc_base/gunit.h"
 
+namespace {
+
+id StubInitWithMediaAndDependencies(
+    RTC_OBJC_TYPE(RTCPeerConnectionFactory) * factory,
+    SEL selector,
+    webrtc::PeerConnectionFactoryDependencies dependencies) {
+  return factory;
+}
+
+RTC_OBJC_TYPE(RTCPeerConnectionFactory) *
+    CreatePeerConnectionFactoryWithStubbedNativeInitializer(
+        RTCPeerConnectionFactoryBuilder *builder) {
+  Method initializer = class_getInstanceMethod(
+      [RTC_OBJC_TYPE(RTCPeerConnectionFactory) class],
+      @selector(initWithMediaAndDependencies:));
+  IMP original_initializer =
+      method_setImplementation(initializer,
+                               reinterpret_cast<IMP>(
+                                   &StubInitWithMediaAndDependencies));
+  @try {
+    return [builder createPeerConnectionFactory];
+  } @finally {
+    method_setImplementation(initializer, original_initializer);
+  }
+}
+
+}  // namespace
+
 @interface RTCPeerConnectionFactoryBuilderTests : XCTestCase
 @end
 
@@ -33,7 +63,7 @@
   RTCPeerConnectionFactoryBuilder* builder =
       [[RTCPeerConnectionFactoryBuilder alloc] init];
   RTC_OBJC_TYPE(RTCPeerConnectionFactory)* peerConnectionFactory =
-      [builder createPeerConnectionFactory];
+      CreatePeerConnectionFactoryWithStubbedNativeInitializer(builder);
   EXPECT_TRUE(peerConnectionFactory != nil);
 }
 
@@ -46,7 +76,7 @@
     return webrtc::scoped_refptr<webrtc::AudioDeviceModule>(nullptr);
   }];
   RTC_OBJC_TYPE(RTCPeerConnectionFactory)* peerConnectionFactory =
-      [builder createPeerConnectionFactory];
+      CreatePeerConnectionFactoryWithStubbedNativeInitializer(builder);
   EXPECT_TRUE(peerConnectionFactory != nil);
   EXPECT_EQ(calledAdmBuilder, 1);
 }
@@ -55,7 +85,7 @@
   RTCPeerConnectionFactoryBuilder* builder =
       [RTCPeerConnectionFactoryBuilder defaultBuilder];
   RTC_OBJC_TYPE(RTCPeerConnectionFactory)* peerConnectionFactory =
-      [builder createPeerConnectionFactory];
+      CreatePeerConnectionFactoryWithStubbedNativeInitializer(builder);
   EXPECT_TRUE(peerConnectionFactory != nil);
 }
 @end
