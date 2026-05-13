@@ -25,6 +25,10 @@ on:
         description: Run macOS host tests
         type: boolean
         default: false
+      ignore_cache:
+        description: Skip restoring dependency caches and force a fresh sync
+        type: boolean
+        default: false
 
 jobs:
   prepare_deps:
@@ -119,6 +123,7 @@ jobs:
           chmod +x "${GITHUB_WORKSPACE}/.github-git-askpass"
 
       - name: Restore gclient source Git cache
+        if: ${{ !inputs.ignore_cache }}
         id: gclient-cache
         uses: actions/cache/restore@v4
         with:
@@ -131,6 +136,7 @@ jobs:
             webrtc-gclient-src-git-v2-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Materialize cached WebRTC source checkout
+        if: ${{ !inputs.ignore_cache }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GIT_ASKPASS: ${{ github.workspace }}/.github-git-askpass
@@ -178,6 +184,7 @@ jobs:
           echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
 
       - name: gclient sync (deps lane)
+        if: ${{ !inputs.ignore_cache }}
         working-directory: release-pipeline
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -196,7 +203,27 @@ jobs:
           number_of_jobs:2
           run_hooks:false
 
+      - name: gclient sync without cache (deps lane)
+        if: ${{ inputs.ignore_cache }}
+        working-directory: release-pipeline
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GIT_ASKPASS: ${{ github.workspace }}/.github-git-askpass
+          GIT_TERMINAL_PROMPT: "0"
+          GIT_CONFIG_COUNT: "2"
+          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_0: "git@github.com:"
+          GIT_CONFIG_KEY_1: url.https://github.com/.insteadOf
+          GIT_CONFIG_VALUE_1: "ssh://git@github.com/"
+        run: >-
+          bundle exec fastlane deps sync
+          "root:${{ github.workspace }}"
+          "target_os:${{ steps.flags.outputs.gclient_target_os }}"
+          number_of_jobs:2
+          run_hooks:false
+
       - name: Restore gclient hook download cache
+        if: ${{ !inputs.ignore_cache }}
         id: gclient-hook-cache
         uses: actions/cache/restore@v4
         with:
@@ -214,22 +241,22 @@ jobs:
           "root:${{ github.workspace }}"
 
       - name: Save gclient hook download cache
-        if: steps.gclient-hook-cache.outputs.cache-hit != 'true'
+        if: ${{ steps.gclient-hook-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
         with:
           path: |
             ${{ github.workspace }}/.output/src/resources
             ${{ github.workspace }}/.output/src/tools/clang/dsymutil/bin
-          key: ${{ steps.gclient-hook-cache.outputs.cache-primary-key }}
+          key: webrtc-gclient-hook-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.output/src/resources/**/*.sha1', '.output/src/tools/clang/dsymutil/bin/*.sha1') }}
 
       - name: Save gclient source Git cache
-        if: steps.gclient-cache.outputs.cache-hit != 'true'
+        if: ${{ steps.gclient-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
         with:
           path: |
             ${{ github.workspace }}/.output/src/.git
             ${{ github.workspace }}/.gclient-git-cache
-          key: ${{ steps.gclient-cache.outputs.cache-primary-key }}
+          key: webrtc-gclient-src-git-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os_cache_key }}-${{ hashFiles('DEPS') }}
 
       - name: Archive prepared WebRTC tree
         run: |
