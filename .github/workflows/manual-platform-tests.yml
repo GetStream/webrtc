@@ -1,9 +1,5 @@
-# Manual WebRTC platform tests with a single gclient sync, then fan-out jobs.
-# Uses HTTPS GitHub authentication so gclient can fetch private GetStream repos without SSH keys.
-# This workflow lives at repo root (the WebRTC `src` tree).
-#
-# Fixed behavior (no workflow inputs): gclient sync uses default -j8; iOS/macOS tests use Fastlane
-# default targets and simulator auto-selection; Xcode is the runner image default.
+# Manual WebRTC platform tests. Shared planning runs first, host-specific
+# prepare jobs produce platform-ready trees, then platform jobs fan out.
 
 name: Manual platform tests
 
@@ -25,262 +21,49 @@ on:
         description: Run macOS host tests
         type: boolean
         default: false
+      platform_android:
+        description: Run Android AAR build validation
+        type: boolean
+        default: false
       ignore_cache:
         description: Skip restoring dependency caches and force a fresh sync
         type: boolean
         default: false
 
 jobs:
-  prepare_deps:
-    name: Prepare WebRTC dependencies
-    runs-on: macos-26
-    timeout-minutes: 360
-    outputs:
-      run_ios: ${{ steps.flags.outputs.run_ios }}
-      run_macos: ${{ steps.flags.outputs.run_macos }}
-      gclient_target_os: ${{ steps.flags.outputs.gclient_target_os }}
-      gclient_target_os_cache_key: ${{ steps.flags.outputs.gclient_target_os_cache_key }}
-    steps:
-      - id: flags
-        name: Resolve platform flags and gclient target_os
-        run: |
-          set -euo pipefail
-          ios='${{ inputs.platform_ios }}'
-          macos='${{ inputs.platform_macos }}'
-          if [[ "${ios}" != "true" && "${macos}" != "true" ]]; then
-            echo "Select at least one platform (enable one or more checkboxes above)."
-            exit 1
-          fi
-          echo "run_ios=${ios}" >> "${GITHUB_OUTPUT}"
-          echo "run_macos=${macos}" >> "${GITHUB_OUTPUT}"
+  prepare_common:
+    uses: ./.github/workflows/prepare-common.yml
+    with:
+      platform_ios: ${{ inputs.platform_ios }}
+      platform_macos: ${{ inputs.platform_macos }}
+      platform_android: ${{ inputs.platform_android }}
 
-          need_ios=false
-          need_mac=false
-          if [[ "${ios}" == "true" ]]; then
-            need_ios=true
-          fi
-          if [[ "${macos}" == "true" ]]; then
-            need_mac=true
-          fi
+  prepare_apple:
+    needs: prepare_common
+    if: needs.prepare_common.outputs.run_apple == 'true'
+    uses: ./.github/workflows/prepare-apple.yml
+    with:
+      webrtc_ref: ${{ inputs.webrtc_ref }}
+      target_os: ${{ needs.prepare_common.outputs.apple_target_os }}
+      target_os_cache_key: ${{ needs.prepare_common.outputs.apple_target_os_cache_key }}
+      ignore_cache: ${{ inputs.ignore_cache }}
+    secrets: inherit
 
-          os_list=()
-          if [[ "${need_ios}" == "true" ]]; then os_list+=("ios"); fi
-          if [[ "${need_mac}" == "true" ]]; then os_list+=("mac"); fi
-          if [[ ${#os_list[@]} -eq 0 ]]; then
-            echo "No platforms selected for dependency sync."
-            exit 1
-          fi
-          IFS=','
-          target_os="${os_list[*]}"
-          echo "gclient_target_os=${target_os}" >> "${GITHUB_OUTPUT}"
-          echo "gclient_target_os_cache_key=${target_os//,/-}" >> "${GITHUB_OUTPUT}"
-
-      - name: Check out this repository (WebRTC tree)
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.webrtc_ref }}
-
-      - name: Check out stream-webrtc-release-pipeline
-        uses: actions/checkout@v4
-        with:
-          repository: GetStream/stream-webrtc-release-pipeline
-          path: release-pipeline
-          token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
-
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "3.2"
-          working-directory: release-pipeline
-          bundler-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.x"
-
-      - name: Git authentication for HTTPS fetches
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          git config --global credential.helper store
-          git credential approve <<EOF
-          protocol=https
-          host=github.com
-          username=x-access-token
-          password=${GITHUB_TOKEN}
-          EOF
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
-          git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
-          cat > "${GITHUB_WORKSPACE}/.github-git-askpass" <<'EOF'
-          #!/usr/bin/env bash
-          case "$1" in
-            *Username*) echo "x-access-token" ;;
-            *Password*) echo "${GITHUB_TOKEN}" ;;
-            *) echo "" ;;
-          esac
-          EOF
-          chmod +x "${GITHUB_WORKSPACE}/.github-git-askpass"
-
-      - name: Restore gclient source Git cache
-        if: ${{ !inputs.ignore_cache }}
-        id: gclient-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            ${{ github.workspace }}/.output/src/.git
-            ${{ github.workspace }}/.gclient-git-cache
-          key: webrtc-gclient-src-git-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os_cache_key }}-${{ hashFiles('DEPS') }}
-          restore-keys: |
-            webrtc-gclient-src-git-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os_cache_key }}-
-            webrtc-gclient-src-git-v2-${{ runner.os }}-${{ runner.arch }}-
-
-      - name: Materialize cached WebRTC source checkout
-        if: ${{ !inputs.ignore_cache }}
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          GIT_ASKPASS: ${{ github.workspace }}/.github-git-askpass
-          GIT_TERMINAL_PROMPT: "0"
-          GIT_CONFIG_COUNT: "2"
-          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
-          GIT_CONFIG_VALUE_0: "git@github.com:"
-          GIT_CONFIG_KEY_1: url.https://github.com/.insteadOf
-          GIT_CONFIG_VALUE_1: "ssh://git@github.com/"
-        run: |
-          set -euo pipefail
-          src="${GITHUB_WORKSPACE}/.output/src"
-          if [[ ! -d "${src}/.git" ]]; then
-            echo "No cached Git checkout found at ${src}/.git; gclient sync will clone it."
-            exit 0
-          fi
-
-          alternates="${src}/.git/objects/info/alternates"
-          if [[ -f "${alternates}" ]]; then
-            while IFS= read -r alternate; do
-              [[ -z "${alternate}" ]] && continue
-              if [[ ! -d "${alternate}" ]]; then
-                echo "Discarding cached Git checkout with missing alternate object store: ${alternate}"
-                rm -rf "${src}/.git"
-                exit 0
-              fi
-            done < "${alternates}"
-          fi
-
-          if ! git -C "${src}" remote set-url origin https://github.com/GetStream/webrtc.git ||
-             ! git -C "${src}" fetch --prune origin "${{ inputs.webrtc_ref }}" ||
-             ! git -C "${src}" checkout --force FETCH_HEAD ||
-             ! git -C "${src}" reset --hard FETCH_HEAD ||
-             ! git -C "${src}" clean -ffdx; then
-            echo "Discarding unusable cached Git checkout; gclient sync will recreate it."
-            rm -rf "${src}/.git"
-          fi
-
-      - name: Install depot_tools
-        run: |
-          if [[ ! -d "${HOME}/depot_tools" ]]; then
-            git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "${HOME}/depot_tools"
-          fi
-          echo "PATH=${HOME}/depot_tools:${PATH}" >> "${GITHUB_ENV}"
-          echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
-
-      - name: gclient sync (deps lane)
-        if: ${{ !inputs.ignore_cache }}
-        working-directory: release-pipeline
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          GIT_ASKPASS: ${{ github.workspace }}/.github-git-askpass
-          GIT_TERMINAL_PROMPT: "0"
-          GIT_CONFIG_COUNT: "2"
-          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
-          GIT_CONFIG_VALUE_0: "git@github.com:"
-          GIT_CONFIG_KEY_1: url.https://github.com/.insteadOf
-          GIT_CONFIG_VALUE_1: "ssh://git@github.com/"
-          GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
-        run: >-
-          bundle exec fastlane deps sync
-          "root:${{ github.workspace }}"
-          "target_os:${{ steps.flags.outputs.gclient_target_os }}"
-          number_of_jobs:2
-          run_hooks:false
-
-      - name: gclient sync without cache (deps lane)
-        if: ${{ inputs.ignore_cache }}
-        working-directory: release-pipeline
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          GIT_ASKPASS: ${{ github.workspace }}/.github-git-askpass
-          GIT_TERMINAL_PROMPT: "0"
-          GIT_CONFIG_COUNT: "2"
-          GIT_CONFIG_KEY_0: url.https://github.com/.insteadOf
-          GIT_CONFIG_VALUE_0: "git@github.com:"
-          GIT_CONFIG_KEY_1: url.https://github.com/.insteadOf
-          GIT_CONFIG_VALUE_1: "ssh://git@github.com/"
-        run: >-
-          bundle exec fastlane deps sync
-          "root:${{ github.workspace }}"
-          "target_os:${{ steps.flags.outputs.gclient_target_os }}"
-          number_of_jobs:2
-          run_hooks:false
-
-      - name: Restore gclient hook download cache
-        if: ${{ !inputs.ignore_cache }}
-        id: gclient-hook-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            ${{ github.workspace }}/.output/src/resources
-            ${{ github.workspace }}/.output/src/tools/clang/dsymutil/bin
-          key: webrtc-gclient-hook-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.output/src/resources/**/*.sha1', '.output/src/tools/clang/dsymutil/bin/*.sha1') }}
-          restore-keys: |
-            webrtc-gclient-hook-downloads-${{ runner.os }}-${{ runner.arch }}-
-
-      - name: gclient runhooks (deps lane)
-        working-directory: release-pipeline
-        run: >-
-          bundle exec fastlane deps runhooks
-          "root:${{ github.workspace }}"
-
-      - name: Save gclient hook download cache
-        if: ${{ steps.gclient-hook-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ${{ github.workspace }}/.output/src/resources
-            ${{ github.workspace }}/.output/src/tools/clang/dsymutil/bin
-          key: webrtc-gclient-hook-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.output/src/resources/**/*.sha1', '.output/src/tools/clang/dsymutil/bin/*.sha1') }}
-
-      - name: Save gclient source Git cache
-        if: ${{ steps.gclient-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ${{ github.workspace }}/.output/src/.git
-            ${{ github.workspace }}/.gclient-git-cache
-          key: webrtc-gclient-src-git-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.flags.outputs.gclient_target_os_cache_key }}-${{ hashFiles('DEPS') }}
-
-      - name: Archive prepared WebRTC tree
-        run: |
-          set -euo pipefail
-          cd "${{ github.workspace }}"
-          COPYFILE_DISABLE=1 tar -czf "${{ github.workspace }}/webrtc-src-prepared.tar.gz" \
-            --exclude='./release-pipeline' \
-            --exclude='./.gclient-git-cache' \
-            --exclude='./webrtc-src-prepared.tar.gz' \
-            --exclude='./.git' \
-            .
-
-      - name: Upload dependency artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: webrtc-src-prepared
-          path: webrtc-src-prepared.tar.gz
-          retention-days: 2
-          compression-level: 0
+  prepare_android:
+    needs: prepare_common
+    if: needs.prepare_common.outputs.run_android == 'true'
+    uses: ./.github/workflows/prepare-android.yml
+    with:
+      webrtc_ref: ${{ inputs.webrtc_ref }}
+      target_os: ${{ needs.prepare_common.outputs.android_target_os }}
+      target_os_cache_key: ${{ needs.prepare_common.outputs.android_target_os_cache_key }}
+      ignore_cache: ${{ inputs.ignore_cache }}
+    secrets: inherit
 
   ios_test:
     name: iOS tests
-    needs: prepare_deps
-    if: needs.prepare_deps.outputs.run_ios == 'true'
+    needs: [prepare_common, prepare_apple]
+    if: needs.prepare_common.outputs.run_ios == 'true'
     runs-on: macos-26
     timeout-minutes: 180
     steps:
@@ -294,13 +77,13 @@ jobs:
       - name: Download prepared WebRTC tree
         uses: actions/download-artifact@v4
         with:
-          name: webrtc-src-prepared
+          name: webrtc-src-prepared-apple
 
       - name: Extract WebRTC tree
         run: |
           set -euo pipefail
           mkdir -p "${{ github.workspace }}/webrtc-tree"
-          tar -xzf webrtc-src-prepared.tar.gz -C "${{ github.workspace }}/webrtc-tree"
+          tar -xzf webrtc-src-prepared-apple.tar.gz -C "${{ github.workspace }}/webrtc-tree"
 
       - name: CI verification (fan-out does not run gclient sync)
         run: |
@@ -363,8 +146,8 @@ jobs:
 
   macos_test:
     name: macOS host tests
-    needs: prepare_deps
-    if: needs.prepare_deps.outputs.run_macos == 'true'
+    needs: [prepare_common, prepare_apple]
+    if: needs.prepare_common.outputs.run_macos == 'true'
     runs-on: macos-26
     timeout-minutes: 180
     steps:
@@ -378,13 +161,13 @@ jobs:
       - name: Download prepared WebRTC tree
         uses: actions/download-artifact@v4
         with:
-          name: webrtc-src-prepared
+          name: webrtc-src-prepared-apple
 
       - name: Extract WebRTC tree
         run: |
           set -euo pipefail
           mkdir -p "${{ github.workspace }}/webrtc-tree"
-          tar -xzf webrtc-src-prepared.tar.gz -C "${{ github.workspace }}/webrtc-tree"
+          tar -xzf webrtc-src-prepared-apple.tar.gz -C "${{ github.workspace }}/webrtc-tree"
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
@@ -410,4 +193,60 @@ jobs:
         working-directory: release-pipeline
         run: >-
           bundle exec fastlane macos test
+          "root:${{ github.workspace }}/webrtc-tree/.output/src"
+
+  android_test:
+    name: Android AAR build validation
+    needs: [prepare_common, prepare_android]
+    if: needs.prepare_common.outputs.run_android == 'true'
+    runs-on: runner-extra-capacity
+    timeout-minutes: 180
+    steps:
+      - name: Check out stream-webrtc-release-pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: GetStream/stream-webrtc-release-pipeline
+          path: release-pipeline
+          token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
+
+      - name: Download prepared WebRTC tree
+        uses: actions/download-artifact@v4
+        with:
+          name: webrtc-src-prepared-android
+
+      - name: Extract WebRTC tree
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ github.workspace }}/webrtc-tree"
+          tar -xzf webrtc-src-prepared-android.tar.gz -C "${{ github.workspace }}/webrtc-tree"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip openjdk-8-jdk lsb-release software-properties-common
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          working-directory: release-pipeline
+          bundler-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install depot_tools
+        run: |
+          if [[ ! -d "${HOME}/depot_tools" ]]; then
+            git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "${HOME}/depot_tools"
+          fi
+          echo "PATH=${HOME}/depot_tools:${PATH}" >> "${GITHUB_ENV}"
+          echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
+
+      - name: Build Android AAR (no gclient sync in lane)
+        working-directory: release-pipeline
+        run: >-
+          bundle exec fastlane android test
           "root:${{ github.workspace }}/webrtc-tree/.output/src"

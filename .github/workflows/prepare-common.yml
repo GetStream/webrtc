@@ -1,0 +1,85 @@
+# Resolves manual platform-test inputs into host-specific prepare plans.
+
+name: Prepare common platform plan
+
+on:
+  workflow_call:
+    inputs:
+      platform_ios:
+        type: boolean
+        required: true
+      platform_macos:
+        type: boolean
+        required: true
+      platform_android:
+        type: boolean
+        required: true
+    outputs:
+      run_ios:
+        value: ${{ jobs.resolve.outputs.run_ios }}
+      run_macos:
+        value: ${{ jobs.resolve.outputs.run_macos }}
+      run_android:
+        value: ${{ jobs.resolve.outputs.run_android }}
+      run_apple:
+        value: ${{ jobs.resolve.outputs.run_apple }}
+      apple_target_os:
+        value: ${{ jobs.resolve.outputs.apple_target_os }}
+      apple_target_os_cache_key:
+        value: ${{ jobs.resolve.outputs.apple_target_os_cache_key }}
+      android_target_os:
+        value: ${{ jobs.resolve.outputs.android_target_os }}
+      android_target_os_cache_key:
+        value: ${{ jobs.resolve.outputs.android_target_os_cache_key }}
+
+jobs:
+  resolve:
+    name: Resolve platform plan
+    runs-on: runner-extra-capacity
+    outputs:
+      run_ios: ${{ steps.flags.outputs.run_ios }}
+      run_macos: ${{ steps.flags.outputs.run_macos }}
+      run_android: ${{ steps.flags.outputs.run_android }}
+      run_apple: ${{ steps.flags.outputs.run_apple }}
+      apple_target_os: ${{ steps.flags.outputs.apple_target_os }}
+      apple_target_os_cache_key: ${{ steps.flags.outputs.apple_target_os_cache_key }}
+      android_target_os: ${{ steps.flags.outputs.android_target_os }}
+      android_target_os_cache_key: ${{ steps.flags.outputs.android_target_os_cache_key }}
+    steps:
+      - id: flags
+        name: Resolve platform flags and target_os
+        run: |
+          set -euo pipefail
+          ios='${{ inputs.platform_ios }}'
+          macos='${{ inputs.platform_macos }}'
+          android='${{ inputs.platform_android }}'
+          if [[ "${ios}" != "true" && "${macos}" != "true" && "${android}" != "true" ]]; then
+            echo "Select at least one platform (enable one or more checkboxes above)."
+            exit 1
+          fi
+
+          apple_os_list=()
+          if [[ "${ios}" == "true" ]]; then apple_os_list+=("ios"); fi
+          if [[ "${macos}" == "true" ]]; then apple_os_list+=("mac"); fi
+
+          run_apple=false
+          apple_target_os=""
+          if [[ ${#apple_os_list[@]} -gt 0 ]]; then
+            run_apple=true
+            IFS=','
+            apple_target_os="${apple_os_list[*]}"
+          fi
+
+          android_target_os=""
+          if [[ "${android}" == "true" ]]; then
+            android_target_os="android,unix"
+          fi
+
+          echo "run_ios=${ios}" >> "${GITHUB_OUTPUT}"
+          echo "run_macos=${macos}" >> "${GITHUB_OUTPUT}"
+          echo "run_android=${android}" >> "${GITHUB_OUTPUT}"
+          echo "run_apple=${run_apple}" >> "${GITHUB_OUTPUT}"
+          echo "apple_target_os=${apple_target_os}" >> "${GITHUB_OUTPUT}"
+          echo "apple_target_os_cache_key=${apple_target_os//,/-}" >> "${GITHUB_OUTPUT}"
+          echo "android_target_os=${android_target_os}" >> "${GITHUB_OUTPUT}"
+          echo "android_target_os_cache_key=${android_target_os//,/-}" >> "${GITHUB_OUTPUT}"
