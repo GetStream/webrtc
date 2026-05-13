@@ -185,7 +185,7 @@ jobs:
           path: |
             ${{ github.workspace }}/.output/src/resources
             ${{ github.workspace }}/.output/src/tools/clang/dsymutil/bin
-          key: webrtc-gclient-hook-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('DEPS', 'resources/**/*.sha1', 'tools/clang/dsymutil/bin/*.sha1') }}
+          key: webrtc-gclient-hook-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.output/src/resources/**/*.sha1', '.output/src/tools/clang/dsymutil/bin/*.sha1') }}
           restore-keys: |
             webrtc-gclient-hook-downloads-${{ runner.os }}-${{ runner.arch }}-
 
