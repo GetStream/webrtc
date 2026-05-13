@@ -35,7 +35,7 @@ on:
 jobs:
   resolve:
     name: Resolve platform plan
-    runs-on: runner-extra-capacity
+    runs-on: ubuntu-latest
     outputs:
       run_ios: ${{ steps.flags.outputs.run_ios }}
       run_macos: ${{ steps.flags.outputs.run_macos }}
