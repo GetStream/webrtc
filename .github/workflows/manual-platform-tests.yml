@@ -21,10 +21,6 @@ on:
         description: Run iOS simulator tests
         type: boolean
         default: true
-      platform_mac_catalyst:
-        description: Run Mac Catalyst build validation
-        type: boolean
-        default: false
       platform_macos:
         description: Run macOS host tests
         type: boolean
@@ -37,7 +33,6 @@ jobs:
     timeout-minutes: 360
     outputs:
       run_ios: ${{ steps.flags.outputs.run_ios }}
-      run_mac_catalyst: ${{ steps.flags.outputs.run_mac_catalyst }}
       run_macos: ${{ steps.flags.outputs.run_macos }}
       gclient_target_os: ${{ steps.flags.outputs.gclient_target_os }}
     steps:
@@ -46,22 +41,20 @@ jobs:
         run: |
           set -euo pipefail
           ios='${{ inputs.platform_ios }}'
-          catalyst='${{ inputs.platform_mac_catalyst }}'
           macos='${{ inputs.platform_macos }}'
-          if [[ "${ios}" != "true" && "${catalyst}" != "true" && "${macos}" != "true" ]]; then
+          if [[ "${ios}" != "true" && "${macos}" != "true" ]]; then
             echo "Select at least one platform (enable one or more checkboxes above)."
             exit 1
           fi
           echo "run_ios=${ios}" >> "${GITHUB_OUTPUT}"
-          echo "run_mac_catalyst=${catalyst}" >> "${GITHUB_OUTPUT}"
           echo "run_macos=${macos}" >> "${GITHUB_OUTPUT}"
 
           need_ios=false
           need_mac=false
-          if [[ "${ios}" == "true" || "${catalyst}" == "true" ]]; then
+          if [[ "${ios}" == "true" ]]; then
             need_ios=true
           fi
-          if [[ "${catalyst}" == "true" || "${macos}" == "true" ]]; then
+          if [[ "${macos}" == "true" ]]; then
             need_mac=true
           fi
 
@@ -337,64 +330,6 @@ jobs:
           "root:${{ github.workspace }}/webrtc-tree/.output/src"
           "builder_config:ios_debug_local_bot_arm64"
           "config_file:${{ github.workspace }}/release-pipeline/fastlane/mb_configs/local_ios.pyl"
-
-  mac_catalyst_build:
-    name: Mac Catalyst build validation
-    needs: prepare_deps
-    if: needs.prepare_deps.outputs.run_mac_catalyst == 'true'
-    runs-on: macos-26
-    timeout-minutes: 240
-    steps:
-      - name: Check out stream-webrtc-release-pipeline
-        uses: actions/checkout@v4
-        with:
-          repository: GetStream/stream-webrtc-release-pipeline
-          path: release-pipeline
-          token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
-
-      - name: Download prepared WebRTC tree
-        uses: actions/download-artifact@v4
-        with:
-          name: webrtc-src-prepared
-
-      - name: Extract WebRTC tree
-        run: |
-          set -euo pipefail
-          mkdir -p "${{ github.workspace }}/webrtc-tree"
-          tar -xzf webrtc-src-prepared.tar.gz -C "${{ github.workspace }}/webrtc-tree"
-
-      - name: Set up Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "3.2"
-          working-directory: release-pipeline
-          bundler-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.x"
-
-      - name: Install depot_tools
-        run: |
-          if [[ ! -d "${HOME}/depot_tools" ]]; then
-            git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "${HOME}/depot_tools"
-          fi
-          echo "PATH=${HOME}/depot_tools:${PATH}" >> "${GITHUB_ENV}"
-          echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
-
-      - name: Build iOS libs with Catalyst (skips gclient + signing)
-        working-directory: release-pipeline
-        run: >-
-          bundle exec fastlane ios build
-          "root:${{ github.workspace }}/webrtc-tree/.output/src"
-          configure_google_client_skip:true
-          prepare_signing_skip:false
-          sign_product_skip:true
-          verify_signatures_skip:true
-          zip_product_skip:true
-          skip_licenses:true
-          maccatalyst_support:true
 
   macos_test:
     name: macOS host tests
