@@ -131,7 +131,6 @@ jobs:
             webrtc-gclient-src-git-v2-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Materialize cached WebRTC source checkout
-        if: steps.gclient-cache.outputs.cache-hit == 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GIT_ASKPASS: ${{ github.workspace }}/.github-git-askpass
