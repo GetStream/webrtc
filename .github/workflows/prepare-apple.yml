@@ -212,13 +212,13 @@ jobs:
       - name: Archive prepared WebRTC tree
         run: |
           set -euo pipefail
-          cd "${{ github.workspace }}"
-          COPYFILE_DISABLE=1 tar -czf "${{ github.workspace }}/webrtc-src-prepared-apple.tar.gz" \
-            --exclude='./release-pipeline' \
-            --exclude='./.gclient-git-cache' \
-            --exclude='./webrtc-src-prepared-apple.tar.gz' \
-            --exclude='./.git' \
-            .
+          archive="${RUNNER_TEMP}/webrtc-src-prepared-apple.tar.gz"
+          COPYFILE_DISABLE=1 tar -czf "${archive}" \
+            -C "${{ github.workspace }}" \
+            --exclude='.output/src/.git' \
+            --exclude='.output/src/.git/**' \
+            .output
+          mv "${archive}" "${{ github.workspace }}/webrtc-src-prepared-apple.tar.gz"
 
       - name: Upload dependency artifact
         uses: actions/upload-artifact@v4
