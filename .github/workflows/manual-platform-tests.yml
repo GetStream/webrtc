@@ -33,35 +33,65 @@ on:
 jobs:
   prepare_common:
     name: Plan platform validation
-    uses: ./.github/workflows/prepare-common.yml
-    with:
-      platform_ios: ${{ inputs.platform_ios }}
-      platform_macos: ${{ inputs.platform_macos }}
-      platform_android: ${{ inputs.platform_android }}
+    runs-on: ubuntu-latest
+    outputs:
+      run_ios: ${{ steps.plan.outputs.run_ios }}
+      run_macos: ${{ steps.plan.outputs.run_macos }}
+      run_android: ${{ steps.plan.outputs.run_android }}
+      run_apple: ${{ steps.plan.outputs.run_apple }}
+      apple_target_os: ${{ steps.plan.outputs.apple_target_os }}
+      apple_target_os_cache_key: ${{ steps.plan.outputs.apple_target_os_cache_key }}
+      android_target_os: ${{ steps.plan.outputs.android_target_os }}
+      android_target_os_cache_key: ${{ steps.plan.outputs.android_target_os_cache_key }}
+    steps:
+      - name: Check out workflow actions
+        uses: actions/checkout@v4
+
+      - id: plan
+        name: Plan platform validation
+        uses: ./.github/actions/prepare-common
+        with:
+          platform_ios: ${{ inputs.platform_ios }}
+          platform_macos: ${{ inputs.platform_macos }}
+          platform_android: ${{ inputs.platform_android }}
 
   prepare_apple:
     name: Prepare Apple dependencies
     needs: prepare_common
     if: needs.prepare_common.outputs.run_apple == 'true'
-    uses: ./.github/workflows/prepare-apple.yml
-    with:
-      webrtc_ref: ${{ inputs.webrtc_ref }}
-      target_os: ${{ needs.prepare_common.outputs.apple_target_os }}
-      target_os_cache_key: ${{ needs.prepare_common.outputs.apple_target_os_cache_key }}
-      ignore_cache: ${{ inputs.ignore_cache }}
-    secrets: inherit
+    runs-on: macos-26
+    timeout-minutes: 360
+    steps:
+      - name: Check out workflow actions
+        uses: actions/checkout@v4
+
+      - name: Prepare Apple dependencies
+        uses: ./.github/actions/prepare-apple
+        with:
+          webrtc_ref: ${{ inputs.webrtc_ref }}
+          target_os: ${{ needs.prepare_common.outputs.apple_target_os }}
+          target_os_cache_key: ${{ needs.prepare_common.outputs.apple_target_os_cache_key }}
+          ignore_cache: ${{ inputs.ignore_cache }}
+          release_pipeline_token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
 
   prepare_android:
     name: Prepare Android dependencies
     needs: prepare_common
     if: needs.prepare_common.outputs.run_android == 'true'
-    uses: ./.github/workflows/prepare-android.yml
-    with:
-      webrtc_ref: ${{ inputs.webrtc_ref }}
-      target_os: ${{ needs.prepare_common.outputs.android_target_os }}
-      target_os_cache_key: ${{ needs.prepare_common.outputs.android_target_os_cache_key }}
-      ignore_cache: ${{ inputs.ignore_cache }}
-    secrets: inherit
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Check out workflow actions
+        uses: actions/checkout@v4
+
+      - name: Prepare Android dependencies
+        uses: ./.github/actions/prepare-android
+        with:
+          webrtc_ref: ${{ inputs.webrtc_ref }}
+          target_os: ${{ needs.prepare_common.outputs.android_target_os }}
+          target_os_cache_key: ${{ needs.prepare_common.outputs.android_target_os_cache_key }}
+          ignore_cache: ${{ inputs.ignore_cache }}
+          release_pipeline_token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
 
   ios_test:
     name: Validate iOS simulator tests
