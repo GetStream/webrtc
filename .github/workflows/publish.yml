@@ -210,8 +210,8 @@ jobs:
           bundle exec fastlane macos test
           "root:${{ github.workspace }}/webrtc-tree/.output/src"
 
-  build_apple:
-    name: Build Apple SDK
+  build_ios:
+    name: Build iOS SDK
     needs: prepare_apple
     runs-on: macos-26
     timeout-minutes: 360
@@ -254,28 +254,132 @@ jobs:
           echo "PATH=${HOME}/depot_tools:${PATH}" >> "${GITHUB_ENV}"
           echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
 
-      - name: Build Apple SDK artifact
+      - name: Build iOS SDK artifact
         working-directory: release-pipeline
         run: >-
-          bundle exec fastlane sdk build
+          bundle exec fastlane ios build
           "root:${{ github.workspace }}/webrtc-tree/.output/src"
-          "products_root:${{ github.workspace }}/apple-products"
+          "products_root:${{ github.workspace }}/ios-products"
           configure_google_client_skip:true
           prepare_signing_skip:false
           sign_product_skip:true
           verify_signatures_skip:true
           zip_product_skip:true
           skip_licenses:true
-          skip_android:true
 
-      - name: Package Apple XCFramework
+      - name: Package iOS XCFramework artifact
         run: |
           set -euo pipefail
           ditto -c -k --sequesterRsrc --keepParent \
-            "${{ github.workspace }}/apple-products/WebRTC.xcframework" \
-            "${{ github.workspace }}/WebRTC.xcframework.zip"
+            "${{ github.workspace }}/ios-products/WebRTC.xcframework" \
+            "${{ github.workspace }}/WebRTC-ios.xcframework.zip"
 
-      - name: Upload Apple SDK artifact
+      - name: Upload iOS SDK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-ios-xcframework
+          path: WebRTC-ios.xcframework.zip
+          retention-days: 2
+
+  build_macos:
+    name: Build macOS SDK
+    needs: prepare_apple
+    runs-on: macos-26
+    timeout-minutes: 360
+    steps:
+      - name: Check out stream-webrtc-release-pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: GetStream/stream-webrtc-release-pipeline
+          path: release-pipeline
+          token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
+
+      - name: Download prepared Apple WebRTC tree
+        uses: actions/download-artifact@v4
+        with:
+          name: webrtc-src-prepared-apple
+
+      - name: Extract WebRTC tree
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ github.workspace }}/webrtc-tree"
+          tar -xzf webrtc-src-prepared-apple.tar.gz -C "${{ github.workspace }}/webrtc-tree"
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          working-directory: release-pipeline
+          bundler-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install depot_tools
+        run: |
+          if [[ ! -d "${HOME}/depot_tools" ]]; then
+            git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "${HOME}/depot_tools"
+          fi
+          echo "PATH=${HOME}/depot_tools:${PATH}" >> "${GITHUB_ENV}"
+          echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
+
+      - name: Build macOS SDK artifact
+        working-directory: release-pipeline
+        run: >-
+          bundle exec fastlane macos build
+          "root:${{ github.workspace }}/webrtc-tree/.output/src"
+          "products_root:${{ github.workspace }}/macos-products"
+          zip_product_skip:true
+
+      - name: Package macOS XCFramework artifact
+        run: |
+          set -euo pipefail
+          ditto -c -k --sequesterRsrc --keepParent \
+            "${{ github.workspace }}/macos-products/WebRTC.xcframework" \
+            "${{ github.workspace }}/WebRTC-macos.xcframework.zip"
+
+      - name: Upload macOS SDK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-macos-xcframework
+          path: WebRTC-macos.xcframework.zip
+          retention-days: 2
+
+  package_apple:
+    name: Package Apple release artifact
+    needs: [build_ios, build_macos, validate_ios, validate_macos]
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - name: Download iOS SDK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: apple-ios-xcframework
+          path: apple-inputs/ios
+
+      - name: Download macOS SDK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: apple-macos-xcframework
+          path: apple-inputs/macos
+
+      - name: Combine Apple XCFrameworks
+        run: |
+          set -euo pipefail
+          ditto -x -k apple-inputs/ios/WebRTC-ios.xcframework.zip apple-inputs/ios
+          ditto -x -k apple-inputs/macos/WebRTC-macos.xcframework.zip apple-inputs/macos
+
+          command=(xcodebuild -create-xcframework)
+          while IFS= read -r framework; do
+            command+=(-framework "${framework}")
+          done < <(find apple-inputs -name '*.framework' -type d | sort)
+
+          "${command[@]}" -output WebRTC.xcframework
+          ditto -c -k --sequesterRsrc --keepParent WebRTC.xcframework WebRTC.xcframework.zip
+
+      - name: Upload Apple release artifact
         uses: actions/upload-artifact@v4
         with:
           name: release-apple
@@ -283,7 +387,7 @@ jobs:
           retention-days: 2
 
   build_android:
-    name: Build Android SDK
+    name: Build Android AAR
     needs: prepare_android
     runs-on: ubuntu-latest
     timeout-minutes: 360
@@ -347,7 +451,7 @@ jobs:
 
   publish:
     name: Publish GitHub release
-    needs: [validate_ios, validate_macos, build_apple, build_android]
+    needs: [validate_ios, validate_macos, package_apple, build_android]
     runs-on: ubuntu-latest
     steps:
       - name: Check out release branch
