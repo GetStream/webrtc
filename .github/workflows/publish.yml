@@ -259,6 +259,7 @@ jobs:
         run: >-
           bundle exec fastlane ios build
           "root:${{ github.workspace }}/webrtc-tree/.output/src"
+          "build_root:${{ github.workspace }}/webrtc-tree/.output"
           "products_root:${{ github.workspace }}/ios-products"
           configure_google_client_skip:true
           prepare_signing_skip:false
