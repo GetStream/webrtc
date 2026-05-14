@@ -21,10 +21,27 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Preserve local action metadata
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "${RUNNER_TEMP}/local-actions"
+        cp -R "${GITHUB_WORKSPACE}/.github/actions/prepare-android" \
+          "${RUNNER_TEMP}/local-actions/prepare-android"
+
     - name: Check out this repository (WebRTC tree)
       uses: actions/checkout@v4
       with:
         ref: ${{ inputs.webrtc_ref }}
+
+    - name: Restore local action metadata
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "${GITHUB_WORKSPACE}/.github/actions"
+        rm -rf "${GITHUB_WORKSPACE}/.github/actions/prepare-android"
+        cp -R "${RUNNER_TEMP}/local-actions/prepare-android" \
+          "${GITHUB_WORKSPACE}/.github/actions/prepare-android"
 
     - name: Check out stream-webrtc-release-pipeline
       uses: actions/checkout@v4
