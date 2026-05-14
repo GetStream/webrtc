@@ -21,7 +21,7 @@ on:
 jobs:
   prepare:
     name: Prepare Android dependencies
-    runs-on: runner-extra-capacity
+    runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
       - name: Check out this repository (WebRTC tree)

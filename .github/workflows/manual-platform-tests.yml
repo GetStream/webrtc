@@ -202,7 +202,7 @@ jobs:
     name: Validate Android tests
     needs: [prepare_common, prepare_android]
     if: needs.prepare_common.outputs.run_android == 'true'
-    runs-on: runner-extra-capacity
+    runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
       - name: Check out stream-webrtc-release-pipeline
