@@ -1,0 +1,394 @@
+name: Publish
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version/tag to create
+        required: true
+      branch:
+        description: Branch, tag, or SHA from GetStream/webrtc to publish
+        required: true
+        default: main
+      alpha:
+        description: Mark the GitHub release as an alpha/pre-release
+        type: boolean
+        default: false
+      changelog_file:
+        description: Optional changelog file path from the selected branch to attach
+        required: false
+        default: ""
+      ignore_cache:
+        description: Skip restoring dependency caches and force a fresh sync
+        type: boolean
+        default: true
+
+jobs:
+  plan:
+    name: Plan release build
+    runs-on: ubuntu-latest
+    outputs:
+      apple_target_os: ${{ steps.plan.outputs.apple_target_os }}
+      apple_target_os_cache_key: ${{ steps.plan.outputs.apple_target_os_cache_key }}
+      android_target_os: ${{ steps.plan.outputs.android_target_os }}
+      android_target_os_cache_key: ${{ steps.plan.outputs.android_target_os_cache_key }}
+    steps:
+      - name: Check out workflow actions
+        uses: actions/checkout@v4
+
+      - id: plan
+        name: Plan release build
+        uses: ./.github/actions/prepare-common
+        with:
+          platform_ios: true
+          platform_macos: true
+          platform_android: true
+
+  prepare_apple:
+    name: Prepare Apple dependencies
+    needs: plan
+    runs-on: macos-26
+    timeout-minutes: 360
+    steps:
+      - name: Check out workflow actions
+        uses: actions/checkout@v4
+
+      - name: Prepare Apple dependencies
+        uses: ./.github/actions/prepare-apple
+        with:
+          webrtc_ref: ${{ inputs.branch }}
+          target_os: ${{ needs.plan.outputs.apple_target_os }}
+          target_os_cache_key: ${{ needs.plan.outputs.apple_target_os_cache_key }}
+          ignore_cache: ${{ inputs.ignore_cache }}
+          release_pipeline_token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
+
+  prepare_android:
+    name: Prepare Android dependencies
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Check out workflow actions
+        uses: actions/checkout@v4
+
+      - name: Prepare Android dependencies
+        uses: ./.github/actions/prepare-android
+        with:
+          webrtc_ref: ${{ inputs.branch }}
+          target_os: ${{ needs.plan.outputs.android_target_os }}
+          target_os_cache_key: ${{ needs.plan.outputs.android_target_os_cache_key }}
+          ignore_cache: ${{ inputs.ignore_cache }}
+          release_pipeline_token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
+
+  validate_ios:
+    name: Validate iOS simulator tests
+    needs: prepare_apple
+    runs-on: macos-26
+    timeout-minutes: 180
+    steps:
+      - name: Check out stream-webrtc-release-pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: GetStream/stream-webrtc-release-pipeline
+          path: release-pipeline
+          token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
+
+      - name: Download prepared Apple WebRTC tree
+        uses: actions/download-artifact@v4
+        with:
+          name: webrtc-src-prepared-apple
+
+      - name: Extract WebRTC tree
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ github.workspace }}/webrtc-tree"
+          tar -xzf webrtc-src-prepared-apple.tar.gz -C "${{ github.workspace }}/webrtc-tree"
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          working-directory: release-pipeline
+          bundler-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install depot_tools
+        run: |
+          if [[ ! -d "${HOME}/depot_tools" ]]; then
+            git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "${HOME}/depot_tools"
+          fi
+          echo "PATH=${HOME}/depot_tools:${PATH}" >> "${GITHUB_ENV}"
+          echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
+
+      - name: Generate local iOS mb config
+        run: |
+          python3 - <<'PY'
+          import ast
+          import pathlib
+          import pprint
+
+          base_path = pathlib.Path("${{ github.workspace }}/webrtc-tree/.output/src/tools_webrtc/mb/mb_config.pyl")
+          output_path = pathlib.Path("${{ github.workspace }}/release-pipeline/fastlane/mb_configs/local_ios.pyl")
+          config = ast.literal_eval(base_path.read_text(encoding="utf-8"))
+
+          mixins = dict(config.get("mixins", {}))
+          mixins["stream_local_ios_tests"] = {
+              "gn_args": "use_siso=false use_remoteexec=false use_reclient=false",
+          }
+          config["mixins"] = mixins
+
+          configs = {name: list(value) for name, value in config.get("configs", {}).items()}
+          configs["ios_debug_local_bot_arm64"] = configs["ios_debug_bot_arm64"] + ["stream_local_ios_tests"]
+          config["configs"] = configs
+
+          output_path.parent.mkdir(parents=True, exist_ok=True)
+          output_path.write_text(f"{pprint.pformat(config, width=120)}\n", encoding="utf-8")
+          PY
+
+      - name: Run iOS tests
+        working-directory: release-pipeline
+        run: >-
+          bundle exec fastlane ios test
+          "root:${{ github.workspace }}/webrtc-tree/.output/src"
+          "builder_config:ios_debug_local_bot_arm64"
+          "config_file:${{ github.workspace }}/release-pipeline/fastlane/mb_configs/local_ios.pyl"
+
+  validate_macos:
+    name: Validate macOS host tests
+    needs: prepare_apple
+    runs-on: macos-26
+    timeout-minutes: 180
+    steps:
+      - name: Check out stream-webrtc-release-pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: GetStream/stream-webrtc-release-pipeline
+          path: release-pipeline
+          token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
+
+      - name: Download prepared Apple WebRTC tree
+        uses: actions/download-artifact@v4
+        with:
+          name: webrtc-src-prepared-apple
+
+      - name: Extract WebRTC tree
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ github.workspace }}/webrtc-tree"
+          tar -xzf webrtc-src-prepared-apple.tar.gz -C "${{ github.workspace }}/webrtc-tree"
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          working-directory: release-pipeline
+          bundler-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install depot_tools
+        run: |
+          if [[ ! -d "${HOME}/depot_tools" ]]; then
+            git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "${HOME}/depot_tools"
+          fi
+          echo "PATH=${HOME}/depot_tools:${PATH}" >> "${GITHUB_ENV}"
+          echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
+
+      - name: Run macOS host tests
+        working-directory: release-pipeline
+        run: >-
+          bundle exec fastlane macos test
+          "root:${{ github.workspace }}/webrtc-tree/.output/src"
+
+  build_apple:
+    name: Build Apple SDK
+    needs: prepare_apple
+    runs-on: macos-26
+    timeout-minutes: 360
+    steps:
+      - name: Check out stream-webrtc-release-pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: GetStream/stream-webrtc-release-pipeline
+          path: release-pipeline
+          token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
+
+      - name: Download prepared Apple WebRTC tree
+        uses: actions/download-artifact@v4
+        with:
+          name: webrtc-src-prepared-apple
+
+      - name: Extract WebRTC tree
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ github.workspace }}/webrtc-tree"
+          tar -xzf webrtc-src-prepared-apple.tar.gz -C "${{ github.workspace }}/webrtc-tree"
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          working-directory: release-pipeline
+          bundler-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install depot_tools
+        run: |
+          if [[ ! -d "${HOME}/depot_tools" ]]; then
+            git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "${HOME}/depot_tools"
+          fi
+          echo "PATH=${HOME}/depot_tools:${PATH}" >> "${GITHUB_ENV}"
+          echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
+
+      - name: Build Apple SDK artifact
+        working-directory: release-pipeline
+        run: >-
+          bundle exec fastlane sdk build
+          "root:${{ github.workspace }}/webrtc-tree/.output/src"
+          "products_root:${{ github.workspace }}/apple-products"
+          configure_google_client_skip:true
+          prepare_signing_skip:false
+          sign_product_skip:true
+          verify_signatures_skip:true
+          zip_product_skip:true
+          skip_licenses:true
+          skip_android:true
+
+      - name: Package Apple XCFramework
+        run: |
+          set -euo pipefail
+          ditto -c -k --sequesterRsrc --keepParent \
+            "${{ github.workspace }}/apple-products/WebRTC.xcframework" \
+            "${{ github.workspace }}/WebRTC.xcframework.zip"
+
+      - name: Upload Apple SDK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apple
+          path: WebRTC.xcframework.zip
+          retention-days: 2
+
+  build_android:
+    name: Build Android SDK
+    needs: prepare_android
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Check out stream-webrtc-release-pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: GetStream/stream-webrtc-release-pipeline
+          path: release-pipeline
+          token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
+
+      - name: Download prepared Android WebRTC tree
+        uses: actions/download-artifact@v4
+        with:
+          name: webrtc-src-prepared-android
+
+      - name: Extract WebRTC tree
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ github.workspace }}/webrtc-tree"
+          tar -xzf webrtc-src-prepared-android.tar.gz -C "${{ github.workspace }}/webrtc-tree"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip openjdk-8-jdk lsb-release software-properties-common
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          working-directory: release-pipeline
+          bundler-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install depot_tools
+        run: |
+          if [[ ! -d "${HOME}/depot_tools" ]]; then
+            git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "${HOME}/depot_tools"
+          fi
+          echo "PATH=${HOME}/depot_tools:${PATH}" >> "${GITHUB_ENV}"
+          echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
+
+      - name: Build Android SDK artifact
+        working-directory: release-pipeline
+        run: >-
+          bundle exec fastlane android build
+          "root:${{ github.workspace }}/webrtc-tree/.output/src"
+          "products_root:${{ github.workspace }}/android-products"
+
+      - name: Upload Android SDK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-android
+          path: android-products/libwebrtc.aar
+          retention-days: 2
+
+  publish:
+    name: Publish GitHub release
+    needs: [validate_ios, validate_macos, build_apple, build_android]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out release branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Stage optional changelog
+        if: ${{ inputs.changelog_file != '' }}
+        run: |
+          set -euo pipefail
+          changelog="${{ inputs.changelog_file }}"
+          test -f "${changelog}"
+          cp "${changelog}" "release-assets/$(basename "${changelog}")"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_BRANCH: ${{ inputs.branch }}
+          IS_ALPHA: ${{ inputs.alpha }}
+        run: |
+          set -euo pipefail
+          release_args=(
+            "${RELEASE_VERSION}"
+            release-assets/*
+            --repo "${{ github.repository }}"
+            --target "${RELEASE_BRANCH}"
+            --title "${RELEASE_VERSION}"
+            --notes "Automated WebRTC SDK release ${RELEASE_VERSION}."
+          )
+          if [[ "${IS_ALPHA}" == "true" ]]; then
+            release_args+=(--prerelease)
+          else
+            release_args+=(--latest)
+          fi
+          gh release create "${release_args[@]}"
