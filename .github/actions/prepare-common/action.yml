@@ -1,0 +1,73 @@
+name: Plan platform validation
+description: Resolve selected platform flags into host-specific prepare plans.
+
+inputs:
+  platform_ios:
+    required: true
+    description: Whether iOS validation is enabled.
+  platform_macos:
+    required: true
+    description: Whether macOS validation is enabled.
+  platform_android:
+    required: true
+    description: Whether Android validation is enabled.
+
+outputs:
+  run_ios:
+    value: ${{ steps.flags.outputs.run_ios }}
+  run_macos:
+    value: ${{ steps.flags.outputs.run_macos }}
+  run_android:
+    value: ${{ steps.flags.outputs.run_android }}
+  run_apple:
+    value: ${{ steps.flags.outputs.run_apple }}
+  apple_target_os:
+    value: ${{ steps.flags.outputs.apple_target_os }}
+  apple_target_os_cache_key:
+    value: ${{ steps.flags.outputs.apple_target_os_cache_key }}
+  android_target_os:
+    value: ${{ steps.flags.outputs.android_target_os }}
+  android_target_os_cache_key:
+    value: ${{ steps.flags.outputs.android_target_os_cache_key }}
+
+runs:
+  using: composite
+  steps:
+    - id: flags
+      name: Resolve platform flags
+      shell: bash
+      run: |
+        set -euo pipefail
+        ios='${{ inputs.platform_ios }}'
+        macos='${{ inputs.platform_macos }}'
+        android='${{ inputs.platform_android }}'
+        if [[ "${ios}" != "true" && "${macos}" != "true" && "${android}" != "true" ]]; then
+          echo "Select at least one platform (enable one or more checkboxes above)."
+          exit 1
+        fi
+
+        apple_os_list=()
+        if [[ "${ios}" == "true" ]]; then apple_os_list+=("ios"); fi
+        if [[ "${macos}" == "true" ]]; then apple_os_list+=("mac"); fi
+
+        run_apple=false
+        apple_target_os=""
+        if [[ ${#apple_os_list[@]} -gt 0 ]]; then
+          run_apple=true
+          IFS=','
+          apple_target_os="${apple_os_list[*]}"
+        fi
+
+        android_target_os=""
+        if [[ "${android}" == "true" ]]; then
+          android_target_os="android,unix"
+        fi
+
+        echo "run_ios=${ios}" >> "${GITHUB_OUTPUT}"
+        echo "run_macos=${macos}" >> "${GITHUB_OUTPUT}"
+        echo "run_android=${android}" >> "${GITHUB_OUTPUT}"
+        echo "run_apple=${run_apple}" >> "${GITHUB_OUTPUT}"
+        echo "apple_target_os=${apple_target_os}" >> "${GITHUB_OUTPUT}"
+        echo "apple_target_os_cache_key=${apple_target_os//,/-}" >> "${GITHUB_OUTPUT}"
+        echo "android_target_os=${android_target_os}" >> "${GITHUB_OUTPUT}"
+        echo "android_target_os_cache_key=${android_target_os//,/-}" >> "${GITHUB_OUTPUT}"

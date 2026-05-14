@@ -1,0 +1,285 @@
+# Manual WebRTC platform tests. Shared planning runs first, host-specific
+# prepare jobs produce platform-ready trees, then platform jobs fan out.
+
+name: Build
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      webrtc_ref:
+        description: Branch, tag, or SHA for this repo (GetStream/webrtc)
+        required: true
+        default: main
+      platform_ios:
+        description: Run iOS simulator tests
+        type: boolean
+        default: true
+      platform_macos:
+        description: Run macOS host tests
+        type: boolean
+        default: false
+      platform_android:
+        description: Run Android AAR build validation
+        type: boolean
+        default: false
+      ignore_cache:
+        description: Skip restoring dependency caches and force a fresh sync
+        type: boolean
+        default: true
+
+jobs:
+  prepare_common:
+    name: Plan platform validation
+    runs-on: ubuntu-latest
+    outputs:
+      run_ios: ${{ steps.plan.outputs.run_ios }}
+      run_macos: ${{ steps.plan.outputs.run_macos }}
+      run_android: ${{ steps.plan.outputs.run_android }}
+      run_apple: ${{ steps.plan.outputs.run_apple }}
+      apple_target_os: ${{ steps.plan.outputs.apple_target_os }}
+      apple_target_os_cache_key: ${{ steps.plan.outputs.apple_target_os_cache_key }}
+      android_target_os: ${{ steps.plan.outputs.android_target_os }}
+      android_target_os_cache_key: ${{ steps.plan.outputs.android_target_os_cache_key }}
+    steps:
+      - name: Check out workflow actions
+        uses: actions/checkout@v4
+
+      - id: plan
+        name: Plan platform validation
+        uses: ./.github/actions/prepare-common
+        with:
+          platform_ios: ${{ inputs.platform_ios }}
+          platform_macos: ${{ inputs.platform_macos }}
+          platform_android: ${{ inputs.platform_android }}
+
+  prepare_apple:
+    name: Prepare Apple dependencies
+    needs: prepare_common
+    if: needs.prepare_common.outputs.run_apple == 'true'
+    runs-on: macos-26
+    timeout-minutes: 360
+    steps:
+      - name: Check out workflow actions
+        uses: actions/checkout@v4
+
+      - name: Prepare Apple dependencies
+        uses: ./.github/actions/prepare-apple
+        with:
+          webrtc_ref: ${{ inputs.webrtc_ref }}
+          target_os: ${{ needs.prepare_common.outputs.apple_target_os }}
+          target_os_cache_key: ${{ needs.prepare_common.outputs.apple_target_os_cache_key }}
+          ignore_cache: ${{ inputs.ignore_cache }}
+          release_pipeline_token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
+
+  prepare_android:
+    name: Prepare Android dependencies
+    needs: prepare_common
+    if: needs.prepare_common.outputs.run_android == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Check out workflow actions
+        uses: actions/checkout@v4
+
+      - name: Prepare Android dependencies
+        uses: ./.github/actions/prepare-android
+        with:
+          webrtc_ref: ${{ inputs.webrtc_ref }}
+          target_os: ${{ needs.prepare_common.outputs.android_target_os }}
+          target_os_cache_key: ${{ needs.prepare_common.outputs.android_target_os_cache_key }}
+          ignore_cache: ${{ inputs.ignore_cache }}
+          release_pipeline_token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
+
+  ios_test:
+    name: Validate iOS simulator tests
+    needs: [prepare_common, prepare_apple]
+    if: needs.prepare_common.outputs.run_ios == 'true'
+    runs-on: macos-26
+    timeout-minutes: 180
+    steps:
+      - name: Check out stream-webrtc-release-pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: GetStream/stream-webrtc-release-pipeline
+          path: release-pipeline
+          token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
+
+      - name: Download prepared WebRTC tree
+        uses: actions/download-artifact@v4
+        with:
+          name: webrtc-src-prepared-apple
+
+      - name: Extract WebRTC tree
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ github.workspace }}/webrtc-tree"
+          tar -xzf webrtc-src-prepared-apple.tar.gz -C "${{ github.workspace }}/webrtc-tree"
+
+      - name: CI verification (fan-out does not run gclient sync)
+        run: |
+          echo "ios test uses only the restored tree; Fastlane lane :test does not call configure_google_client."
+          test -f "${{ github.workspace }}/webrtc-tree/.output/src/tools/mb/mb.py"
+          test -f "${{ github.workspace }}/webrtc-tree/.output/src/tools_webrtc/mb/mb_config.pyl"
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          working-directory: release-pipeline
+          bundler-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install depot_tools
+        run: |
+          if [[ ! -d "${HOME}/depot_tools" ]]; then
+            git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "${HOME}/depot_tools"
+          fi
+          echo "PATH=${HOME}/depot_tools:${PATH}" >> "${GITHUB_ENV}"
+          echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
+
+      - name: Generate local iOS mb config
+        run: |
+          python3 - <<'PY'
+          import ast
+          import pathlib
+          import pprint
+
+          base_path = pathlib.Path("${{ github.workspace }}/webrtc-tree/.output/src/tools_webrtc/mb/mb_config.pyl")
+          output_path = pathlib.Path("${{ github.workspace }}/release-pipeline/fastlane/mb_configs/local_ios.pyl")
+          config = ast.literal_eval(base_path.read_text(encoding="utf-8"))
+
+          mixins = dict(config.get("mixins", {}))
+          mixins["stream_local_ios_tests"] = {
+              "gn_args": "use_siso=false use_remoteexec=false use_reclient=false",
+          }
+          config["mixins"] = mixins
+
+          configs = {name: list(value) for name, value in config.get("configs", {}).items()}
+          configs["ios_debug_local_bot_arm64"] = configs["ios_debug_bot_arm64"] + ["stream_local_ios_tests"]
+          config["configs"] = configs
+
+          output_path.parent.mkdir(parents=True, exist_ok=True)
+          output_path.write_text(f"{pprint.pformat(config, width=120)}\n", encoding="utf-8")
+          PY
+
+      - name: Run iOS tests (no gclient sync in lane)
+        working-directory: release-pipeline
+        run: >-
+          bundle exec fastlane ios test
+          "root:${{ github.workspace }}/webrtc-tree/.output/src"
+          "builder_config:ios_debug_local_bot_arm64"
+          "config_file:${{ github.workspace }}/release-pipeline/fastlane/mb_configs/local_ios.pyl"
+
+  macos_test:
+    name: Validate macOS host tests
+    needs: [prepare_common, prepare_apple]
+    if: needs.prepare_common.outputs.run_macos == 'true'
+    runs-on: macos-26
+    timeout-minutes: 180
+    steps:
+      - name: Check out stream-webrtc-release-pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: GetStream/stream-webrtc-release-pipeline
+          path: release-pipeline
+          token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
+
+      - name: Download prepared WebRTC tree
+        uses: actions/download-artifact@v4
+        with:
+          name: webrtc-src-prepared-apple
+
+      - name: Extract WebRTC tree
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ github.workspace }}/webrtc-tree"
+          tar -xzf webrtc-src-prepared-apple.tar.gz -C "${{ github.workspace }}/webrtc-tree"
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          working-directory: release-pipeline
+          bundler-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install depot_tools
+        run: |
+          if [[ ! -d "${HOME}/depot_tools" ]]; then
+            git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "${HOME}/depot_tools"
+          fi
+          echo "PATH=${HOME}/depot_tools:${PATH}" >> "${GITHUB_ENV}"
+          echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
+
+      - name: Run macOS host tests (no gclient sync in lane)
+        working-directory: release-pipeline
+        run: >-
+          bundle exec fastlane macos test
+          "root:${{ github.workspace }}/webrtc-tree/.output/src"
+
+  android_test:
+    name: Validate Android build
+    needs: [prepare_common, prepare_android]
+    if: needs.prepare_common.outputs.run_android == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Check out stream-webrtc-release-pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: GetStream/stream-webrtc-release-pipeline
+          path: release-pipeline
+          token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
+
+      - name: Download prepared WebRTC tree
+        uses: actions/download-artifact@v4
+        with:
+          name: webrtc-src-prepared-android
+
+      - name: Extract WebRTC tree
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ github.workspace }}/webrtc-tree"
+          tar -xzf webrtc-src-prepared-android.tar.gz -C "${{ github.workspace }}/webrtc-tree"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip openjdk-8-jdk lsb-release software-properties-common
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          working-directory: release-pipeline
+          bundler-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install depot_tools
+        run: |
+          if [[ ! -d "${HOME}/depot_tools" ]]; then
+            git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "${HOME}/depot_tools"
+          fi
+          echo "PATH=${HOME}/depot_tools:${PATH}" >> "${GITHUB_ENV}"
+          echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
+
+      - name: Build Android AAR (no gclient sync in lane)
+        working-directory: release-pipeline
+        run: >-
+          bundle exec fastlane android test
+          "root:${{ github.workspace }}/webrtc-tree/.output/src"

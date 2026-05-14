@@ -87,3 +87,4 @@ fastlane/*.xml
 out_ios_libs
 .output
 .products
+out_macos_libs
