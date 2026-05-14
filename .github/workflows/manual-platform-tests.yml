@@ -1,7 +1,7 @@
 # Manual WebRTC platform tests. Shared planning runs first, host-specific
 # prepare jobs produce platform-ready trees, then platform jobs fan out.
 
-name: WebRTC Platform Validation
+name: Build
 
 permissions:
   contents: read
