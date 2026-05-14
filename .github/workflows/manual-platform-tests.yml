@@ -199,7 +199,7 @@ jobs:
           "root:${{ github.workspace }}/webrtc-tree/.output/src"
 
   android_test:
-    name: Validate Android tests
+    name: Validate Android build
     needs: [prepare_common, prepare_android]
     if: needs.prepare_common.outputs.run_android == 'true'
     runs-on: ubuntu-latest
