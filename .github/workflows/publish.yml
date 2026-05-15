@@ -24,7 +24,7 @@ on:
       ignore_cache:
         description: Skip restoring dependency caches and force a fresh sync
         type: boolean
-        default: true
+        default: false
 
 jobs:
   plan:
@@ -498,9 +498,14 @@ jobs:
           fi
           gh release create "${release_args[@]}"
 
+  trigger_downstream_releases:
+    name: Trigger downstream WebRTC releases
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
       - name: Trigger stream-video-swift-webrtc release
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
           RELEASE_VERSION: ${{ inputs.version }}
           IS_ALPHA: ${{ inputs.alpha }}
         run: |
@@ -508,5 +513,18 @@ jobs:
           webrtc_release_url="https://github.com/${{ github.repository }}/releases/tag/${RELEASE_VERSION}"
           gh workflow run publish-from-webrtc.yml \
             --repo GetStream/stream-video-swift-webrtc \
+            --field "webrtc_release_url=${webrtc_release_url}" \
+            --field "pre_release=${IS_ALPHA}"
+
+      - name: Trigger stream-video-android-webrtc release
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          IS_ALPHA: ${{ inputs.alpha }}
+        run: |
+          set -euo pipefail
+          webrtc_release_url="https://github.com/${{ github.repository }}/releases/tag/${RELEASE_VERSION}"
+          gh workflow run publish-from-webrtc.yml \
+            --repo GetStream/stream-video-android-webrtc \
             --field "webrtc_release_url=${webrtc_release_url}" \
             --field "pre_release=${IS_ALPHA}"
