@@ -184,9 +184,10 @@ void AudioState::OnMuteStreamChanged() {
     if (!adm->Recording() && adm->InitRecording() == 0) {
       adm->StartRecording();
     }
-  } else {
-    adm->StopRecording();
   }
+  // Do not stop recording when all send streams are muted. On iOS, tearing
+  // down input recreates the audio graph as output-only and changes playout
+  // loudness; explicit SetRecording(false) and stream removal still stop input.
 }
 
 void AudioState::UpdateAudioTransportWithSendingStreams() {
