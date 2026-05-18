@@ -52,6 +52,7 @@ using ::testing::InSequence;
 using ::testing::Matcher;
 using ::testing::NiceMock;
 using ::testing::NotNull;
+using ::testing::Return;
 using ::testing::StrictMock;
 using ::testing::Values;
 
@@ -445,6 +446,29 @@ TEST_P(AudioStateTest, AlwaysCallInitRecordingBeforeStartRecording) {
     audio_state->SetRecording(true);
   }
 
+  EXPECT_CALL(*adm, StopRecording());
+  audio_state->RemoveSendingStream(&stream);
+}
+
+TEST_P(AudioStateTest, MuteStreamChangeDoesNotStopRecording) {
+  ConfigHelper helper(GetParam());
+  scoped_refptr<internal::AudioState> audio_state(
+      make_ref_counted<internal::AudioState>(helper.config()));
+
+  auto* adm = reinterpret_cast<MockAudioDeviceModule*>(
+      helper.config().audio_device_module.get());
+
+  MockAudioSendStream stream;
+  EXPECT_CALL(*adm, InitRecording());
+  EXPECT_CALL(*adm, StartRecording());
+  audio_state->AddSendingStream(&stream, kSampleRate, kNumberOfChannels);
+
+  EXPECT_CALL(stream, GetMuted()).WillRepeatedly(Return(true));
+  EXPECT_CALL(*adm, StopRecording()).Times(0);
+  audio_state->OnMuteStreamChanged();
+
+  testing::Mock::VerifyAndClearExpectations(&stream);
+  testing::Mock::VerifyAndClearExpectations(adm);
   EXPECT_CALL(*adm, StopRecording());
   audio_state->RemoveSendingStream(&stream);
 }
