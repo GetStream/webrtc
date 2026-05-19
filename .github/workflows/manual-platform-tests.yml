@@ -37,6 +37,10 @@ on:
         description: Skip restoring dependency caches and force a fresh sync
         type: boolean
         default: false
+      android_arch:
+        description: Optional Android ABI to build, for example arm64-v8a. Leave empty to build the default ABI set.
+        required: false
+        default: ""
 
 jobs:
   # Fail invalid manual input before any expensive WebRTC sync/build work starts.
@@ -52,6 +56,17 @@ jobs:
           set -euo pipefail
           if [[ "${BUILD_APPLE}" != "true" && "${BUILD_ANDROID}" != "true" ]]; then
             echo "At least one of apple or android must be true."
+            exit 1
+          fi
+
+      - name: Validate Android build options
+        env:
+          ANDROID_ARCH: ${{ inputs.android_arch }}
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${ANDROID_ARCH}" && "${ANDROID_ARCH}" =~ [[:space:]] ]]; then
+            echo "::error::android_arch accepts a single ABI, for example arm64-v8a."
             exit 1
           fi
 
@@ -308,6 +323,8 @@ jobs:
           verify_signatures_skip:true
           zip_product_skip:true
           "build_product_arg_is_debug:${{ inputs.debug }}"
+          build_product_arg_treat_warnings_as_errors:false
+          build_product_arg_rtc_build_examples:false
           skip_licenses:true
 
       - name: Package iOS XCFramework artifact
@@ -376,6 +393,8 @@ jobs:
           "root:${{ github.workspace }}/webrtc-tree/.output/src"
           "products_root:${{ github.workspace }}/macos-products"
           "build_product_arg_is_debug:${{ inputs.debug }}"
+          build_product_arg_treat_warnings_as_errors:false
+          build_product_arg_rtc_build_examples:false
           zip_product_skip:true
 
       - name: Package macOS XCFramework artifact
@@ -495,11 +514,25 @@ jobs:
 
       - name: Build Android SDK artifact
         working-directory: release-pipeline
-        run: >-
-          bundle exec fastlane android build
-          "root:${{ github.workspace }}/webrtc-tree/.output/src"
-          "products_root:${{ github.workspace }}/android-products"
-          "build_product_arg_is_debug:${{ inputs.debug }}"
+        env:
+          ANDROID_ARCH: ${{ inputs.android_arch }}
+        run: |
+          set -euo pipefail
+
+          fastlane_args=(
+            android build
+            "root:${{ github.workspace }}/webrtc-tree/.output/src"
+            "products_root:${{ github.workspace }}/android-products"
+            "build_product_arg_is_debug:${{ inputs.debug }}"
+            build_product_arg_treat_warnings_as_errors:false
+            build_product_arg_rtc_build_examples:false
+          )
+
+          if [[ -n "${ANDROID_ARCH}" ]]; then
+            fastlane_args+=("archs:${ANDROID_ARCH}")
+          fi
+
+          bundle exec fastlane "${fastlane_args[@]}"
 
       - name: Upload Android build artifact
         uses: actions/upload-artifact@v4
