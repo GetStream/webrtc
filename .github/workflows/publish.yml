@@ -17,18 +17,47 @@ on:
         description: Mark the GitHub release as an alpha/pre-release
         type: boolean
         default: false
-      changelog_file:
-        description: Optional changelog file path from the selected branch to attach
+      debug:
+        description: Build WebRTC artifacts with GN is_debug=true
+        type: boolean
+        default: false
+      ios:
+        description: Build, validate, publish Apple artifacts and trigger stream-video-swift-webrtc
+        type: boolean
+        default: true
+      android:
+        description: Build, validate, publish Android artifacts and trigger stream-video-android-webrtc
+        type: boolean
+        default: true
+      changelog:
+        description: Optional release notes markdown. Leave empty to use generated notes.
         required: false
         default: ""
       ignore_cache:
         description: Skip restoring dependency caches and force a fresh sync
         type: boolean
-        default: true
+        default: false
 
 jobs:
+  # Keep this as a separate first job so invalid manual input fails before any expensive WebRTC sync/build work starts.
+  validate_inputs:
+    name: Validate release inputs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure at least one platform is selected
+        env:
+          BUILD_IOS: ${{ inputs.ios }}
+          BUILD_ANDROID: ${{ inputs.android }}
+        run: |
+          set -euo pipefail
+          if [[ "${BUILD_IOS}" != "true" && "${BUILD_ANDROID}" != "true" ]]; then
+            echo "At least one of ios or android must be true."
+            exit 1
+          fi
+
   plan:
     name: Plan release build
+    needs: validate_inputs
     runs-on: ubuntu-latest
     outputs:
       apple_target_os: ${{ steps.plan.outputs.apple_target_os }}
@@ -43,13 +72,16 @@ jobs:
         name: Plan release build
         uses: ./.github/actions/prepare-common
         with:
-          platform_ios: true
-          platform_macos: true
-          platform_android: true
+          # Platform inputs control which prepare/build/test legs run. iOS releases need both iOS and macOS
+          # Apple artifacts, so platform_macos follows the iOS input.
+          platform_ios: ${{ inputs.ios }}
+          platform_macos: ${{ inputs.ios }}
+          platform_android: ${{ inputs.android }}
 
   prepare_apple:
     name: Prepare Apple dependencies
     needs: plan
+    if: ${{ inputs.ios }}
     runs-on: macos-26
     timeout-minutes: 360
     steps:
@@ -68,6 +100,7 @@ jobs:
   prepare_android:
     name: Prepare Android dependencies
     needs: plan
+    if: ${{ inputs.android }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
@@ -86,6 +119,7 @@ jobs:
   validate_ios:
     name: Validate iOS simulator tests
     needs: prepare_apple
+    if: ${{ inputs.ios }}
     runs-on: macos-26
     timeout-minutes: 180
     steps:
@@ -163,6 +197,7 @@ jobs:
   validate_macos:
     name: Validate macOS host tests
     needs: prepare_apple
+    if: ${{ inputs.ios }}
     runs-on: macos-26
     timeout-minutes: 180
     steps:
@@ -213,6 +248,7 @@ jobs:
   build_ios:
     name: Build iOS SDK
     needs: prepare_apple
+    if: ${{ inputs.ios }}
     runs-on: macos-26
     timeout-minutes: 360
     steps:
@@ -259,12 +295,14 @@ jobs:
         run: >-
           bundle exec fastlane ios build
           "root:${{ github.workspace }}/webrtc-tree/.output/src"
+          "build_root:${{ github.workspace }}/webrtc-tree/.output"
           "products_root:${{ github.workspace }}/ios-products"
           configure_google_client_skip:true
           prepare_signing_skip:false
           sign_product_skip:true
           verify_signatures_skip:true
           zip_product_skip:true
+          "build_product_arg_is_debug:${{ inputs.debug }}"
           skip_licenses:true
 
       - name: Package iOS XCFramework artifact
@@ -284,6 +322,7 @@ jobs:
   build_macos:
     name: Build macOS SDK
     needs: prepare_apple
+    if: ${{ inputs.ios }}
     runs-on: macos-26
     timeout-minutes: 360
     steps:
@@ -331,6 +370,7 @@ jobs:
           bundle exec fastlane macos build
           "root:${{ github.workspace }}/webrtc-tree/.output/src"
           "products_root:${{ github.workspace }}/macos-products"
+          "build_product_arg_is_debug:${{ inputs.debug }}"
           zip_product_skip:true
 
       - name: Package macOS XCFramework artifact
@@ -350,6 +390,7 @@ jobs:
   package_apple:
     name: Package Apple release artifact
     needs: [build_ios, build_macos, validate_ios, validate_macos]
+    if: ${{ inputs.ios }}
     runs-on: macos-26
     timeout-minutes: 60
     steps:
@@ -366,6 +407,8 @@ jobs:
           path: apple-inputs/macos
 
       - name: Combine Apple XCFrameworks
+        env:
+          ENABLE_DEBUG: ${{ inputs.debug }}
         run: |
           set -euo pipefail
           ditto -x -k apple-inputs/ios/WebRTC-ios.xcframework.zip apple-inputs/ios
@@ -374,6 +417,14 @@ jobs:
           command=(xcodebuild -create-xcframework)
           while IFS= read -r framework; do
             command+=(-framework "${framework}")
+            if [[ "${ENABLE_DEBUG}" == "true" ]]; then
+              mapfile -t dsyms < <(find "$(dirname "${framework}")" -name "$(basename "${framework}").dSYM" -type d | sort)
+              if [[ "${#dsyms[@]}" -eq 0 ]]; then
+                echo "::warning::Missing dSYM for ${framework}"
+                continue
+              fi
+              command+=(-debug-symbols "${dsyms[0]}")
+            fi
           done < <(find apple-inputs -name '*.framework' -type d | sort)
 
           "${command[@]}" -output WebRTC.xcframework
@@ -389,6 +440,7 @@ jobs:
   build_android:
     name: Build Android AAR
     needs: prepare_android
+    if: ${{ inputs.android }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
@@ -441,6 +493,7 @@ jobs:
           bundle exec fastlane android build
           "root:${{ github.workspace }}/webrtc-tree/.output/src"
           "products_root:${{ github.workspace }}/android-products"
+          "build_product_arg_is_debug:${{ inputs.debug }}"
 
       - name: Upload Android SDK artifact
         uses: actions/upload-artifact@v4
@@ -451,7 +504,10 @@ jobs:
 
   publish:
     name: Publish GitHub release
+    # GitHub Actions needs are static. Jobs for disabled platforms are skipped quickly, and this condition
+    # lets publish continue as long as no selected platform failed or was cancelled.
     needs: [validate_ios, validate_macos, package_apple, build_android]
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out release branch
@@ -466,29 +522,29 @@ jobs:
           merge-multiple: true
           path: release-assets
 
-      - name: Stage optional changelog
-        if: ${{ inputs.changelog_file != '' }}
-        run: |
-          set -euo pipefail
-          changelog="${{ inputs.changelog_file }}"
-          test -f "${changelog}"
-          cp "${changelog}" "release-assets/$(basename "${changelog}")"
-
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ inputs.version }}
           RELEASE_BRANCH: ${{ inputs.branch }}
           IS_ALPHA: ${{ inputs.alpha }}
+          CHANGELOG: ${{ inputs.changelog }}
         run: |
           set -euo pipefail
+          notes_file="$(mktemp)"
+          if [[ -n "${CHANGELOG}" ]]; then
+            printf '%s\n' "${CHANGELOG}" > "${notes_file}"
+          else
+            printf 'Automated WebRTC SDK release %s.\n' "${RELEASE_VERSION}" > "${notes_file}"
+          fi
+
           release_args=(
             "${RELEASE_VERSION}"
             release-assets/*
             --repo "${{ github.repository }}"
             --target "${RELEASE_BRANCH}"
             --title "${RELEASE_VERSION}"
-            --notes "Automated WebRTC SDK release ${RELEASE_VERSION}."
+            --notes-file "${notes_file}"
           )
           if [[ "${IS_ALPHA}" == "true" ]]; then
             release_args+=(--prerelease)
@@ -496,3 +552,39 @@ jobs:
             release_args+=(--latest)
           fi
           gh release create "${release_args[@]}"
+
+  trigger_downstream_releases:
+    name: Trigger downstream WebRTC releases
+    needs: publish
+    if: ${{ !cancelled() && !failure() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger stream-video-swift-webrtc release
+        # Only trigger the Swift wrapper when Apple artifacts were part of this WebRTC release.
+        if: ${{ inputs.ios }}
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          IS_ALPHA: ${{ inputs.alpha }}
+        run: |
+          set -euo pipefail
+          webrtc_release_url="https://github.com/${{ github.repository }}/releases/tag/${RELEASE_VERSION}"
+          gh workflow run publish-from-webrtc.yml \
+            --repo GetStream/stream-video-swift-webrtc \
+            --field "webrtc_release_url=${webrtc_release_url}" \
+            --field "pre_release=${IS_ALPHA}"
+
+      - name: Trigger stream-video-android-webrtc release
+        # Only trigger the Android wrapper when Android artifacts were part of this WebRTC release.
+        if: ${{ inputs.android }}
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          IS_ALPHA: ${{ inputs.alpha }}
+        run: |
+          set -euo pipefail
+          webrtc_release_url="https://github.com/${{ github.repository }}/releases/tag/${RELEASE_VERSION}"
+          gh workflow run publish-from-webrtc.yml \
+            --repo GetStream/stream-video-android-webrtc \
+            --field "webrtc_release_url=${webrtc_release_url}" \
+            --field "pre_release=${IS_ALPHA}"
