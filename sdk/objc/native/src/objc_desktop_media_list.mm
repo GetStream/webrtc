@@ -36,8 +36,11 @@ extern "C" {
 namespace webrtc {
 
 ObjCDesktopMediaList::ObjCDesktopMediaList(DesktopType type,
-                                           RTC_OBJC_TYPE(RTCDesktopMediaList) * objcMediaList)
-    : thread_(rtc::Thread::Create()), objcMediaList_(objcMediaList), type_(type) {
+                                           RTC_OBJC_TYPE(RTCDesktopMediaList) *
+                                               objcMediaList)
+    : thread_(webrtc::Thread::Create()),
+      objcMediaList_(objcMediaList),
+      type_(type) {
   RTC_DCHECK(thread_);
   thread_->Start();
   options_ = webrtc::DesktopCaptureOptions::CreateDefault();
@@ -47,7 +50,7 @@ ObjCDesktopMediaList::ObjCDesktopMediaList(DesktopType type,
   callback_ = std::make_unique<CallbackProxy>();
 
   thread_->BlockingCall([this, type] {
-     if (type == kScreen) {
+    if (type == kScreen) {
       capturer_ = webrtc::DesktopCapturer::CreateScreenCapturer(options_);
     } else {
       capturer_ = webrtc::DesktopCapturer::CreateWindowCapturer(options_);
@@ -57,12 +60,11 @@ ObjCDesktopMediaList::ObjCDesktopMediaList(DesktopType type,
 }
 
 ObjCDesktopMediaList::~ObjCDesktopMediaList() {
-  thread_->BlockingCall([this] {
-    capturer_.reset();
-  });
+  thread_->BlockingCall([this] { capturer_.reset(); });
 }
 
-int32_t ObjCDesktopMediaList::UpdateSourceList(bool force_reload, bool get_thumbnail) {
+int32_t ObjCDesktopMediaList::UpdateSourceList(bool force_reload,
+                                               bool get_thumbnail) {
   if (force_reload) {
     for (auto source : sources_) {
       [objcMediaList_ mediaSourceRemoved:source.get()];
@@ -72,9 +74,8 @@ int32_t ObjCDesktopMediaList::UpdateSourceList(bool force_reload, bool get_thumb
 
   webrtc::DesktopCapturer::SourceList new_sources;
 
-  thread_->BlockingCall([this, &new_sources] {
-    capturer_->GetSourceList(&new_sources);
-  });
+  thread_->BlockingCall(
+      [this, &new_sources] { capturer_->GetSourceList(&new_sources); });
 
   typedef std::set<DesktopCapturer::SourceId> SourceSet;
   SourceSet new_source_set;
@@ -101,7 +102,8 @@ int32_t ObjCDesktopMediaList::UpdateSourceList(bool force_reload, bool get_thumb
     for (size_t i = 0; i < new_sources.size(); ++i) {
       if (old_source_set.find(new_sources[i].id) == old_source_set.end()) {
         MediaSource *source = new MediaSource(this, new_sources[i], type_);
-        sources_.insert(sources_.begin() + i, std::shared_ptr<MediaSource>(source));
+        sources_.insert(sources_.begin() + i,
+                        std::shared_ptr<MediaSource>(source));
         [objcMediaList_ mediaSourceAdded:source];
         GetThumbnail(source, true);
       }
@@ -146,17 +148,17 @@ int32_t ObjCDesktopMediaList::UpdateSourceList(bool force_reload, bool get_thumb
 
 bool ObjCDesktopMediaList::GetThumbnail(MediaSource *source, bool notify) {
   thread_->PostTask([this, source, notify] {
-      if(capturer_->SelectSource(source->id())){
-        callback_->SetCallback([&](webrtc::DesktopCapturer::Result result,
-                             std::unique_ptr<webrtc::DesktopFrame> frame) {
-          auto old_thumbnail = source->thumbnail();
-          source->SaveCaptureResult(result, std::move(frame));
-          if(old_thumbnail.size() != source->thumbnail().size() && notify) {
-            [objcMediaList_ mediaSourceThumbnailChanged:source];
-          }
-        });
-        capturer_->CaptureFrame();
-      }
+    if (capturer_->SelectSource(source->id())) {
+      callback_->SetCallback([&](webrtc::DesktopCapturer::Result result,
+                                 std::unique_ptr<webrtc::DesktopFrame> frame) {
+        auto old_thumbnail = source->thumbnail();
+        source->SaveCaptureResult(result, std::move(frame));
+        if (old_thumbnail.size() != source->thumbnail().size() && notify) {
+          [objcMediaList_ mediaSourceThumbnailChanged:source];
+        }
+      });
+      capturer_->CaptureFrame();
+    }
   });
 
   return true;
@@ -174,8 +176,9 @@ bool MediaSource::UpdateThumbnail() {
   return mediaList_->GetThumbnail(this, true);
 }
 
-void MediaSource::SaveCaptureResult(webrtc::DesktopCapturer::Result result,
-                                    std::unique_ptr<webrtc::DesktopFrame> frame) {
+void MediaSource::SaveCaptureResult(
+    webrtc::DesktopCapturer::Result result,
+    std::unique_ptr<webrtc::DesktopFrame> frame) {
   if (result != webrtc::DesktopCapturer::Result::SUCCESS) {
     return;
   }
@@ -199,13 +202,15 @@ void MediaSource::SaveCaptureResult(webrtc::DesktopCapturer::Result result,
 
   CVPixelBufferRef pixelBuffer = NULL;
 
-  NSDictionary *pixelAttributes = @{(NSString *)kCVPixelBufferIOSurfacePropertiesKey : @{}};
-  CVReturn res = CVPixelBufferCreate(kCFAllocatorDefault,
-                                     width,
-                                     height,
-                                     kCVPixelFormatType_32BGRA,
-                                     (__bridge CFDictionaryRef)(pixelAttributes),
-                                     &pixelBuffer);
+  NSDictionary *pixelAttributes =
+      @{(NSString *)kCVPixelBufferIOSurfacePropertiesKey : @{}};
+  CVReturn res =
+      CVPixelBufferCreate(kCFAllocatorDefault,
+                          width,
+                          height,
+                          kCVPixelFormatType_32BGRA,
+                          (__bridge CFDictionaryRef)(pixelAttributes),
+                          &pixelBuffer);
   CVPixelBufferLockBaseAddress(pixelBuffer, 0);
   uint8_t *pxdata = (uint8_t *)CVPixelBufferGetBaseAddress(pixelBuffer);
   libyuv::ConvertToARGB(reinterpret_cast<uint8_t *>(frame->data()),

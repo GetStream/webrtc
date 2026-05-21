@@ -562,6 +562,14 @@ template("rtc_test") {
       }
     }
 
+    if (!build_with_chromium && rtc_include_tests &&
+        (!defined(invoker.is_xctest) || !invoker.is_xctest)) {
+      if (!defined(deps)) {
+        deps = []
+      }
+      deps += [ webrtc_root + "test:test_main" ]
+    }
+
     assert(
         !defined(absl_deps),
         "`absl_deps` has been deprecated, add your Abseil dependencies to the `deps` variable.")
@@ -1177,7 +1185,7 @@ if (is_mac || is_ios) {
       deps = [ ":create_bracket_include_headers_$this_target_name" ]
     }
 
-    if (is_mac || target_environment == "catalyst") {
+    if (is_mac) {
       headers_dir = "Versions/A/Headers"
       copy("copy_umbrella_header_$target_name") {
         sources = [ umbrella_header_path ]
