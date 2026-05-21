@@ -1007,6 +1007,12 @@ VideoEncoder::EncoderInfo SimulcastEncoderAdapter::GetEncoderInfo() const {
 
   encoder_info.scaling_settings = VideoEncoder::ScalingSettings::kOff;
   std::vector<std::string> encoder_names;
+  // SEA can keep multiple stream contexts alive even when runtime bitrate
+  // allocation has paused all but one spatial layer. Track that state
+  // explicitly so we can preserve simulcast-specific aggregation while still
+  // forwarding the active encoder's single-layer adaptation hints.
+  size_t active_stream_count = 0;
+  std::optional<VideoEncoder::EncoderInfo> active_stream_info;
 
   for (size_t i = 0; i < stream_contexts_.size(); ++i) {
     VideoEncoder::EncoderInfo encoder_impl_info =
@@ -1014,6 +1020,11 @@ VideoEncoder::EncoderInfo SimulcastEncoderAdapter::GetEncoderInfo() const {
 
     // Encoder name indicates names of all active sub-encoders.
     if (!stream_contexts_[i].is_paused()) {
+      // If exactly one layer stays unpaused after SetRates(), this is the
+      // encoder whose runtime adaptation fields should be exposed to the rest
+      // of WebRTC.
+      ++active_stream_count;
+      active_stream_info = encoder_impl_info;
       encoder_names.push_back(encoder_impl_info.implementation_name);
     }
 
@@ -1073,6 +1084,27 @@ VideoEncoder::EncoderInfo SimulcastEncoderAdapter::GetEncoderInfo() const {
     implementation_name_builder << StrJoin(encoder_names, ", ");
     implementation_name_builder << ")";
     encoder_info.implementation_name += implementation_name_builder.Release();
+  }
+
+  if (active_stream_count == 1) {
+    RTC_DCHECK(active_stream_info.has_value());
+    // Keep the aggregated SEA view for simulcast-specific fields such as
+    // implementation_name, fps_allocation and alignment, but make the adapter
+    // behave like single-layer publishing for the runtime-sensitive fields
+    // consumed by adaptation and frame handling.
+    encoder_info.scaling_settings = active_stream_info->scaling_settings;
+    encoder_info.supports_native_handle =
+        active_stream_info->supports_native_handle;
+    encoder_info.has_trusted_rate_controller =
+        active_stream_info->has_trusted_rate_controller;
+    encoder_info.is_hardware_accelerated =
+        active_stream_info->is_hardware_accelerated;
+    encoder_info.is_qp_trusted = active_stream_info->is_qp_trusted;
+    encoder_info.resolution_bitrate_limits =
+        active_stream_info->resolution_bitrate_limits;
+    encoder_info.min_qp = active_stream_info->min_qp;
+    encoder_info.preferred_pixel_formats =
+        active_stream_info->preferred_pixel_formats;
   }
 
   OverrideFromFieldTrial(&encoder_info);

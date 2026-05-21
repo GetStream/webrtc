@@ -565,16 +565,86 @@ void VideoStreamEncoderResourceManager::UpdateBandwidthQualityScalerSettings(
   }
 }
 
+void VideoStreamEncoderResourceManager::ResetAdaptationsForSimulcastChange() {
+  RTC_DCHECK_RUN_ON(encoder_queue_);
+  std::vector<scoped_refptr<Resource>> quality_resources;
+  for (const auto& resource_and_reason : resources_) {
+    if (resource_and_reason.second == VideoAdaptationReason::kQuality) {
+      quality_resources.push_back(resource_and_reason.first);
+    }
+  }
+
+  if (quality_resources.empty()) {
+    return;
+  }
+
+  for (const auto& resource : quality_resources) {
+    if (resource == quality_scaler_resource_) {
+      RTC_LOG(LS_INFO) << "Clearing quality scaler restrictions for simulcast "
+                          "active-layer transition.";
+      quality_scaler_resource_->StopCheckForOveruse();
+      RemoveResource(resource);
+      initial_frame_dropper_->OnQualityScalerSettingsUpdated();
+    } else if (resource == bandwidth_quality_scaler_resource_) {
+      RTC_LOG(LS_INFO)
+          << "Clearing bandwidth quality scaler restrictions for simulcast "
+             "active-layer transition.";
+      bandwidth_quality_scaler_resource_->StopCheckForOveruse();
+      RemoveResource(resource);
+    } else {
+      RTC_LOG(LS_INFO) << "Resetting quality adaptation resource \""
+                       << resource->Name()
+                       << "\" for simulcast active-layer transition.";
+      RemoveResource(resource);
+      AddResource(resource, VideoAdaptationReason::kQuality);
+    }
+  }
+
+  UpdateStatsAdaptationSettings();
+}
+
+void VideoStreamEncoderResourceManager::SetSimulcastActive(
+    bool simulcast_active) {
+  RTC_DCHECK_RUN_ON(encoder_queue_);
+  if (simulcast_active_ != simulcast_active) {
+    RTC_LOG(LS_INFO) << "SetSimulcastActive: " << simulcast_active_
+                     << " -> " << simulcast_active;
+  }
+  simulcast_active_ = simulcast_active;
+}
+
 void VideoStreamEncoderResourceManager::ConfigureQualityScaler(
     const VideoEncoder::EncoderInfo& encoder_info) {
   RTC_DCHECK_RUN_ON(encoder_queue_);
   const auto scaling_settings = encoder_info.scaling_settings;
+  // Quality scaling (adapting input resolution based on encoded QP) is allowed
+  // only when ALL of the following are true:
+  //  1. The degradation preference permits resolution changes.
+  //  2. Simulcast is NOT active — during simulcast, the SFU handles quality
+  //     adaptation by activating/deactivating layers. Allowing the quality
+  //     scaler to run would shrink the input resolution and cause all
+  //     simulcast layer dimensions to be recomputed from degraded input.
+  //  3. The encoder reports QP thresholds or the encoder config explicitly
+  //     allows quality scaling (is_quality_scaling_allowed).
+  //  4. The encoder's QP values are trusted for scaling decisions.
+  const bool resolution_scaling_enabled =
+      IsResolutionScalingEnabled(degradation_preference_);
+  const bool has_scaling_thresholds =
+      scaling_settings.thresholds.has_value() ||
+      (encoder_settings_.has_value() &&
+       encoder_settings_->encoder_config().is_quality_scaling_allowed);
+  const bool qp_trusted = encoder_info.is_qp_trusted.value_or(true);
   const bool quality_scaling_allowed =
-      IsResolutionScalingEnabled(degradation_preference_) &&
-      (scaling_settings.thresholds.has_value() ||
-       (encoder_settings_.has_value() &&
-        encoder_settings_->encoder_config().is_quality_scaling_allowed)) &&
-      encoder_info.is_qp_trusted.value_or(true);
+      resolution_scaling_enabled && !simulcast_active_ &&
+      has_scaling_thresholds && qp_trusted;
+
+  RTC_LOG(LS_INFO) << "ConfigureQualityScaler: allowed=" << quality_scaling_allowed
+                   << " (resolution_scaling=" << resolution_scaling_enabled
+                   << ", simulcast_active=" << simulcast_active_
+                   << ", has_thresholds=" << has_scaling_thresholds
+                   << ", qp_trusted=" << qp_trusted
+                   << ", scaler_running=" << quality_scaler_resource_->is_started()
+                   << ")";
 
   // TODO(https://crbug.com/webrtc/11222): Should this move to
   // QualityScalerResource?
@@ -615,6 +685,7 @@ void VideoStreamEncoderResourceManager::ConfigureBandwidthQualityScaler(
   RTC_DCHECK_RUN_ON(encoder_queue_);
   const bool bandwidth_quality_scaling_allowed =
       IsResolutionScalingEnabled(degradation_preference_) &&
+      !simulcast_active_ &&
       (encoder_settings_.has_value() &&
        encoder_settings_->encoder_config().is_quality_scaling_allowed) &&
       !encoder_info.is_qp_trusted.value_or(true);
