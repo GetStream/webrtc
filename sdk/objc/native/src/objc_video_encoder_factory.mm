@@ -134,8 +134,17 @@ class ObjCVideoEncoder : public VideoEncoder {
 
     RTC_OBJC_TYPE(RTCVideoEncoderQpThresholds) *qp_thresholds =
         [encoder_ scalingSettings];
+    // The default kDefaultMinPixelsPerFrame (320*180 = 57600) is too
+    // conservative for iOS hardware encoders (VideoToolbox). It prevents
+    // the quality scaler from reducing resolution below ~180x320 (the
+    // quarter-resolution simulcast layer for 720p), which limits adaptation
+    // range on constrained networks (e.g. 3G). VideoToolbox can encode at
+    // resolutions well below this threshold, so we use a lower floor to
+    // allow meaningful quality adaptation in bandwidth-limited scenarios.
+    constexpr int kObjCEncoderMinPixelsPerFrame = 90 * 160;
     info.scaling_settings = qp_thresholds ?
-        ScalingSettings(qp_thresholds.low, qp_thresholds.high) :
+        ScalingSettings(qp_thresholds.low, qp_thresholds.high,
+                        kObjCEncoderMinPixelsPerFrame) :
         ScalingSettings::kOff;
 
     info.requested_resolution_alignment = encoder_.resolutionAlignment > 0 ?: 1;

@@ -276,6 +276,9 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
   uint32_t GetInputFramerateFps() RTC_RUN_ON(encoder_queue_);
   void SetEncoderRates(const EncoderRateSettings& rate_settings)
       RTC_RUN_ON(encoder_queue_);
+  size_t GetNumActiveSimulcastLayers() const RTC_RUN_ON(encoder_queue_);
+  void UpdateSimulcastAdaptationState(size_t num_active_layers)
+      RTC_RUN_ON(encoder_queue_);
 
   void RunPostEncode(const EncodedImage& encoded_image,
                      int64_t time_sent_us,
@@ -344,6 +347,10 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
   std::optional<VideoFrameInfo> last_frame_info_ RTC_GUARDED_BY(encoder_queue_);
   int crop_width_ RTC_GUARDED_BY(encoder_queue_) = 0;
   int crop_height_ RTC_GUARDED_BY(encoder_queue_) = 0;
+  // Tracks the runtime number of active spatial layers so quality-scaler
+  // transitions follow the current rate allocation, not only the latest
+  // encoder configuration.
+  size_t prev_num_active_simulcast_layers_ RTC_GUARDED_BY(encoder_queue_) = 0;
   std::optional<uint32_t> encoder_target_bitrate_bps_
       RTC_GUARDED_BY(encoder_queue_);
   size_t max_data_payload_length_ RTC_GUARDED_BY(encoder_queue_) = 0;

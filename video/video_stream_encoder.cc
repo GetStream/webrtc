@@ -1102,6 +1102,8 @@ void VideoStreamEncoder::ReconfigureEncoder() {
   AlignmentAdjuster::GetAlignmentAndMaybeAdjustScaleFactors(
       encoder_->GetEncoderInfo(), &encoder_config_, std::nullopt);
 
+  UpdateSimulcastAdaptationState(GetNumActiveSimulcastLayers());
+
   std::vector<VideoStream> streams;
   if (encoder_config_.video_stream_factory) {
     // Note: only tests set their own EncoderStreamFactory...
@@ -1815,6 +1817,8 @@ void VideoStreamEncoder::SetEncoderRates(
     last_encoder_rate_settings_ = rate_settings;
   }
 
+  UpdateSimulcastAdaptationState(GetNumActiveSimulcastLayers());
+
   if (!encoder_)
     return;
 
@@ -1921,6 +1925,78 @@ void VideoStreamEncoder::OnFramePrepared(size_t frame_id) {
     MaybeEncodeVideoFrame(front.frame, front.time_when_posted_us);
     pending_mapped_frames_.pop_front();
   }
+}
+
+size_t VideoStreamEncoder::GetNumActiveSimulcastLayers() const {
+  RTC_DCHECK_RUN_ON(encoder_queue_.get());
+  if (last_encoder_rate_settings_.has_value()) {
+    size_t num_active_layers = 0;
+    for (size_t i = 0; i < encoder_config_.number_of_streams; ++i) {
+      if (last_encoder_rate_settings_->rate_control.target_bitrate
+              .GetSpatialLayerSum(i) > 0) {
+        ++num_active_layers;
+      }
+    }
+    return num_active_layers;
+  }
+
+  size_t num_active_layers = 0;
+  for (size_t i = 0; i < encoder_config_.number_of_streams; ++i) {
+    if (encoder_config_.simulcast_layers[i].active) {
+      ++num_active_layers;
+    }
+  }
+  return num_active_layers;
+}
+
+void VideoStreamEncoder::UpdateSimulcastAdaptationState(
+    size_t num_active_layers) {
+  RTC_DCHECK_RUN_ON(encoder_queue_.get());
+  // Determine whether we are effectively in simulcast mode based on the
+  // number of active runtime layers, not only the configured streams. The
+  // encoder config may keep 3 streams configured while SetRates() collapses
+  // publishing down to a single layer, or expands it back to simulcast,
+  // without a fresh ConfigureEncoder() call.
+  const bool is_simulcast = num_active_layers > 1;
+  const bool was_simulcast = prev_num_active_simulcast_layers_ > 1;
+
+  RTC_LOG(LS_INFO) << "[VSE] Simulcast state: active_layers="
+                   << num_active_layers
+                   << ", prev_active_layers="
+                   << prev_num_active_simulcast_layers_
+                   << ", streams=" << encoder_config_.number_of_streams
+                   << ", is_simulcast=" << is_simulcast
+                   << ", was_simulcast=" << was_simulcast;
+
+  if (is_simulcast &&
+      (!was_simulcast ||
+       num_active_layers > prev_num_active_simulcast_layers_)) {
+    // Whenever the active simulcast layer count increases, disable the
+    // quality scaler and clear any accumulated resolution restrictions so the
+    // source can return to full-resolution input for the larger runtime layer
+    // set. The guard on prev > 0 avoids clearing on the very first encoder
+    // configuration where no restrictions exist yet.
+    RTC_LOG(LS_INFO) << "[VSE] Active-layer increase -> simulcast: disabling "
+                        "quality scaler, clearing accumulated restrictions.";
+    stream_resource_manager_.SetSimulcastActive(true);
+    if (prev_num_active_simulcast_layers_ > 0) {
+      stream_resource_manager_.ResetAdaptationsForSimulcastChange();
+    }
+  } else if (!is_simulcast && was_simulcast) {
+    RTC_LOG(LS_INFO) << "[VSE] Transition -> single stream: quality scaler "
+                        "will be re-enabled.";
+    stream_resource_manager_.SetSimulcastActive(false);
+  } else if (is_simulcast) {
+    RTC_LOG(LS_INFO) << "[VSE] Staying in simulcast: quality scaler remains "
+                        "disabled.";
+    stream_resource_manager_.SetSimulcastActive(true);
+  } else {
+    RTC_LOG(LS_INFO) << "[VSE] Staying in single stream: quality scaler "
+                        "remains enabled.";
+    stream_resource_manager_.SetSimulcastActive(false);
+  }
+
+  prev_num_active_simulcast_layers_ = num_active_layers;
 }
 
 void VideoStreamEncoder::MaybeEncodeVideoFrame(const VideoFrame& video_frame,

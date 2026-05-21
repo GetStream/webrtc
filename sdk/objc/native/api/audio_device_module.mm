@@ -44,6 +44,7 @@ webrtc::scoped_refptr<AudioDeviceModule> CreateAudioDeviceModule(
 #endif
 }
 
+#if defined(WEBRTC_IOS)
 webrtc::scoped_refptr<AudioDeviceModule> CreateMutedDetectAudioDeviceModule(
     AudioDeviceModule::MutedSpeechEventHandler muted_speech_event_handler,
     bool bypass_voice_processing) {
@@ -79,13 +80,8 @@ webrtc::scoped_refptr<AudioDeviceModule> CreateMutedDetectAudioDeviceModule(
     ADMErrorHandler error_handler,
     bool bypass_voice_processing) {
   RTC_DLOG(LS_INFO) << __FUNCTION__;
-#if defined(WEBRTC_IOS)
   return webrtc::make_ref_counted<ios_adm::AudioDeviceModuleIOS>(
       env, bypass_voice_processing, muted_speech_event_handler, error_handler);
-#else
-  RTC_LOG(LS_ERROR)
-      << "current platform is not supported => this module will self destruct!";
-  return nullptr;
-#endif
 }
+#endif
 }  // namespace webrtc

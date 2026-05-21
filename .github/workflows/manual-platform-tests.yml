@@ -1,5 +1,5 @@
-# Manual WebRTC platform tests. Shared planning runs first, host-specific
-# prepare jobs produce platform-ready trees, then platform jobs fan out.
+# Manual WebRTC build. Shared planning runs first, host-specific prepare jobs
+# produce platform-ready trees, then selected platform builds/tests fan out.
 
 name: Build
 
@@ -13,32 +13,68 @@ on:
         description: Branch, tag, or SHA for this repo (GetStream/webrtc)
         required: true
         default: main
-      platform_ios:
-        description: Run iOS simulator tests
+      apple:
+        description: Build and package Apple xcframework artifacts
         type: boolean
         default: true
-      platform_macos:
-        description: Run macOS host tests
+      android:
+        description: Build and package Android AAR artifact
         type: boolean
-        default: false
-      platform_android:
-        description: Run Android AAR build validation
+        default: true
+      debug:
+        description: Build WebRTC artifacts with GN is_debug=true and include Apple dSYMs when available
+        type: boolean
+        default: true
+      run_ios_tests:
+        description: Run iOS simulator tests when Apple is enabled
+        type: boolean
+        default: true
+      run_macos_tests:
+        description: Run macOS host tests when Apple is enabled
         type: boolean
         default: false
       ignore_cache:
         description: Skip restoring dependency caches and force a fresh sync
         type: boolean
-        default: true
+        default: false
+      android_arch:
+        description: Optional Android ABI to build, for example arm64-v8a. Leave empty to build the default ABI set.
+        required: false
+        default: ""
 
 jobs:
+  # Fail invalid manual input before any expensive WebRTC sync/build work starts.
+  validate_inputs:
+    name: Validate build inputs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure at least one platform is selected
+        env:
+          BUILD_APPLE: ${{ inputs.apple }}
+          BUILD_ANDROID: ${{ inputs.android }}
+        run: |
+          set -euo pipefail
+          if [[ "${BUILD_APPLE}" != "true" && "${BUILD_ANDROID}" != "true" ]]; then
+            echo "At least one of apple or android must be true."
+            exit 1
+          fi
+
+      - name: Validate Android build options
+        env:
+          ANDROID_ARCH: ${{ inputs.android_arch }}
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${ANDROID_ARCH}" && "${ANDROID_ARCH}" =~ [[:space:]] ]]; then
+            echo "::error::android_arch accepts a single ABI, for example arm64-v8a."
+            exit 1
+          fi
+
   prepare_common:
-    name: Plan platform validation
+    name: Plan platform build
+    needs: validate_inputs
     runs-on: ubuntu-latest
     outputs:
-      run_ios: ${{ steps.plan.outputs.run_ios }}
-      run_macos: ${{ steps.plan.outputs.run_macos }}
-      run_android: ${{ steps.plan.outputs.run_android }}
-      run_apple: ${{ steps.plan.outputs.run_apple }}
       apple_target_os: ${{ steps.plan.outputs.apple_target_os }}
       apple_target_os_cache_key: ${{ steps.plan.outputs.apple_target_os_cache_key }}
       android_target_os: ${{ steps.plan.outputs.android_target_os }}
@@ -48,17 +84,18 @@ jobs:
         uses: actions/checkout@v4
 
       - id: plan
-        name: Plan platform validation
+        name: Plan platform build
         uses: ./.github/actions/prepare-common
         with:
-          platform_ios: ${{ inputs.platform_ios }}
-          platform_macos: ${{ inputs.platform_macos }}
-          platform_android: ${{ inputs.platform_android }}
+          # Apple artifacts include both iOS and macOS slices, so both platform flags follow apple.
+          platform_ios: ${{ inputs.apple }}
+          platform_macos: ${{ inputs.apple }}
+          platform_android: ${{ inputs.android }}
 
   prepare_apple:
     name: Prepare Apple dependencies
     needs: prepare_common
-    if: needs.prepare_common.outputs.run_apple == 'true'
+    if: ${{ inputs.apple }}
     runs-on: macos-26
     timeout-minutes: 360
     steps:
@@ -77,7 +114,7 @@ jobs:
   prepare_android:
     name: Prepare Android dependencies
     needs: prepare_common
-    if: needs.prepare_common.outputs.run_android == 'true'
+    if: ${{ inputs.android }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
@@ -95,8 +132,8 @@ jobs:
 
   ios_test:
     name: Validate iOS simulator tests
-    needs: [prepare_common, prepare_apple]
-    if: needs.prepare_common.outputs.run_ios == 'true'
+    needs: prepare_apple
+    if: ${{ inputs.apple && inputs.run_ios_tests }}
     runs-on: macos-26
     timeout-minutes: 180
     steps:
@@ -179,8 +216,8 @@ jobs:
 
   macos_test:
     name: Validate macOS host tests
-    needs: [prepare_common, prepare_apple]
-    if: needs.prepare_common.outputs.run_macos == 'true'
+    needs: prepare_apple
+    if: ${{ inputs.apple && inputs.run_macos_tests }}
     runs-on: macos-26
     timeout-minutes: 180
     steps:
@@ -228,12 +265,12 @@ jobs:
           bundle exec fastlane macos test
           "root:${{ github.workspace }}/webrtc-tree/.output/src"
 
-  android_test:
-    name: Validate Android build
-    needs: [prepare_common, prepare_android]
-    if: needs.prepare_common.outputs.run_android == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 180
+  build_ios:
+    name: Build iOS SDK
+    needs: prepare_apple
+    if: ${{ inputs.apple }}
+    runs-on: macos-26
+    timeout-minutes: 360
     steps:
       - name: Check out stream-webrtc-release-pipeline
         uses: actions/checkout@v4
@@ -242,7 +279,204 @@ jobs:
           path: release-pipeline
           token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
 
-      - name: Download prepared WebRTC tree
+      - name: Download prepared Apple WebRTC tree
+        uses: actions/download-artifact@v4
+        with:
+          name: webrtc-src-prepared-apple
+
+      - name: Extract WebRTC tree
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ github.workspace }}/webrtc-tree"
+          tar -xzf webrtc-src-prepared-apple.tar.gz -C "${{ github.workspace }}/webrtc-tree"
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          working-directory: release-pipeline
+          bundler-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install depot_tools
+        run: |
+          if [[ ! -d "${HOME}/depot_tools" ]]; then
+            git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "${HOME}/depot_tools"
+          fi
+          echo "PATH=${HOME}/depot_tools:${PATH}" >> "${GITHUB_ENV}"
+          echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
+
+      - name: Build iOS SDK artifact
+        working-directory: release-pipeline
+        run: >-
+          bundle exec fastlane ios build
+          "root:${{ github.workspace }}/webrtc-tree/.output/src"
+          "build_root:${{ github.workspace }}/webrtc-tree/.output"
+          "products_root:${{ github.workspace }}/ios-products"
+          configure_google_client_skip:true
+          prepare_signing_skip:false
+          sign_product_skip:true
+          verify_signatures_skip:true
+          zip_product_skip:true
+          "build_product_arg_is_debug:${{ inputs.debug }}"
+          build_product_arg_treat_warnings_as_errors:false
+          build_product_arg_rtc_build_examples:false
+          skip_licenses:true
+
+      - name: Package iOS XCFramework artifact
+        run: |
+          set -euo pipefail
+          ditto -c -k --sequesterRsrc --keepParent \
+            "${{ github.workspace }}/ios-products/WebRTC.xcframework" \
+            "${{ github.workspace }}/WebRTC-ios.xcframework.zip"
+
+      - name: Upload iOS SDK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-ios-xcframework
+          path: WebRTC-ios.xcframework.zip
+          retention-days: 2
+
+  build_macos:
+    name: Build macOS SDK
+    needs: prepare_apple
+    if: ${{ inputs.apple }}
+    runs-on: macos-26
+    timeout-minutes: 360
+    steps:
+      - name: Check out stream-webrtc-release-pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: GetStream/stream-webrtc-release-pipeline
+          path: release-pipeline
+          token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
+
+      - name: Download prepared Apple WebRTC tree
+        uses: actions/download-artifact@v4
+        with:
+          name: webrtc-src-prepared-apple
+
+      - name: Extract WebRTC tree
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ github.workspace }}/webrtc-tree"
+          tar -xzf webrtc-src-prepared-apple.tar.gz -C "${{ github.workspace }}/webrtc-tree"
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          working-directory: release-pipeline
+          bundler-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install depot_tools
+        run: |
+          if [[ ! -d "${HOME}/depot_tools" ]]; then
+            git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "${HOME}/depot_tools"
+          fi
+          echo "PATH=${HOME}/depot_tools:${PATH}" >> "${GITHUB_ENV}"
+          echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
+
+      - name: Build macOS SDK artifact
+        working-directory: release-pipeline
+        run: >-
+          bundle exec fastlane macos build
+          "root:${{ github.workspace }}/webrtc-tree/.output/src"
+          "products_root:${{ github.workspace }}/macos-products"
+          "build_product_arg_is_debug:${{ inputs.debug }}"
+          build_product_arg_treat_warnings_as_errors:false
+          build_product_arg_rtc_build_examples:false
+          zip_product_skip:true
+
+      - name: Package macOS XCFramework artifact
+        run: |
+          set -euo pipefail
+          ditto -c -k --sequesterRsrc --keepParent \
+            "${{ github.workspace }}/macos-products/WebRTC.xcframework" \
+            "${{ github.workspace }}/WebRTC-macos.xcframework.zip"
+
+      - name: Upload macOS SDK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-macos-xcframework
+          path: WebRTC-macos.xcframework.zip
+          retention-days: 2
+
+  package_apple:
+    name: Package Apple build artifact
+    needs: [build_ios, build_macos, ios_test, macos_test]
+    # Test jobs can be skipped by input. Continue when selected Apple build jobs succeeded and no selected test failed.
+    if: ${{ inputs.apple && !cancelled() && !failure() }}
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - name: Download iOS SDK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: apple-ios-xcframework
+          path: apple-inputs/ios
+
+      - name: Download macOS SDK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: apple-macos-xcframework
+          path: apple-inputs/macos
+
+      - name: Combine Apple XCFrameworks
+        env:
+          ENABLE_DEBUG: ${{ inputs.debug }}
+        run: |
+          set -euo pipefail
+          ditto -x -k apple-inputs/ios/WebRTC-ios.xcframework.zip apple-inputs/ios
+          ditto -x -k apple-inputs/macos/WebRTC-macos.xcframework.zip apple-inputs/macos
+
+          command=(xcodebuild -create-xcframework)
+          while IFS= read -r framework; do
+            command+=(-framework "${framework}")
+            if [[ "${ENABLE_DEBUG}" == "true" ]]; then
+              mapfile -t dsyms < <(find "$(dirname "${framework}")" -name "$(basename "${framework}").dSYM" -type d | sort)
+              if [[ "${#dsyms[@]}" -eq 0 ]]; then
+                echo "::warning::Missing dSYM for ${framework}"
+                continue
+              fi
+              command+=(-debug-symbols "${dsyms[0]}")
+            fi
+          done < <(find apple-inputs -name '*.framework' -type d | sort)
+
+          "${command[@]}" -output WebRTC.xcframework
+          ditto -c -k --sequesterRsrc --keepParent WebRTC.xcframework WebRTC.xcframework.zip
+
+      - name: Upload Apple build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apple
+          path: WebRTC.xcframework.zip
+          retention-days: 7
+
+  build_android:
+    name: Build Android AAR
+    needs: prepare_android
+    if: ${{ inputs.android }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Check out stream-webrtc-release-pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: GetStream/stream-webrtc-release-pipeline
+          path: release-pipeline
+          token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
+
+      - name: Download prepared Android WebRTC tree
         uses: actions/download-artifact@v4
         with:
           name: webrtc-src-prepared-android
@@ -278,8 +512,31 @@ jobs:
           echo "PATH=${HOME}/depot_tools:${PATH}" >> "${GITHUB_ENV}"
           echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
 
-      - name: Build Android AAR (no gclient sync in lane)
+      - name: Build Android SDK artifact
         working-directory: release-pipeline
-        run: >-
-          bundle exec fastlane android test
-          "root:${{ github.workspace }}/webrtc-tree/.output/src"
+        env:
+          ANDROID_ARCH: ${{ inputs.android_arch }}
+        run: |
+          set -euo pipefail
+
+          fastlane_args=(
+            android build
+            "root:${{ github.workspace }}/webrtc-tree/.output/src"
+            "products_root:${{ github.workspace }}/android-products"
+            "build_product_arg_is_debug:${{ inputs.debug }}"
+            build_product_arg_treat_warnings_as_errors:false
+            build_product_arg_rtc_build_examples:false
+          )
+
+          if [[ -n "${ANDROID_ARCH}" ]]; then
+            fastlane_args+=("archs:${ANDROID_ARCH}")
+          fi
+
+          bundle exec fastlane "${fastlane_args[@]}"
+
+      - name: Upload Android build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-android
+          path: android-products/libwebrtc.aar
+          retention-days: 7

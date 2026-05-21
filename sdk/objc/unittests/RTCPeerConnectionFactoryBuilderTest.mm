@@ -9,14 +9,8 @@
  */
 
 #import <Foundation/Foundation.h>
+#import <objc/runtime.h>
 #import <XCTest/XCTest.h>
-#ifdef __cplusplus
-extern "C" {
-#endif
-#import <OCMock/OCMock.h>
-#ifdef __cplusplus
-}
-#endif
 #import "api/peerconnection/RTCPeerConnectionFactory+Native.h"
 #import "api/peerconnection/RTCPeerConnectionFactoryBuilder+DefaultComponents.h"
 #import "api/peerconnection/RTCPeerConnectionFactoryBuilder.h"
@@ -28,8 +22,37 @@ extern "C" {
 #include "api/video_codecs/video_decoder_factory.h"
 #include "api/video_codecs/video_encoder_factory.h"
 
+#include <utility>
+
 #include "rtc_base/gunit.h"
-#include "rtc_base/system/unused.h"
+
+namespace {
+
+id StubInitWithMediaAndDependencies(
+    RTC_OBJC_TYPE(RTCPeerConnectionFactory) * factory,
+    SEL selector,
+    webrtc::PeerConnectionFactoryDependencies dependencies) {
+  return factory;
+}
+
+RTC_OBJC_TYPE(RTCPeerConnectionFactory) *
+    CreatePeerConnectionFactoryWithStubbedNativeInitializer(
+        RTCPeerConnectionFactoryBuilder *builder) {
+  Method initializer = class_getInstanceMethod(
+      [RTC_OBJC_TYPE(RTCPeerConnectionFactory) class],
+      @selector(initWithMediaAndDependencies:));
+  IMP original_initializer =
+      method_setImplementation(initializer,
+                               reinterpret_cast<IMP>(
+                                   &StubInitWithMediaAndDependencies));
+  @try {
+    return [builder createPeerConnectionFactory];
+  } @finally {
+    method_setImplementation(initializer, original_initializer);
+  }
+}
+
+}  // namespace
 
 @interface RTCPeerConnectionFactoryBuilderTests : XCTestCase
 @end
@@ -37,27 +60,14 @@ extern "C" {
 @implementation RTCPeerConnectionFactoryBuilderTests
 
 - (void)testBuilder {
-  id factoryMock =
-      OCMStrictClassMock([RTC_OBJC_TYPE(RTCPeerConnectionFactory) class]);
-  OCMExpect([factoryMock alloc]).andReturn(factoryMock);
-  webrtc::PeerConnectionFactoryDependencies default_deps;
-  RTC_UNUSED([[[[factoryMock expect] andReturn:factoryMock]
-      ignoringNonObjectArgs] initWithMediaAndDependencies:default_deps]);
   RTCPeerConnectionFactoryBuilder* builder =
       [[RTCPeerConnectionFactoryBuilder alloc] init];
   RTC_OBJC_TYPE(RTCPeerConnectionFactory)* peerConnectionFactory =
-      [builder createPeerConnectionFactory];
+      CreatePeerConnectionFactoryWithStubbedNativeInitializer(builder);
   EXPECT_TRUE(peerConnectionFactory != nil);
-  OCMVerifyAll(factoryMock);
 }
 
 - (void)testAudioDeviceModuleBuilder {
-  id factoryMock =
-      OCMStrictClassMock([RTC_OBJC_TYPE(RTCPeerConnectionFactory) class]);
-  OCMExpect([factoryMock alloc]).andReturn(factoryMock);
-  webrtc::PeerConnectionFactoryDependencies default_deps;
-  RTC_UNUSED([[[[factoryMock expect] andReturn:factoryMock]
-      ignoringNonObjectArgs] initWithMediaAndDependencies:default_deps]);
   RTCPeerConnectionFactoryBuilder* builder =
       [RTCPeerConnectionFactoryBuilder builder];
   __block int calledAdmBuilder = 0;
@@ -66,24 +76,16 @@ extern "C" {
     return webrtc::scoped_refptr<webrtc::AudioDeviceModule>(nullptr);
   }];
   RTC_OBJC_TYPE(RTCPeerConnectionFactory)* peerConnectionFactory =
-      [builder createPeerConnectionFactory];
+      CreatePeerConnectionFactoryWithStubbedNativeInitializer(builder);
   EXPECT_TRUE(peerConnectionFactory != nil);
   EXPECT_EQ(calledAdmBuilder, 1);
-  OCMVerifyAll(factoryMock);
 }
 
 - (void)testDefaultComponentsBuilder {
-  id factoryMock =
-      OCMStrictClassMock([RTC_OBJC_TYPE(RTCPeerConnectionFactory) class]);
-  OCMExpect([factoryMock alloc]).andReturn(factoryMock);
-  webrtc::PeerConnectionFactoryDependencies default_deps;
-  RTC_UNUSED([[[[factoryMock expect] andReturn:factoryMock]
-      ignoringNonObjectArgs] initWithMediaAndDependencies:default_deps]);
   RTCPeerConnectionFactoryBuilder* builder =
       [RTCPeerConnectionFactoryBuilder defaultBuilder];
   RTC_OBJC_TYPE(RTCPeerConnectionFactory)* peerConnectionFactory =
-      [builder createPeerConnectionFactory];
+      CreatePeerConnectionFactoryWithStubbedNativeInitializer(builder);
   EXPECT_TRUE(peerConnectionFactory != nil);
-  OCMVerifyAll(factoryMock);
 }
 @end

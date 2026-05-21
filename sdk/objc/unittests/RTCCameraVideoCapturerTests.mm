@@ -121,8 +121,10 @@ CMSampleBufferRef createTestSampleBufferRef() {
 - (void)tearDown {
   [self.delegateMock stopMocking];
   [self.deviceMock stopMocking];
+  [self.captureConnectionMock stopMocking];
   self.delegateMock = nil;
   self.deviceMock = nil;
+  self.captureConnectionMock = nil;
   self.capturer = nil;
 }
 
@@ -455,10 +457,11 @@ CMSampleBufferRef createTestSampleBufferRef() {
 - (void)tearDown {
   [self.delegateMock stopMocking];
   [self.deviceMock stopMocking];
+  [self.captureSessionMock stopMocking];
   self.delegateMock = nil;
   self.deviceMock = nil;
-  self.capturer = nil;
   self.captureSessionMock = nil;
+  self.capturer = nil;
 }
 
 #pragma mark - test cases

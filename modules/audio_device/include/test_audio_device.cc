@@ -51,17 +51,17 @@ constexpr int kFramesPerSecond = kNumMicrosecsPerSec / kFrameLengthUs;
 class TestAudioDeviceModuleImpl : public AudioDeviceModuleImpl {
  public:
   TestAudioDeviceModuleImpl(
-      TaskQueueFactory* task_queue_factory,
+      const Environment& env,
       std::unique_ptr<TestAudioDeviceModule::Capturer> capturer,
       std::unique_ptr<TestAudioDeviceModule::Renderer> renderer,
       float speed = 1)
       : AudioDeviceModuleImpl(
             AudioLayer::kDummyAudio,
-            std::make_unique<TestAudioDevice>(task_queue_factory,
+            std::make_unique<TestAudioDevice>(env,
                                               std::move(capturer),
                                               std::move(renderer),
                                               speed),
-            task_queue_factory,
+            &env.task_queue_factory(),
             /*create_detached=*/true) {}
 
   ~TestAudioDeviceModuleImpl() override = default;
@@ -70,16 +70,16 @@ class TestAudioDeviceModuleImpl : public AudioDeviceModuleImpl {
 class TestAudioDeviceModuleImpl : public AudioDeviceModuleForTest {
  public:
   TestAudioDeviceModuleImpl(
-      TaskQueueFactory* task_queue_factory,
+      const Environment& env,
       std::unique_ptr<TestAudioDeviceModule::Capturer> capturer,
       std::unique_ptr<TestAudioDeviceModule::Renderer> renderer,
       float speed = 1)
       : audio_device_(std::make_unique<TestAudioDevice>(
-            task_queue_factory,
+            env,
             std::move(capturer),
             std::move(renderer),
             speed)),
-        audio_device_buffer_(task_queue_factory,
+        audio_device_buffer_(&env.task_queue_factory(),
                              /*create_detached=*/true) {
     audio_device_->AttachAudioBuffer(&audio_device_buffer_);
   }
@@ -784,12 +784,12 @@ size_t TestAudioDeviceModule::SamplesPerFrame(int sampling_frequency_in_hz) {
 }
 
 scoped_refptr<AudioDeviceModule> TestAudioDeviceModule::Create(
-    TaskQueueFactory* task_queue_factory,
+    const Environment& env,
     std::unique_ptr<TestAudioDeviceModule::Capturer> capturer,
     std::unique_ptr<TestAudioDeviceModule::Renderer> renderer,
     float speed) {
   auto audio_device = make_ref_counted<TestAudioDeviceModuleImpl>(
-      task_queue_factory, std::move(capturer), std::move(renderer), speed);
+      env, std::move(capturer), std::move(renderer), speed);
 
 #if defined(WEBRTC_INCLUDE_INTERNAL_AUDIO_DEVICE)
   // Ensure that the current platform is supported.
