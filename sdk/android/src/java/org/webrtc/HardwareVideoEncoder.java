@@ -217,7 +217,7 @@ class HardwareVideoEncoder implements VideoEncoder {
     }
     this.width = settings.width;
     this.height = settings.height;
-    useSurfaceMode = canUseSurface();
+    useSurfaceMode = false;
 
     if (settings.startBitrate != 0 && settings.maxFramerate != 0) {
       bitrateAdjuster.setTargets(settings.startBitrate * 1000, settings.maxFramerate);
