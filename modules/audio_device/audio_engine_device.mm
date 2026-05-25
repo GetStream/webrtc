@@ -1080,6 +1080,7 @@ int32_t AudioEngineDevice::RegisterAudioCallback(AudioTransport* audioCallback) 
       state.output_running = false;
       state.input_enabled = false;
       state.input_running = false;
+      state.input_enabled_persistent_mode = false;
       return state;
     });
     if (stop_result != 0) {
