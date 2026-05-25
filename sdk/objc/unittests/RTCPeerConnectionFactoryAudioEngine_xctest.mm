@@ -12,8 +12,14 @@
 
 #include <vector>
 
+#import "api/logging/RTCCallbackLogger.h"
+#import "api/peerconnection/RTCConfiguration.h"
 #import "api/peerconnection/RTCAudioDeviceModule.h"
+#import "api/peerconnection/RTCMediaConstraints.h"
+#import "api/peerconnection/RTCPeerConnection.h"
 #import "api/peerconnection/RTCPeerConnectionFactory.h"
+#import "api/peerconnection/RTCRtpTransceiver.h"
+#import "api/peerconnection/RTCSessionDescription.h"
 #import "components/audio/RTCAudioSession+Private.h"
 
 @interface RTC_OBJC_TYPE(RTCAudioSession)
@@ -88,6 +94,82 @@
   }
 
   retainedAudioDeviceModule = nil;
+}
+
+- (void)testAudioEngineDoesNotDropAudioTransportWhenPreparedBeforeOffer {
+  RTC_OBJC_TYPE(RTCCallbackLogger) *logger =
+      [[RTC_OBJC_TYPE(RTCCallbackLogger) alloc] init];
+  logger.severity = RTCLoggingSeverityWarning;
+  XCTestExpectation *transportFailure =
+      [self expectationWithDescription:@"audio transport registration failure"];
+  transportFailure.inverted = YES;
+  [logger startWithMessageAndSeverityHandler:^(
+              NSString *message, RTCLoggingSeverity severity) {
+    if ([message containsString:
+                     @"Failed to set audio transport since media was active"] ||
+        [message containsString:@"Invalid audio transport"]) {
+      [transportFailure fulfill];
+    }
+  }];
+
+  RTC_OBJC_TYPE(RTCPeerConnectionFactory) *factory =
+      [[RTC_OBJC_TYPE(RTCPeerConnectionFactory) alloc]
+          initWithAudioDeviceModuleType:
+              RTC_OBJC_TYPE(RTCAudioDeviceModuleTypeAudioEngine)
+                    bypassVoiceProcessing:NO
+                           encoderFactory:nil
+                           decoderFactory:nil
+                    audioProcessingModule:nil];
+  RTC_OBJC_TYPE(RTCAudioDeviceModule) *audioDeviceModule =
+      factory.audioDeviceModule;
+  XCTAssertEqual(0, [audioDeviceModule setRecordingAlwaysPreparedMode:YES]);
+  XCTAssertTrue(audioDeviceModule.recordingAlwaysPreparedMode);
+
+  RTC_OBJC_TYPE(RTCConfiguration) *config =
+      [[RTC_OBJC_TYPE(RTCConfiguration) alloc] init];
+  config.sdpSemantics = RTCSdpSemanticsUnifiedPlan;
+  RTC_OBJC_TYPE(RTCMediaConstraints) *constraints =
+      [[RTC_OBJC_TYPE(RTCMediaConstraints) alloc]
+          initWithMandatoryConstraints:@{
+            RTC_CONSTANT_TYPE(RTCMediaConstraintsOfferToReceiveAudio) :
+                RTC_CONSTANT_TYPE(RTCMediaConstraintsValueTrue)
+          }
+                   optionalConstraints:nil];
+  RTC_OBJC_TYPE(RTCPeerConnection) *peerConnection =
+      [factory peerConnectionWithConfiguration:config
+                                   constraints:constraints
+                                      delegate:nil];
+  RTC_OBJC_TYPE(RTCRtpTransceiverInit) *transceiverInit =
+      [[RTC_OBJC_TYPE(RTCRtpTransceiverInit) alloc] init];
+  transceiverInit.direction = RTCRtpTransceiverDirectionRecvOnly;
+  XCTAssertNotNil([peerConnection addTransceiverOfType:RTCRtpMediaTypeAudio
+                                                  init:transceiverInit]);
+
+  dispatch_semaphore_t offerSemaphore = dispatch_semaphore_create(0);
+  __block RTC_OBJC_TYPE(RTCSessionDescription) *localOffer = nil;
+  __block NSError *localOfferError = nil;
+  [peerConnection
+      offerForConstraints:constraints
+        completionHandler:^(
+            RTC_OBJC_TYPE(RTCSessionDescription) *_Nullable offer,
+            NSError *_Nullable error) {
+          localOffer = offer;
+          localOfferError = error;
+          dispatch_semaphore_signal(offerSemaphore);
+        }];
+  XCTAssertEqual(
+      0,
+      dispatch_semaphore_wait(
+          offerSemaphore,
+          dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15 * NSEC_PER_SEC))));
+  XCTAssertNil(localOfferError);
+  XCTAssertNotNil(localOffer);
+
+  [self waitForExpectations:@[ transportFailure ] timeout:1.0];
+
+  [peerConnection close];
+  XCTAssertEqual(0, [audioDeviceModule setRecordingAlwaysPreparedMode:NO]);
+  [logger stop];
 }
 
 @end
