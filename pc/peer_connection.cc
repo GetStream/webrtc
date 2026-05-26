@@ -1120,6 +1120,14 @@ PeerConnection::AddTransceiver(MediaType media_type,
     LOG_AND_RETURN_ERROR(RTCErrorType::UNSUPPORTED_OPERATION,
                          "Not configured for media");
   }
+  // In m146, AddTransceiver creates audio/video channels while constructing the
+  // transceiver. If Close() has already reset call_, continuing past this point
+  // can pass PeerConnection::call_ptr_ (a known raw-pointer workaround) into the
+  // channel constructors and crash when they dereference Call.
+  if (IsClosed()) {
+    LOG_AND_RETURN_ERROR(RTCErrorType::INVALID_STATE,
+                         "PeerConnection is closed.");
+  }
   RTC_DCHECK(
       (media_type == MediaType::AUDIO || media_type == MediaType::VIDEO));
   if (track) {

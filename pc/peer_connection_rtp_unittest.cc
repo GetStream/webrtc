@@ -984,6 +984,20 @@ TEST_F(PeerConnectionRtpTestUnifiedPlan,
   EXPECT_EQ(MediaStreamTrackInterface::TrackState::kLive, track->state());
 }
 
+TEST_F(PeerConnectionRtpTestUnifiedPlan,
+       AddAudioTransceiverAfterCloseReturnsInvalidState) {
+  auto caller = CreatePeerConnection();
+  caller->pc()->Close();
+
+  // Regression coverage for the m146 channel-creation path: AddTransceiver now
+  // constructs media channels early, and doing that after Close() used to reach
+  // PeerConnection::call_ptr_ after call_ had been reset on the worker thread.
+  auto result = caller->pc()->AddTransceiver(MediaType::AUDIO);
+
+  ASSERT_FALSE(result.ok());
+  EXPECT_EQ(RTCErrorType::INVALID_STATE, result.error().type());
+}
+
 // Test that adding a transceiver with the video kind creates an video sender
 // and video receiver with the receiver having a live video track.
 TEST_F(PeerConnectionRtpTestUnifiedPlan,
