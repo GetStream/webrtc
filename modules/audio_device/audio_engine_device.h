@@ -99,8 +99,16 @@ enum AudioEngineErrorCode {
 };
 
 class FineAudioBuffer;
+class AudioEngineDeviceInputRenderContext;
 
 extern NSString* const kAudioEngineInputMixerNodeKey;
+
+// Test hook for the AVAudioSinkNode lifetime regression. Keep the actual render context private to
+// audio_engine_device.mm so this header does not grow extra implementation surface just for tests.
+OSStatus AudioEngineDeviceRenderInvalidatedInputContextForTesting(
+    const AudioTimeStamp* timestamp,
+    AVAudioFrameCount frame_count,
+    const AudioBufferList* input_data);
 
 class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver {
  public:
@@ -491,7 +499,7 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
 
   const std::unique_ptr<TaskQueueFactory> task_queue_factory_;
   std::unique_ptr<AudioDeviceBuffer> audio_device_buffer_;
-  std::unique_ptr<FineAudioBuffer> fine_audio_buffer_;
+  std::shared_ptr<FineAudioBuffer> fine_audio_buffer_;
 
   AudioParameters playout_parameters_;
   AudioParameters record_parameters_;
@@ -527,10 +535,8 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
   // Input related nodes
   AVAudioSinkNode* sink_node_ RTC_GUARDED_BY(thread_);
   AVAudioMixerNode* input_mixer_node_ RTC_GUARDED_BY(thread_);
-
-  // Float32 -> Int16 converter.
-  AudioConverterRef converter_ref_;
-  AVAudioPCMBuffer* converter_buffer_;
+  std::shared_ptr<AudioEngineDeviceInputRenderContext> input_render_context_
+      RTC_GUARDED_BY(thread_);
 
   void* configuration_observer_ RTC_GUARDED_BY(thread_);
 };

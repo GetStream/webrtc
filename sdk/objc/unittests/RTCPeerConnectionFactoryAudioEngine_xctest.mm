@@ -21,6 +21,7 @@
 #import "api/peerconnection/RTCRtpTransceiver.h"
 #import "api/peerconnection/RTCSessionDescription.h"
 #import "components/audio/RTCAudioSession+Private.h"
+#include "modules/audio_device/audio_engine_device.h"
 
 @interface RTC_OBJC_TYPE(RTCAudioSession)
 (UnitTesting)
@@ -170,6 +171,27 @@
   [peerConnection close];
   XCTAssertEqual(0, [audioDeviceModule setRecordingAlwaysPreparedMode:NO]);
   [logger stop];
+}
+
+- (void)testAudioEngineInputRenderContextIgnoresLateCallbackAfterInvalidation {
+  // This is a focused regression test for the crash where AURemoteIO invoked the AVAudioSinkNode
+  // receiver block after AudioEngineDevice had already torn down its converter buffer during the
+  // RegisterAudioCallback stop/restart path. The test intentionally does not require real audio
+  // hardware: a late callback after invalidation must return cleanly before it touches resources
+  // that graph teardown is allowed to clear.
+  int16_t sample = 0;
+  AudioBufferList inputData;
+  inputData.mNumberBuffers = 1;
+  inputData.mBuffers[0].mNumberChannels = 1;
+  inputData.mBuffers[0].mDataByteSize = sizeof(sample);
+  inputData.mBuffers[0].mData = &sample;
+
+  AudioTimeStamp timestamp = {};
+  timestamp.mHostTime = 1;
+
+  XCTAssertEqual(noErr,
+                 webrtc::AudioEngineDeviceRenderInvalidatedInputContextForTesting(
+                     &timestamp, 1, &inputData));
 }
 
 @end

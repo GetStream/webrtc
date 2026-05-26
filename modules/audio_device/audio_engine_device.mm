@@ -21,6 +21,7 @@
 
 #include <mach/mach_time.h>
 #include <cmath>
+#include <utility>
 
 #include "api/array_view.h"
 #include "api/environment/environment_factory.h"
@@ -59,6 +60,119 @@ const useconds_t kStartEngineRetryDelayMs = 100;
 
 const size_t kMaximumFramesPerBuffer = 3072;
 const size_t kAudioSampleSize = 2;  // Signed 16-bit integer
+
+// Private context captured by the AVAudioSinkNode receiver block. The important invariant is that
+// graph teardown invalidates this object before detaching/releasing the sink node, but the block's
+// shared_ptr keeps the converter, PCM buffer, and FineAudioBuffer alive until any late AURemoteIO
+// callback returns.
+class AudioEngineDeviceInputRenderContext {
+ public:
+  AudioEngineDeviceInputRenderContext(std::shared_ptr<FineAudioBuffer> fine_audio_buffer,
+                                      AudioConverterRef converter_ref,
+                                      AVAudioPCMBuffer* converter_buffer,
+                                      double mach_tick_units_to_nanoseconds);
+  ~AudioEngineDeviceInputRenderContext();
+
+  void Invalidate();
+  OSStatus Render(const AudioTimeStamp* timestamp,
+                  AVAudioFrameCount frame_count,
+                  const AudioBufferList* input_data);
+
+ private:
+  std::atomic<bool> active_{true};
+  std::shared_ptr<FineAudioBuffer> fine_audio_buffer_;
+  AudioConverterRef converter_ref_;
+  __strong AVAudioPCMBuffer* converter_buffer_;
+  const double mach_tick_units_to_nanoseconds_;
+};
+
+AudioEngineDeviceInputRenderContext::AudioEngineDeviceInputRenderContext(
+    std::shared_ptr<FineAudioBuffer> fine_audio_buffer,
+    AudioConverterRef converter_ref,
+    AVAudioPCMBuffer* converter_buffer,
+    double mach_tick_units_to_nanoseconds)
+    : fine_audio_buffer_(std::move(fine_audio_buffer)),
+      converter_ref_(converter_ref),
+      converter_buffer_(converter_buffer),
+      mach_tick_units_to_nanoseconds_(mach_tick_units_to_nanoseconds) {}
+
+AudioEngineDeviceInputRenderContext::~AudioEngineDeviceInputRenderContext() {
+  if (converter_ref_ != nullptr) {
+    OSStatus err = AudioConverterDispose(converter_ref_);
+    RTC_DCHECK(err == noErr);
+    converter_ref_ = nullptr;
+  }
+}
+
+void AudioEngineDeviceInputRenderContext::Invalidate() {
+  active_.store(false, std::memory_order_release);
+}
+
+OSStatus AudioEngineDeviceInputRenderContext::Render(
+    const AudioTimeStamp* timestamp,
+    AVAudioFrameCount frame_count,
+    const AudioBufferList* input_data) {
+  // AVAudioEngine may deliver one final sink callback after graph teardown has begun. In that
+  // window the owning AudioEngineDevice has already requested invalidation, but this context stays
+  // alive because the block captured a shared_ptr. Return noErr so the realtime thread exits
+  // quietly without touching converter state that teardown is allowed to retire.
+  if (!active_.load(std::memory_order_acquire)) {
+    return noErr;
+  }
+
+  if (timestamp == nullptr || input_data == nullptr || input_data->mNumberBuffers == 0 ||
+      converter_ref_ == nullptr || converter_buffer_ == nil || fine_audio_buffer_ == nullptr) {
+    return noErr;
+  }
+
+  RTC_DCHECK(input_data->mNumberBuffers == 1);
+
+  AudioBufferList* converter_buffer_abl =
+      const_cast<AudioBufferList*>(converter_buffer_.audioBufferList);
+  if (converter_buffer_abl == nullptr || converter_buffer_abl->mNumberBuffers == 0) {
+    return noErr;
+  }
+
+  RTC_DCHECK(converter_buffer_abl->mNumberBuffers == input_data->mNumberBuffers);
+
+  // Fails for conversions where there is a variation between the input and output data
+  // buffer sizes.
+  converter_buffer_abl->mBuffers[0].mDataByteSize = input_data->mBuffers[0].mDataByteSize;
+
+  RTC_DCHECK(converter_buffer_abl->mBuffers[0].mDataByteSize ==
+             input_data->mBuffers[0].mDataByteSize);
+
+  OSStatus err =
+      AudioConverterConvertComplexBuffer(converter_ref_, frame_count, input_data,
+                                         converter_buffer_abl);
+  RTC_DCHECK(err == noErr);
+  if (err != noErr) {
+    return err;
+  }
+
+  const int16_t* rtc_buffer = (int16_t*)converter_buffer_abl->mBuffers[0].mData;  // Float32
+  if (rtc_buffer == nullptr) {
+    return noErr;
+  }
+
+  const int64_t capture_time_ns =
+      timestamp->mHostTime * mach_tick_units_to_nanoseconds_;
+
+  fine_audio_buffer_->DeliverRecordedData(
+      webrtc::ArrayView<const int16_t>(rtc_buffer, frame_count), kFixedRecordDelayEstimate,
+      capture_time_ns);
+
+  return noErr;
+}
+
+OSStatus AudioEngineDeviceRenderInvalidatedInputContextForTesting(
+    const AudioTimeStamp* timestamp,
+    AVAudioFrameCount frame_count,
+    const AudioBufferList* input_data) {
+  auto context = std::make_shared<AudioEngineDeviceInputRenderContext>(nullptr, nullptr, nil, 1.0);
+  context->Invalidate();
+  return context->Render(timestamp, frame_count, input_data);
+}
 
 AudioEngineDevice::AudioEngineDevice(bool voice_processing_bypassed)
     : task_queue_factory_(CreateDefaultTaskQueueFactory()), initialized_(false) {
@@ -1955,6 +2069,15 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
         return rollback(result);
       }
     }
+
+    // Engine recreation skips the normal input-disable branch below. Invalidate the sink context
+    // here so a late input callback from the old graph exits before touching the converter/buffer
+    // that belong to that graph.
+    if (input_render_context_ != nullptr) {
+      input_render_context_->Invalidate();
+      input_render_context_.reset();
+    }
+
     engine_device_ = nil;
   }
 
@@ -2226,50 +2349,38 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
     audio_device_buffer_->SetRecordingSampleRate(rtc_input_format.sampleRate);
     audio_device_buffer_->SetRecordingChannels(rtc_input_format.channelCount);
     RTC_DCHECK(audio_device_buffer_ != nullptr);
-    fine_audio_buffer_.reset(new FineAudioBuffer(audio_device_buffer_.get()));
+    fine_audio_buffer_ = std::make_shared<FineAudioBuffer>(audio_device_buffer_.get());
 
     // Prepare Float32 -> Int16 converter.
-    if (converter_ref_ == nullptr) {
-      OSStatus err = AudioConverterNew(engine_input_format.streamDescription,
-                                       rtc_input_format.streamDescription, &converter_ref_);
-      RTC_DCHECK(err == noErr);
+    AudioConverterRef converter_ref = nullptr;
+    OSStatus converter_err = AudioConverterNew(engine_input_format.streamDescription,
+                                               rtc_input_format.streamDescription, &converter_ref);
+    RTC_DCHECK(converter_err == noErr);
+    if (converter_err != noErr) {
+      return rollback(kAudioEngineRecordingInitError);
     }
 
     // Prepare buffer for Int16 converter.
-    if (converter_buffer_ == nil) {
-      converter_buffer_ = [[AVAudioPCMBuffer alloc] initWithPCMFormat:rtc_input_format
-                                                        frameCapacity:kMaximumFramesPerBuffer];
+    AVAudioPCMBuffer* converter_buffer =
+        [[AVAudioPCMBuffer alloc] initWithPCMFormat:rtc_input_format
+                                      frameCapacity:kMaximumFramesPerBuffer];
+    if (converter_buffer == nil) {
+      AudioConverterDispose(converter_ref);
+      return rollback(kAudioEngineOutOfMemoryError);
     }
+
+    // The sink block used to read converter_ref_, converter_buffer_, and fine_audio_buffer_
+    // directly from AudioEngineDevice. RegisterAudioCallback can now perform a full input stop
+    // while AVAudioEngine still has one callback in flight, so those members can disappear under
+    // the realtime thread. Keep all three inside a block-captured context instead.
+    auto input_render_context = std::make_shared<AudioEngineDeviceInputRenderContext>(
+        fine_audio_buffer_, converter_ref, converter_buffer, machTickUnitsToNanoseconds_);
 
     // Convert to Int16 buffers within the sink block.
     AVAudioSinkNodeReceiverBlock sink_block =
         ^OSStatus(const AudioTimeStamp* timestamp, AVAudioFrameCount frameCount,
                   const AudioBufferList* inputData) {
-          RTC_DCHECK(inputData->mNumberBuffers == 1);
-
-          AudioBufferList* converter_buffer_abl =
-              const_cast<AudioBufferList*>(converter_buffer_.audioBufferList);
-          RTC_DCHECK(converter_buffer_abl->mNumberBuffers == inputData->mNumberBuffers);
-
-          // Fails for conversions where there is a variation between the input and output data
-          // buffer sizes.
-          converter_buffer_abl->mBuffers[0].mDataByteSize = inputData->mBuffers[0].mDataByteSize;
-
-          RTC_DCHECK(converter_buffer_abl->mBuffers[0].mDataByteSize ==
-                     inputData->mBuffers[0].mDataByteSize);
-
-          OSStatus err = AudioConverterConvertComplexBuffer(converter_ref_, frameCount, inputData,
-                                                            converter_buffer_abl);
-          RTC_DCHECK(err == noErr);
-
-          const int16_t* rtc_buffer = (int16_t*)converter_buffer_abl->mBuffers[0].mData;  // Float32
-          const int64_t capture_time_ns = timestamp->mHostTime * machTickUnitsToNanoseconds_;
-
-          fine_audio_buffer_->DeliverRecordedData(
-              webrtc::ArrayView<const int16_t>(rtc_buffer, frameCount), kFixedRecordDelayEstimate,
-              capture_time_ns);
-
-          return noErr;
+          return input_render_context->Render(timestamp, frameCount, inputData);
         };
 
     NSMutableArray<AVAudioConnectionPoint*>* input_mixer_connections = [NSMutableArray array];
@@ -2302,6 +2413,7 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
     }
 
     sink_node_ = [[AVAudioSinkNode alloc] initWithReceiverBlock:sink_block];
+    input_render_context_ = input_render_context;
     [engine_device_ attachNode:sink_node_];
 
     [engine_device_ connect:input_mixer_node_ to:sink_node_ format:engine_input_format];
@@ -2315,6 +2427,10 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
     if (inputNode().voiceProcessingEnabled && inputNode().voiceProcessingInputMuted) {
       LOGI() << "Update mute (voice processing) unmuting vp for stop-recording";
       inputNode().voiceProcessingInputMuted = false;
+    }
+
+    if (input_render_context_ != nullptr) {
+      input_render_context_->Invalidate();
     }
 
     // Detach input mixer node
@@ -2344,16 +2460,7 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
         sink_node_ = nil;
       }
     }
-
-    // Dispose Float32 -> Int16 converter.
-    if (converter_ref_ != nullptr) {
-      OSStatus err = AudioConverterDispose(converter_ref_);
-      RTC_DCHECK(err == noErr);
-      converter_ref_ = nullptr;
-    }
-
-    // Release buffer for Int16 converter.
-    converter_buffer_ = nil;
+    input_render_context_.reset();
   }
 
   // --------------------------------------------------------------------------------------------
