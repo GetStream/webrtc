@@ -1795,6 +1795,14 @@ if (is_ios || is_mac) {
           "objc/components/video_codec/RTCVideoEncoderH264.h",
           "objc/components/video_frame_buffer/RTCCVPixelBuffer.h",
           "objc/helpers/RTCDispatcher.h",
+          "objc/helpers/RTCYUVHelper.h",
+          "objc/components/video_codec/RTCVideoEncoderFactorySimulcast.h",
+          "objc/api/video_codec/RTCVideoEncoderSimulcast.h",
+          "objc/components/audio/RTCAudioBuffer.h",
+          "objc/components/audio/RTCAudioProcessingModule.h",
+          "objc/components/audio/RTCDefaultAudioProcessingModule.h",
+          "objc/components/audio/RTCAudioCustomProcessingDelegate.h",
+          "objc/components/audio/RTCAudioProcessingConfig.h",
         ]
         if (!build_with_chromium) {
           sources += [
@@ -1812,6 +1820,7 @@ if (is_ios || is_mac) {
           ":native_api",
           ":native_video",
           ":peerconnectionfactory_base_objc",
+          ":simulcast",
           ":videocapture_objc",
           ":videocodec_objc",
           ":videotoolbox_objc",
