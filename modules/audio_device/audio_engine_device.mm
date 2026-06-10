@@ -2577,6 +2577,10 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
                       }
                     }];
 
+        // engine.start() drops the muted-talker listener; re-arm it on the live input node.
+        if (state.next.IsInputEnabled() && inputNode().voiceProcessingEnabled) {
+          ConfigureMutedSpeechActivityEventListener(inputNode(), state);
+        }
       } else {
         LOGE() << "Failed to start engine after " << kStartEngineMaxRetries << " attempts";
         DebugAudioEngine();
