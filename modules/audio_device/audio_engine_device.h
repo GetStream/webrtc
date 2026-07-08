@@ -122,6 +122,8 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
     bool output_enabled = false;
     bool output_running = false;
 
+    // Default true: the engine may activate on init.
+    // Set false to gate start/stop (e.g. CallKit).
     bool output_available = true;
     bool input_available = true;
 
@@ -198,6 +200,9 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
 
     bool IsAnyEnabled() const { return IsInputEnabled() || IsOutputEnabled(); }
     bool IsAnyRunning() const { return IsInputRunning() || IsOutputRunning(); }
+
+    bool IsAllEnabled() const { return IsInputEnabled() && IsOutputEnabled(); }
+    bool IsAllRunning() const { return IsInputRunning() && IsOutputRunning(); }
 
     bool IsOutputDefaultDevice() const {
 #if TARGET_OS_OSX

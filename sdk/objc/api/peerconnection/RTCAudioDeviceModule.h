@@ -41,11 +41,11 @@ typedef NS_ENUM(NSInteger, RTC_OBJC_TYPE(RTCAudioEngineMuteMode)) {
 };
 
 typedef struct {
-  BOOL outputEnabled;
-  BOOL outputRunning;
-  BOOL inputEnabled;
-  BOOL inputRunning;
-  BOOL inputMuted;
+  bool outputEnabled;
+  bool outputRunning;
+  bool inputEnabled;
+  bool inputRunning;
+  bool inputMuted;
   RTC_OBJC_TYPE(RTCAudioEngineMuteMode) muteMode;
 } RTC_OBJC_TYPE(RTCAudioEngineState);
 
@@ -57,8 +57,8 @@ typedef struct {
 } RTC_OBJC_TYPE(RTCAudioProcessingState);
 
 typedef struct {
-  BOOL isInputAvailable;
-  BOOL isOutputAvailable;
+  bool isInputAvailable;
+  bool isOutputAvailable;
 } RTC_OBJC_TYPE(RTCAudioEngineAvailability);
 
 RTC_EXTERN NSString *const RTC_CONSTANT_TYPE(RTCAudioEngineInputMixerNodeKey);

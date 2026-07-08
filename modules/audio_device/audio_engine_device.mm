@@ -2841,6 +2841,10 @@ void AudioEngineDevice::DebugEngineState(const std::string& prefix,
          << ", IsInputRunning: " << state.IsInputRunning()
          << ", IsAnyEnabled: " << state.IsAnyEnabled()
          << ", IsAnyRunning: " << state.IsAnyRunning()
+         << ", IsAllEnabled: " << state.IsAllEnabled()
+         << ", IsAllRunning: " << state.IsAllRunning()
+         << ", InputAvailable: " << state.input_available
+         << ", OutputAvailable: " << state.output_available
          << ", AdvancedDucking: " << state.advanced_ducking
          << ", DuckingLevel: " << state.ducking_level
          << ", MuteMode: " << static_cast<int>(state.mute_mode)
