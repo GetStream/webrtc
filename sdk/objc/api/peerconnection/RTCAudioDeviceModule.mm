@@ -566,6 +566,30 @@ class AudioDeviceObserver : public webrtc::AudioDeviceObserver {
 
 #pragma mark - Unique to AudioEngineDevice
 
+- (NSInteger)setEngineAvailability:(RTC_OBJC_TYPE(RTCAudioEngineAvailability))availability {
+  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
+  if (module == nullptr) return -1;
+
+  return _workerThread->BlockingCall([module, availability] {
+    return module->SetEngineAvailability(availability.isInputAvailable,
+                                         availability.isOutputAvailable);
+  });
+}
+
+- (RTC_OBJC_TYPE(RTCAudioEngineAvailability))engineAvailability {
+  webrtc::AudioEngineDevice *module = static_cast<webrtc::AudioEngineDevice *>(_native.get());
+  if (module == nullptr) return RTC_OBJC_TYPE(RTCAudioEngineAvailability)(NO, NO);
+
+  return _workerThread->BlockingCall([module] {
+    bool input_available = false;
+    bool output_available = false;
+    int32_t result = module->EngineAvailability(&input_available, &output_available);
+    if (result != 0) return RTC_OBJC_TYPE(RTCAudioEngineAvailability)(NO, NO);
+
+    return RTC_OBJC_TYPE(RTCAudioEngineAvailability)(input_available, output_available);
+  });
+}
+
 - (BOOL)isRecordingAlwaysPreparedMode {
 #if !defined(WEBRTC_INCLUDE_INTERNAL_AUDIO_DEVICE)
   return NO;
