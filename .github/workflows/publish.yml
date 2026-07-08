@@ -418,12 +418,13 @@ jobs:
           while IFS= read -r framework; do
             command+=(-framework "${framework}")
             if [[ "${ENABLE_DEBUG}" == "true" ]]; then
-              mapfile -t dsyms < <(find "$(dirname "${framework}")" -name "$(basename "${framework}").dSYM" -type d | sort)
-              if [[ "${#dsyms[@]}" -eq 0 ]]; then
+              # macOS runners use bash 3.2, which lacks mapfile.
+              dsym="$(find "$(dirname "${framework}")" -name "$(basename "${framework}").dSYM" -type d | sort | head -n 1)"
+              if [[ -z "${dsym}" ]]; then
                 echo "::warning::Missing dSYM for ${framework}"
                 continue
               fi
-              command+=(-debug-symbols "${dsyms[0]}")
+              command+=(-debug-symbols "${dsym}")
             fi
           done < <(find apple-inputs -name '*.framework' -type d | sort)
 
