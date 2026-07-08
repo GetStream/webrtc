@@ -15,14 +15,15 @@
 
 #include <map>
 #include <memory>
+#include <span>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
 #include "absl/base/nullability.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
-#include "api/array_view.h"
 #include "api/environment/environment.h"
 #include "api/field_trials_view.h"
 #include "api/scoped_refptr.h"
@@ -426,8 +427,8 @@ class RTC_EXPORT Network {
   NetworkSlice network_slice() const { return network_slice_; }
   void set_network_slice(NetworkSlice slice) { network_slice_ = slice; }
 
-  static std::pair<AdapterType, bool /* vpn */> GuessAdapterFromNetworkCost(
-      int network_cost);
+  static std::tuple<AdapterType, bool /* vpn */, NetworkSlice>
+  GuessAdapterFromNetworkCost(int network_cost);
 
   // Debugging description of this network
   std::string ToString() const;
@@ -469,7 +470,7 @@ class RTC_EXPORT NetworkManagerBase : public NetworkManager {
 
   // Check if MAC address in |bytes| is one of the pre-defined
   // MAC addresses for know VPNs.
-  static bool IsVpnMacAddress(ArrayView<const uint8_t> address);
+  static bool IsVpnMacAddress(std::span<const uint8_t> address);
 
  protected:
   // Updates `networks_` with the networks listed in `list`. If
@@ -624,6 +625,5 @@ class RTC_EXPORT BasicNetworkManager : public NetworkManagerBase,
 };
 
 }  //  namespace webrtc
-
 
 #endif  // RTC_BASE_NETWORK_H_

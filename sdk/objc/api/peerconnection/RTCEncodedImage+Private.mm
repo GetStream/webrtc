@@ -98,8 +98,8 @@ class ObjCEncodedImageBuffer : public webrtc::EncodedImageBufferInterface {
     self.flags = encodedImage.timing_.flags;
     self.encodeStartMs = encodedImage.timing_.encode_start_ms;
     self.encodeFinishMs = encodedImage.timing_.encode_finish_ms;
-    self.frameType = static_cast<RTC_OBJC_TYPE(RTCFrameType)>(encodedImage._frameType);
-    self.rotation = static_cast<RTC_OBJC_TYPE(RTCVideoRotation)>(encodedImage.rotation_);
+    self.frameType = static_cast<RTCFrameType>(encodedImage.frame_type());
+    self.rotation = static_cast<RTCVideoRotation>(encodedImage.rotation_);
     self.qp = @(encodedImage.qp_);
     self.contentType = (encodedImage.content_type_ == webrtc::VideoContentType::SCREENSHARE) ?
         RTC_OBJC_TYPE(RTCVideoContentTypeScreenshare) :
@@ -128,7 +128,7 @@ class ObjCEncodedImageBuffer : public webrtc::EncodedImageBufferInterface {
   encodedImage.timing_.flags = self.flags;
   encodedImage.timing_.encode_start_ms = self.encodeStartMs;
   encodedImage.timing_.encode_finish_ms = self.encodeFinishMs;
-  encodedImage._frameType = webrtc::VideoFrameType(self.frameType);
+  encodedImage.set_frame_type(webrtc::VideoFrameType(self.frameType));
   encodedImage.rotation_ = webrtc::VideoRotation(self.rotation);
   encodedImage.qp_ = self.qp ? self.qp.intValue : -1;
   encodedImage.content_type_ = (self.contentType == RTC_OBJC_TYPE(RTCVideoContentTypeScreenshare)) ?

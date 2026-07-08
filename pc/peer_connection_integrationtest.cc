@@ -86,6 +86,7 @@
 #include "rtc_base/ssl_identity.h"
 #include "rtc_base/ssl_stream_adapter.h"
 #include "rtc_base/string_encode.h"
+#include "rtc_base/system/plan_b_only.h"
 #include "rtc_base/task_queue_for_test.h"
 #include "rtc_base/test_certificate_verifier.h"
 #include "rtc_base/virtual_socket_server.h"
@@ -1615,7 +1616,8 @@ TEST_P(PeerConnectionIntegrationTest, NewGetStatsManyAudioAndManyVideoStreams) {
       audio_sender_1->track()->id(), video_sender_1->track()->id(),
       audio_sender_2->track()->id(), video_sender_2->track()->id()};
 
-  scoped_refptr<const RTCStatsReport> caller_report = caller()->NewGetStats();
+  scoped_refptr<const RTCStatsReport> caller_report =
+      caller()->NewGetStats(run_loop());
   ASSERT_TRUE(caller_report);
   auto outbound_stream_stats =
       caller_report->GetStatsOfType<RTCOutboundRtpStreamStats>();
@@ -1639,7 +1641,8 @@ TEST_P(PeerConnectionIntegrationTest, NewGetStatsManyAudioAndManyVideoStreams) {
   }
   EXPECT_THAT(outbound_track_ids, UnorderedElementsAreArray(track_ids));
 
-  scoped_refptr<const RTCStatsReport> callee_report = callee()->NewGetStats();
+  scoped_refptr<const RTCStatsReport> callee_report =
+      callee()->NewGetStats(run_loop());
   ASSERT_TRUE(callee_report);
   auto inbound_stream_stats =
       callee_report->GetStatsOfType<RTCInboundRtpStreamStats>();
@@ -1678,7 +1681,8 @@ TEST_P(PeerConnectionIntegrationTest,
 
   // We received a frame, so we should have nonzero "bytes received" stats for
   // the unsignaled stream, if stats are working for it.
-  scoped_refptr<const RTCStatsReport> report = callee()->NewGetStats();
+  scoped_refptr<const RTCStatsReport> report =
+      callee()->NewGetStats(run_loop());
   ASSERT_NE(nullptr, report);
   auto inbound_stream_stats =
       report->GetStatsOfType<RTCInboundRtpStreamStats>();
@@ -1728,7 +1732,8 @@ TEST_P(PeerConnectionIntegrationTest,
   media_expectations.CalleeExpectsSomeVideo(1);
   ASSERT_TRUE(ExpectNewFrames(media_expectations));
 
-  scoped_refptr<const RTCStatsReport> report = callee()->NewGetStats();
+  scoped_refptr<const RTCStatsReport> report =
+      callee()->NewGetStats(run_loop());
   ASSERT_NE(nullptr, report);
 
   auto inbound_rtps = report->GetStatsOfType<RTCInboundRtpStreamStats>();
@@ -1770,11 +1775,11 @@ TEST_P(PeerConnectionIntegrationTest, Dtls10CipherStatsAndUmaMetrics) {
   EXPECT_THAT(WaitUntil(
                   [&] {
                     return SSLStreamAdapter::IsAcceptableCipher(
-                        caller()->OldGetStats()->DtlsCipher(), KT_DEFAULT);
+                        caller()->DtlsCipher(), KT_DEFAULT);
                   },
                   IsTrue()),
               IsRtcOk());
-  EXPECT_THAT(WaitUntil([&] { return caller()->OldGetStats()->SrtpCipher(); },
+  EXPECT_THAT(WaitUntil([&] { return caller()->SrtpCipher(); },
                         Eq(SrtpCryptoSuiteToName(kDefaultSrtpCryptoSuite))),
               IsRtcOk());
 }
@@ -1793,11 +1798,11 @@ TEST_P(PeerConnectionIntegrationTest, Dtls12CipherStatsAndUmaMetrics) {
   EXPECT_THAT(WaitUntil(
                   [&] {
                     return SSLStreamAdapter::IsAcceptableCipher(
-                        caller()->OldGetStats()->DtlsCipher(), KT_DEFAULT);
+                        caller()->DtlsCipher(), KT_DEFAULT);
                   },
                   IsTrue()),
               IsRtcOk());
-  EXPECT_THAT(WaitUntil([&] { return caller()->OldGetStats()->SrtpCipher(); },
+  EXPECT_THAT(WaitUntil([&] { return caller()->SrtpCipher(); },
                         Eq(SrtpCryptoSuiteToName(kDefaultSrtpCryptoSuite))),
               IsRtcOk());
 }
@@ -2447,6 +2452,7 @@ TEST_P(PeerConnectionIntegrationTest,
 // received end-to-end.
 TEST_F(PeerConnectionIntegrationTestPlanB,
        MediaFlowsAfterEarlyWarmupWithCreateSender) {
+  RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN()
   ASSERT_TRUE(CreatePeerConnectionWrappers());
   ConnectFakeSignaling();
   auto caller_audio_sender =
@@ -2457,6 +2463,7 @@ TEST_F(PeerConnectionIntegrationTestPlanB,
       callee()->pc()->CreateSender("audio", "callee_stream");
   auto callee_video_sender =
       callee()->pc()->CreateSender("video", "callee_stream");
+  RTC_ALLOW_PLAN_B_DEPRECATION_END()
   caller()->CreateAndSetAndSignalOffer();
   ASSERT_THAT(WaitUntil([&] { return SignalingStateStable(); }, IsTrue(),
                         {.timeout = kMaxWaitForActivation}),
@@ -2538,6 +2545,7 @@ TEST_F(PeerConnectionIntegrationTestUnifiedPlan,
 // from the caller to the callee, rather than being forwarded to a third
 // PeerConnection.
 TEST_F(PeerConnectionIntegrationTestPlanB, CanSendRemoteVideoTrack) {
+  RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN()
   ASSERT_TRUE(CreatePeerConnectionWrappers());
   ConnectFakeSignaling();
   // Just send a video track from the caller.
@@ -2551,6 +2559,7 @@ TEST_F(PeerConnectionIntegrationTestPlanB, CanSendRemoteVideoTrack) {
   // Echo the stream back, and do a new offer/anwer (initiated by callee this
   // time).
   callee()->pc()->AddStream(callee()->remote_streams()->at(0));
+  RTC_ALLOW_PLAN_B_DEPRECATION_END()
   callee()->CreateAndSetAndSignalOffer();
   ASSERT_THAT(WaitUntil([&] { return SignalingStateStable(); }, IsTrue(),
                         {.timeout = kMaxWaitForActivation}),
@@ -2659,7 +2668,8 @@ TEST_P(PeerConnectionIntegrationTestWithFakeClock,
   caller()->AddAudioTrack();
 
   // Call getStats, assert there are no candidates.
-  scoped_refptr<const RTCStatsReport> first_report = caller()->NewGetStats();
+  scoped_refptr<const RTCStatsReport> first_report =
+      caller()->NewGetStats(run_loop());
   ASSERT_TRUE(first_report);
   auto first_candidate_stats =
       first_report->GetStatsOfType<RTCLocalIceCandidateStats>();
@@ -2669,7 +2679,8 @@ TEST_P(PeerConnectionIntegrationTestWithFakeClock,
   // callee.
   caller()->CreateAndSetAndSignalOffer();
   // Call getStats again, assert there are candidates now.
-  scoped_refptr<const RTCStatsReport> second_report = caller()->NewGetStats();
+  scoped_refptr<const RTCStatsReport> second_report =
+      caller()->NewGetStats(run_loop());
   ASSERT_TRUE(second_report);
   auto second_candidate_stats =
       second_report->GetStatsOfType<RTCLocalIceCandidateStats>();
@@ -2694,7 +2705,8 @@ TEST_P(PeerConnectionIntegrationTestWithFakeClock,
               IsRtcOk());
 
   // Call getStats, assert there are no candidates.
-  scoped_refptr<const RTCStatsReport> first_report = caller()->NewGetStats();
+  scoped_refptr<const RTCStatsReport> first_report =
+      caller()->NewGetStats(run_loop());
   ASSERT_TRUE(first_report);
   auto first_candidate_stats =
       first_report->GetStatsOfType<RTCRemoteIceCandidateStats>();
@@ -2713,7 +2725,8 @@ TEST_P(PeerConnectionIntegrationTestWithFakeClock,
   ASSERT_TRUE(result.value().ok());
 
   // Call getStats again, assert there is a remote candidate now.
-  scoped_refptr<const RTCStatsReport> second_report = caller()->NewGetStats();
+  scoped_refptr<const RTCStatsReport> second_report =
+      caller()->NewGetStats(run_loop());
   ASSERT_TRUE(second_report);
   auto second_candidate_stats =
       second_report->GetStatsOfType<RTCRemoteIceCandidateStats>();

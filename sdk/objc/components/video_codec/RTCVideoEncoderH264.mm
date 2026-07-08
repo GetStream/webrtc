@@ -37,6 +37,7 @@
 #include "rtc_base/logging.h"
 #include "rtc_base/time_utils.h"
 #include "sdk/objc/components/video_codec/nalu_rewriter.h"
+#include "system_wrappers/include/clock.h"
 #include "third_party/libyuv/include/libyuv/convert_from.h"
 
 @interface RTC_OBJC_TYPE (RTCVideoEncoderH264)
@@ -399,9 +400,9 @@ NSUInteger GetMaxSampleRate(
   self = [super init];
   if (self) {
     _codecInfo = codecInfo;
-    _packetizationMode = RTC_OBJC_TYPE(RTCH264PacketizationModeNonInterleaved);
-    _profile_level_id =
-        webrtc::ParseSdpForH264ProfileLevelId([codecInfo nativeSdpVideoFormat].parameters);
+    _packetizationMode = RTCH264PacketizationModeNonInterleaved;
+    _profile_level_id = webrtc::ParseSdpForH264ProfileLevelId(
+        [codecInfo nativeSdpVideoFormat].parameters);
     _previousPresentationTimeStamp = kCMTimeZero;
     RTC_DCHECK(_profile_level_id);
     RTC_LOG(LS_INFO) << "Using profile "

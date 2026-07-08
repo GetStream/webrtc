@@ -12,9 +12,8 @@
 
 #include <utility>
 
+#include "absl/base/nullability.h"
 #include "absl/functional/any_invocable.h"
-#include "api/scoped_refptr.h"
-#include "api/task_queue/pending_task_safety_flag.h"
 #include "api/task_queue/task_queue_base.h"
 #include "api/units/time_delta.h"
 #include "rtc_base/socket.h"
@@ -32,6 +31,7 @@ namespace test {
 class RunLoop {
  public:
   RunLoop();
+  explicit RunLoop(SocketServer* absl_nullable custom_ss);
   ~RunLoop();
 
   // Returns a pointer to the task queue implementation managed by this RunLoop.
@@ -64,31 +64,33 @@ class RunLoop {
   class FakeSocketServer : public SocketServer {
    public:
     FakeSocketServer();
+    explicit FakeSocketServer(SocketServer* absl_nullable custom_ss);
     ~FakeSocketServer() override;
 
     void FailNextWait();
 
    private:
+    void SetMessageQueue(Thread* absl_nullable queue) override;
     bool Wait(webrtc::TimeDelta max_wait_duration, bool process_io) override;
     void WakeUp() override;
 
-    Socket* CreateSocket(int family, int type) override;
+    Socket* absl_nullable CreateSocket(int family, int type) override;
 
    private:
     bool fail_next_wait_ = false;
+    SocketServer* const absl_nullable custom_ss_ = nullptr;
   };
 
   class WorkerThread : public Thread {
    public:
-    explicit WorkerThread(SocketServer* ss);
+    explicit WorkerThread(SocketServer* absl_nullable ss);
 
    private:
     CurrentTaskQueueSetter tq_setter_;
   };
 
-  scoped_refptr<PendingTaskSafetyFlag> run_for_flag_ = nullptr;
   FakeSocketServer socket_server_;
-  WorkerThread worker_thread_{&socket_server_};
+  WorkerThread worker_thread_;
   WeakPtrFactory<RunLoop> weak_factory_;
 };
 

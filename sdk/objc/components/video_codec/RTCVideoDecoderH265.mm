@@ -163,7 +163,7 @@ uint8_t ComputeH265ReorderSizeFromAnnexB(const uint8_t *annexb_buffer, size_t an
       continue;
     }
     webrtc::ArrayView<const uint8_t> nalu =
-        annexb.subview(index.payload_start_offset, index.payload_size);
+        annexb.subspan(index.payload_start_offset, index.payload_size);
     if (webrtc::H265::ParseNaluType(nalu[0]) == webrtc::H265::kVps) {
       return ComputeH265ReorderSizeFromVPS(nalu.data() + hevcNalHeaderSize,
                                            nalu.size() - hevcNalHeaderSize);

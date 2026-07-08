@@ -40,10 +40,10 @@
 #include "rtc_base/ssl_fingerprint.h"
 #include "rtc_base/ssl_identity.h"
 #include "rtc_base/ssl_stream_adapter.h"
-#include "rtc_base/thread.h"
 #include "test/create_test_environment.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
+#include "test/run_loop.h"
 #include "test/wait_until.h"
 
 namespace webrtc {
@@ -130,15 +130,15 @@ class DtlsSrtpTransportIntegrationTest : public ::testing::Test {
     client_ice_transport_->SetDestination(server_ice_transport_.get());
 
     // Wait for the DTLS connection to be up.
-    EXPECT_THAT(WaitUntil(
-                    [&] {
-                      return client_dtls_transport_->writable() &&
-                             server_dtls_transport_->writable();
-                    },
-                    IsTrue(),
-                    {.timeout = TimeDelta::Millis(kTimeout),
-                     .clock = &fake_clock_}),
-                IsRtcOk());
+    EXPECT_THAT(
+        WaitUntil(
+            [&] {
+              return client_dtls_transport_->writable() &&
+                     server_dtls_transport_->writable();
+            },
+            IsTrue(),
+            {.timeout = TimeDelta::Millis(kTimeout), .clock = &fake_clock_}),
+        IsRtcOk());
     EXPECT_EQ(client_dtls_transport_->dtls_state(),
               DtlsTransportState::kConnected);
     EXPECT_EQ(server_dtls_transport_->dtls_state(),
@@ -156,10 +156,8 @@ class DtlsSrtpTransportIntegrationTest : public ::testing::Test {
         GetSrtpKeyAndSaltLengths((selected_crypto_suite), &key_len, &salt_len));
 
     // Extract the keys. The order depends on the role!
-    ZeroOnFreeBuffer<uint8_t> dtls_buffer =
-        ZeroOnFreeBuffer<uint8_t>::CreateUninitializedWithSize(key_len * 2 +
-                                                               salt_len * 2);
-    ASSERT_TRUE(server_dtls_transport_->ExportSrtpKeyingMaterial(dtls_buffer));
+    ZeroOnFreeBuffer<uint8_t> dtls_buffer;
+    ASSERT_TRUE(server_dtls_transport_->AppendSrtpKeyingMaterial(dtls_buffer));
 
     ZeroOnFreeBuffer<unsigned char> client_write_key(&dtls_buffer[0], key_len,
                                                      key_len + salt_len);
@@ -222,7 +220,7 @@ class DtlsSrtpTransportIntegrationTest : public ::testing::Test {
   }
 
  private:
-  AutoThread main_thread_;
+  test::RunLoop main_thread_;
   ScopedFakeClock fake_clock_;
   const Environment env_ = CreateTestEnvironment();
 

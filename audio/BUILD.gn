@@ -40,7 +40,6 @@ rtc_library("audio") {
   ]
 
   deps = [
-    "../api:array_view",
     "../api:bitrate_allocation",
     "../api:call_api",
     "../api:field_trials_view",
@@ -81,8 +80,10 @@ rtc_library("audio") {
     "../common_audio",
     "../common_audio:common_audio_c",
     "../logging:rtc_event_audio",
+    "../logging:rtc_event_rtp_rtcp",
     "../logging:rtc_stream_config",
     "../media:media_channel",
+    "../media:media_channel_impl",
     "../media:media_constants",
     "../modules:module_api_public",
     "../modules/async_audio_processing",
@@ -162,7 +163,7 @@ if (rtc_include_tests) {
     deps = [
       ":audio",
       ":audio_end_to_end_test",
-      "../api:array_view",
+      ":channel_receive_unittest",
       "../api:bitrate_allocation",
       "../api:call_api",
       "../api:field_trials",
@@ -249,7 +250,6 @@ if (rtc_include_tests) {
     sources = [ "channel_receive_unittest.cc" ]
     deps = [
       ":audio",
-      "../api:array_view",
       "../api:make_ref_counted",
       "../api:mock_frame_transformer",
       "../api:scoped_refptr",
@@ -261,6 +261,7 @@ if (rtc_include_tests) {
       "../api/environment:environment_factory",
       "../api/units:time_delta",
       "../api/units:timestamp",
+      "../logging:mocks",
       "../modules/audio_device:mock_audio_device",
       "../modules/rtp_rtcp:ntp_time_util",
       "../modules/rtp_rtcp:rtp_rtcp_format",

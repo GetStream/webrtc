@@ -48,6 +48,7 @@
 #include "test/create_test_environment.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
+#include "test/run_loop.h"
 #include "test/wait_until.h"
 
 #ifdef WEBRTC_ANDROID
@@ -65,6 +66,8 @@ using ::testing::AtLeast;
 using ::testing::Eq;
 using ::testing::Ge;
 using ::testing::Gt;
+using ::testing::IsTrue;
+using ::testing::Ne;
 using ::testing::SizeIs;
 using ::testing::StrictMock;
 using ::testing::Values;
@@ -244,7 +247,7 @@ class PeerConnectionEndToEndBaseTest : public ::testing::Test {
   }
 
  protected:
-  AutoThread main_thread_;
+  test::RunLoop main_thread_;
   PhysicalSocketServer pss_;
   Environment env_;
   std::unique_ptr<Thread> network_thread_;
@@ -285,13 +288,13 @@ std::unique_ptr<AudioDecoder> CreateForwardingMockDecoder(
       .WillRepeatedly([dec] { return dec->Channels(); });
   EXPECT_CALL(*mock_decoder, DecodeInternal(_, _, _, _, _))
       .Times(AtLeast(1))
-      .WillRepeatedly(
-          [dec](const uint8_t* encoded, size_t encoded_len, int sample_rate_hz,
-                int16_t* decoded, AudioDecoder::SpeechType* speech_type) {
-            return dec->Decode(encoded, encoded_len, sample_rate_hz,
-                               std::numeric_limits<size_t>::max(), decoded,
-                               speech_type);
-          });
+      .WillRepeatedly([dec](const uint8_t* encoded, size_t encoded_len,
+                            int sample_rate_hz, int16_t* decoded,
+                            AudioDecoder::SpeechType* speech_type) {
+        return dec->Decode(encoded, encoded_len, sample_rate_hz,
+                           std::numeric_limits<size_t>::max(), decoded,
+                           speech_type);
+      });
   EXPECT_CALL(*mock_decoder, Die());
   EXPECT_CALL(*mock_decoder, HasDecodePlc()).WillRepeatedly([dec] {
     return dec->HasDecodePlc();
@@ -324,15 +327,14 @@ scoped_refptr<AudioDecoderFactory> CreateForwardingMockDecoderFactory(
       });
   EXPECT_CALL(*mock_decoder_factory, Create)
       .Times(AtLeast(2))
-      .WillRepeatedly(
-          [real_decoder_factory](const Environment& env,
-                                 const SdpAudioFormat& format,
-                                 std::optional<AudioCodecPairId> /* pair */) {
-            auto real_decoder = real_decoder_factory->Create(env, format);
-            return real_decoder
-                       ? CreateForwardingMockDecoder(std::move(real_decoder))
-                       : nullptr;
-          });
+      .WillRepeatedly([real_decoder_factory](
+                          const Environment& env, const SdpAudioFormat& format,
+                          std::optional<AudioCodecPairId> /* pair */) {
+        auto real_decoder = real_decoder_factory->Create(env, format);
+        return real_decoder
+                   ? CreateForwardingMockDecoder(std::move(real_decoder))
+                   : nullptr;
+      });
   return mock_decoder_factory;
 }
 
@@ -538,9 +540,21 @@ TEST_P(PeerConnectionEndToEndTest, DataChannelIdAssignment) {
   scoped_refptr<DataChannelInterface> callee_dc_1(
       callee_->CreateDataChannel("data", init));
 
+  MockDataChannelObserver caller_dc_1_observer(caller_dc_1.get());
+  MockDataChannelObserver callee_dc_1_observer(callee_dc_1.get());
+
   Negotiate();
   WaitForConnection();
 
+  EXPECT_THAT(
+      WaitUntil([&] { return caller_dc_1_observer.IsOpen(); }, IsTrue()),
+      IsRtcOk());
+  EXPECT_THAT(
+      WaitUntil([&] { return callee_dc_1_observer.IsOpen(); }, IsTrue()),
+      IsRtcOk());
+
+  EXPECT_NE(-1, caller_dc_1->id());
+  EXPECT_NE(-1, callee_dc_1->id());
   EXPECT_EQ(1, caller_dc_1->id() % 2);
   EXPECT_EQ(0, callee_dc_1->id() % 2);
 
@@ -549,6 +563,18 @@ TEST_P(PeerConnectionEndToEndTest, DataChannelIdAssignment) {
   scoped_refptr<DataChannelInterface> callee_dc_2(
       callee_->CreateDataChannel("data", init));
 
+  MockDataChannelObserver caller_dc_2_observer(caller_dc_2.get());
+  MockDataChannelObserver callee_dc_2_observer(callee_dc_2.get());
+
+  EXPECT_THAT(
+      WaitUntil([&] { return caller_dc_2_observer.IsOpen(); }, IsTrue()),
+      IsRtcOk());
+  EXPECT_THAT(
+      WaitUntil([&] { return callee_dc_2_observer.IsOpen(); }, IsTrue()),
+      IsRtcOk());
+
+  EXPECT_NE(-1, caller_dc_2->id());
+  EXPECT_NE(-1, callee_dc_2->id());
   EXPECT_EQ(1, caller_dc_2->id() % 2);
   EXPECT_EQ(0, callee_dc_2->id() % 2);
 }
@@ -664,7 +690,7 @@ TEST_P(PeerConnectionEndToEndTest, CloseDataChannelRemotelyWhileNotReferenced) {
 
   // Wait for a bit longer so the remote data channel will receive the
   // close message and be destroyed.
-  Thread::Current()->ProcessMessages(100);
+  main_thread_.RunFor(webrtc::TimeDelta::Millis(100));
 }
 
 // Test behavior of creating too many datachannels.

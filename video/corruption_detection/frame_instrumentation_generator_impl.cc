@@ -27,7 +27,6 @@
 #include "api/video/encoded_image.h"
 #include "api/video/video_codec_type.h"
 #include "api/video/video_frame.h"
-#include "api/video/video_frame_type.h"
 #include "api/video_codecs/scalability_mode.h"
 #include "api/video_codecs/video_codec.h"
 #include "modules/include/module_common_types_public.h"
@@ -93,7 +92,7 @@ std::unique_ptr<FrameSelector> CreateFrameSelector(
     return nullptr;
   }
   return std::make_unique<FrameSelector>(
-      scalability_mode.value_or(ScalabilityMode::kL1T1),
+      *environment, scalability_mode.value_or(ScalabilityMode::kL1T1),
       FrameSelector::Timespan{
           .lower_bound = settings.low_overhead_lower_bound(),
           .upper_bound = settings.low_overhead_upper_bound()},
@@ -144,10 +143,13 @@ FrameInstrumentationGeneratorImpl::OnEncodedImage(
     }
     captured_frame = captured_frames_.front();
 
+    if (encoded_image.is_end_of_temporal_unit()) {
+      captured_frames_.pop();
+    }
+
     layer_id = GetSpatialLayerId(encoded_image);
 
-    bool is_key_frame =
-        encoded_image.FrameType() == VideoFrameType::kVideoFrameKey;
+    bool is_key_frame = encoded_image.IsKey();
     if (!is_key_frame) {
       for (const auto& [unused, context] : contexts_) {
         if (context.rtp_timestamp_of_last_key_frame ==
@@ -242,6 +244,18 @@ FrameInstrumentationGeneratorImpl::OnEncodedImage(
   RTC_CHECK(data.SetSampleValues(std::move(plain_values)));
 
   return data;
+}
+
+void FrameInstrumentationGeneratorImpl::OnFrameReleased(
+    uint32_t rtp_timestamp) {
+  MutexLock lock(&mutex_);
+  // Remove the frame and any preceding ones from the queue.
+  while (!captured_frames_.empty() &&
+         (IsNewerTimestamp(rtp_timestamp,
+                           captured_frames_.front().rtp_timestamp()) ||
+          rtp_timestamp == captured_frames_.front().rtp_timestamp())) {
+    captured_frames_.pop();
+  }
 }
 
 std::optional<int> FrameInstrumentationGeneratorImpl::GetHaltonSequenceIndex(

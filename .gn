@@ -12,8 +12,8 @@ import("//build/dotfile_settings.gni")
 buildconfig = "//build/config/BUILDCONFIG.gn"
 
 # The python interpreter to use by default. On Windows, this will look
-# for vpython3.exe and vpython3.bat.
-script_executable = "vpython3"
+# for python3.exe and python3.bat.
+script_executable = "python3"
 
 # The secondary source root is a parallel directory tree where
 # GN build files are placed when they can not be placed directly
@@ -94,6 +94,8 @@ default_args = {
 
   # Use Siso instead of Ninja.
   use_siso = true
+
+  clang_unsafe_buffers_paths = "//unsafe_buffers_paths.txt"
 
   # WebRTC must stay in C++20 for longer compared to Chromium.
   use_cxx23 = false
