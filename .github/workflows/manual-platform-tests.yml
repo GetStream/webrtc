@@ -312,6 +312,12 @@ jobs:
 
       - name: Build iOS SDK artifact
         working-directory: release-pipeline
+        # M148's build config adds the lld-only flag --ignore-auto-link-option
+        # when Xcode >= 26.4, but the pipeline links with Apple ld (use_lld=false
+        # for Mac Catalyst), which rejects it. Pin Xcode 26.3 until the Catalyst
+        # slices can link with lld again.
+        env:
+          DEVELOPER_DIR: /Applications/Xcode_26.3.app
         run: >-
           bundle exec fastlane ios build
           "root:${{ github.workspace }}/webrtc-tree/.output/src"
