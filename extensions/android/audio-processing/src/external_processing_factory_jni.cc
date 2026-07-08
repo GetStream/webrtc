@@ -45,7 +45,8 @@ static jlong JNI_NativeExternalAudioProcessingFactory_CreateAudioProcessingModul
                  .Build(webrtc::CreateEnvironment());
   webrtc::AudioProcessing::Config config;
   config.echo_canceller.enabled = false;
-  config.echo_canceller.mobile_mode = true;
+  // M148 removed AECM (mobile echo canceller); Config::EchoCanceller no longer
+  // has mobile_mode. AEC is disabled here anyway, so nothing to preserve.
   apm->ApplyConfig(config);
   apm_ptr = apm.release();
   return webrtc::jni::jlongFromPointer(apm_ptr);
