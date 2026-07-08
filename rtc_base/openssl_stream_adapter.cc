@@ -21,6 +21,7 @@
 #include <cstring>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -28,7 +29,6 @@
 #include "absl/functional/any_invocable.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
-#include "api/array_view.h"
 #include "api/field_trials_view.h"
 #include "api/sequence_checker.h"
 #include "api/task_queue/pending_task_safety_flag.h"
@@ -248,7 +248,7 @@ int stream_read(BIO* b, char* out, int outl) {
   size_t read;
   int error;
   StreamResult result = stream->Read(
-      MakeArrayView(reinterpret_cast<uint8_t*>(out), outl), read, error);
+      std::span(reinterpret_cast<uint8_t*>(out), outl), read, error);
   if (result == SR_SUCCESS) {
     return checked_cast<int>(read);
   } else if (result == SR_BLOCK) {
@@ -266,7 +266,7 @@ int stream_write(BIO* b, const char* in, int inl) {
   size_t written;
   int error;
   StreamResult result = stream->Write(
-      MakeArrayView(reinterpret_cast<const uint8_t*>(in), inl), written, error);
+      std::span(reinterpret_cast<const uint8_t*>(in), inl), written, error);
   if (result == SR_SUCCESS) {
     return checked_cast<int>(written);
   } else if (result == SR_BLOCK) {
@@ -292,6 +292,7 @@ long stream_ctrl(BIO* b, int cmd, long num, void* ptr) {
     case BIO_CTRL_PENDING:
       return 0;
     case BIO_CTRL_FLUSH: {
+      // Flush signals the end of a flight of handshake packets.
       StreamInterface* stream = static_cast<StreamInterface*>(BIO_get_data(b));
       RTC_DCHECK(stream);
       if (stream->Flush()) {
@@ -365,7 +366,7 @@ void OpenSSLStreamAdapter::SetServerRole(SSLRole role) {
 
 SSLPeerCertificateDigestError OpenSSLStreamAdapter::SetPeerCertificateDigest(
     absl::string_view digest_alg,
-    ArrayView<const uint8_t> digest_val) {
+    std::span<const uint8_t> digest_val) {
   RTC_DCHECK(!peer_certificate_verified_);
   RTC_DCHECK(!HasPeerCertificateDigest());
   size_t expected_len;
@@ -497,6 +498,44 @@ bool OpenSSLStreamAdapter::ExportSrtpKeyingMaterial(
   return true;
 }
 
+bool OpenSSLStreamAdapter::AppendSrtpKeyingMaterial(
+    ZeroOnFreeBuffer<uint8_t>& key_buffer) {
+  // Compute size of keying material.
+  int selected_crypto_suite;
+  if (!GetDtlsSrtpCryptoSuite(&selected_crypto_suite)) {
+    RTC_LOG(LS_ERROR) << "No crypto suite";
+    return false;
+  }
+  int key_len, salt_len;
+  if (!GetSrtpKeyAndSaltLengths(selected_crypto_suite, &key_len, &salt_len)) {
+    RTC_LOG(LS_ERROR) << "Unable to get key and salt len from crypto suite";
+    return false;
+  }
+  int key_material_size = key_len * 2 + salt_len * 2;
+  // Arguments are:
+  // keying material/len -- a buffer to hold the keying material.
+  // label               -- the exporter label.
+  //                        part of the RFC defining each exporter
+  //                        usage. We only use RFC 5764 for DTLS-SRTP.
+  // context/context_len -- a context to bind to for this connection;
+  // use_context            optional, can be null, 0 (IN). Not used by WebRTC.
+  bool success = false;
+  key_buffer.AppendData(
+      key_material_size, [&](std::span<uint8_t> keying_material) -> size_t {
+        int result = SSL_export_keying_material(
+            ssl_, keying_material.data(), keying_material.size(),
+            kDtlsSrtpExporterLabel.data(), kDtlsSrtpExporterLabel.size(),
+            nullptr, 0, false);
+        if (result != 0) {
+          success = true;
+          return keying_material.size();
+        } else {
+          return 0;  // Consider no data appended
+        }
+      });
+  return success;
+}
+
 uint16_t OpenSSLStreamAdapter::GetPeerSignatureAlgorithm() const {
   if (state_ != SSL_CONNECTED) {
     return 0;
@@ -607,8 +646,6 @@ void OpenSSLStreamAdapter::UpdateRetransmissionTimeout(int timeout_ms) {
   dtls_handshake_timeout_ms_ = timeout_ms;
 #ifdef OPENSSL_IS_BORINGSSL
   if (ssl_ctx_ != nullptr && ssl_mode_ == SSL_MODE_DTLS) {
-    // TODO (jonaso, webrtc:367395350): Switch to upcoming
-    // DTLSv1_update_timeout_duration.
     DTLSv1_set_initial_timeout_duration(ssl_, dtls_handshake_timeout_ms_);
     // Clear the DTLS timer
     timeout_task_.Stop();
@@ -627,7 +664,7 @@ void OpenSSLStreamAdapter::SetMTU(int mtu) {
 //
 // StreamInterface Implementation
 //
-StreamResult OpenSSLStreamAdapter::Write(ArrayView<const uint8_t> data,
+StreamResult OpenSSLStreamAdapter::Write(std::span<const uint8_t> data,
                                          size_t& written,
                                          int& error) {
   RTC_DLOG(LS_VERBOSE) << "OpenSSLStreamAdapter::Write(" << data.size() << ")";
@@ -685,7 +722,7 @@ StreamResult OpenSSLStreamAdapter::Write(ArrayView<const uint8_t> data,
   // not reached
 }
 
-StreamResult OpenSSLStreamAdapter::Read(ArrayView<uint8_t> data,
+StreamResult OpenSSLStreamAdapter::Read(std::span<uint8_t> data,
                                         size_t& read,
                                         int& error) {
   RTC_DLOG(LS_VERBOSE) << "OpenSSLStreamAdapter::Read(" << data.size() << ")";
@@ -1198,7 +1235,7 @@ bool OpenSSLStreamAdapter::VerifyPeerCertificate() {
     return false;
   }
 
-  Buffer computed_digest(0, EVP_MAX_MD_SIZE);
+  Buffer computed_digest = Buffer::CreateWithCapacity(EVP_MAX_MD_SIZE);
   if (!peer_cert_chain_->Get(0).ComputeDigest(
           peer_certificate_digest_algorithm_, computed_digest)) {
     RTC_LOG(LS_WARNING) << "Failed to compute peer cert digest.";

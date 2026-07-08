@@ -542,7 +542,7 @@ void FrameCryptorTransformer::decryptFrame(
   auto uncrypted_magic_bytes = key_provider_->options().uncrypted_magic_bytes;
   if (uncrypted_magic_bytes.size() > 0 &&
       data_in.size() >= uncrypted_magic_bytes.size()) {
-    auto tmp = data_in.subview(data_in.size() - (uncrypted_magic_bytes.size()),
+    auto tmp = data_in.subspan(data_in.size() - (uncrypted_magic_bytes.size()),
                                uncrypted_magic_bytes.size());
     auto data = std::vector<uint8_t>(tmp.begin(), tmp.end());
     if (uncrypted_magic_bytes == data) {
@@ -557,7 +557,7 @@ void FrameCryptorTransformer::decryptFrame(
       // decryption.
       Buffer data_out;
       data_out.AppendData(
-          data_in.subview(0, data_in.size() - uncrypted_magic_bytes.size()));
+          data_in.subspan(0, data_in.size() - uncrypted_magic_bytes.size()));
       frame->SetData(data_out);
       sink_callback->OnTransformedFrame(std::move(frame));
       return;

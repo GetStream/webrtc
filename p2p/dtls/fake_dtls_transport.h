@@ -15,11 +15,12 @@
 #include <cstring>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/strings/string_view.h"
-#include "api/array_view.h"
 #include "api/dtls_transport_interface.h"
 #include "api/ice_transport_interface.h"
 #include "api/rtc_error.h"
@@ -55,7 +56,7 @@ class FakeDtlsTransport : public DtlsTransportInternal {
             ice_transport_ref_->internal())),
         transport_name_(ice_transport_->transport_name()),
         component_(ice_transport_->component()),
-        dtls_fingerprint_("", nullptr) {
+        dtls_fingerprint_("", std::span<const uint8_t>()) {
     RTC_DCHECK(ice_transport_);
     ice_transport_->RegisterReceivedPacketCallback(
         this, [&](PacketTransportInternal* transport,
@@ -71,7 +72,7 @@ class FakeDtlsTransport : public DtlsTransportInternal {
       : owned_ice_transport_(std::move(ice)),
         transport_name_(owned_ice_transport_->transport_name()),
         component_(owned_ice_transport_->component()),
-        dtls_fingerprint_("", ArrayView<const uint8_t>()) {
+        dtls_fingerprint_("", std::span<const uint8_t>()) {
     ice_transport_ = owned_ice_transport_.get();
     ice_transport_->RegisterReceivedPacketCallback(
         this, [&](PacketTransportInternal* transport,
@@ -186,7 +187,7 @@ class FakeDtlsTransport : public DtlsTransportInternal {
   bool SetRemoteFingerprint(absl::string_view alg,
                             const uint8_t* digest,
                             size_t digest_len) {
-    dtls_fingerprint_ = SSLFingerprint(alg, MakeArrayView(digest, digest_len));
+    dtls_fingerprint_ = SSLFingerprint(alg, std::span(digest, digest_len));
     return true;
   }
   bool SetDtlsRole(SSLRole role) override {
@@ -252,6 +253,24 @@ class FakeDtlsTransport : public DtlsTransportInternal {
       ZeroOnFreeBuffer<uint8_t>& keying_material) override {
     if (do_dtls_) {
       std::memset(keying_material.data(), 0xff, keying_material.size());
+    }
+    return do_dtls_;
+  }
+  bool AppendSrtpKeyingMaterial(
+      ZeroOnFreeBuffer<uint8_t>& keying_material) override {
+    if (do_dtls_) {
+      int crypto_suite;
+      if (!GetSrtpCryptoSuite(&crypto_suite)) {
+        return false;
+      }
+      int key_len;
+      int salt_len;
+      if (!GetSrtpKeyAndSaltLengths(crypto_suite, &key_len, &salt_len)) {
+        return false;
+      }
+      size_t data_size = 2 * key_len + 2 * salt_len;
+      std::vector<uint8_t> data(data_size, 0xff);
+      keying_material.AppendData(data);
     }
     return do_dtls_;
   }

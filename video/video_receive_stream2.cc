@@ -18,13 +18,13 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/algorithm/container.h"
 #include "absl/strings/str_cat.h"
-#include "api/array_view.h"
 #include "api/crypto/frame_decryptor_interface.h"
 #include "api/environment/environment.h"
 #include "api/field_trials_view.h"
@@ -81,7 +81,6 @@
 #include "rtc_base/race_checker.h"
 #include "rtc_base/strings/string_builder.h"
 #include "rtc_base/synchronization/mutex.h"
-#include "rtc_base/system/file_wrapper.h"
 #include "rtc_base/trace_event.h"
 #include "system_wrappers/include/clock.h"
 #include "system_wrappers/include/ntp_time.h"
@@ -89,6 +88,7 @@
 #include "video/decode_synchronizer.h"
 #include "video/frame_decode_scheduler.h"
 #include "video/frame_dumping_decoder.h"
+#include "video/null_video_decoder.h"
 #include "video/receive_statistics_proxy.h"
 #include "video/render/incoming_video_stream.h"
 #include "video/task_queue_frame_decode_scheduler.h"
@@ -115,7 +115,7 @@ class WebRtcRecordableEncodedFrame : public RecordableEncodedFrame {
       : buffer_(frame.GetEncodedData()),
         render_time_ms_(frame.RenderTime()),
         codec_(frame.CodecSpecific()->codecType),
-        is_key_frame_(frame.FrameType() == VideoFrameType::kVideoFrameKey),
+        is_key_frame_(frame.IsKey()),
         resolution_(resolution) {
     if (frame.ColorSpace()) {
       color_space_ = *frame.ColorSpace();
@@ -171,36 +171,8 @@ RenderResolution InitialDecoderResolution(const FieldTrialsView& field_trials) {
   return RenderResolution(320, 180);
 }
 
-// Video decoder class to be used for unknown codecs. Doesn't support decoding
-// but logs messages to LS_ERROR.
-class NullVideoDecoder : public VideoDecoder {
- public:
-  bool Configure(const Settings& settings) override {
-    RTC_LOG(LS_ERROR) << "Can't initialize NullVideoDecoder.";
-    return true;
-  }
-
-  int32_t Decode(const EncodedImage& input_image,
-                 int64_t render_time_ms) override {
-    RTC_LOG(LS_ERROR) << "The NullVideoDecoder doesn't support decoding.";
-    return WEBRTC_VIDEO_CODEC_OK;
-  }
-
-  int32_t RegisterDecodeCompleteCallback(
-      DecodedImageCallback* callback) override {
-    RTC_LOG(LS_ERROR)
-        << "Can't register decode complete callback on NullVideoDecoder.";
-    return WEBRTC_VIDEO_CODEC_OK;
-  }
-
-  int32_t Release() override { return WEBRTC_VIDEO_CODEC_OK; }
-
-  const char* ImplementationName() const override { return "NullVideoDecoder"; }
-};
-
 bool IsKeyFrameAndUnspecifiedResolution(const EncodedFrame& frame) {
-  return frame.FrameType() == VideoFrameType::kVideoFrameKey &&
-         frame.EncodedImage()._encodedWidth == 0 &&
+  return frame.IsKey() && frame.EncodedImage()._encodedWidth == 0 &&
          frame.EncodedImage()._encodedHeight == 0;
 }
 
@@ -268,8 +240,10 @@ VideoReceiveStream2::VideoReceiveStream2(
           false)),
       frame_evaluator_(FrameInstrumentationEvaluation::Create(&stats_proxy_)),
       decode_queue_(env_.task_queue_factory().CreateTaskQueue(
-          "DecodingQueue",
-          TaskQueueFactory::Priority::HIGH)) {
+          "VideoDecoderQueue",
+          env_.field_trials().IsEnabled("WebRTC-MediaTaskQueuePriorities")
+              ? TaskQueueFactory::Priority::kVideo
+              : TaskQueueFactory::Priority::kHigh)) {
   RTC_LOG(LS_INFO) << "VideoReceiveStream2: " << config_.ToString();
 
   RTC_DCHECK(call_->worker_thread());
@@ -300,7 +274,7 @@ VideoReceiveStream2::VideoReceiveStream2(
 
   if (!config_.rtp.rtx_associated_payload_types.empty()) {
     rtx_receive_stream_ = std::make_unique<RtxReceiveStream>(
-        &rtp_video_stream_receiver_,
+        env_, &rtp_video_stream_receiver_,
         std::move(config_.rtp.rtx_associated_payload_types), remote_ssrc(),
         rtp_receive_statistics_.get());
   } else {
@@ -349,7 +323,7 @@ void VideoReceiveStream2::SignalNetworkState(NetworkState state) {
   rtp_video_stream_receiver_.SignalNetworkState(state);
 }
 
-bool VideoReceiveStream2::DeliverRtcp(ArrayView<const uint8_t> packet) {
+bool VideoReceiveStream2::DeliverRtcp(std::span<const uint8_t> packet) {
   RTC_DCHECK_RUN_ON(&packet_sequence_checker_);
   return rtp_video_stream_receiver_.DeliverRtcp(packet);
 }
@@ -357,16 +331,6 @@ bool VideoReceiveStream2::DeliverRtcp(ArrayView<const uint8_t> packet) {
 void VideoReceiveStream2::SetSync(Syncable* audio_syncable) {
   RTC_DCHECK_RUN_ON(&packet_sequence_checker_);
   rtp_stream_sync_.ConfigureSync(audio_syncable);
-}
-
-void VideoReceiveStream2::SetLocalSsrc(uint32_t local_ssrc) {
-  RTC_DCHECK_RUN_ON(&packet_sequence_checker_);
-  if (config_.rtp.local_ssrc == local_ssrc)
-    return;
-
-  // TODO(tommi): Make sure we don't rely on local_ssrc via the config struct.
-  const_cast<uint32_t&>(config_.rtp.local_ssrc) = local_ssrc;
-  rtp_video_stream_receiver_.OnLocalSsrcChange(local_ssrc);
 }
 
 void VideoReceiveStream2::Start() {
@@ -565,10 +529,8 @@ void VideoReceiveStream2::CreateAndRegisterExternalDecoder(
                "VideoReceiveStream2::CreateAndRegisterExternalDecoder");
   std::unique_ptr<VideoDecoder> video_decoder =
       config_.decoder_factory->Create(env_, decoder.video_format);
-  // If we still have no valid decoder, we have to create a "Null" decoder
-  // that ignores all calls. The reason we can get into this state is that the
-  // old decoder factory interface doesn't have a way to query supported
-  // codecs.
+  // The factory can end up in this state either if the format is not supported
+  // or because a creation step failed, e.g. HW is unavailable.
   if (!video_decoder) {
     video_decoder = std::make_unique<NullVideoDecoder>();
   }
@@ -583,12 +545,11 @@ void VideoReceiveStream2::CreateAndRegisterExternalDecoder(
   // dumped video, since it's developers-only feature for debugging.
   absl::c_replace(decoded_output_file, ';', '/');
   if (!decoded_output_file.empty()) {
-    char filename_buffer[256];
-    SimpleStringBuilder ssb(filename_buffer);
+    StringBuilder ssb;
     ssb << decoded_output_file << "/webrtc_receive_stream_" << remote_ssrc()
         << "-" << env_.clock().TimeInMicroseconds() << ".ivf";
-    video_decoder = CreateFrameDumpingDecoderWrapper(
-        std::move(video_decoder), FileWrapper::OpenWriteOnly(ssb.str()));
+    video_decoder =
+        CreateFrameDumpingDecoderWrapper(std::move(video_decoder), ssb.str());
   }
 
   video_receiver_.RegisterExternalDecoder(std::move(video_decoder),
@@ -818,8 +779,7 @@ void VideoReceiveStream2::OnEncodedFrame(std::unique_ptr<EncodedFrame> frame) {
   const bool keyframe_request_is_due =
       !last_keyframe_request_ ||
       now >= (*last_keyframe_request_ + max_wait_for_keyframe_);
-  const bool received_frame_is_keyframe =
-      frame->FrameType() == VideoFrameType::kVideoFrameKey;
+  const bool received_frame_is_keyframe = frame->IsKey();
 
   // Current OnPreDecode only cares about QP for VP8.
   // TODO(brandtr): Move to stats_proxy_.OnDecodableFrame in VSBC, or deprecate.
@@ -989,7 +949,7 @@ int VideoReceiveStream2::DecodeAndMaybeDispatchEncodedFrame(
         << "Failed to decode frame. Return code: " << decode_result
         << ", SSRC: " << remote_ssrc()
         << ", frame RTP timestamp: " << frame_ptr->RtpTimestamp()
-        << ", type: " << VideoFrameTypeToString(frame_ptr->FrameType())
+        << ", type: " << VideoFrameTypeToString(frame_ptr->frame_type())
         << ", size: " << frame_ptr->size()
         << ", width: " << frame_ptr->_encodedWidth
         << ", height: " << frame_ptr->_encodedHeight

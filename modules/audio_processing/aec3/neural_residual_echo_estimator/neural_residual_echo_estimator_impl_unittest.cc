@@ -16,12 +16,12 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/strings/string_view.h"
-#include "api/array_view.h"
 #include "modules/audio_processing/aec3/aec3_common.h"
 #include "modules/audio_processing/aec3/block.h"
 #include "modules/audio_processing/aec3/neural_residual_echo_estimator/neural_feature_extractor.h"
@@ -78,36 +78,34 @@ class MockModelRunner : public NeuralResidualEchoEstimatorImpl::ModelRunner {
 
   int StepSize() const override { return constants_.step_size; }
 
-  ArrayView<float> GetInput(ModelInputEnum input_enum) override {
+  std::span<float> GetInput(ModelInputEnum input_enum) override {
     switch (input_enum) {
       case ModelInputEnum::kMic:
-        return webrtc::ArrayView<float>(input_mic_.data(),
-                                        constants_.frame_size);
+        return std::span<float>(input_mic_.data(), constants_.frame_size);
       case ModelInputEnum::kLinearAecOutput:
-        return webrtc::ArrayView<float>(input_linear_aec_output_.data(),
-                                        constants_.frame_size);
+        return std::span<float>(input_linear_aec_output_.data(),
+                                constants_.frame_size);
       case ModelInputEnum::kAecRef:
-        return webrtc::ArrayView<float>(input_aec_ref_.data(),
-                                        constants_.frame_size);
+        return std::span<float>(input_aec_ref_.data(), constants_.frame_size);
       case ModelInputEnum::kModelState:
       case ModelInputEnum::kNumInputs:
         RTC_CHECK(false);
-        return webrtc::ArrayView<float>();
+        return std::span<float>();
     }
   }
 
-  ArrayView<const float> GetOutput(ModelOutputEnum output_enum) override {
+  std::span<const float> GetOutput(ModelOutputEnum output_enum) override {
     switch (output_enum) {
       case ModelOutputEnum::kEchoMask:
       case ModelOutputEnum::kUnboundedEchoMask:
-        return ArrayView<const float>(output_echo_mask_.data(),
+        return std::span<const float>(output_echo_mask_.data(),
                                       constants_.frame_size_by_2_plus_1);
       case ModelOutputEnum::kModelState:
         // Mock model state output if needed, for now return empty
-        return ArrayView<const float>();
+        return std::span<const float>();
       default:
         RTC_CHECK(false);
-        return ArrayView<float>();
+        return std::span<float>();
     }
   }
 
@@ -116,6 +114,8 @@ class MockModelRunner : public NeuralResidualEchoEstimatorImpl::ModelRunner {
   }
 
   MOCK_METHOD(bool, Invoke, (), (override));
+
+  MOCK_METHOD(void, Reset, (), (override));
 
   const ModelConstants constants_;
   const audioproc::ReeModelMetadata metadata_;
@@ -142,14 +142,14 @@ TEST_P(NeuralResidualEchoEstimatorImplTest,
 
   constexpr int kNumCaptureChannels = 1;
   std::array<float, kBlockSize> x;
-  std::vector<std::array<float, kBlockSize>> y{kNumCaptureChannels};
-  std::vector<std::array<float, kBlockSize>> e{kNumCaptureChannels};
-  std::vector<std::array<float, kFftLengthBy2Plus1>> E2{kNumCaptureChannels};
-  std::vector<std::array<float, kFftLengthBy2Plus1>> S2{kNumCaptureChannels};
-  std::vector<std::array<float, kFftLengthBy2Plus1>> Y2{kNumCaptureChannels};
-  std::vector<std::array<float, kFftLengthBy2Plus1>> R2{kNumCaptureChannels};
-  std::vector<std::array<float, kFftLengthBy2Plus1>> R2_unbounded{
-      kNumCaptureChannels};
+  std::vector<std::array<float, kBlockSize>> y(kNumCaptureChannels);
+  std::vector<std::array<float, kBlockSize>> e(kNumCaptureChannels);
+  std::vector<std::array<float, kFftLengthBy2Plus1>> E2(kNumCaptureChannels);
+  std::vector<std::array<float, kFftLengthBy2Plus1>> S2(kNumCaptureChannels);
+  std::vector<std::array<float, kFftLengthBy2Plus1>> Y2(kNumCaptureChannels);
+  std::vector<std::array<float, kFftLengthBy2Plus1>> R2(kNumCaptureChannels);
+  std::vector<std::array<float, kFftLengthBy2Plus1>> R2_unbounded(
+      kNumCaptureChannels);
 
   auto mock_model_runner = std::make_unique<MockModelRunner>(model_constants);
   for (int i = 0; i < model_constants.frame_size; ++i) {
@@ -218,14 +218,14 @@ TEST_P(NeuralResidualEchoEstimatorImplTest, OutputMaskIsApplied) {
 
   constexpr int kNumCaptureChannels = 1;
   std::array<float, kBlockSize> x;
-  std::vector<std::array<float, kBlockSize>> y{kNumCaptureChannels};
-  std::vector<std::array<float, kBlockSize>> e{kNumCaptureChannels};
-  std::vector<std::array<float, kFftLengthBy2Plus1>> E2{kNumCaptureChannels};
+  std::vector<std::array<float, kBlockSize>> y(kNumCaptureChannels);
+  std::vector<std::array<float, kBlockSize>> e(kNumCaptureChannels);
+  std::vector<std::array<float, kFftLengthBy2Plus1>> E2(kNumCaptureChannels);
   std::vector<std::array<float, kFftLengthBy2Plus1>> S2{kNumCaptureChannels};
   std::vector<std::array<float, kFftLengthBy2Plus1>> Y2{kNumCaptureChannels};
   std::vector<std::array<float, kFftLengthBy2Plus1>> R2{kNumCaptureChannels};
-  std::vector<std::array<float, kFftLengthBy2Plus1>> R2_unbounded{
-      kNumCaptureChannels};
+  std::vector<std::array<float, kFftLengthBy2Plus1>> R2_unbounded(
+      kNumCaptureChannels);
   std::fill(x.begin(), x.end(), 10000);
   std::fill(y[0].begin(), y[0].end(), 10000);
   std::fill(e[0].begin(), e[0].end(), 10000);
@@ -272,6 +272,48 @@ TEST_P(NeuralResidualEchoEstimatorImplTest, OutputMaskIsApplied) {
   }
 }
 
+TEST_P(NeuralResidualEchoEstimatorImplTest, ResetsState) {
+  const ModelConstants model_constants = GetParam();
+  if (model_constants.step_size == kBlockSize) {
+    // This reset test needs to have a step size larger than the block size.
+    return;
+  }
+  SCOPED_TRACE(testing::Message()
+               << "model_constants.frame_size=" << model_constants.frame_size);
+
+  constexpr int kNumCaptureChannels = 1;
+  std::vector<std::array<float, kBlockSize>> y(kNumCaptureChannels);
+  std::vector<std::array<float, kBlockSize>> e(kNumCaptureChannels);
+  std::vector<std::array<float, kFftLengthBy2Plus1>> E2(kNumCaptureChannels);
+  std::vector<std::array<float, kFftLengthBy2Plus1>> S2(kNumCaptureChannels);
+  std::vector<std::array<float, kFftLengthBy2Plus1>> Y2(kNumCaptureChannels);
+  std::vector<std::array<float, kFftLengthBy2Plus1>> R2(kNumCaptureChannels);
+  std::vector<std::array<float, kFftLengthBy2Plus1>> R2_unbounded(
+      kNumCaptureChannels);
+
+  auto mock_model_runner = std::make_unique<MockModelRunner>(model_constants);
+  auto* mock_model_runner_ptr = mock_model_runner.get();
+  NeuralResidualEchoEstimatorImpl estimator(std::move(mock_model_runner));
+
+  EXPECT_CALL(*mock_model_runner_ptr, Invoke()).Times(1);
+  EXPECT_CALL(*mock_model_runner_ptr, Reset()).Times(1);
+
+  const int num_blocks_to_process = model_constants.step_size / kBlockSize;
+  for (int frame = 0; frame < 2; ++frame) {
+    for (int block = 0; block < num_blocks_to_process; ++block) {
+      Block render_block(1, 1);
+      estimator.Estimate(render_block, y, e, S2, Y2, E2,
+                         /*dominant_nearend=*/false, R2, R2_unbounded);
+      if (frame == 1 && block == 0) {
+        // Resetting after the first block clears the estimator internal
+        // buffers. This prevents the model from receiving a full input frame,
+        // so Invoke() will not be called again within this second frame.
+        estimator.Reset();
+      }
+    }
+  }
+}
+
 TEST(NeuralResidualEchoEstimatorWithRealModelTest,
      RunEstimationWithRealTfLiteModel) {
   std::string model_path = test::ResourcePath(
@@ -294,10 +336,10 @@ TEST(NeuralResidualEchoEstimatorWithRealModelTest,
   std::array<float, kBlockSize> x;
   std::vector<std::array<float, kBlockSize>> y{kNumCaptureChannels};
   std::vector<std::array<float, kBlockSize>> e{kNumCaptureChannels};
-  std::vector<std::array<float, kFftLengthBy2Plus1>> E2{kNumCaptureChannels};
-  std::vector<std::array<float, kFftLengthBy2Plus1>> S2{kNumCaptureChannels};
-  std::vector<std::array<float, kFftLengthBy2Plus1>> Y2{kNumCaptureChannels};
-  std::vector<std::array<float, kFftLengthBy2Plus1>> R2{kNumCaptureChannels};
+  std::vector<std::array<float, kFftLengthBy2Plus1>> E2(kNumCaptureChannels);
+  std::vector<std::array<float, kFftLengthBy2Plus1>> S2(kNumCaptureChannels);
+  std::vector<std::array<float, kFftLengthBy2Plus1>> Y2(kNumCaptureChannels);
+  std::vector<std::array<float, kFftLengthBy2Plus1>> R2(kNumCaptureChannels);
   std::vector<std::array<float, kFftLengthBy2Plus1>> R2_unbounded{
       kNumCaptureChannels};
   Random random_generator(4635U);

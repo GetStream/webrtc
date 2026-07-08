@@ -35,11 +35,14 @@
 // config.echo_canceller.mobile_mode
 
 - (BOOL)isEchoCancellationMobileMode {
-  return _config.echo_canceller.mobile_mode;
+  // ponytail: M148 removed AECM (mobile echo canceller); there is no upstream
+  // mobile_mode to map to. Upgrade path: re-plumb AECM into the M148 APM if
+  // mobile AEC is required again.
+  return NO;
 }
 
 - (void)setIsEchoCancellationMobileMode:(BOOL)value {
-  _config.echo_canceller.mobile_mode = value;
+  // ponytail: no-op; AECM was removed upstream in M148. See getter above.
 }
 
 // config.noise_suppression.enabled

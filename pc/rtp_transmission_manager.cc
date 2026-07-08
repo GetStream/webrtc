@@ -52,6 +52,7 @@
 #include "rtc_base/checks.h"
 #include "rtc_base/crypto_random.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/system/plan_b_only.h"
 
 namespace webrtc {
 
@@ -132,38 +133,34 @@ void RtpTransmissionManager::RunWithObserver(
   std::move(task)(observer_);
 }
 
-VoiceMediaSendChannelInterface*
+PLAN_B_ONLY VoiceMediaSendChannelInterface*
 RtpTransmissionManager::voice_media_send_channel() const {
   RTC_DCHECK_RUN_ON(signaling_thread());
   RTC_DCHECK(!IsUnifiedPlan());
-  auto* voice_channel = GetAudioTransceiver()->internal()->channel();
-  return voice_channel ? voice_channel->voice_media_send_channel() : nullptr;
+  return GetAudioTransceiver()->internal()->voice_media_send_channel();
 }
 
-VideoMediaSendChannelInterface*
+PLAN_B_ONLY VideoMediaSendChannelInterface*
 RtpTransmissionManager::video_media_send_channel() const {
   RTC_DCHECK_RUN_ON(signaling_thread());
   RTC_DCHECK(!IsUnifiedPlan());
-  auto* video_channel = GetVideoTransceiver()->internal()->channel();
-  return video_channel ? video_channel->video_media_send_channel() : nullptr;
+  return GetVideoTransceiver()->internal()->video_media_send_channel();
 }
-VoiceMediaReceiveChannelInterface*
+PLAN_B_ONLY VoiceMediaReceiveChannelInterface*
 RtpTransmissionManager::voice_media_receive_channel() const {
   RTC_DCHECK_RUN_ON(signaling_thread());
   RTC_DCHECK(!IsUnifiedPlan());
-  auto* voice_channel = GetAudioTransceiver()->internal()->channel();
-  return voice_channel ? voice_channel->voice_media_receive_channel() : nullptr;
+  return GetAudioTransceiver()->internal()->voice_media_receive_channel();
 }
 
-VideoMediaReceiveChannelInterface*
+PLAN_B_ONLY VideoMediaReceiveChannelInterface*
 RtpTransmissionManager::video_media_receive_channel() const {
   RTC_DCHECK_RUN_ON(signaling_thread());
   RTC_DCHECK(!IsUnifiedPlan());
-  auto* video_channel = GetVideoTransceiver()->internal()->channel();
-  return video_channel ? video_channel->video_media_receive_channel() : nullptr;
+  return GetVideoTransceiver()->internal()->video_media_receive_channel();
 }
 
-RTCErrorOr<scoped_refptr<RtpSenderInterface>>
+PLAN_B_ONLY RTCErrorOr<scoped_refptr<RtpSenderInterface>>
 RtpTransmissionManager::AddTrackPlanB(
     scoped_refptr<MediaStreamTrackInterface> track,
     const std::vector<std::string>& stream_ids,
@@ -171,9 +168,9 @@ RtpTransmissionManager::AddTrackPlanB(
   RTC_DCHECK_RUN_ON(signaling_thread());
   RTC_DCHECK(!IsUnifiedPlan());
   if (stream_ids.size() > 1u) {
-    LOG_AND_RETURN_ERROR(RTCErrorType::UNSUPPORTED_OPERATION,
-                         "AddTrack with more than one stream is not "
-                         "supported with Plan B semantics.");
+    return LOG_ERROR(RTCError::UnsupportedOperation()
+                     << "AddTrack with more than one stream is not supported "
+                        "with Plan B semantics.");
   }
   std::vector<std::string> adjusted_stream_ids;
   if (stream_ids.empty()) {
@@ -226,8 +223,8 @@ RtpTransmissionManager::AddTrackUnifiedPlan(
                      << MediaTypeToString(transceiver->media_type())
                      << " transceiver for AddTrack.";
     if (transceiver->stopping()) {
-      LOG_AND_RETURN_ERROR(RTCErrorType::INVALID_PARAMETER,
-                           "The existing transceiver is stopping.");
+      return LOG_ERROR(RTCError::InvalidParameter()
+                       << "The existing transceiver is stopping.");
     }
 
     if (transceiver->direction() == RtpTransceiverDirection::kRecvOnly) {
@@ -287,11 +284,13 @@ RtpTransmissionManager::CreateAndAddTransceiver(
   RTC_DCHECK(!FindSenderById(sender_id));
   std::vector<RtpHeaderExtensionCapability> header_extensions =
       std::move(header_extensions_to_negotiate);
-  if (env_.field_trials().IsEnabled("WebRTC-HeaderExtensionNegotiateMemory")) {
+  if (!env_.field_trials().IsDisabled(
+          "WebRTC-HeaderExtensionNegotiateMemory")) {
     // If we have already negotiated header extensions for this type,
+    // and it is not stopped,
     // reuse the negotiated state for new transceivers of the same type.
     for (const auto& transceiver : transceivers()->List()) {
-      if (transceiver->media_type() == media_type) {
+      if (transceiver->media_type() == media_type && !transceiver->stopping()) {
         header_extensions = transceiver->GetHeaderExtensionsToNegotiate();
         break;
       }
@@ -351,7 +350,9 @@ RtpTransmissionManager::GetSendersInternal() const {
     if (IsUnifiedPlan() && transceiver->internal()->stopped())
       continue;
 
+    RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN()
     auto senders = transceiver->internal()->senders();
+    RTC_ALLOW_PLAN_B_DEPRECATION_END()
     all_senders.insert(all_senders.end(), senders.begin(), senders.end());
   }
   return all_senders;
@@ -366,14 +367,16 @@ RtpTransmissionManager::GetReceiversInternal() const {
     if (IsUnifiedPlan() && transceiver->internal()->stopped())
       continue;
 
+    RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN()
     auto receivers = transceiver->internal()->receivers();
+    RTC_ALLOW_PLAN_B_DEPRECATION_END()
     all_receivers.insert(all_receivers.end(), receivers.begin(),
                          receivers.end());
   }
   return all_receivers;
 }
 
-scoped_refptr<RtpTransceiverProxyWithInternal<RtpTransceiver>>
+PLAN_B_ONLY scoped_refptr<RtpTransceiverProxyWithInternal<RtpTransceiver>>
 RtpTransmissionManager::GetAudioTransceiver() const {
   RTC_DCHECK_RUN_ON(signaling_thread());
   // This method only works with Plan B SDP, where there is a single
@@ -388,7 +391,7 @@ RtpTransmissionManager::GetAudioTransceiver() const {
   return nullptr;
 }
 
-scoped_refptr<RtpTransceiverProxyWithInternal<RtpTransceiver>>
+PLAN_B_ONLY scoped_refptr<RtpTransceiverProxyWithInternal<RtpTransceiver>>
 RtpTransmissionManager::GetVideoTransceiver() const {
   RTC_DCHECK_RUN_ON(signaling_thread());
   // This method only works with Plan B SDP, where there is a single
@@ -403,8 +406,9 @@ RtpTransmissionManager::GetVideoTransceiver() const {
   return nullptr;
 }
 
-void RtpTransmissionManager::AddTrackPlanB(MediaStreamTrackInterface* track,
-                                           MediaStreamInterface* stream) {
+PLAN_B_ONLY void RtpTransmissionManager::AddTrackPlanB(
+    MediaStreamTrackInterface* track,
+    MediaStreamInterface* stream) {
   RTC_DCHECK_RUN_ON(signaling_thread());
   RTC_DCHECK(track);
   RTC_DCHECK(stream);
@@ -443,8 +447,9 @@ void RtpTransmissionManager::AddTrackPlanB(MediaStreamTrackInterface* track,
 
 // TODO(deadbeef): Don't destroy RtpSenders here; they should be kept around
 // indefinitely, when we have unified plan SDP.
-void RtpTransmissionManager::RemoveTrackPlanB(MediaStreamTrackInterface* track,
-                                              MediaStreamInterface* stream) {
+PLAN_B_ONLY void RtpTransmissionManager::RemoveTrackPlanB(
+    MediaStreamTrackInterface* track,
+    MediaStreamInterface* stream) {
   RTC_DCHECK_RUN_ON(signaling_thread());
   RTC_DCHECK(!IsUnifiedPlan());
   auto sender = FindSenderForTrack(track);
@@ -459,7 +464,7 @@ void RtpTransmissionManager::RemoveTrackPlanB(MediaStreamTrackInterface* track,
   transceiver->RemoveSenderPlanB(sender.get());
 }
 
-void RtpTransmissionManager::CreateAudioReceiverPlanB(
+PLAN_B_ONLY void RtpTransmissionManager::CreateAudioReceiverPlanB(
     MediaStreamInterface* stream,
     const RtpSenderInfo& remote_sender_info) {
   RTC_DCHECK(!IsUnifiedPlan());
@@ -471,11 +476,11 @@ void RtpTransmissionManager::CreateAudioReceiverPlanB(
   auto audio_receiver = make_ref_counted<AudioRtpReceiver>(
       worker_thread(), remote_sender_info.sender_id, streams, false,
       voice_media_receive_channel());
-  if (remote_sender_info.sender_id == kDefaultAudioSenderId) {
-    audio_receiver->SetupUnsignaledMediaChannel();
-  } else {
-    audio_receiver->SetupMediaChannel(remote_sender_info.first_ssrc);
-  }
+  auto task = (remote_sender_info.sender_id == kDefaultAudioSenderId)
+                  ? audio_receiver->GetSetupForUnsignaledMediaChannel()
+                  : audio_receiver->GetSetupForMediaChannel(
+                        remote_sender_info.first_ssrc);
+  worker_thread()->BlockingCall([&]() mutable { std::move(task)(); });
 
   auto receiver = RtpReceiverProxyWithInternal<RtpReceiverInternal>::Create(
       signaling_thread(), worker_thread(), std::move(audio_receiver));
@@ -485,7 +490,7 @@ void RtpTransmissionManager::CreateAudioReceiverPlanB(
   NoteUsageEvent(UsageEvent::AUDIO_ADDED);
 }
 
-void RtpTransmissionManager::CreateVideoReceiverPlanB(
+PLAN_B_ONLY void RtpTransmissionManager::CreateVideoReceiverPlanB(
     MediaStreamInterface* stream,
     const RtpSenderInfo& remote_sender_info) {
   RTC_DCHECK(!IsUnifiedPlan());
@@ -497,11 +502,12 @@ void RtpTransmissionManager::CreateVideoReceiverPlanB(
   auto video_receiver = make_ref_counted<VideoRtpReceiver>(
       worker_thread(), remote_sender_info.sender_id, streams);
 
-  video_receiver->SetupMediaChannel(
+  auto task = video_receiver->GetSetupForMediaChannel(
       remote_sender_info.sender_id == kDefaultVideoSenderId
           ? std::nullopt
           : std::optional<uint32_t>(remote_sender_info.first_ssrc),
       video_media_receive_channel());
+  worker_thread()->BlockingCall([&]() mutable { std::move(task)(); });
 
   auto receiver = RtpReceiverProxyWithInternal<RtpReceiverInternal>::Create(
       signaling_thread(), worker_thread(), std::move(video_receiver));
@@ -513,7 +519,7 @@ void RtpTransmissionManager::CreateVideoReceiverPlanB(
 
 // TODO(deadbeef): Keep RtpReceivers around even if track goes away in remote
 // description.
-scoped_refptr<RtpReceiverInterface>
+PLAN_B_ONLY scoped_refptr<RtpReceiverInterface>
 RtpTransmissionManager::RemoveAndStopReceiver(
     const RtpSenderInfo& remote_sender_info) {
   RTC_DCHECK(!IsUnifiedPlan());
@@ -531,7 +537,7 @@ RtpTransmissionManager::RemoveAndStopReceiver(
   return receiver;
 }
 
-void RtpTransmissionManager::OnRemoteSenderAddedPlanB(
+PLAN_B_ONLY void RtpTransmissionManager::OnRemoteSenderAddedPlanB(
     const RtpSenderInfo& sender_info,
     MediaStreamInterface* stream,
     MediaType media_type) {
@@ -550,7 +556,7 @@ void RtpTransmissionManager::OnRemoteSenderAddedPlanB(
   }
 }
 
-void RtpTransmissionManager::OnRemoteSenderRemovedPlanB(
+PLAN_B_ONLY void RtpTransmissionManager::OnRemoteSenderRemovedPlanB(
     const RtpSenderInfo& sender_info,
     MediaStreamInterface* stream,
     MediaType media_type) {
@@ -590,7 +596,7 @@ void RtpTransmissionManager::OnRemoteSenderRemovedPlanB(
   }
 }
 
-void RtpTransmissionManager::OnLocalSenderAdded(
+PLAN_B_ONLY void RtpTransmissionManager::OnLocalSenderAdded(
     const RtpSenderInfo& sender_info,
     MediaType media_type) {
   RTC_DCHECK_RUN_ON(signaling_thread());
@@ -613,7 +619,7 @@ void RtpTransmissionManager::OnLocalSenderAdded(
   sender->internal()->SetSsrc(sender_info.first_ssrc);
 }
 
-void RtpTransmissionManager::OnLocalSenderRemoved(
+PLAN_B_ONLY void RtpTransmissionManager::OnLocalSenderRemoved(
     const RtpSenderInfo& sender_info,
     MediaType media_type) {
   RTC_DCHECK_RUN_ON(signaling_thread());
@@ -655,11 +661,13 @@ RtpTransmissionManager::FindSenderForTrack(
     MediaStreamTrackInterface* track) const {
   RTC_DCHECK_RUN_ON(signaling_thread());
   for (const auto& transceiver : transceivers_.List()) {
+    RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN()
     for (auto sender : transceiver->internal()->senders()) {
       if (sender->track() == track) {
         return sender;
       }
     }
+    RTC_ALLOW_PLAN_B_DEPRECATION_END()
   }
   return nullptr;
 }
@@ -668,16 +676,22 @@ scoped_refptr<RtpSenderProxyWithInternal<RtpSenderInternal>>
 RtpTransmissionManager::FindSenderById(absl::string_view sender_id) const {
   RTC_DCHECK_RUN_ON(signaling_thread());
   for (const auto& transceiver : transceivers_.List()) {
+    RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN();
+    // Under Unified Plan, senders() always has exactly one entry,
+    // and one can use sender() not senders().
+    // Since this function is used both in Plan B and Unified, this is
+    // left as-is for now.
     for (auto sender : transceiver->internal()->senders()) {
       if (sender->id() == sender_id) {
         return sender;
       }
     }
+    RTC_ALLOW_PLAN_B_DEPRECATION_END();
   }
   return nullptr;
 }
 
-scoped_refptr<RtpReceiverProxyWithInternal<RtpReceiverInternal>>
+PLAN_B_ONLY scoped_refptr<RtpReceiverProxyWithInternal<RtpReceiverInternal>>
 RtpTransmissionManager::FindReceiverById(absl::string_view receiver_id) const {
   RTC_DCHECK_RUN_ON(signaling_thread());
   for (const auto& transceiver : transceivers_.List()) {

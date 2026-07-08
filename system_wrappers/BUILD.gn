@@ -23,7 +23,6 @@ rtc_library("system_wrappers") {
   defines = []
   libs = []
   deps = [
-    "../api:array_view",
     "../api/units:time_delta",
     "../api/units:timestamp",
     "../rtc_base:checks",
@@ -34,6 +33,7 @@ rtc_library("system_wrappers") {
     "../rtc_base:timeutils",
     "../rtc_base/synchronization:mutex",
     "../rtc_base/system:rtc_export",
+    "//third_party/abseil-cpp/absl/base:nullability",
   ]
   if (is_win) {
     libs += [ "winmm.lib" ]

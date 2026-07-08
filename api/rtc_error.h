@@ -147,6 +147,18 @@ class RTC_EXPORT RTCError {
   static RTCError InvalidParameter() {
     return RTCError(RTCErrorType::INVALID_PARAMETER);
   }
+  static RTCError InvalidState() {
+    return RTCError(RTCErrorType::INVALID_STATE);
+  }
+  static RTCError InvalidModification() {
+    return RTCError(RTCErrorType::INVALID_MODIFICATION);
+  }
+  static RTCError UnsupportedOperation() {
+    return RTCError(RTCErrorType::UNSUPPORTED_OPERATION);
+  }
+  static RTCError UnsupportedParameter() {
+    return RTCError(RTCErrorType::UNSUPPORTED_PARAMETER);
+  }
 
   // Error type.
   RTCErrorType type() const { return type_; }
@@ -213,20 +225,6 @@ class RTC_EXPORT RTCError {
   std::optional<uint16_t> sctp_cause_code_;
 };
 
-// Helper macro that can be used by implementations to create an error with a
-// message and log it. `message` should be a string literal or movable
-// std::string.
-#define LOG_AND_RETURN_ERROR_EX(type, message, severity)                     \
-  {                                                                          \
-    RTC_DCHECK(type != RTCErrorType::NONE);                                  \
-    RTC_LOG(severity) << message << " (" << ::webrtc::ToString(type) << ")"; \
-    return ::webrtc::RTCError(type, message);                                \
-  }
-
-// LOG_AND_RETURN_ERROR is a s simpler variant of `LOG_AND_RETURN_ERROR_EX`.
-#define LOG_AND_RETURN_ERROR(type, message) \
-  LOG_AND_RETURN_ERROR_EX(type, message, LS_ERROR)
-
 inline RTCError LogErrorImpl(RTCError error,
                              LoggingSeverity severity,
                              const char* file,
@@ -243,7 +241,6 @@ inline RTCError LogErrorImpl(RTCError error,
   return error;
 }
 
-// A slightly more C++ looking alternative to the LOG_AND_RETURN_ERROR() macro.
 // This approach does not hide the return statement and also allows for
 // constructing/formatting the error string inline.
 //

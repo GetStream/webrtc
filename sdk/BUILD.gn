@@ -17,18 +17,6 @@ if (is_mac) {
   import("//build/config/mac/rules.gni")
 }
 
-group("sdk") {
-  public_deps = []
-  if (!build_with_chromium) {
-    if (is_android) {
-      public_deps += [ "android" ]
-    }
-    if (is_ios) {
-      public_deps += [ ":framework_objc" ]
-    }
-  }
-}
-
 rtc_library("media_constraints") {
   sources = [
     "media_constraints.cc",
@@ -337,7 +325,6 @@ if (is_ios || is_mac) {
           ":audio_session_observer",
           ":base_objc",
           ":core_audio_helpers_objc",
-          "../api:array_view",
           "../api:scoped_refptr",
           "../api:sequence_checker",
           "../api/audio:audio_device",
@@ -531,7 +518,6 @@ if (is_ios || is_mac) {
       deps = [
         ":audio_device_api_objc",
         ":core_audio_helpers_objc",
-        "../api:array_view",
         "../api:make_ref_counted",
         "../api:refcountedbase",
         "../api:scoped_refptr",
@@ -1300,6 +1286,7 @@ if (is_ios || is_mac) {
         "../rtc_base:stringutils",
         "../rtc_base:threading",
         "../rtc_base:timeutils",
+        "../rtc_base/system:plan_b_only",
         "../stats:rtc_stats",
         "../system_wrappers:metrics",
       ]
@@ -1374,7 +1361,6 @@ if (is_ios || is_mac) {
             ":videoframebuffer_objc",
             ":videosource_objc",
             ":videotoolbox_objc",
-            "../api:array_view",
             "../api:jsep",
             "../api:rtc_error_matchers",
             "../api:scoped_refptr",
@@ -1392,9 +1378,9 @@ if (is_ios || is_mac) {
             "../media:rtc_media_base",
             "../media:rtc_media_tests_utils",
             "../modules/video_coding:video_codec_interface",
-            "../rtc_base:gunit_helpers",
             "../rtc_base:refcount",
             "../rtc_base:rtc_event",
+            "../rtc_base:threading",
             "../rtc_base/system:unused",
             "../system_wrappers",
             "../test:create_test_environment",
@@ -1437,7 +1423,7 @@ if (is_ios || is_mac) {
             ":sdk_unittests_bundle_data",
             ":sdk_unittests_sources",
             "../rtc_base:threading",
-            "//test:test_support",
+            "//test:test_support_objc",
           ]
           ldflags = [ "-all_load" ]
         }
@@ -1456,7 +1442,7 @@ if (is_ios || is_mac) {
             ":framework_objc+link",
             ":ios_framework_bundle",
             "../rtc_base:threading",
-            "//test:test_support",
+            "//test:test_support_objc",
           ]
         }
       }
@@ -2017,7 +2003,6 @@ if (is_ios || is_mac) {
         "objc/components/video_codec/nalu_rewriter.h",
       ]
       deps = [
-        "../api:array_view",
         "../common_video",
         "../modules/video_coding:webrtc_h264",
         "../rtc_base:buffer",
@@ -2067,7 +2052,6 @@ if (is_ios || is_mac) {
         ":video_toolbox_cc",
         ":videocodec_objc",
         ":videoframebuffer_objc",
-        "../api:array_view",
         "../api/video:video_rtp_headers",
         "../api/video_codecs:video_codecs_api",
         "../common_video",
@@ -2076,6 +2060,7 @@ if (is_ios || is_mac) {
         "../rtc_base:checks",
         "../rtc_base:logging",
         "../rtc_base:timeutils",
+        "../system_wrappers",
         "//third_party/libyuv",
       ]
 

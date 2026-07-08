@@ -16,6 +16,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 #include "api/array_view.h"
@@ -44,7 +45,7 @@ bool H265CMSampleBufferToAnnexBBuffer(CMSampleBufferRef hvcc_sample_buffer,
 // If `is_keyframe` is true then `video_format` is ignored since the format will
 // be read from the buffer. Otherwise `video_format` must be provided.
 // Caller is responsible for releasing the created sample buffer.
-bool H264AnnexBBufferToCMSampleBuffer(ArrayView<const uint8_t> annexb_buffer,
+bool H264AnnexBBufferToCMSampleBuffer(std::span<const uint8_t> annexb_buffer,
                                       CMVideoFormatDescriptionRef video_format,
                                       CMSampleBufferRef* out_sample_buffer,
                                       CMMemoryPoolRef memory_pool);
@@ -57,7 +58,7 @@ bool H265AnnexBBufferToCMSampleBuffer(ArrayView<const uint8_t> annexb_buffer,
 // the Annex B buffer. If there is no such information, nullptr is returned.
 // The caller is responsible for releasing the description.
 CMVideoFormatDescriptionRef CreateVideoFormatDescription(
-    ArrayView<const uint8_t> annexb_buffer);
+    std::span<const uint8_t> annexb_buffer);
 
 CMVideoFormatDescriptionRef CreateH265VideoFormatDescription(
     ArrayView<const uint8_t> annexb_buffer);
@@ -65,14 +66,14 @@ CMVideoFormatDescriptionRef CreateH265VideoFormatDescription(
 // Helper class for reading NALUs from an RTP Annex B buffer.
 class AnnexBBufferReader final {
  public:
-  explicit AnnexBBufferReader(ArrayView<const uint8_t> annexb_buffer);
+  explicit AnnexBBufferReader(std::span<const uint8_t> annexb_buffer);
   ~AnnexBBufferReader();
   AnnexBBufferReader(const AnnexBBufferReader& other) = delete;
   void operator=(const AnnexBBufferReader& other) = delete;
 
   // Returns a pointer to the beginning of the next NALU slice without the
   // header bytes and its length. Returns false if no more slices remain.
-  bool ReadNalu(ArrayView<const uint8_t>& out_nalu);
+  bool ReadNalu(std::span<const uint8_t>& out_nalu);
 
   // Returns the number of unread NALU bytes, including the size of the header.
   // If the buffer has no remaining NALUs this will return zero.
@@ -93,7 +94,7 @@ class AnnexBBufferReader final {
                             size_t length,
                             size_t offset) const;
 
-  const ArrayView<const uint8_t> buffer_;
+  const std::span<const uint8_t> buffer_;
   std::vector<NaluIndex> offsets_;
   std::vector<NaluIndex>::iterator offset_;
 };
@@ -101,20 +102,20 @@ class AnnexBBufferReader final {
 // Helper class for writing NALUs using avcc format into a buffer.
 class AvccBufferWriter final {
  public:
-  explicit AvccBufferWriter(ArrayView<uint8_t> avcc_buffer);
+  explicit AvccBufferWriter(std::span<uint8_t> avcc_buffer);
   ~AvccBufferWriter() {}
   AvccBufferWriter(const AvccBufferWriter& other) = delete;
   void operator=(const AvccBufferWriter& other) = delete;
 
   // Writes the data slice into the buffer. Returns false if there isn't
   // enough space left.
-  bool WriteNalu(ArrayView<const uint8_t> data);
+  bool WriteNalu(std::span<const uint8_t> data);
 
   // Returns the unused bytes in the buffer.
   size_t BytesRemaining() const;
 
  private:
-  ArrayView<uint8_t> buffer_;
+  std::span<uint8_t> buffer_;
 };
 
 }  // namespace webrtc

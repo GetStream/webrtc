@@ -5,7 +5,12 @@ import("//third_party/jni_zero/jni_zero.gni")
 
 rtc_library("simulcast_jni") {
   visibility = [ "*" ]
-  allow_poison = [ "software_video_codecs" ]
+  allow_poison = [
+    "software_video_codecs",
+
+    # M148: video_jni -> environment_jni -> api:field_trials carries this poison.
+    "environment_construction",
+  ]
   sources = [
     "src/simulcast_video_encoder.cc",
     "src/simulcast_video_encoder.h",

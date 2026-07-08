@@ -171,7 +171,8 @@ void compressionOutputCallback(void* encoder, void* params, OSStatus status,
   self = [super init];
   if (self) {
     _codecInfo = codecInfo;
-    _bitrateAdjuster.reset(new webrtc::BitrateAdjuster(.5, .95));
+    _bitrateAdjuster.reset(new webrtc::BitrateAdjuster(
+        webrtc::Clock::GetRealTimeClock(), .5, .95));
     // AnnexB and low latency are always enabled.
     RTC_CHECK([codecInfo.name isEqualToString:RTC_CONSTANT_TYPE(RTCVideoCodecH265Name)]);
   }

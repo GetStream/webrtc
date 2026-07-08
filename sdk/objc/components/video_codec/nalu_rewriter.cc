@@ -16,9 +16,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <span>
 #include <vector>
 
-#include "api/array_view.h"
 #include "common_video/h264/h264_common.h"
 #include "common_video/h265/h265_common.h"
 #include "rtc_base/buffer.h"
@@ -238,7 +238,7 @@ bool H265CMSampleBufferToAnnexBBuffer(CMSampleBufferRef hvcc_sample_buffer,
   return true;
 }
 
-bool H264AnnexBBufferToCMSampleBuffer(ArrayView<const uint8_t> annexb_buffer,
+bool H264AnnexBBufferToCMSampleBuffer(std::span<const uint8_t> annexb_buffer,
                                       CMVideoFormatDescriptionRef video_format,
                                       CMSampleBufferRef* out_sample_buffer,
                                       CMMemoryPoolRef memory_pool) {
@@ -249,7 +249,7 @@ bool H264AnnexBBufferToCMSampleBuffer(ArrayView<const uint8_t> annexb_buffer,
   AnnexBBufferReader reader(annexb_buffer);
   if (reader.SeekToNextNaluOfType(kSps)) {
     // Buffer contains an SPS NALU - skip it and the following PPS
-    ArrayView<const uint8_t> data;
+    std::span<const uint8_t> data;
     if (!reader.ReadNalu(data)) {
       RTC_LOG(LS_ERROR) << "Failed to read SPS";
       return false;
@@ -306,9 +306,9 @@ bool H264AnnexBBufferToCMSampleBuffer(ArrayView<const uint8_t> annexb_buffer,
 
   // Write Avcc NALUs into block buffer memory.
   AvccBufferWriter writer(
-      MakeArrayView(reinterpret_cast<uint8_t*>(data_ptr), block_buffer_size));
+      std::span(reinterpret_cast<uint8_t*>(data_ptr), block_buffer_size));
   while (reader.BytesRemaining() > 0) {
-    ArrayView<const uint8_t> nalu_data;
+    std::span<const uint8_t> nalu_data;
     if (reader.ReadNalu(nalu_data)) {
       writer.WriteNalu(nalu_data);
     }
@@ -328,7 +328,7 @@ bool H264AnnexBBufferToCMSampleBuffer(ArrayView<const uint8_t> annexb_buffer,
 }
 
 CMVideoFormatDescriptionRef CreateVideoFormatDescription(
-    ArrayView<const uint8_t> annexb_buffer) {
+    std::span<const uint8_t> annexb_buffer) {
   const uint8_t* param_set_ptrs[2] = {};
   size_t param_set_sizes[2] = {};
   AnnexBBufferReader reader(annexb_buffer);
@@ -336,7 +336,7 @@ CMVideoFormatDescriptionRef CreateVideoFormatDescription(
   if (!reader.SeekToNextNaluOfType(kSps)) {
     return nullptr;
   }
-  ArrayView<const uint8_t> param_set;
+  std::span<const uint8_t> param_set;
   if (reader.ReadNalu(param_set)) {
     param_set_ptrs[0] = param_set.data();
     param_set_sizes[0] = param_set.size();
@@ -376,7 +376,7 @@ CMVideoFormatDescriptionRef CreateH265VideoFormatDescription(
       continue;
     }
     ArrayView<const uint8_t> nalu =
-        annexb_buffer.subview(index.payload_start_offset, index.payload_size);
+        annexb_buffer.subspan(index.payload_start_offset, index.payload_size);
     switch (H265::ParseNaluType(nalu[0])) {
       case H265::kVps:
         param_set_ptrs[0] = nalu.data();
@@ -427,7 +427,7 @@ bool H265AnnexBBufferToCMSampleBuffer(ArrayView<const uint8_t> annexb_buffer,
       continue;
     }
     ArrayView<const uint8_t> nalu =
-        annexb_buffer.subview(index.payload_start_offset, index.payload_size);
+        annexb_buffer.subspan(index.payload_start_offset, index.payload_size);
     H265::NaluType type = H265::ParseNaluType(nalu[0]);
     if (type == H265::kVps || type == H265::kSps || type == H265::kPps ||
         type == H265::kAud) {
@@ -483,7 +483,7 @@ bool H265AnnexBBufferToCMSampleBuffer(ArrayView<const uint8_t> annexb_buffer,
   return true;
 }
 
-AnnexBBufferReader::AnnexBBufferReader(ArrayView<const uint8_t> annexb_buffer)
+AnnexBBufferReader::AnnexBBufferReader(std::span<const uint8_t> annexb_buffer)
     : buffer_(annexb_buffer) {
   offsets_ = H264::FindNaluIndices(annexb_buffer);
   offset_ = offsets_.begin();
@@ -491,12 +491,12 @@ AnnexBBufferReader::AnnexBBufferReader(ArrayView<const uint8_t> annexb_buffer)
 
 AnnexBBufferReader::~AnnexBBufferReader() = default;
 
-bool AnnexBBufferReader::ReadNalu(ArrayView<const uint8_t>& out_nalu) {
+bool AnnexBBufferReader::ReadNalu(std::span<const uint8_t>& out_nalu) {
   if (offset_ == offsets_.end()) {
     return false;
   }
   out_nalu =
-      buffer_.subview(offset_->payload_start_offset, offset_->payload_size);
+      buffer_.subspan(offset_->payload_start_offset, offset_->payload_size);
   ++offset_;
   return true;
 }
@@ -522,10 +522,10 @@ bool AnnexBBufferReader::SeekToNextNaluOfType(NaluType type) {
   return false;
 }
 
-AvccBufferWriter::AvccBufferWriter(ArrayView<uint8_t> avcc_buffer)
+AvccBufferWriter::AvccBufferWriter(std::span<uint8_t> avcc_buffer)
     : buffer_(avcc_buffer) {}
 
-bool AvccBufferWriter::WriteNalu(ArrayView<const uint8_t> data) {
+bool AvccBufferWriter::WriteNalu(std::span<const uint8_t> data) {
   // Check if we can write this length of data.
   if (data.size() + kAvccHeaderByteSize > BytesRemaining()) {
     return false;
@@ -533,10 +533,10 @@ bool AvccBufferWriter::WriteNalu(ArrayView<const uint8_t> data) {
   // Write length header, which needs to be big endian.
   uint32_t big_endian_length = CFSwapInt32HostToBig(data.size());
   memcpy(buffer_.data(), &big_endian_length, sizeof(big_endian_length));
-  buffer_ = buffer_.subview(sizeof(big_endian_length));
+  buffer_ = buffer_.subspan(sizeof(big_endian_length));
   // Write data.
   memcpy(buffer_.data(), data.data(), data.size());
-  buffer_ = buffer_.subview(data.size());
+  buffer_ = buffer_.subspan(data.size());
   return true;
 }
 

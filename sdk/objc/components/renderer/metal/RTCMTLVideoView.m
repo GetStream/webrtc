@@ -27,13 +27,24 @@
 // To avoid unreconized symbol linker errors, we're taking advantage of the objc
 // runtime. Linking errors occur when compiling for architectures that don't
 // support Metal.
-#define MTKViewClass NSClassFromString(@"MTKView")
-#define RTCMTLNV12RendererClass NSClassFromString(@"RTCMTLNV12Renderer")
-#define RTCMTLI420RendererClass NSClassFromString(@"RTCMTLI420Renderer")
-#define RTCMTLRGBRendererClass NSClassFromString(@"RTCMTLRGBRenderer")
+#define RTC_OBJC_TYPE_PREFIX_STRING_HELPER(x) #x
+#define RTC_OBJC_TYPE_PREFIX_STRING(x) \
+  RTC_OBJC_TYPE_PREFIX_STRING_HELPER(x)
 
-@interface RTC_OBJC_TYPE (RTCMTLVideoView) ()<MTKViewDelegate> 
-@property(nonatomic) RTC_OBJC_TYPE(RTCMTLI420Renderer) *rendererI420;
+#define MTKViewClass NSClassFromString(@"MTKView")
+#define RTCMTLNV12RendererClass                      \
+  NSClassFromString(@"" RTC_OBJC_TYPE_PREFIX_STRING( \
+      RTC_OBJC_TYPE_PREFIX) @"RTCMTLNV12Renderer")
+#define RTCMTLI420RendererClass                      \
+  NSClassFromString(@"" RTC_OBJC_TYPE_PREFIX_STRING( \
+      RTC_OBJC_TYPE_PREFIX) @"RTCMTLI420Renderer")
+#define RTCMTLRGBRendererClass                       \
+  NSClassFromString(@"" RTC_OBJC_TYPE_PREFIX_STRING( \
+      RTC_OBJC_TYPE_PREFIX) @"RTCMTLRGBRenderer")
+
+@interface RTC_OBJC_TYPE (RTCMTLVideoView)
+()<MTKViewDelegate> @property(nonatomic) RTC_OBJC_TYPE(RTCMTLI420Renderer) *
+    rendererI420;
 @property(nonatomic) RTC_OBJC_TYPE(RTCMTLNV12Renderer) * rendererNV12;
 @property(nonatomic) RTC_OBJC_TYPE(RTCMTLRGBRenderer) * rendererRGB;
 @property(nonatomic) MTKView *metalView;
@@ -103,15 +114,15 @@
 }
 
 + (RTC_OBJC_TYPE(RTCMTLNV12Renderer) *)createNV12Renderer {
-  return [[RTC_OBJC_TYPE(RTCMTLNV12Renderer) alloc] init];
+  return [[RTCMTLNV12RendererClass alloc] init];
 }
 
 + (RTC_OBJC_TYPE(RTCMTLI420Renderer) *)createI420Renderer {
-  return [[RTC_OBJC_TYPE(RTCMTLI420Renderer) alloc] init];
+  return [[RTCMTLI420RendererClass alloc] init];
 }
 
 + (RTC_OBJC_TYPE(RTCMTLRGBRenderer) *)createRGBRenderer {
-  return [[RTC_OBJC_TYPE(RTCMTLRGBRenderer) alloc] init];
+  return [[RTCMTLRGBRendererClass alloc] init];
 }
 
 - (void)configure {
