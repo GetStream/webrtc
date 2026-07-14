@@ -428,6 +428,13 @@
     'release_bot_x64_fuchsia':
     ['openh264', 'release_bot', 'x64', 'fuchsia', 'h265'],
     'release_bot_x86': ['openh264', 'release_bot', 'x86', 'h265'],
+    # webOS targets 32-bit ARM (Cortex-A9) with a softfp float ABI, unlike
+    # the standard hardfp 'release_bot_arm' Linux config. target_sysroot is
+    # supplied at build time (webOS NDK path is environment-specific), not
+    # hardcoded here.
+    'release_bot_webos_arm': [
+      'openh264', 'release_bot', 'arm', 'webos_arm_abi', 'h265'
+    ],
     'rtti_no_sctp_android_arm': [
       'android',
       'arm',
@@ -665,6 +672,13 @@
     },
     'use_cxx23_flag': {
       'gn_args': 'use_cxx23=true',
+    },
+    # webOS's NDK targets a 32-bit ARM Cortex-A9 with a softfp float ABI,
+    # unlike the hardfp default assumed by the plain 'arm' mixin's host
+    # sysroot. target_sysroot (the webOS NDK sysroot path) is environment-
+    # specific and is supplied via extra_gn_args at build time, not here.
+    'webos_arm_abi': {
+      'gn_args': 'arm_version=7 arm_use_neon=true arm_float_abi="softfp"',
     },
     'win_undef_unicode': {
       'gn_args': 'rtc_win_undef_unicode=true',
