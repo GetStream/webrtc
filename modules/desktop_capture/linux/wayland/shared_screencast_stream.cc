@@ -71,10 +71,10 @@ constexpr int CursorMetaSize(int w, int h) {
           w * h * kCursorBpp);
 }
 
-constexpr PipeWireVersion kDmaBufModifierMinVersion = {.major = 0,
+const PipeWireVersion kDmaBufModifierMinVersion = {.major = 0,
                                                        .minor = 3,
                                                        .micro = 33};
-constexpr PipeWireVersion kDropSingleModifierMinVersion = {.major = 0,
+const PipeWireVersion kDropSingleModifierMinVersion = {.major = 0,
                                                            .minor = 3,
                                                            .micro = 40};
 
