@@ -329,6 +329,10 @@
     'debug_bot_arm64': ['openh264', 'debug_bot', 'arm64', 'h265'],
     'debug_bot_x64': ['openh264', 'debug_bot', 'x64', 'h265'],
     'debug_bot_x86': ['openh264', 'debug_bot', 'x86', 'h265'],
+    # See 'release_bot_webos_arm' below for the softfp/NEON rationale.
+    'debug_bot_webos_arm': [
+      'openh264', 'debug_bot', 'arm', 'webos_arm_abi', 'h265'
+    ],
     'disable_trace_events_android_arm': [
       'android',
       'arm',
