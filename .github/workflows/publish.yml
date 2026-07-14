@@ -37,6 +37,24 @@ on:
         description: Skip restoring dependency caches and force a fresh sync
         type: boolean
         default: false
+      desktop_linux:
+        description: Build and publish the desktop libwebrtc C++ wrapper for Linux (x64 + arm64)
+        type: boolean
+        default: false
+      desktop_windows:
+        description: Build and publish the desktop libwebrtc C++ wrapper for Windows (x64)
+        type: boolean
+        default: false
+      desktop_webos:
+        description: Build and publish the desktop libwebrtc C++ wrapper for webOS (armv7, softfp). Requires webos_sysroot.
+        type: boolean
+        default: false
+      webos_sysroot:
+        description: >-
+          Absolute path to the webOS NDK sysroot on the runner. Required when desktop_webos is enabled;
+          provisioning that toolchain onto the runner is not handled by this workflow.
+        required: false
+        default: ""
 
 jobs:
   # Keep this as a separate first job so invalid manual input fails before any expensive WebRTC sync/build work starts.
@@ -48,10 +66,26 @@ jobs:
         env:
           BUILD_IOS: ${{ inputs.ios }}
           BUILD_ANDROID: ${{ inputs.android }}
+          BUILD_DESKTOP_LINUX: ${{ inputs.desktop_linux }}
+          BUILD_DESKTOP_WINDOWS: ${{ inputs.desktop_windows }}
+          BUILD_DESKTOP_WEBOS: ${{ inputs.desktop_webos }}
         run: |
           set -euo pipefail
-          if [[ "${BUILD_IOS}" != "true" && "${BUILD_ANDROID}" != "true" ]]; then
-            echo "At least one of ios or android must be true."
+          if [[ "${BUILD_IOS}" != "true" && "${BUILD_ANDROID}" != "true" && \
+                "${BUILD_DESKTOP_LINUX}" != "true" && "${BUILD_DESKTOP_WINDOWS}" != "true" && \
+                "${BUILD_DESKTOP_WEBOS}" != "true" ]]; then
+            echo "At least one of ios, android, desktop_linux, desktop_windows, or desktop_webos must be true."
+            exit 1
+          fi
+
+      - name: Validate webOS build options
+        env:
+          BUILD_DESKTOP_WEBOS: ${{ inputs.desktop_webos }}
+          WEBOS_SYSROOT: ${{ inputs.webos_sysroot }}
+        run: |
+          set -euo pipefail
+          if [[ "${BUILD_DESKTOP_WEBOS}" == "true" && -z "${WEBOS_SYSROOT}" ]]; then
+            echo "::error::webos_sysroot is required when desktop_webos is enabled."
             exit 1
           fi
 
@@ -115,6 +149,262 @@ jobs:
           target_os_cache_key: ${{ needs.plan.outputs.android_target_os_cache_key }}
           ignore_cache: ${{ inputs.ignore_cache }}
           release_pipeline_token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
+
+  # Shared by build_desktop_linux and build_desktop_webos: both are Linux-hosted
+  # and need the same gclient deps ("unix"); only their GN args differ.
+  prepare_desktop_linux:
+    name: Prepare desktop dependencies (Linux)
+    needs: plan
+    if: ${{ inputs.desktop_linux || inputs.desktop_webos }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Check out workflow actions
+        uses: actions/checkout@v4
+
+      - name: Prepare desktop dependencies
+        uses: ./.github/actions/prepare-desktop
+        with:
+          webrtc_ref: ${{ inputs.branch }}
+          target_os: unix
+          target_os_cache_key: unix
+          artifact_name: webrtc-src-prepared-desktop-linux
+          ignore_cache: ${{ inputs.ignore_cache }}
+          release_pipeline_token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
+
+  # NOTE: first Windows-hosted job in this workflow -- unverified against a
+  # real runner. Validate before relying on it for a real release.
+  prepare_desktop_windows:
+    name: Prepare desktop dependencies (Windows)
+    needs: plan
+    if: ${{ inputs.desktop_windows }}
+    runs-on: windows-latest
+    timeout-minutes: 360
+    steps:
+      - name: Check out workflow actions
+        uses: actions/checkout@v4
+
+      - name: Prepare desktop dependencies
+        uses: ./.github/actions/prepare-desktop
+        with:
+          webrtc_ref: ${{ inputs.branch }}
+          target_os: win
+          target_os_cache_key: win
+          artifact_name: webrtc-src-prepared-desktop-windows
+          ignore_cache: ${{ inputs.ignore_cache }}
+          release_pipeline_token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
+
+  build_desktop_linux:
+    name: Build desktop libwebrtc (Linux ${{ matrix.arch }})
+    needs: prepare_desktop_linux
+    if: ${{ inputs.desktop_linux }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
+    steps:
+      - name: Check out stream-webrtc-release-pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: GetStream/stream-webrtc-release-pipeline
+          path: release-pipeline
+          token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
+
+      - name: Download prepared desktop WebRTC tree
+        uses: actions/download-artifact@v4
+        with:
+          name: webrtc-src-prepared-desktop-linux
+
+      - name: Extract WebRTC tree
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ github.workspace }}/webrtc-tree"
+          tar -xzf webrtc-src-prepared-desktop-linux.tar.gz -C "${{ github.workspace }}/webrtc-tree"
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          working-directory: release-pipeline
+          bundler-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install depot_tools
+        run: |
+          if [[ ! -d "${HOME}/depot_tools" ]]; then
+            git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "${HOME}/depot_tools"
+          fi
+          echo "PATH=${HOME}/depot_tools:${PATH}" >> "${GITHUB_ENV}"
+          echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
+
+      - name: Build desktop libwebrtc artifact
+        working-directory: release-pipeline
+        run: >-
+          bundle exec fastlane desktop build
+          "root:${{ github.workspace }}/webrtc-tree/.output/src"
+          "products_root:${{ github.workspace }}/desktop-products"
+          target_os:linux
+          "arch:${{ matrix.arch }}"
+          "profile:${{ inputs.debug && 'debug' || 'release' }}"
+
+      - name: Upload desktop libwebrtc artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-desktop-linux-${{ matrix.arch }}
+          path: desktop-products/libwebrtc-linux-${{ matrix.arch }}-*.zip
+          retention-days: 2
+
+  build_desktop_webos:
+    name: Build desktop libwebrtc (webOS armv7)
+    needs: prepare_desktop_linux
+    if: ${{ inputs.desktop_webos }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Check out stream-webrtc-release-pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: GetStream/stream-webrtc-release-pipeline
+          path: release-pipeline
+          token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
+
+      - name: Download prepared desktop WebRTC tree
+        uses: actions/download-artifact@v4
+        with:
+          name: webrtc-src-prepared-desktop-linux
+
+      - name: Extract WebRTC tree
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ github.workspace }}/webrtc-tree"
+          tar -xzf webrtc-src-prepared-desktop-linux.tar.gz -C "${{ github.workspace }}/webrtc-tree"
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          working-directory: release-pipeline
+          bundler-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install depot_tools
+        run: |
+          if [[ ! -d "${HOME}/depot_tools" ]]; then
+            git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "${HOME}/depot_tools"
+          fi
+          echo "PATH=${HOME}/depot_tools:${PATH}" >> "${GITHUB_ENV}"
+          echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
+
+      # This workflow does not provision the webOS NDK/sysroot onto the
+      # runner -- webos_sysroot must already point at one that exists there.
+      # Fail fast and clearly rather than silently building against the
+      # host's own sysroot.
+      - name: Verify webOS sysroot is present
+        env:
+          WEBOS_SYSROOT: ${{ inputs.webos_sysroot }}
+        run: |
+          set -euo pipefail
+          if [[ ! -d "${WEBOS_SYSROOT}" ]]; then
+            echo "::error::webos_sysroot '${WEBOS_SYSROOT}' does not exist on this runner. Provisioning the webOS NDK is not handled by this workflow."
+            exit 1
+          fi
+
+      - name: Build desktop libwebrtc artifact
+        working-directory: release-pipeline
+        env:
+          WEBOS_SYSROOT: ${{ inputs.webos_sysroot }}
+        run: >-
+          bundle exec fastlane desktop build
+          "root:${{ github.workspace }}/webrtc-tree/.output/src"
+          "products_root:${{ github.workspace }}/desktop-products"
+          target_os:webos
+          arch:arm
+          "profile:${{ inputs.debug && 'debug' || 'release' }}"
+          "extra_gn_args:target_sysroot=${{ inputs.webos_sysroot }}"
+
+      - name: Upload desktop libwebrtc artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-desktop-webos-arm
+          path: desktop-products/libwebrtc-webos-arm-*.zip
+          retention-days: 2
+
+  # NOTE: first Windows-hosted job in this workflow -- unverified against a
+  # real runner. Validate before relying on it for a real release.
+  build_desktop_windows:
+    name: Build desktop libwebrtc (Windows x64)
+    needs: prepare_desktop_windows
+    if: ${{ inputs.desktop_windows }}
+    runs-on: windows-latest
+    timeout-minutes: 360
+    steps:
+      - name: Check out stream-webrtc-release-pipeline
+        uses: actions/checkout@v4
+        with:
+          repository: GetStream/stream-webrtc-release-pipeline
+          path: release-pipeline
+          token: ${{ secrets.RELEASE_PIPELINE_TOKEN || github.token }}
+
+      - name: Download prepared desktop WebRTC tree
+        uses: actions/download-artifact@v4
+        with:
+          name: webrtc-src-prepared-desktop-windows
+
+      - name: Extract WebRTC tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ github.workspace }}/webrtc-tree"
+          tar -xzf webrtc-src-prepared-desktop-windows.tar.gz -C "${{ github.workspace }}/webrtc-tree"
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          working-directory: release-pipeline
+          bundler-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install depot_tools
+        shell: bash
+        run: |
+          if [[ ! -d "${HOME}/depot_tools" ]]; then
+            git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "${HOME}/depot_tools"
+          fi
+          echo "PATH=${HOME}/depot_tools:${PATH}" >> "${GITHUB_ENV}"
+          echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
+
+      - name: Build desktop libwebrtc artifact
+        shell: bash
+        working-directory: release-pipeline
+        run: >-
+          bundle exec fastlane desktop build
+          "root:${{ github.workspace }}/webrtc-tree/.output/src"
+          "products_root:${{ github.workspace }}/desktop-products"
+          target_os:win
+          arch:x64
+          "profile:${{ inputs.debug && 'debug' || 'release' }}"
+
+      - name: Upload desktop libwebrtc artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-desktop-windows-x64
+          path: desktop-products/libwebrtc-win-x64-*.zip
+          retention-days: 2
 
   validate_ios:
     name: Validate iOS simulator tests
@@ -506,7 +796,10 @@ jobs:
     name: Publish GitHub release
     # GitHub Actions needs are static. Jobs for disabled platforms are skipped quickly, and this condition
     # lets publish continue as long as no selected platform failed or was cancelled.
-    needs: [validate_ios, validate_macos, package_apple, build_android]
+    needs: [
+      validate_ios, validate_macos, package_apple, build_android,
+      build_desktop_linux, build_desktop_webos, build_desktop_windows
+    ]
     if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-latest
     steps:
