@@ -77,7 +77,6 @@
 /out-release
 /out-debug
 /node_modules
-/libwebrtc
 /args.txt
 
 
