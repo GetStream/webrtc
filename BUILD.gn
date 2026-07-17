@@ -45,6 +45,9 @@ if (!build_with_chromium) {
     if (rtc_build_tools) {
       deps += [ "rtc_tools" ]
     }
+    if (rtc_build_libwebrtc) {
+      deps += [ "//libwebrtc" ]
+    }
     if (rtc_include_tests) {
       deps += [
         ":rtc_p2p_unittests",

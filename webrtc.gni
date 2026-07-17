@@ -137,6 +137,13 @@ declare_args() {
   # Set this to false to skip building tools.
   rtc_build_tools = true
 
+  # Build the libwebrtc C++ wrapper shared library (//libwebrtc). Off by
+  # default: the wrapper (vendored in-tree at //libwebrtc) is only used by the
+  # desktop and webOS targets and pulls desktop-only deps (desktop capture,
+  # etc.), so mobile builds leave it off. The desktop release pipeline sets
+  # this to true.
+  rtc_build_libwebrtc = false
+
   # Set this to false to skip building code that requires X11.
   rtc_use_x11 = ozone_platform_x11
 
