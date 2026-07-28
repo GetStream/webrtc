@@ -1832,7 +1832,9 @@ int32_t AudioEngineDevice::ApplyManualEngineState(EngineStateUpdate& state) {
                                  to:outputNode()
                              format:manual_render_rtc_format_];
     } @catch (NSException* exception) {
-      LOGE() << "Failed to connect manual input nodes: " << exception.reason.UTF8String;
+      // Keep the connection failure diagnostic safe when NSException provides no reason.
+      LOGE() << "Failed to connect manual input nodes: "
+             << (exception.reason ? exception.reason.UTF8String : "Unknown");
       return kAudioEngineDeviceFormatError;
     }
 
@@ -2320,7 +2322,9 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
                            to:outputNode()
                        format:engine_output_format];
     } @catch (NSException* exception) {
-      LOGE() << "Failed to connect output nodes: " << exception.reason.UTF8String;
+      // Keep the connection failure diagnostic safe when NSException provides no reason.
+      LOGE() << "Failed to connect output nodes: "
+             << (exception.reason ? exception.reason.UTF8String : "Unknown");
       return rollback(kAudioEngineDeviceFormatError);
     }
 
@@ -2495,7 +2499,9 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
         [engine_device_ connect:inputNode() to:input_mixer_node_ format:engine_input_format];
       }
     } @catch (NSException* exception) {
-      LOGE() << "Failed to connect input nodes: " << exception.reason.UTF8String;
+      // Keep the connection failure diagnostic safe when NSException provides no reason.
+      LOGE() << "Failed to connect input nodes: "
+             << (exception.reason ? exception.reason.UTF8String : "Unknown");
       return rollback(kAudioEngineDeviceFormatError);
     }
 
@@ -2505,7 +2511,9 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
     @try {
       [engine_device_ connect:input_mixer_node_ to:sink_node_ format:engine_input_format];
     } @catch (NSException* exception) {
-      LOGE() << "Failed to connect input mixer to sink node: " << exception.reason.UTF8String;
+      // Keep the connection failure diagnostic safe when NSException provides no reason.
+      LOGE() << "Failed to connect input mixer to sink node: "
+             << (exception.reason ? exception.reason.UTF8String : "Unknown");
       return rollback(kAudioEngineDeviceFormatError);
     }
 
