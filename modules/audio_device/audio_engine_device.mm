@@ -2192,8 +2192,20 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
         return release_result;
       }
 
-      // Rebuild the last known stable state from a guaranteed blank graph.
-      EngineStateUpdate recovery_state = {{}, state.prev};
+      // Preserve the effective output state even when it was linked to input.
+      EngineState recovery_next = state.prev;
+      // Materialize linked output so speaker-only recovery keeps playout alive.
+      recovery_next.output_enabled = state.prev.IsOutputEnabled();
+      // Preserve active playout while discarding the failed input transition.
+      recovery_next.output_running = state.prev.IsOutputRunning();
+      // Disable regular input so recovery cannot configure voice processing.
+      recovery_next.input_enabled = false;
+      // Stop input with the graph so recording cannot outlive its failed VP.
+      recovery_next.input_running = false;
+      // Disable persistent input because it also contributes to IsInputEnabled.
+      recovery_next.input_enabled_persistent_mode = false;
+      // Rebuild the speaker-only state from a guaranteed blank graph.
+      EngineStateUpdate recovery_state = {{}, recovery_next};
       // Use the normal transition machinery to restore observer and node state.
       int32_t recovery_result = ApplyDeviceEngineState(recovery_state);
       // Prefer a recovery error; otherwise preserve the original VP failure.
