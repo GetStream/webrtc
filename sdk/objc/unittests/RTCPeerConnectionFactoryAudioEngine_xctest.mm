@@ -172,6 +172,49 @@
   [logger stop];
 }
 
+- (void)testEnablingRecordingWhilePlayoutIsRunningKeepsVoiceProcessingEnabled {
+  RETURN_IF_SIMULATOR_AUDIO_TEST_DISABLED();
+
+  AVAudioSession *session = [AVAudioSession sharedInstance];
+  NSError *sessionError = nil;
+  XCTAssertTrue([session setCategory:AVAudioSessionCategoryPlayAndRecord
+                                mode:AVAudioSessionModeVoiceChat
+                             options:0
+                               error:&sessionError]);
+  XCTAssertNil(sessionError);
+  XCTAssertTrue([session setActive:YES error:&sessionError]);
+  XCTAssertNil(sessionError);
+
+  RTC_OBJC_TYPE(RTCPeerConnectionFactory) *factory =
+      [[RTC_OBJC_TYPE(RTCPeerConnectionFactory) alloc]
+          initWithAudioDeviceModuleType:RTC_OBJC_TYPE(
+                                            RTCAudioDeviceModuleTypeAudioEngine)
+                  bypassVoiceProcessing:NO
+                         encoderFactory:nil
+                         decoderFactory:nil
+                  audioProcessingModule:nil];
+  RTC_OBJC_TYPE(RTCAudioDeviceModule) *audioDeviceModule =
+      factory.audioDeviceModule;
+
+  XCTAssertEqual(0, [audioDeviceModule initPlayout]);
+  XCTAssertEqual(0, [audioDeviceModule startPlayout]);
+
+  for (NSUInteger iteration = 0; iteration < 5; iteration++) {
+    XCTAssertEqual(0, [audioDeviceModule initAndStartRecording]);
+    XCTAssertTrue(audioDeviceModule.isRecording);
+    XCTAssertTrue(audioDeviceModule.isVoiceProcessingEnabled);
+    XCTAssertEqual(0, [audioDeviceModule stopRecording]);
+    XCTAssertTrue(audioDeviceModule.isPlaying);
+  }
+
+  XCTAssertEqual(0, [audioDeviceModule stopPlayout]);
+  XCTAssertTrue([session
+        setActive:NO
+      withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
+            error:&sessionError]);
+  XCTAssertNil(sessionError);
+}
+
 @end
 
 #undef RETURN_IF_SIMULATOR_AUDIO_TEST_DISABLED
