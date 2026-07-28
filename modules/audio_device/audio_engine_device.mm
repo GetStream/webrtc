@@ -56,6 +56,10 @@ const UInt16 kFixedPlayoutDelayEstimate = 0;
 const UInt16 kFixedRecordDelayEstimate = 0;
 const UInt16 kStartEngineMaxRetries = 10;  // Maximum blocking 1sec.
 const useconds_t kStartEngineRetryDelayMs = 100;
+// Bound VP recovery so a persistent AVAudioEngine failure cannot hang setup.
+const UInt16 kVoiceProcessingMaxRetries = 3;
+// Give the released I/O unit time to stop before building the next graph.
+const useconds_t kVoiceProcessingRetryDelayMs = 100;
 
 const size_t kMaximumFramesPerBuffer = 3072;
 const size_t kAudioSampleSize = 2;  // Signed 16-bit integer
@@ -1788,7 +1792,14 @@ int32_t AudioEngineDevice::ApplyManualEngineState(EngineStateUpdate& state) {
     fine_audio_buffer_.reset(new FineAudioBuffer(audio_device_buffer_.get()));
 
     if (state.next.IsInputEnabled()) {
-      ConfigureVoiceProcessingNode(engine_manual_input_.inputNode, state);
+      // Capture the native result so manual mode honors the same VP guarantee.
+      int32_t result =
+          ConfigureVoiceProcessingNode(engine_manual_input_.inputNode, state);
+      // Stop setup if the requested processing could not be applied.
+      if (result != 0) {
+        // Surface the error instead of recording with degraded call audio.
+        return result;
+      }
     }
 
   } else if (state.prev.IsOutputEnabled() && !state.next.IsOutputEnabled()) {
@@ -1941,6 +1952,75 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
     return engine_device_.outputNode;
   };
 
+  // Keep every release and observer notification identical across retries,
+  // normal recreation, and final shutdown.
+  auto releaseEngine = [this]() {
+    // AVAudioEngine ownership is confined to the device-control thread.
+    RTC_DCHECK_RUN_ON(thread_);
+    // Give the owner a chance to detach from the engine before destruction.
+    if (observer_ != nullptr) {
+      // Preserve the observer's error so lifecycle recovery remains atomic.
+      int32_t result = observer_->OnEngineWillRelease(engine_device_);
+      // Do not discard an engine the observer failed to release safely.
+      if (result != 0) {
+        // Record which lifecycle callback prevented the transition.
+        LOGE() << "Call to OnEngineWillRelease returned error: " << result;
+        // Propagate the exact callback failure to the state transition.
+        return result;
+      }
+    }
+    // Drop the old graph only after all owners have released it.
+    engine_device_ = nil;
+    // Report that the engine is fully released and safe to replace.
+    return 0;
+  };
+
+  // Keep engine allocation and observer attachment identical for retries and
+  // ordinary state transitions.
+  auto createEngine = [this]() {
+    // AVAudioEngine ownership is confined to the device-control thread.
+    RTC_DCHECK_RUN_ON(thread_);
+    // A fresh graph avoids reconnecting nodes on the stopped I/O unit.
+    engine_device_ = [[AVAudioEngine alloc] init];
+    // Let the owner attach its configuration to this exact engine instance.
+    if (observer_ != nullptr) {
+      // Preserve the observer's result so a partial create cannot continue.
+      int32_t result = observer_->OnEngineDidCreate(engine_device_);
+      // Stop before node configuration when owner setup failed.
+      if (result != 0) {
+        // Record which lifecycle callback prevented engine creation.
+        LOGE() << "Call to OnEngineDidCreate returned error: " << result;
+        // Propagate the callback failure to the transaction rollback.
+        return result;
+      }
+    }
+    // Report that a fresh engine and its observer state are ready.
+    return 0;
+  };
+
+  // Reapply session-dependent owner configuration to every fresh retry engine.
+  auto prepareEngine = [this, &state]() {
+    // AVAudioEngine ownership is confined to the device-control thread.
+    RTC_DCHECK_RUN_ON(thread_);
+    // Notify only for transitions that enable media and have an observer.
+    if (state.DidAnyEnable() && observer_ != nullptr) {
+      // Configure the audio session before voice-processing touches the graph.
+      int32_t result =
+          observer_->OnEngineWillEnable(engine_device_,
+                                        state.next.IsOutputEnabled(),
+                                        state.next.IsInputEnabled());
+      // Stop before node configuration when session preparation failed.
+      if (result != 0) {
+        // Record which lifecycle callback prevented engine preparation.
+        LOGE() << "Call to OnEngineWillEnable returned error: " << result;
+        // Propagate the callback failure to the transaction rollback.
+        return result;
+      }
+    }
+    // Report that node configuration may safely proceed.
+    return 0;
+  };
+
   // --------------------------------------------------------------------------------------------
   // Step: Stop AVAudioEngine
   //
@@ -1975,14 +2055,13 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
   //
   if (state.IsEngineRecreateRequired()) {
     LOGI() << "Recreate required, releasing AVAudioEngine...";
-    if (observer_ != nullptr) {
-      int32_t result = observer_->OnEngineWillRelease(engine_device_);
-      if (result != 0) {
-        LOGE() << "Call to OnEngineWillRelease returned error: " << result;
-        return rollback(result);
-      }
+    // Use the shared release path so observer ordering matches retry recovery.
+    int32_t result = releaseEngine();
+    // Preserve the existing rollback semantics when release fails.
+    if (result != 0) {
+      // Undo earlier transition work and return the release error.
+      return rollback(result);
     }
-    engine_device_ = nil;
   }
 
   // --------------------------------------------------------------------------------------------
@@ -1993,20 +2072,18 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
     LOGI() << "Creating AVAudioEngine (device)...";
     RTC_DCHECK(engine_device_ == nil);
 
-    engine_device_ = [[AVAudioEngine alloc] init];
-
     rollback_actions.push_back([=, this]() {
       RTC_DCHECK_RUN_ON(thread_);
       LOGI() << "Rolling back create AVAudioEngine (device)...";
       engine_device_ = nil;
     });
 
-    if (observer_ != nullptr) {
-      int32_t result = observer_->OnEngineDidCreate(engine_device_);
-      if (result != 0) {
-        LOGE() << "Call to OnEngineDidCreate returned error: " << result;
-        return rollback(result);
-      }
+    // Use the shared creation path so initial and retry engines are equivalent.
+    int32_t result = createEngine();
+    // Preserve the existing rollback semantics when creation fails.
+    if (result != 0) {
+      // Undo earlier transition work and return the creation error.
+      return rollback(result);
     }
   }
 
@@ -2037,15 +2114,14 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
   // --------------------------------------------------------------------------------------------
   // Step: Trigger "engine will enable" event
   //
-  if (state.DidAnyEnable() && observer_ != nullptr) {
-    // Invoke here before configuring nodes. In iOS, session configuration is required before
-    // enabling AGC, muted talker etc.
-    int32_t result = observer_->OnEngineWillEnable(engine_device_, state.next.IsOutputEnabled(),
-                                                   state.next.IsInputEnabled());
-    if (result != 0) {
-      LOGE() << "Call to OnEngineWillEnable returned error: " << result;
-      return rollback(result);
-    }
+  // Invoke here before configuring nodes. In iOS, session configuration is
+  // required before enabling AGC, muted talker etc.
+  // Use the shared preparation path so retries preserve lifecycle ordering.
+  int32_t prepare_result = prepareEngine();
+  // Do not touch nodes when the owner could not prepare the audio session.
+  if (prepare_result != 0) {
+    // Roll back the transition and return the preparation failure.
+    return rollback(prepare_result);
   }
 
   // --------------------------------------------------------------------------------------------
@@ -2054,7 +2130,75 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
   // - Note: We configure input VP before output to avoid artifacts playout during configuration.
   //
   if (state.next.IsInputEnabled()) {
-    ConfigureVoiceProcessingNode(inputNode(), state);
+    // Attempt VP before output setup so unprocessed input is never started.
+    int32_t voice_processing_result =
+        ConfigureVoiceProcessingNode(inputNode(), state);
+    // Count the first attempt so the retry bound includes all engine graphs.
+    UInt16 attempt = 1;
+
+    // Retry only native VP failures and stop at the fixed recovery bound.
+    while (voice_processing_result != 0 &&
+           attempt < kVoiceProcessingMaxRetries) {
+      // Make retry progress visible without exposing raw audio data.
+      LOGW() << "Retrying voice processing on a fresh engine (attempt "
+             << (attempt + 1) << "/" << kVoiceProcessingMaxRetries << ")";
+
+      // Fully release the failed graph before allocating its replacement.
+      int32_t release_result = releaseEngine();
+      // Stop recovery if the failed graph cannot be released safely.
+      if (release_result != 0) {
+        // Roll back earlier work and return the release failure.
+        return rollback(release_result);
+      }
+
+      // Avoid racing AVAudioEngine's asynchronous I/O-unit shutdown.
+      usleep(kVoiceProcessingRetryDelayMs * 1000);
+
+      // Allocate a new graph rather than reconnecting the failed one.
+      int32_t create_result = createEngine();
+      // Stop recovery if a replacement graph cannot be created.
+      if (create_result != 0) {
+        // Roll back earlier work and return the creation failure.
+        return rollback(create_result);
+      }
+
+      // Reapply session preparation to the replacement engine.
+      prepare_result = prepareEngine();
+      // Stop recovery if the replacement cannot be prepared.
+      if (prepare_result != 0) {
+        // Roll back earlier work and return the preparation failure.
+        return rollback(prepare_result);
+      }
+
+      // Retry VP only after the replacement graph is fully prepared.
+      voice_processing_result =
+          ConfigureVoiceProcessingNode(inputNode(), state);
+      // Advance the bounded attempt count after each complete retry.
+      attempt++;
+    }
+
+    // Recover the previous stable media state when every VP attempt fails.
+    if (voice_processing_result != 0) {
+      // Record the bounded failure for production crash diagnostics.
+      LOGE() << "Failed to configure voice processing after " << attempt
+             << " attempts";
+      // Release the last failed graph before rebuilding the prior state.
+      int32_t release_result = releaseEngine();
+      // The explicit prior-state recovery supersedes generic rollback actions.
+      rollback_actions.clear();
+      // Avoid recovery on top of an engine that failed to release.
+      if (release_result != 0) {
+        // Surface the release failure because no stable state was restored.
+        return release_result;
+      }
+
+      // Rebuild the last known stable state from a guaranteed blank graph.
+      EngineStateUpdate recovery_state = {{}, state.prev};
+      // Use the normal transition machinery to restore observer and node state.
+      int32_t recovery_result = ApplyDeviceEngineState(recovery_state);
+      // Prefer a recovery error; otherwise preserve the original VP failure.
+      return recovery_result != 0 ? recovery_result : voice_processing_result;
+    }
   }
 
   // --------------------------------------------------------------------------------------------
@@ -2621,16 +2765,15 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
   if (state.prev.IsAnyEnabled() && !state.next.IsAnyEnabled()) {
     RTC_DCHECK(engine_device_ != nullptr);
 
-    if (observer_ != nullptr) {
-      int32_t result = observer_->OnEngineWillRelease(engine_device_);
-      if (result != 0) {
-        LOGE() << "Call to OnEngineWillRelease returned error: " << result;
-        return rollback(result);
-      }
+    // Use the shared release path so final shutdown matches recreation.
+    int32_t result = releaseEngine();
+    // Preserve the existing rollback semantics when release fails.
+    if (result != 0) {
+      // Undo earlier transition work and return the release error.
+      return rollback(result);
     }
 
     LOGI() << "Releasing AVAudioEngine...";
-    engine_device_ = nil;
   }
 
   return 0;
@@ -2639,36 +2782,79 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
 // ----------------------------------------------------------------------------------------------------
 // Private - EngineState
 
-void AudioEngineDevice::ConfigureVoiceProcessingNode(AVAudioInputNode* input_node,
-                                                     EngineStateUpdate state) {
-  if (state.next.IsInputEnabled() && input_node.voiceProcessingEnabled != state.next.voice_processing_enabled) {
-    #if TARGET_OS_SIMULATOR
-        LOGI() << "setVoiceProcessingEnabled (input): "
-              << (state.next.voice_processing_enabled ? "YES" : "NO") << " (Ignored on Simulator)";
-    #else
-        LOGI() << "setVoiceProcessingEnabled (input): " << state.next.voice_processing_enabled ? "YES"
-                                                                                              : "NO";
-        NSError* error = nil;
-        BOOL set_vp_result = [input_node setVoiceProcessingEnabled:state.next.voice_processing_enabled
-                                                              error:&error];
-        if (!set_vp_result) {
-          NSLog(@"AudioEngineDevice setVoiceProcessingEnabled error: %@", error.localizedDescription);
-          RTC_DCHECK(set_vp_result);
-        }
-        LOGI() << "setVoiceProcessingEnabled (input) result: " << set_vp_result ? "YES" : "NO";
-    #endif
+// Return an error instead of continuing with input whose requested processing
+// could not be applied.
+int32_t AudioEngineDevice::ConfigureVoiceProcessingNode(
+    AVAudioInputNode* input_node, EngineStateUpdate state) {
+  // Skip native graph mutation when input is off or VP already matches.
+  if (!state.next.IsInputEnabled() ||
+      input_node.voiceProcessingEnabled ==
+          state.next.voice_processing_enabled) {
+    // Report success because no voice-processing transition is required.
+    return 0;
+  }
 
-    if (input_node.voiceProcessingEnabled) {
-      // Always unmute vp if restart mute mode.
-      if (state.next.mute_mode == MuteMode::RestartEngine &&
-          input_node.voiceProcessingInputMuted) {
-        LOGI() << "Update mute (voice processing) unmuting vp for restart engine mode";
-        input_node.voiceProcessingInputMuted = false;
-      }
+#if TARGET_OS_SIMULATOR
+  // The simulator lacks the device I/O path, so retain its existing no-op.
+  LOGI() << "setVoiceProcessingEnabled (input): "
+         << (state.next.voice_processing_enabled ? "YES" : "NO")
+         << " (Ignored on Simulator)";
+#else
+  // Record the requested transition before entering the throwing Apple API.
+  LOGI() << "setVoiceProcessingEnabled (input): "
+         << (state.next.voice_processing_enabled ? "YES" : "NO");
 
-      ConfigureMutedSpeechActivityEventListener(input_node, state);
+  // Capture NSError failures from the documented API contract.
+  NSError* error = nil;
+  // Default to failure so only an explicit native success may continue.
+  BOOL set_vp_result = NO;
+  // Convert Objective-C graph exceptions into the existing ADM error path.
+  @try {
+    // Apply VP on the prepared fresh graph and capture NSError details.
+    set_vp_result = [input_node
+        setVoiceProcessingEnabled:state.next.voice_processing_enabled
+                            error:&error];
+  } @catch (NSException* exception) {
+    // Preserve exception context without allowing it to terminate the process.
+    LOGE() << "setVoiceProcessingEnabled exception: "
+           << (exception.reason ? exception.reason.UTF8String :
+                                  "Unknown exception");
+    // Trigger bounded fresh-engine recovery through the caller.
+    return kAudioEngineVoiceProcessingError;
+  }
+
+  // Treat a reported native failure as equivalent to the caught exception.
+  if (!set_vp_result) {
+    // Preserve the NSError context for crash and device diagnostics.
+    LOGE() << "setVoiceProcessingEnabled error: "
+           << (error.localizedDescription ?
+                   error.localizedDescription.UTF8String :
+                   "Unknown error");
+    // Trigger bounded fresh-engine recovery through the caller.
+    return kAudioEngineVoiceProcessingError;
+  }
+
+  // Record that the requested processing state was applied successfully.
+  LOGI() << "setVoiceProcessingEnabled (input) result: YES";
+#endif
+
+  // Configure VP-dependent features only when the input node confirms VP.
+  if (input_node.voiceProcessingEnabled) {
+    // Always unmute vp if restart mute mode.
+    if (state.next.mute_mode == MuteMode::RestartEngine &&
+        input_node.voiceProcessingInputMuted) {
+      LOGI() << "Update mute (voice processing) unmuting vp for restart engine "
+                "mode";
+      // Clear the VP mute left by the previous restart-based mute strategy.
+      input_node.voiceProcessingInputMuted = false;
     }
-  } 
+
+    // Restore muted-speech callbacks after the VP audio unit is recreated.
+    ConfigureMutedSpeechActivityEventListener(input_node, state);
+  }
+
+  // Report success only after all VP-dependent configuration is complete.
+  return 0;
 }
 
 void AudioEngineDevice::ConfigureMutedSpeechActivityEventListener(AVAudioInputNode* input_node, 
