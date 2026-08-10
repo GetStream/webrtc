@@ -89,6 +89,13 @@ AudioEngineInputRenderContext::AudioEngineInputRenderContext(
   // lifetime as the converter itself.
   converter_buffer_ = [[AVAudioPCMBuffer alloc] initWithPCMFormat:rtc_format
                                                     frameCapacity:kMaximumFramesPerBuffer];
+  // Reject partial native allocation in release builds because Render cannot
+  // safely recover from missing conversion resources on the audio thread.
+  if (err != noErr || converter_ref_ == nullptr || converter_buffer_ == nil) {
+    // Close the callback gate while leaving Invalidate to release any resource
+    // that was created before the other allocation failed.
+    is_valid_ = false;
+  }
 }
 
 AudioEngineInputRenderContext::~AudioEngineInputRenderContext() {
@@ -101,11 +108,6 @@ void AudioEngineInputRenderContext::Invalidate() {
   // Taking the render lock drains a callback that already entered conversion
   // and prevents any later callback from observing partially released state.
   MutexLock lock(&mutex_);
-  // Repeated rollback and release paths can safely share this cleanup method.
-  if (!is_valid_) {
-    return;
-  }
-
   // Close the callback gate before dropping any resource it may access.
   is_valid_ = false;
   // Remove FineAudioBuffer's raw AudioDeviceBuffer link while the device still
@@ -127,21 +129,28 @@ void AudioEngineInputRenderContext::Invalidate() {
 OSStatus AudioEngineInputRenderContext::Render(const AudioTimeStamp* timestamp,
                                                AVAudioFrameCount frame_count,
                                                const AudioBufferList* input_data) {
-  // Hold the teardown gate across conversion and delivery because both use
-  // resources that Invalidate releases together.
-  MutexLock lock(&mutex_);
+  // Never make AVAudioEngine's real-time callback wait for another render or
+  // teardown user of the shared conversion resources.
+  if (!mutex_.TryLock()) {
+    return noErr;
+  }
   // AVAudioEngine may invoke its copied block after detach; that callback must
   // succeed as a no-op without touching released input pointers.
   if (!is_valid_) {
+    // Release the non-blocking gate before returning from the ignored callback.
+    mutex_.Unlock();
     return noErr;
   }
 
   // Promote weak access only for this render so the callback never owns the
-  // buffer beyond active work.
-  const auto audio_device_buffer = audio_device_buffer_.lock();
+  // buffer beyond active work, and keep it mutable so it can be dropped before
+  // teardown reacquires the gate.
+  auto audio_device_buffer = audio_device_buffer_.lock();
   // Device destruction can win the race before callback entry; no delivery is
   // possible once the owner is gone.
   if (audio_device_buffer == nullptr) {
+    // A failed weak promotion owns no device state, so release the gate now.
+    mutex_.Unlock();
     return noErr;
   }
 
@@ -185,6 +194,11 @@ OSStatus AudioEngineInputRenderContext::Render(const AudioTimeStamp* timestamp,
       webrtc::ArrayView<const int16_t>(rtc_buffer, frame_count), kFixedRecordDelayEstimate,
       capture_time_ns);
 
+  // Drop render-scoped ownership before teardown can release the device's
+  // strong owner, preserving AudioDeviceBuffer destruction on its sequence.
+  audio_device_buffer.reset();
+  // Release conversion resources to teardown only after render is fully done.
+  mutex_.Unlock();
   // A completed or intentionally ignored sink callback is successful to
   // AVAudioEngine, so teardown does not provoke a second error path.
   return noErr;
@@ -2918,6 +2932,9 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
 }
 
 void AudioEngineDevice::InvalidateInputRenderContext() {
+  // Context ownership is confined to the device-control thread so graph and
+  // callback teardown keep the same sequence ordering.
+  RTC_DCHECK_RUN_ON(thread_);
   // A missing context means input setup never completed or teardown already
   // consumed the device's reference.
   if (input_render_context_ != nullptr) {
