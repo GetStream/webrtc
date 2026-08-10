@@ -17,7 +17,6 @@
 #ifndef SDK_OBJC_NATIVE_SRC_AUDIO_AUDIO_DEVICE_AUDIOENGINE_H_
 #define SDK_OBJC_NATIVE_SRC_AUDIO_AUDIO_DEVICE_AUDIOENGINE_H_
 
-#include <atomic>
 #include <memory>
 #include <string>
 
@@ -26,6 +25,9 @@
 #include "api/task_queue/pending_task_safety_flag.h"
 #include "modules/audio_device/audio_device_generic.h"
 #include "rtc_base/buffer.h"
+// Use the repository's annotated mutex to make render/teardown ordering
+// visible to Clang's thread-safety analysis.
+#include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/thread.h"
 #include "rtc_base/thread_annotations.h"
 #include "sdk/objc/base/RTCMacros.h"
@@ -98,7 +100,52 @@ enum AudioEngineErrorCode {
   kAudioEngineAGCError = -8001
 };
 
+// Avoid pulling the full buffer definition into every audio-engine consumer.
+class AudioDeviceBuffer;
 class FineAudioBuffer;
+
+/// Keeps sink-callback resources alive without extending device ownership.
+///
+/// AVAudioEngine may invoke a copied sink block after graph teardown begins.
+/// This context lets teardown close that callback gate before releasing the
+/// conversion resources that a late invocation could otherwise access.
+class AudioEngineInputRenderContext {
+ public:
+  /// Builds the callback-local converter while leaving buffer ownership with
+  /// AudioEngineDevice.
+  AudioEngineInputRenderContext(AVAudioFormat* engine_format,
+                                AVAudioFormat* rtc_format,
+                                std::shared_ptr<AudioDeviceBuffer> audio_device_buffer,
+                                double mach_tick_units_to_nanoseconds);
+  /// Provides safe fallback cleanup if a block releases its last reference.
+  ~AudioEngineInputRenderContext();
+
+  /// Closes the callback gate and drains any render that already holds it.
+  void Invalidate();
+  /// Converts and delivers input only while teardown has not invalidated it.
+  OSStatus Render(const AudioTimeStamp* timestamp,
+                  AVAudioFrameCount frame_count,
+                  const AudioBufferList* input_data);
+
+ private:
+  // Serializes conversion with teardown so converter state cannot be disposed
+  // while AVAudioEngine is still using it.
+  Mutex mutex_;
+  // Turns callbacks copied by AVAudioEngine into no-ops after graph teardown.
+  bool is_valid_ RTC_GUARDED_BY(mutex_) = true;
+  // Prevents the callback block from becoming the final owner of the
+  // sequence-affine AudioDeviceBuffer.
+  const std::weak_ptr<AudioDeviceBuffer> audio_device_buffer_;
+  // Owns the callback's raw buffer link only until invalidation drains render.
+  std::unique_ptr<FineAudioBuffer> fine_audio_buffer_ RTC_GUARDED_BY(mutex_);
+  // Keeps conversion state with the callback lifetime instead of the device
+  // object whose graph may already be releasing.
+  AudioConverterRef converter_ref_ RTC_GUARDED_BY(mutex_) = nullptr;
+  // Retains converted sample storage until render completes or is invalidated.
+  AVAudioPCMBuffer* converter_buffer_ RTC_GUARDED_BY(mutex_) = nil;
+  // Preserves the engine's host-time conversion without capturing the device.
+  const double mach_tick_units_to_nanoseconds_;
+};
 
 extern NSString* const kAudioEngineInputMixerNodeKey;
 
@@ -503,6 +550,9 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
 
   void NotifyProcessingStateObserver(EngineStateUpdate state);
 
+  // Ends callback access before any path detaches or releases the input graph.
+  void InvalidateInputRenderContext();
+
   // Thread that this object is created on.
   webrtc::Thread* thread_;
   std::unique_ptr<webrtc::Thread> render_thread_;
@@ -510,7 +560,8 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
   AVAudioPCMBuffer* read_buffer_;
 
   const std::unique_ptr<TaskQueueFactory> task_queue_factory_;
-  std::unique_ptr<AudioDeviceBuffer> audio_device_buffer_;
+  // Remains the long-lived owner while render contexts take only weak access.
+  std::shared_ptr<AudioDeviceBuffer> audio_device_buffer_;
   std::unique_ptr<FineAudioBuffer> fine_audio_buffer_;
 
   AudioParameters playout_parameters_;
@@ -548,9 +599,9 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
   AVAudioSinkNode* sink_node_ RTC_GUARDED_BY(thread_);
   AVAudioMixerNode* input_mixer_node_ RTC_GUARDED_BY(thread_);
 
-  // Float32 -> Int16 converter.
-  AudioConverterRef converter_ref_;
-  AVAudioPCMBuffer* converter_buffer_;
+  // Lets device teardown invalidate the context even when the sink block keeps
+  // its own copy alive for a late callback.
+  std::shared_ptr<AudioEngineInputRenderContext> input_render_context_;
 
   void* configuration_observer_ RTC_GUARDED_BY(thread_);
 };
