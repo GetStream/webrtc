@@ -418,16 +418,25 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
       bool default_device = (DidUpdateDefaultOutputDevice() && next.IsOutputDefaultDevice()) ||
                             (DidUpdateDefaultInputDevice() && next.IsInputDefaultDevice());
 
-      // Special case to re-create engine when switching from Speaker & Mic ->
-      // Speaker only.
-      bool special_case = (prev.IsOutputEnabled() && next.IsOutputEnabled()) &&
-                          (prev.IsInputEnabled() && !next.IsInputEnabled());
+      // Adding or removing input while output remains enabled changes the I/O
+      // topology. Recreate the engine so voice processing is configured on a
+      // fresh graph rather than one whose I/O unit is still stopping.
+      bool input_topology = prev.IsOutputEnabled() && next.IsOutputEnabled() &&
+          prev.IsInputEnabled() != next.IsInputEnabled();
 
       // When stereo output channels preference changes or stereo playout becomes
       // unavailable/available.
       bool output_channels = DidUpdateDesiredOutputChannels();
 
-      return device || default_device || special_case || output_channels;
+      // A live graph cannot safely toggle voice processing while its I/O unit
+      // may still be stopping, so require a fresh engine for that transition.
+      bool voice_processing =
+          prev.IsAnyEnabled() && DidUpdateVoiceProcessingEnabled();
+
+      // Centralize every graph-invalidating transition so callers always take
+      // the same deterministic release-and-recreate path.
+      return device || default_device || input_topology || voice_processing ||
+          output_channels;
     }
 
     bool DidEnableManualRenderingMode() const {
@@ -484,8 +493,10 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
   void StartRenderLoop();
   AVAudioEngineManualRenderingBlock render_block_;
 
-  void ConfigureVoiceProcessingNode(AVAudioInputNode* input_node,
-                                    EngineStateUpdate state);
+  // Return the native failure so callers can avoid running input without the
+  // requested voice-processing configuration.
+  int32_t ConfigureVoiceProcessingNode(AVAudioInputNode* input_node,
+                                       EngineStateUpdate state);
 
   void ConfigureMutedSpeechActivityEventListener(AVAudioInputNode* input_node, 
                                                  EngineStateUpdate state);
