@@ -10,8 +10,11 @@
 
 #import <XCTest/XCTest.h>
 
+#include <memory>
+#include <thread>
 #include <vector>
 
+#include "api/environment/environment_factory.h"
 #import "api/logging/RTCCallbackLogger.h"
 #import "api/peerconnection/RTCConfiguration.h"
 #import "api/peerconnection/RTCAudioDeviceModule.h"
@@ -21,6 +24,8 @@
 #import "api/peerconnection/RTCRtpTransceiver.h"
 #import "api/peerconnection/RTCSessionDescription.h"
 #import "components/audio/RTCAudioSession+Private.h"
+#include "modules/audio_device/audio_device_buffer.h"
+#include "modules/audio_device/audio_engine_device.h"
 
 @interface RTC_OBJC_TYPE(RTCAudioSession)
 (UnitTesting)
@@ -41,6 +46,63 @@
       return;                                     \
     }                                             \
   } while (false)
+
+- (void)testAudioEngineInputRenderContextIgnoresLateCallbackAfterInvalidation {
+  auto audioDeviceBuffer = std::make_shared<webrtc::AudioDeviceBuffer>(
+      webrtc::CreateEnvironment());
+  audioDeviceBuffer->SetRecordingSampleRate(48000);
+  audioDeviceBuffer->SetRecordingChannels(1);
+
+  AVAudioFormat *engineFormat =
+      [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatFloat32
+                                      sampleRate:48000
+                                        channels:1
+                                     interleaved:YES];
+  AVAudioFormat *rtcFormat =
+      [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatInt16
+                                      sampleRate:48000
+                                        channels:1
+                                     interleaved:YES];
+  auto subject = std::make_shared<webrtc::AudioEngineInputRenderContext>(
+      engineFormat, rtcFormat, audioDeviceBuffer, 1.0);
+
+  subject->Invalidate();
+
+  XCTAssertEqual(noErr, subject->Render(nullptr, 0, nullptr));
+}
+
+- (void)testAudioEngineInputRenderContextDoesNotOwnAudioDeviceBuffer {
+  const std::thread::id ownerThread = std::this_thread::get_id();
+  std::thread::id deleterThread;
+  auto audioDeviceBuffer = std::shared_ptr<webrtc::AudioDeviceBuffer>(
+      new webrtc::AudioDeviceBuffer(webrtc::CreateEnvironment(),
+                                    /*create_detached=*/true),
+      [&deleterThread](webrtc::AudioDeviceBuffer *buffer) {
+        deleterThread = std::this_thread::get_id();
+        delete buffer;
+      });
+
+  AVAudioFormat *engineFormat =
+      [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatFloat32
+                                      sampleRate:48000
+                                        channels:1
+                                     interleaved:YES];
+  AVAudioFormat *rtcFormat =
+      [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatInt16
+                                      sampleRate:48000
+                                        channels:1
+                                     interleaved:YES];
+  auto subject = std::make_shared<webrtc::AudioEngineInputRenderContext>(
+      engineFormat, rtcFormat, audioDeviceBuffer, 1.0);
+
+  subject->Invalidate();
+  audioDeviceBuffer.reset();
+  std::thread releaseThread(
+      [subject = std::move(subject)]() mutable { subject.reset(); });
+  releaseThread.join();
+
+  XCTAssertEqual(ownerThread, deleterThread);
+}
 
 - (void)testAudioEngineModuleRetainedAfterFactoryDeallocDoesNotKeepAudioSessionDelegate {
   RETURN_IF_SIMULATOR_AUDIO_TEST_DISABLED();

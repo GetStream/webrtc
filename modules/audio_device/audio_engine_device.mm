@@ -64,13 +64,141 @@ const useconds_t kVoiceProcessingRetryDelayMs = 100;
 const size_t kMaximumFramesPerBuffer = 3072;
 const size_t kAudioSampleSize = 2;  // Signed 16-bit integer
 
+AudioEngineInputRenderContext::AudioEngineInputRenderContext(
+    AVAudioFormat* engine_format,
+    AVAudioFormat* rtc_format,
+    std::shared_ptr<AudioDeviceBuffer> audio_device_buffer,
+    double mach_tick_units_to_nanoseconds)
+    // Observe the device-owned buffer without extending its destruction
+    // sequence to the AVAudioEngine callback thread.
+    : audio_device_buffer_(audio_device_buffer),
+      // FineAudioBuffer caches a raw buffer pointer, so invalidation must
+      // destroy it before the device owner can disappear.
+      fine_audio_buffer_(
+          std::make_unique<FineAudioBuffer>(audio_device_buffer.get())),
+      // Copy the scalar timing ratio instead of capturing AudioEngineDevice.
+      mach_tick_units_to_nanoseconds_(mach_tick_units_to_nanoseconds) {
+  // Move the converter beside the sink callback so its lifetime follows every
+  // copied block invocation rather than the releasing engine object.
+  OSStatus err = AudioConverterNew(engine_format.streamDescription,
+                                   rtc_format.streamDescription, &converter_ref_);
+  // Preserve the original construction invariant: rendering requires a valid
+  // converter and cannot recover inside the real-time callback.
+  RTC_DCHECK(err == noErr);
+  // Keep the converter's destination memory alive for the same guarded
+  // lifetime as the converter itself.
+  converter_buffer_ = [[AVAudioPCMBuffer alloc] initWithPCMFormat:rtc_format
+                                                    frameCapacity:kMaximumFramesPerBuffer];
+}
+
+AudioEngineInputRenderContext::~AudioEngineInputRenderContext() {
+  // Normal teardown invalidates on the device thread; this fallback prevents a
+  // missed path from leaking callback-local conversion resources.
+  Invalidate();
+}
+
+void AudioEngineInputRenderContext::Invalidate() {
+  // Taking the render lock drains a callback that already entered conversion
+  // and prevents any later callback from observing partially released state.
+  MutexLock lock(&mutex_);
+  // Repeated rollback and release paths can safely share this cleanup method.
+  if (!is_valid_) {
+    return;
+  }
+
+  // Close the callback gate before dropping any resource it may access.
+  is_valid_ = false;
+  // Remove FineAudioBuffer's raw AudioDeviceBuffer link while the device still
+  // owns the underlying sequence-affine object.
+  fine_audio_buffer_.reset();
+  // Dispose the converter on the device-control sequence after in-flight
+  // conversion has completed under the same lock.
+  if (converter_ref_ != nullptr) {
+    OSStatus err = AudioConverterDispose(converter_ref_);
+    // Match creation's invariant while ensuring repeated invalidation cannot
+    // dispose the converter twice.
+    RTC_DCHECK(err == noErr);
+    converter_ref_ = nullptr;
+  }
+  // Release the Objective-C sample storage with the converter it backs.
+  converter_buffer_ = nil;
+}
+
+OSStatus AudioEngineInputRenderContext::Render(const AudioTimeStamp* timestamp,
+                                               AVAudioFrameCount frame_count,
+                                               const AudioBufferList* input_data) {
+  // Hold the teardown gate across conversion and delivery because both use
+  // resources that Invalidate releases together.
+  MutexLock lock(&mutex_);
+  // AVAudioEngine may invoke its copied block after detach; that callback must
+  // succeed as a no-op without touching released input pointers.
+  if (!is_valid_) {
+    return noErr;
+  }
+
+  // Promote weak access only for this render so the callback never owns the
+  // buffer beyond active work.
+  const auto audio_device_buffer = audio_device_buffer_.lock();
+  // Device destruction can win the race before callback entry; no delivery is
+  // possible once the owner is gone.
+  if (audio_device_buffer == nullptr) {
+    return noErr;
+  }
+
+  // The configured mono sink and converter must agree on one input buffer.
+  RTC_DCHECK(input_data->mNumberBuffers == 1);
+
+  // AVAudioPCMBuffer owns the writable list; AudioConverter's C API requires
+  // the non-const view used only during this guarded conversion.
+  AudioBufferList* converter_buffer_abl =
+      const_cast<AudioBufferList*>(converter_buffer_.audioBufferList);
+  // Reject an engine format change that would violate the prepared converter.
+  RTC_DCHECK(converter_buffer_abl->mNumberBuffers == input_data->mNumberBuffers);
+
+  // Fails for conversions where there is a variation between the input and output data
+  // buffer sizes.
+  converter_buffer_abl->mBuffers[0].mDataByteSize = input_data->mBuffers[0].mDataByteSize;
+
+  // Keep the prepared output view aligned with the engine input before the C
+  // converter reads either list.
+  RTC_DCHECK(converter_buffer_abl->mBuffers[0].mDataByteSize ==
+             input_data->mBuffers[0].mDataByteSize);
+
+  // Convert while teardown is excluded so AudioConverterDispose cannot race
+  // this call.
+  OSStatus err = AudioConverterConvertComplexBuffer(converter_ref_, frame_count, input_data,
+                                                    converter_buffer_abl);
+  // The render path cannot substitute valid recorded data after conversion
+  // failure, matching the previous callback behavior.
+  RTC_DCHECK(err == noErr);
+
+  // Reuse the converter's Int16 storage without copying on the audio thread.
+  const int16_t* rtc_buffer =
+      static_cast<int16_t*>(converter_buffer_abl->mBuffers[0].mData);
+  // Preserve AVAudioEngine's host timestamp after removing the device capture.
+  const int64_t capture_time_ns =
+      timestamp->mHostTime * mach_tick_units_to_nanoseconds_;
+
+  // Deliver while the temporary strong buffer reference and teardown lock are
+  // both held, then release that reference back on this callback invocation.
+  fine_audio_buffer_->DeliverRecordedData(
+      webrtc::ArrayView<const int16_t>(rtc_buffer, frame_count), kFixedRecordDelayEstimate,
+      capture_time_ns);
+
+  // A completed or intentionally ignored sink callback is successful to
+  // AVAudioEngine, so teardown does not provoke a second error path.
+  return noErr;
+}
+
 AudioEngineDevice::AudioEngineDevice(bool voice_processing_bypassed)
     : task_queue_factory_(CreateDefaultTaskQueueFactory()), initialized_(false) {
   LOGI() << "voice_processing_bypassed " << voice_processing_bypassed;
 
   thread_ = webrtc::Thread::Current();
-  audio_device_buffer_.reset(
-      new webrtc::AudioDeviceBuffer(webrtc::CreateEnvironment(task_queue_factory_.get())));
+  // Keep the device as the long-lived owner while callback contexts obtain
+  // only weak, render-scoped access.
+  audio_device_buffer_ = std::make_shared<webrtc::AudioDeviceBuffer>(
+      webrtc::CreateEnvironment(task_queue_factory_.get()));
 
 #if defined(WEBRTC_IOS)
   audio_session_observer_ =
@@ -1976,6 +2104,8 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
         return result;
       }
     }
+    // Drain callbacks before graph release can free their converter resources.
+    InvalidateInputRenderContext();
     // Drop the old graph only after all owners have released it.
     engine_device_ = nil;
     // Report that the engine is fully released and safe to replace.
@@ -2425,48 +2555,23 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
     RTC_DCHECK(audio_device_buffer_ != nullptr);
     fine_audio_buffer_.reset(new FineAudioBuffer(audio_device_buffer_.get()));
 
-    // Prepare Float32 -> Int16 converter.
-    if (converter_ref_ == nullptr) {
-      OSStatus err = AudioConverterNew(engine_input_format.streamDescription,
-                                       rtc_input_format.streamDescription, &converter_ref_);
-      RTC_DCHECK(err == noErr);
-    }
-
-    // Prepare buffer for Int16 converter.
-    if (converter_buffer_ == nil) {
-      converter_buffer_ = [[AVAudioPCMBuffer alloc] initWithPCMFormat:rtc_input_format
-                                                        frameCapacity:kMaximumFramesPerBuffer];
-    }
+    // Give copied sink blocks their own guarded converter lifetime without
+    // capturing AudioEngineDevice.
+    input_render_context_ = std::make_shared<AudioEngineInputRenderContext>(
+        engine_input_format, rtc_input_format, audio_device_buffer_,
+        machTickUnitsToNanoseconds_);
+    // Tear down partially configured input through the same callback gate.
+    rollback_actions.push_back([this] { InvalidateInputRenderContext(); });
+    // Capture the context by value because AVAudioEngine owns a copied block
+    // that can outlive the device's reference during graph release.
+    const auto input_render_context = input_render_context_;
 
     // Convert to Int16 buffers within the sink block.
     AVAudioSinkNodeReceiverBlock sink_block =
         ^OSStatus(const AudioTimeStamp* timestamp, AVAudioFrameCount frameCount,
                   const AudioBufferList* inputData) {
-          RTC_DCHECK(inputData->mNumberBuffers == 1);
-
-          AudioBufferList* converter_buffer_abl =
-              const_cast<AudioBufferList*>(converter_buffer_.audioBufferList);
-          RTC_DCHECK(converter_buffer_abl->mNumberBuffers == inputData->mNumberBuffers);
-
-          // Fails for conversions where there is a variation between the input and output data
-          // buffer sizes.
-          converter_buffer_abl->mBuffers[0].mDataByteSize = inputData->mBuffers[0].mDataByteSize;
-
-          RTC_DCHECK(converter_buffer_abl->mBuffers[0].mDataByteSize ==
-                     inputData->mBuffers[0].mDataByteSize);
-
-          OSStatus err = AudioConverterConvertComplexBuffer(converter_ref_, frameCount, inputData,
-                                                            converter_buffer_abl);
-          RTC_DCHECK(err == noErr);
-
-          const int16_t* rtc_buffer = (int16_t*)converter_buffer_abl->mBuffers[0].mData;  // Float32
-          const int64_t capture_time_ns = timestamp->mHostTime * machTickUnitsToNanoseconds_;
-
-          fine_audio_buffer_->DeliverRecordedData(
-              webrtc::ArrayView<const int16_t>(rtc_buffer, frameCount), kFixedRecordDelayEstimate,
-              capture_time_ns);
-
-          return noErr;
+          // Route every invocation through the guarded lifetime boundary.
+          return input_render_context->Render(timestamp, frameCount, inputData);
         };
 
     NSMutableArray<AVAudioConnectionPoint*>* input_mixer_connections = [NSMutableArray array];
@@ -2521,6 +2626,8 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
              !state.IsEngineRecreateRequired()) {
     LOGI() << "Disabling input for AVAudioEngine...";
     RTC_DCHECK(!engine_device_.running);
+    // Close and drain the callback before detaching either input node.
+    InvalidateInputRenderContext();
 
     // If disabling input, always unmute the voice-processing input mute.
     if (inputNode().voiceProcessingEnabled && inputNode().voiceProcessingInputMuted) {
@@ -2556,15 +2663,6 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
       }
     }
 
-    // Dispose Float32 -> Int16 converter.
-    if (converter_ref_ != nullptr) {
-      OSStatus err = AudioConverterDispose(converter_ref_);
-      RTC_DCHECK(err == noErr);
-      converter_ref_ = nullptr;
-    }
-
-    // Release buffer for Int16 converter.
-    converter_buffer_ = nil;
   }
 
   // --------------------------------------------------------------------------------------------
@@ -2817,6 +2915,19 @@ int32_t AudioEngineDevice::ApplyDeviceEngineState(EngineStateUpdate& state) {
   }
 
   return 0;
+}
+
+void AudioEngineDevice::InvalidateInputRenderContext() {
+  // A missing context means input setup never completed or teardown already
+  // consumed the device's reference.
+  if (input_render_context_ != nullptr) {
+    // Release callback-local raw links and converter state on the owning
+    // device-control sequence after any active render exits.
+    input_render_context_->Invalidate();
+    // The sink block may retain the inert context, but it no longer retains or
+    // accesses sequence-affine production resources.
+    input_render_context_.reset();
+  }
 }
 
 // ----------------------------------------------------------------------------------------------------
