@@ -27,6 +27,10 @@ class AudioSessionObserver {
   // Called when audio route changes.
   virtual void OnValidRouteChange() = 0;
 
+  // Called after the media services process restarts.
+  // Implementations can rebuild audio objects invalidated by the reset.
+  virtual void OnMediaServicesReset() {}
+
   // Called when the ability to play or record changes.
   virtual void OnCanPlayOrRecordChange(bool can_play_or_record) = 0;
 

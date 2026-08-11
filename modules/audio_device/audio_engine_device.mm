@@ -651,6 +651,16 @@ void AudioEngineDevice::OnValidRouteChange() {
   }));
 }
 
+void AudioEngineDevice::OnMediaServicesReset() {
+  LOGI() << "OnMediaServicesReset";
+  RTC_DCHECK(thread_);
+
+  // A media-services reset invalidates AVAudioEngine and its nodes even though
+  // WebRTC still considers playout and recording started. ReconfigureEngine
+  // rebuilds the graph and restores their prior state.
+  ReconfigureEngine();
+}
+
 void AudioEngineDevice::OnCanPlayOrRecordChange(bool can_play_or_record) {
   LOGI() << "OnCanPlayOrRecordChange";
   RTC_DCHECK(thread_);
@@ -1586,6 +1596,8 @@ void AudioEngineDevice::ReconfigureEngine() {
   thread_->PostTask(SafeTask(safety_, [this] {
     RTC_DCHECK_RUN_ON(thread_);
 
+    // Snapshot on the device thread so stop and availability updates are
+    // ordered before or after the complete recovery transition.
     EngineState current_state = this->engine_state_;
 
     // Re-configure is only for device mode
