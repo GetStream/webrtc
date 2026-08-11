@@ -21,6 +21,27 @@
 
 #import "components/audio/RTCAudioSession.h"
 #import "components/audio/RTCAudioSessionConfiguration.h"
+#import "components/audio/RTCNativeAudioSessionDelegateAdapter.h"
+
+#include "sdk/objc/native/src/audio/audio_session_observer.h"
+
+namespace {
+
+class TestAudioSessionObserver final : public webrtc::AudioSessionObserver {
+ public:
+  void OnInterruptionBegin() override {}
+  void OnInterruptionEnd(bool should_resume) override {}
+  void OnValidRouteChange() override {}
+  void OnMediaServicesReset() override {
+    did_receive_media_services_reset = true;
+  }
+  void OnCanPlayOrRecordChange(bool can_play_or_record) override {}
+  void OnChangedOutputVolume() override {}
+
+  bool did_receive_media_services_reset = false;
+};
+
+}  // namespace
 
 @interface RTC_OBJC_TYPE (RTCAudioSession)
 (UnitTesting)
@@ -29,17 +50,75 @@
         __weak id<RTC_OBJC_TYPE(RTCAudioSessionDelegate)> > delegates;
 
 - (instancetype)initWithAudioSession:(id)audioSession;
+- (void)handleMediaServicesWereReset:(NSNotification *)notification;
 
 @end
 
 @interface MockAVAudioSession : NSObject
 
 @property(nonatomic, readwrite, assign) float outputVolume;
+@property(nonatomic, readonly) AVAudioSessionCategory lastCategory;
+@property(nonatomic, readonly) AVAudioSessionMode lastMode;
+@property(nonatomic, readonly)
+    AVAudioSessionCategoryOptions lastCategoryOptions;
+@property(nonatomic, readonly) double lastPreferredSampleRate;
+@property(nonatomic, readonly) NSTimeInterval lastPreferredIOBufferDuration;
+@property(nonatomic, readonly) NSInteger lastPreferredInputNumberOfChannels;
+@property(nonatomic, readonly) NSInteger lastPreferredOutputNumberOfChannels;
+@property(nonatomic, readonly) BOOL lastActive;
+@property(nonatomic, readonly) AVAudioSessionSetActiveOptions lastActiveOptions;
+@property(nonatomic, readonly) NSInteger setActiveCallCount;
+@property(nonatomic, copy) void (^setActiveHandler)(BOOL active);
 
 @end
 
 @implementation MockAVAudioSession
 @synthesize outputVolume = _outputVolume;
+
+- (BOOL)setCategory:(AVAudioSessionCategory)category
+               mode:(AVAudioSessionMode)mode
+            options:(AVAudioSessionCategoryOptions)options
+              error:(NSError **)outError {
+  _lastCategory = category;
+  _lastMode = mode;
+  _lastCategoryOptions = options;
+  return YES;
+}
+
+- (BOOL)setPreferredSampleRate:(double)sampleRate error:(NSError **)outError {
+  _lastPreferredSampleRate = sampleRate;
+  return YES;
+}
+
+- (BOOL)setPreferredIOBufferDuration:(NSTimeInterval)duration
+                               error:(NSError **)outError {
+  _lastPreferredIOBufferDuration = duration;
+  return YES;
+}
+
+- (BOOL)setPreferredInputNumberOfChannels:(NSInteger)count
+                                    error:(NSError **)outError {
+  _lastPreferredInputNumberOfChannels = count;
+  return YES;
+}
+
+- (BOOL)setPreferredOutputNumberOfChannels:(NSInteger)count
+                                     error:(NSError **)outError {
+  _lastPreferredOutputNumberOfChannels = count;
+  return YES;
+}
+
+- (BOOL)setActive:(BOOL)active
+      withOptions:(AVAudioSessionSetActiveOptions)options
+            error:(NSError **)outError {
+  _lastActive = active;
+  _lastActiveOptions = options;
+  ++_setActiveCallCount;
+  if (_setActiveHandler) {
+    _setActiveHandler(active);
+  }
+  return YES;
+}
 @end
 
 @interface RTCAudioSessionTestDelegate
@@ -217,12 +296,155 @@
 
 - (void)testAudioSessionActivation {
   RTC_OBJC_TYPE(RTCAudioSession) *audioSession =
-      [RTC_OBJC_TYPE(RTCAudioSession) sharedInstance];
+      [[RTC_OBJC_TYPE(RTCAudioSession) alloc]
+          initWithAudioSession:[AVAudioSession sharedInstance]];
   EXPECT_EQ(0, audioSession.activationCount);
   [audioSession audioSessionDidActivate:[AVAudioSession sharedInstance]];
   EXPECT_EQ(1, audioSession.activationCount);
   [audioSession audioSessionDidDeactivate:[AVAudioSession sharedInstance]];
   EXPECT_EQ(0, audioSession.activationCount);
+}
+
+- (void)testUnbalancedAudioSessionDeactivationDoesNotUnderflow {
+  RTC_OBJC_TYPE(RTCAudioSession) *audioSession =
+      [[RTC_OBJC_TYPE(RTCAudioSession) alloc]
+          initWithAudioSession:[AVAudioSession sharedInstance]];
+  EXPECT_EQ(0, audioSession.activationCount);
+
+  [audioSession audioSessionDidDeactivate:[AVAudioSession sharedInstance]];
+
+  EXPECT_EQ(0, audioSession.activationCount);
+
+  [audioSession audioSessionDidActivate:[AVAudioSession sharedInstance]];
+
+  EXPECT_EQ(1, audioSession.activationCount);
+}
+
+- (void)testMediaServerResetIsForwardedToNativeObserver {
+  TestAudioSessionObserver observer;
+  RTC_OBJC_TYPE(RTCNativeAudioSessionDelegateAdapter) *adapter =
+      [[RTC_OBJC_TYPE(RTCNativeAudioSessionDelegateAdapter) alloc]
+          initWithObserver:&observer];
+
+  [adapter audioSessionMediaServerReset:[RTC_OBJC_TYPE(RTCAudioSession)
+                                            sharedInstance]];
+
+  EXPECT_TRUE(observer.did_receive_media_services_reset);
+}
+
+- (void)testMediaServicesResetRestoresConfigurationAndActiveState {
+  RTC_OBJC_TYPE(RTCAudioSessionConfiguration) *previousConfiguration =
+      [RTC_OBJC_TYPE(RTCAudioSessionConfiguration) webRTCConfiguration];
+  RTC_OBJC_TYPE(RTCAudioSessionConfiguration) *configuration =
+      [[RTC_OBJC_TYPE(RTCAudioSessionConfiguration) alloc] init];
+  configuration.category = AVAudioSessionCategoryPlayAndRecord;
+  configuration.mode = AVAudioSessionModeVoiceChat;
+  configuration.categoryOptions = AVAudioSessionCategoryOptionAllowBluetoothHFP;
+  configuration.sampleRate = 48000;
+  configuration.ioBufferDuration = 0.02;
+  configuration.inputNumberOfChannels = 1;
+  configuration.outputNumberOfChannels = 1;
+  [RTC_OBJC_TYPE(RTCAudioSessionConfiguration)
+      setWebRTCConfiguration:configuration];
+
+  MockAVAudioSession *mockAVAudioSession = [[MockAVAudioSession alloc] init];
+  RTC_OBJC_TYPE(RTCAudioSession) *audioSession =
+      [[RTC_OBJC_TYPE(RTCAudioSession) alloc]
+          initWithAudioSession:mockAVAudioSession];
+
+  [audioSession audioSessionDidActivate:(AVAudioSession *)mockAVAudioSession];
+  [audioSession handleMediaServicesWereReset:nil];
+
+  EXPECT_EQ(1, audioSession.activationCount);
+  EXPECT_TRUE(audioSession.isActive);
+  EXPECT_EQ(configuration.category, mockAVAudioSession.lastCategory);
+  EXPECT_EQ(configuration.mode, mockAVAudioSession.lastMode);
+  EXPECT_EQ(configuration.categoryOptions,
+            mockAVAudioSession.lastCategoryOptions);
+  EXPECT_EQ(configuration.sampleRate,
+            mockAVAudioSession.lastPreferredSampleRate);
+  EXPECT_EQ(configuration.ioBufferDuration,
+            mockAVAudioSession.lastPreferredIOBufferDuration);
+  EXPECT_EQ(configuration.inputNumberOfChannels,
+            mockAVAudioSession.lastPreferredInputNumberOfChannels);
+  EXPECT_EQ(configuration.outputNumberOfChannels,
+            mockAVAudioSession.lastPreferredOutputNumberOfChannels);
+  EXPECT_TRUE(mockAVAudioSession.lastActive);
+  EXPECT_EQ(0u, mockAVAudioSession.lastActiveOptions);
+  EXPECT_EQ(1, mockAVAudioSession.setActiveCallCount);
+
+  [RTC_OBJC_TYPE(RTCAudioSessionConfiguration)
+      setWebRTCConfiguration:previousConfiguration];
+}
+
+- (void)testMediaServicesResetKeepsSessionInactiveWithoutActivationOwner {
+  RTC_OBJC_TYPE(RTCAudioSessionConfiguration) *previousConfiguration =
+      [RTC_OBJC_TYPE(RTCAudioSessionConfiguration) webRTCConfiguration];
+  RTC_OBJC_TYPE(RTCAudioSessionConfiguration) *configuration =
+      [[RTC_OBJC_TYPE(RTCAudioSessionConfiguration) alloc] init];
+  configuration.category = AVAudioSessionCategoryPlayAndRecord;
+  configuration.mode = AVAudioSessionModeVoiceChat;
+  configuration.categoryOptions = 0;
+  [RTC_OBJC_TYPE(RTCAudioSessionConfiguration)
+      setWebRTCConfiguration:configuration];
+
+  MockAVAudioSession *mockAVAudioSession = [[MockAVAudioSession alloc] init];
+  RTC_OBJC_TYPE(RTCAudioSession) *audioSession =
+      [[RTC_OBJC_TYPE(RTCAudioSession) alloc]
+          initWithAudioSession:mockAVAudioSession];
+
+  [audioSession handleMediaServicesWereReset:nil];
+
+  EXPECT_EQ(0, audioSession.activationCount);
+  EXPECT_FALSE(audioSession.isActive);
+  EXPECT_FALSE(mockAVAudioSession.lastActive);
+  EXPECT_EQ(AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation,
+            mockAVAudioSession.lastActiveOptions);
+  EXPECT_EQ(1, mockAVAudioSession.setActiveCallCount);
+
+  [RTC_OBJC_TYPE(RTCAudioSessionConfiguration)
+      setWebRTCConfiguration:previousConfiguration];
+}
+
+- (void)testMediaServicesResetReconcilesDeactivationDuringRestore {
+  RTC_OBJC_TYPE(RTCAudioSessionConfiguration) *previousConfiguration =
+      [RTC_OBJC_TYPE(RTCAudioSessionConfiguration) webRTCConfiguration];
+  RTC_OBJC_TYPE(RTCAudioSessionConfiguration) *configuration =
+      [[RTC_OBJC_TYPE(RTCAudioSessionConfiguration) alloc] init];
+  configuration.category = AVAudioSessionCategoryPlayAndRecord;
+  configuration.mode = AVAudioSessionModeVoiceChat;
+  [RTC_OBJC_TYPE(RTCAudioSessionConfiguration)
+      setWebRTCConfiguration:configuration];
+
+  MockAVAudioSession *mockAVAudioSession = [[MockAVAudioSession alloc] init];
+  RTC_OBJC_TYPE(RTCAudioSession) *audioSession =
+      [[RTC_OBJC_TYPE(RTCAudioSession) alloc]
+          initWithAudioSession:mockAVAudioSession];
+  [audioSession audioSessionDidActivate:(AVAudioSession *)mockAVAudioSession];
+
+  __block BOOL didDeactivate = NO;
+  __weak RTC_OBJC_TYPE(RTCAudioSession) *weakAudioSession = audioSession;
+  __weak MockAVAudioSession *weakMockAVAudioSession = mockAVAudioSession;
+  mockAVAudioSession.setActiveHandler = ^(BOOL active) {
+    if (active && !didDeactivate) {
+      didDeactivate = YES;
+      [weakAudioSession
+          audioSessionDidDeactivate:(AVAudioSession *)weakMockAVAudioSession];
+    }
+  };
+
+  [audioSession handleMediaServicesWereReset:nil];
+  mockAVAudioSession.setActiveHandler = nil;
+
+  EXPECT_EQ(0, audioSession.activationCount);
+  EXPECT_FALSE(audioSession.isActive);
+  EXPECT_FALSE(mockAVAudioSession.lastActive);
+  EXPECT_EQ(AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation,
+            mockAVAudioSession.lastActiveOptions);
+  EXPECT_EQ(2, mockAVAudioSession.setActiveCallCount);
+
+  [RTC_OBJC_TYPE(RTCAudioSessionConfiguration)
+      setWebRTCConfiguration:previousConfiguration];
 }
 
 // TODO(b/298960678): Fix crash when running the test on simulators.

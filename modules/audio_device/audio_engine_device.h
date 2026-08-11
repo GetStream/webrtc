@@ -360,6 +360,7 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
   void OnInterruptionBegin() override;
   void OnInterruptionEnd(bool should_resume) override;
   void OnValidRouteChange() override;
+  void OnMediaServicesReset() override;
   void OnCanPlayOrRecordChange(bool can_play_or_record) override;
   void OnChangedOutputVolume() override;
 

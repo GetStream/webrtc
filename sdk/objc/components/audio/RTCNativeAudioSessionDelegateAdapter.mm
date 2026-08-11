@@ -72,6 +72,10 @@
 }
 
 - (void)audioSessionMediaServerReset:(RTC_OBJC_TYPE(RTCAudioSession) *)session {
+  // iOS sends this after its media-services process restarts. Existing audio
+  // objects may remain alive while capture and playout stay silent until the
+  // graph is rebuilt.
+  _observer->OnMediaServicesReset();
 }
 
 - (void)audioSession:(RTC_OBJC_TYPE(RTCAudioSession) *)session

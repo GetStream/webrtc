@@ -41,6 +41,8 @@ ABSL_CONST_INIT thread_local bool mutex_locked = false;
 @interface RTC_OBJC_TYPE (RTCAudioSession)
 () @property(nonatomic, readonly)
     std::vector<__weak id<RTC_OBJC_TYPE(RTCAudioSessionDelegate)> > delegates;
+
+- (void)restoreAudioSessionAfterMediaServicesReset;
 @end
 
 // This class needs to be thread-safe because it is accessed from many threads.
@@ -595,7 +597,7 @@ ABSL_CONST_INIT thread_local bool mutex_locked = false;
 
 - (void)handleMediaServicesWereReset:(NSNotification *)notification {
   RTCLog(@"Media services were reset.");
-  [self updateAudioSessionAfterEvent];
+  [self restoreAudioSessionAfterMediaServicesReset];
   [self notifyMediaServicesWereReset];
 }
 
@@ -676,7 +678,18 @@ ABSL_CONST_INIT thread_local bool mutex_locked = false;
 
 - (NSInteger)decrementActivationCount {
   RTCLog(@"Decrementing activation count.");
-  return _activationCount.fetch_sub(1) - 1;
+  // An unmatched deactivation used to make the count negative. A later valid
+  // activation then still looked inactive during media-services recovery.
+  int activationCount = _activationCount.load();
+  while (activationCount > 0) {
+    if (_activationCount.compare_exchange_weak(activationCount,
+                                               activationCount - 1)) {
+      return activationCount - 1;
+    }
+  }
+
+  RTCLogWarning(@"Ignoring unbalanced audio session deactivation.");
+  return 0;
 }
 
 - (int)webRTCSessionCount {
@@ -812,21 +825,90 @@ ABSL_CONST_INIT thread_local bool mutex_locked = false;
 }
 
 - (void)updateAudioSessionAfterEvent {
-  BOOL shouldActivate = self.activationCount > 0;
-  AVAudioSessionSetActiveOptions options = shouldActivate ?
-      0 :
-      AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation;
+  BOOL shouldActivate = NO;
+  do {
+    shouldActivate = self.activationCount > 0;
+    AVAudioSessionSetActiveOptions options = shouldActivate ?
+        0 :
+        AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation;
+    NSError *error = nil;
+    if ([self.session setActive:shouldActivate
+                    withOptions:options
+                          error:&error]) {
+      self.isActive = shouldActivate;
+      RTCLog(@"Did set session active to %d", shouldActivate);
+    } else {
+      RTCLogError(@"Failed to set session active to %d. Error:%@",
+                  shouldActivate,
+                  error.localizedDescription);
+      return;
+    }
+
+    // An external activation or deactivation can arrive while setActive is in
+    // progress. Reconcile once more when ownership changed during the call.
+  } while ((self.activationCount > 0) != shouldActivate);
+}
+
+- (void)restoreAudioSessionAfterMediaServicesReset {
+  RTC_OBJC_TYPE(RTCAudioSessionConfiguration) *configuration =
+      [RTC_OBJC_TYPE(RTCAudioSessionConfiguration) webRTCConfiguration];
+  [self lockForConfiguration];
+
+  // The restarted media server no longer owns the previous session state even
+  // when AVAudioSession still reports the cached values. Reapply each value
+  // without comparing it to the getters first.
+  self.isActive = NO;
   NSError *error = nil;
-  if ([self.session setActive:shouldActivate
-                  withOptions:options
-                        error:&error]) {
-    self.isActive = shouldActivate;
-     RTCLogError(@"Did set session active to %d", shouldActivate);
-  } else {
-    RTCLogError(@"Failed to set session active to %d. Error:%@",
-                shouldActivate,
+  if (![self setCategory:configuration.category
+                    mode:configuration.mode
+                 options:configuration.categoryOptions
+                   error:&error]) {
+    RTCLogError(@"Failed to restore category and mode after media-services "
+                @"reset: %@",
                 error.localizedDescription);
   }
+
+  error = nil;
+  if (![self setPreferredSampleRate:configuration.sampleRate error:&error]) {
+    RTCLogError(@"Failed to restore preferred sample rate after media-services "
+                @"reset: %@",
+                error.localizedDescription);
+  }
+
+  error = nil;
+  if (![self setPreferredIOBufferDuration:configuration.ioBufferDuration
+                                    error:&error]) {
+    RTCLogError(@"Failed to restore preferred I/O buffer duration after "
+                @"media-services reset: %@",
+                error.localizedDescription);
+  }
+
+  // Restore the physical session without changing the activation ownership
+  // count. A deactivation racing the reset therefore still wins normally.
+  [self updateAudioSessionAfterEvent];
+
+  if (self.isActive &&
+      [configuration.mode isEqualToString:AVAudioSessionModeVoiceChat]) {
+    error = nil;
+    if (![self setPreferredInputNumberOfChannels:configuration
+                                                     .inputNumberOfChannels
+                                           error:&error]) {
+      RTCLogError(@"Failed to restore preferred input channels after "
+                  @"media-services reset: %@",
+                  error.localizedDescription);
+    }
+
+    error = nil;
+    if (![self setPreferredOutputNumberOfChannels:configuration
+                                                      .outputNumberOfChannels
+                                            error:&error]) {
+      RTCLogError(@"Failed to restore preferred output channels after "
+                  @"media-services reset: %@",
+                  error.localizedDescription);
+    }
+  }
+
+  [self unlockForConfiguration];
 }
 
 - (void)updateCanPlayOrRecord {
