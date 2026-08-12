@@ -631,13 +631,22 @@ void AudioEngineDevice::OnInterruptionEnd(bool should_resume) {
   LOGI() << "OnInterruptionEnd should_resume: " << should_resume;
 
   RTC_DCHECK(thread_);
-  thread_->PostTask(SafeTask(safety_, [this] {
+  thread_->PostTask(SafeTask(safety_, [this, should_resume] {
     int32_t result = this->ModifyEngineState([](EngineState state) -> EngineState {
       state.is_interrupted = false;
       return state;
     });
     if (result != 0) {
       LOGE() << "Failed to update engine state for interruption end, error: " << result;
+      return;
+    }
+
+    if (should_resume &&
+        this->should_reconfigure_after_media_services_reset_.exchange(false)) {
+      LOGI() << "Reconfiguring after media-services reset and audio-session "
+                "reactivation";
+      this->ReconfigureEngine(
+          /*restore_media_services_recovery_on_failure=*/true);
     }
   }));
 }
@@ -658,6 +667,7 @@ void AudioEngineDevice::OnMediaServicesReset() {
   // A media-services reset invalidates AVAudioEngine and its nodes even though
   // WebRTC still considers playout and recording started. ReconfigureEngine
   // rebuilds the graph and restores their prior state.
+  should_reconfigure_after_media_services_reset_.store(true);
   ReconfigureEngine();
 }
 
@@ -1587,48 +1597,58 @@ int32_t AudioEngineDevice::InitRecordingPersistentMode(bool* enabled) {
 // ----------------------------------------------------------------------------------------------------
 // Private - Engine Related
 
-void AudioEngineDevice::ReconfigureEngine() {
+void AudioEngineDevice::ReconfigureEngine(
+    bool restore_media_services_recovery_on_failure) {
   LOGI() << "ReconfigureEngine";
 
   // TODO: More optimizations
   // We only need to re-attach the input / output nodes with updated sample rate etc.
 
-  thread_->PostTask(SafeTask(safety_, [this] {
-    RTC_DCHECK_RUN_ON(thread_);
+  thread_->PostTask(
+      SafeTask(safety_, [this, restore_media_services_recovery_on_failure] {
+        RTC_DCHECK_RUN_ON(thread_);
 
-    // Snapshot on the device thread so stop and availability updates are
-    // ordered before or after the complete recovery transition.
-    EngineState current_state = this->engine_state_;
+        // Snapshot on the device thread so stop and availability updates are
+        // ordered before or after the complete recovery transition.
+        EngineState current_state = this->engine_state_;
 
-    // Re-configure is only for device mode
-    if (current_state.render_mode != RenderMode::Device) return;
+        // Re-configure is only for device mode
+        if (current_state.render_mode != RenderMode::Device) return;
 
-    EngineState shutdown_state = this->engine_state_;
-    shutdown_state.input_enabled = false;
-    shutdown_state.input_running = false;
-    shutdown_state.output_enabled = false;
-    shutdown_state.output_running = false;
+        EngineState shutdown_state = this->engine_state_;
+        shutdown_state.input_enabled = false;
+        shutdown_state.input_running = false;
+        shutdown_state.output_enabled = false;
+        shutdown_state.output_running = false;
 
-    int32_t shutdown_result =
-        this->ModifyEngineState([shutdown_state](EngineState state) -> EngineState {
-          return shutdown_state;  // Shutdown engine
-        });
+        int32_t shutdown_result = this->ModifyEngineState(
+            [shutdown_state](EngineState state) -> EngineState {
+              return shutdown_state;  // Shutdown engine
+            });
 
-    if (shutdown_result != 0) {
-      LOGE() << "ReconfigureEngine: Failed to shutdown engine, error: " << shutdown_result;
-      return;
-    }
+        if (shutdown_result != 0) {
+          LOGE() << "ReconfigureEngine: Failed to shutdown engine, error: "
+                 << shutdown_result;
+          if (restore_media_services_recovery_on_failure) {
+            should_reconfigure_after_media_services_reset_.store(true);
+          }
+          return;
+        }
 
-    int32_t recover_result =
-        this->ModifyEngineState([current_state](EngineState state) -> EngineState {
-          return current_state;  // Recover engine state
-        });
+        int32_t recover_result = this->ModifyEngineState(
+            [current_state](EngineState state) -> EngineState {
+              return current_state;  // Recover engine state
+            });
 
-    if (recover_result != 0) {
-      LOGE() << "ReconfigureEngine: Failed to recover engine state, error: " << recover_result;
-      // We're in a bad state now, could consider more recovery options here
-    }
-  }));
+        if (recover_result != 0) {
+          LOGE() << "ReconfigureEngine: Failed to recover engine state, error: "
+                 << recover_result;
+          if (restore_media_services_recovery_on_failure) {
+            should_reconfigure_after_media_services_reset_.store(true);
+          }
+          // We're in a bad state now, could consider more recovery options here
+        }
+      }));
 }
 
 bool AudioEngineDevice::IsMicrophonePermissionGranted() {
