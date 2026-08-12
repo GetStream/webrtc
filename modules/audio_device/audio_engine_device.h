@@ -505,6 +505,7 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
 
   // CallKit may reactivate the audio session after the media server restarts.
   // Rebuild once more after that activation so the graph uses the new I/O unit.
+  // Keep recovery pending after a failed rebuild so a later activation retries.
   std::atomic<bool> should_reconfigure_after_media_services_reset_{false};
 
   bool IsMicrophonePermissionGranted();
@@ -515,7 +516,8 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
   int32_t ApplyManualEngineState(EngineStateUpdate& state);
 
   // AudioEngine observer methods. May be called from any thread.
-  void ReconfigureEngine();
+  void ReconfigureEngine(
+      bool restore_media_services_recovery_on_failure = false);
 
   // Stereo Playout helpers
   int32_t ResolveStereoPlayoutAvailability(const EngineState& state, bool* available) const;

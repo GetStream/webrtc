@@ -8,6 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#import <OCMock/OCMock.h>
 #import <XCTest/XCTest.h>
 
 #include <memory>
@@ -77,6 +78,75 @@
   [session notifyDidEndInterruptionWithShouldResumeSession:YES];
 
   [self waitForExpectations:@[ reconfiguredTwice ] timeout:1.0];
+  [logger stop];
+}
+
+- (void)
+    testMediaServicesRecoveryRemainsPendingWhenDeferredReconfigurationFails {
+  RTC_OBJC_TYPE(RTCPeerConnectionFactory) *factory =
+      [[RTC_OBJC_TYPE(RTCPeerConnectionFactory) alloc]
+          initWithAudioDeviceModuleType:RTC_OBJC_TYPE(
+                                            RTCAudioDeviceModuleTypeAudioEngine)
+                  bypassVoiceProcessing:NO
+                         encoderFactory:nil
+                         decoderFactory:nil
+                  audioProcessingModule:nil];
+  RTC_OBJC_TYPE(RTCAudioDeviceModule) *audioDeviceModule =
+      factory.audioDeviceModule;
+
+  RTC_OBJC_TYPE(RTCMediaConstraints) *constraints =
+      [[RTC_OBJC_TYPE(RTCMediaConstraints) alloc]
+          initWithMandatoryConstraints:nil
+                   optionalConstraints:nil];
+  RTC_OBJC_TYPE(RTCPeerConnection) *peerConnection = [factory
+      peerConnectionWithConfiguration:[[RTC_OBJC_TYPE(RTCConfiguration) alloc]
+                                          init]
+                          constraints:constraints
+                             delegate:nil];
+  XCTAssertNotNil(peerConnection);
+  XCTAssertEqual(0, [audioDeviceModule initPlayout]);
+
+  id observer =
+      OCMProtocolMock(@protocol(RTC_OBJC_TYPE(RTCAudioDeviceModuleDelegate)));
+  OCMStub([observer audioDeviceModule:[OCMArg any]
+                    willReleaseEngine:[OCMArg any]])
+      .andReturn(-1);
+  audioDeviceModule.observer = observer;
+
+  XCTestExpectation *initialFailures =
+      [self expectationWithDescription:@"initial reconfiguration failures"];
+  initialFailures.expectedFulfillmentCount = 2;
+  XCTestExpectation *retryFailure =
+      [self expectationWithDescription:@"retried reconfiguration failure"];
+  __block NSUInteger failureCount = 0;
+  RTC_OBJC_TYPE(RTCCallbackLogger) *logger =
+      [[RTC_OBJC_TYPE(RTCCallbackLogger) alloc] init];
+  logger.severity = RTCLoggingSeverityError;
+  [logger startWithMessageAndSeverityHandler:^(NSString *message,
+                                               RTCLoggingSeverity severity) {
+    if ([message
+            containsString:@"ReconfigureEngine: Failed to shutdown engine"]) {
+      failureCount++;
+      if (failureCount <= 2) {
+        [initialFailures fulfill];
+      } else if (failureCount == 3) {
+        [retryFailure fulfill];
+      }
+    }
+  }];
+
+  RTC_OBJC_TYPE(RTCAudioSession) *session =
+      [RTC_OBJC_TYPE(RTCAudioSession) sharedInstance];
+  [session notifyMediaServicesWereReset];
+  [session notifyDidEndInterruptionWithShouldResumeSession:YES];
+  [self waitForExpectations:@[ initialFailures ] timeout:1.0];
+
+  [session notifyDidEndInterruptionWithShouldResumeSession:YES];
+  [self waitForExpectations:@[ retryFailure ] timeout:1.0];
+
+  audioDeviceModule.observer = nil;
+  XCTAssertEqual(0, [audioDeviceModule reset]);
+  [peerConnection close];
   [logger stop];
 }
 
