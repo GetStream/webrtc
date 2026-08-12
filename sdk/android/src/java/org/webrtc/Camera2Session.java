@@ -123,8 +123,6 @@ class Camera2Session implements CameraSession {
         camera.createCaptureSession(
             Arrays.asList(surface), new CaptureSessionCallback(), cameraThreadHandler);
       } catch (CameraAccessException | SecurityException | IllegalStateException e) {
-        // The camera service rejects calls when the owning client record no longer matches
-        // this process, or when the device was closed underneath this callback.
         reportError("Failed to create capture session. " + e);
         return;
       }
@@ -176,8 +174,6 @@ class Camera2Session implements CameraSession {
         session.setRepeatingRequest(
             captureRequestBuilder.build(), new CameraCaptureCallback(), cameraThreadHandler);
       } catch (CameraAccessException | SecurityException | IllegalStateException e) {
-        // The camera service rejects calls when the owning client record no longer matches
-        // this process, or when the device was closed underneath this callback.
         reportError("Failed to start capture request. " + e);
         return;
       }
