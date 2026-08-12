@@ -47,6 +47,39 @@
     }                                             \
   } while (false)
 
+- (void)testMediaServicesRecoveryReconfiguresAfterInterruptionEnd {
+  RTC_OBJC_TYPE(RTCPeerConnectionFactory) *factory =
+      [[RTC_OBJC_TYPE(RTCPeerConnectionFactory) alloc]
+          initWithAudioDeviceModuleType:RTC_OBJC_TYPE(
+                                            RTCAudioDeviceModuleTypeAudioEngine)
+                  bypassVoiceProcessing:NO
+                         encoderFactory:nil
+                         decoderFactory:nil
+                  audioProcessingModule:nil];
+  XCTAssertNotNil(factory.audioDeviceModule);
+
+  XCTestExpectation *reconfiguredTwice =
+      [self expectationWithDescription:@"audio engine reconfigured twice"];
+  reconfiguredTwice.expectedFulfillmentCount = 2;
+  RTC_OBJC_TYPE(RTCCallbackLogger) *logger =
+      [[RTC_OBJC_TYPE(RTCCallbackLogger) alloc] init];
+  logger.severity = RTCLoggingSeverityInfo;
+  [logger startWithMessageAndSeverityHandler:^(NSString *message,
+                                               RTCLoggingSeverity severity) {
+    if ([message containsString:@"AudioEngineDevice::ReconfigureEngine"]) {
+      [reconfiguredTwice fulfill];
+    }
+  }];
+
+  RTC_OBJC_TYPE(RTCAudioSession) *session =
+      [RTC_OBJC_TYPE(RTCAudioSession) sharedInstance];
+  [session notifyMediaServicesWereReset];
+  [session notifyDidEndInterruptionWithShouldResumeSession:YES];
+
+  [self waitForExpectations:@[ reconfiguredTwice ] timeout:1.0];
+  [logger stop];
+}
+
 - (void)testAudioEngineInputRenderContextIgnoresLateCallbackAfterInvalidation {
   auto audioDeviceBuffer = std::make_shared<webrtc::AudioDeviceBuffer>(
       webrtc::CreateEnvironment());

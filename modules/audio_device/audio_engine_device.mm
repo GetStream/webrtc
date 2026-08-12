@@ -631,13 +631,20 @@ void AudioEngineDevice::OnInterruptionEnd(bool should_resume) {
   LOGI() << "OnInterruptionEnd should_resume: " << should_resume;
 
   RTC_DCHECK(thread_);
-  thread_->PostTask(SafeTask(safety_, [this] {
+  thread_->PostTask(SafeTask(safety_, [this, should_resume] {
     int32_t result = this->ModifyEngineState([](EngineState state) -> EngineState {
       state.is_interrupted = false;
       return state;
     });
     if (result != 0) {
       LOGE() << "Failed to update engine state for interruption end, error: " << result;
+    }
+
+    if (should_resume &&
+        this->should_reconfigure_after_media_services_reset_.exchange(false)) {
+      LOGI() << "Reconfiguring after media-services reset and audio-session "
+                "reactivation";
+      this->ReconfigureEngine();
     }
   }));
 }
@@ -658,6 +665,7 @@ void AudioEngineDevice::OnMediaServicesReset() {
   // A media-services reset invalidates AVAudioEngine and its nodes even though
   // WebRTC still considers playout and recording started. ReconfigureEngine
   // rebuilds the graph and restores their prior state.
+  should_reconfigure_after_media_services_reset_.store(true);
   ReconfigureEngine();
 }
 

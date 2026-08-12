@@ -17,6 +17,7 @@
 #ifndef SDK_OBJC_NATIVE_SRC_AUDIO_AUDIO_DEVICE_AUDIOENGINE_H_
 #define SDK_OBJC_NATIVE_SRC_AUDIO_AUDIO_DEVICE_AUDIOENGINE_H_
 
+#include <atomic>
 #include <memory>
 #include <string>
 
@@ -501,6 +502,10 @@ class AudioEngineDevice : public AudioDeviceModule, public AudioSessionObserver 
   };
 
   EngineState engine_state_ RTC_GUARDED_BY(thread_);
+
+  // CallKit may reactivate the audio session after the media server restarts.
+  // Rebuild once more after that activation so the graph uses the new I/O unit.
+  std::atomic<bool> should_reconfigure_after_media_services_reset_{false};
 
   bool IsMicrophonePermissionGranted();
   void ResetEngineState();
