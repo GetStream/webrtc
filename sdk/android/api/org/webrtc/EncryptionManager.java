@@ -378,19 +378,19 @@ public class EncryptionManager implements E2EEManager {
 
   private static native long nativeCreate(String userId, int algorithm);
   private static native boolean nativeSetKey(
-      long nativeManager, String userId, int keyIndex, byte[] rawKey);
+      long managerPointer, String userId, int keyIndex, byte[] rawKey);
   private static native boolean nativeSetSharedKey(
-      long nativeManager, int keyIndex, byte[] rawKey);
-  private static native void nativeRemoveKey(long nativeManager, String userId, int keyIndex);
-  private static native void nativeRemoveAllKeys(long nativeManager, String userId);
-  private static native void nativeRemoveSharedKey(long nativeManager, int keyIndex);
+      long managerPointer, int keyIndex, byte[] rawKey);
+  private static native void nativeRemoveKey(long managerPointer, String userId, int keyIndex);
+  private static native void nativeRemoveAllKeys(long managerPointer, String userId);
+  private static native void nativeRemoveSharedKey(long managerPointer, int keyIndex);
   private static native boolean nativeEncrypt(
-      long nativeManager, long nativeSender, String codec, int trackType);
+      long managerPointer, long senderPointer, String codec, int trackType);
   private static native boolean nativeDecrypt(
-      long nativeManager, long nativeReceiver, String userId, int trackType);
+      long managerPointer, long receiverPointer, String userId, int trackType);
   private static native boolean nativeEnablePerformanceReporting(
-      long nativeManager, boolean enabled);
-  private static native void nativeRequestKeyState(long nativeManager);
-  private static native long nativeSetObserver(long nativeManager, Observer observer);
-  private static native void nativeDispose(long nativeManager);
+      long managerPointer, boolean enabled);
+  private static native void nativeRequestKeyState(long managerPointer);
+  private static native long nativeSetObserver(long managerPointer, Observer observer);
+  private static native void nativeDispose(long managerPointer);
 }
