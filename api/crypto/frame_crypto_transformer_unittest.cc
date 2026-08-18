@@ -5,6 +5,8 @@
 #include "api/crypto/frame_crypto_trailer.h"
 #include "api/crypto/frame_encryption_manager.h"
 #include "api/make_ref_counted.h"
+#include "api/task_queue/task_queue_base.h"
+#include "api/units/time_delta.h"
 #include "api/test/mock_transformable_audio_frame.h"
 #include "api/test/mock_transformable_video_frame.h"
 #include "api/video/video_codec_type.h"
@@ -437,6 +439,7 @@ struct FrameCryptoFixture {
   }
 
   void WaitIdle() { manager->WaitUntilIdleForTest(); }
+  ~FrameCryptoFixture() { WaitIdle(); }
 };
 
 }  // namespace
@@ -796,6 +799,24 @@ TEST(FrameCryptorTransformer, FrameTrailerNoDedicatedThread) {
   FrameCryptoFixture fx;
   EXPECT_FALSE(fx.sender->has_dedicated_thread_for_test());
   EXPECT_FALSE(fx.receiver->has_dedicated_thread_for_test());
+}
+
+TEST(FrameCryptorTransformer, DestroyOnCryptoQueueDoesNotDeadlock) {
+  AutoThread main;
+  auto manager = make_ref_counted<DefaultEncryptionManager>("local");
+  scoped_refptr<FrameCryptorTransformer> cryptor(new FrameCryptorTransformer(
+      Thread::Current(), "local", FrameCryptorTransformer::TrackType::kAudio,
+      manager));
+  ASSERT_FALSE(cryptor->has_dedicated_thread_for_test());
+  TaskQueueBase* queue = manager->crypto_task_queue();
+  ASSERT_NE(queue, nullptr);
+  Event done;
+  manager = nullptr;
+  queue->PostTask([cryptor = std::move(cryptor), &done]() mutable {
+    cryptor = nullptr;
+    done.Set();
+  });
+  ASSERT_TRUE(done.Wait(TimeDelta::Seconds(5)));
 }
 
 TEST(FrameCryptorTransformer, FrameTrailerAes256RoundTrip) {

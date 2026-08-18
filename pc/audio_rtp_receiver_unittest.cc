@@ -138,8 +138,6 @@ TEST(AudioRtpReceiver, OnChangedNotificationsAfterConstruction) {
 }
 
 TEST_F(AudioRtpReceiverTest, SetFrameTransformerUsesSignaledSsrc) {
-  // SDP assigned a real SSRC, so the channel is addressed with that id,
-  // not the 0 unsignaled sentinel.
   auto transformer = make_ref_counted<MockFrameTransformer>();
 
   EXPECT_CALL(receive_channel_, SetOutputVolume(kSsrc, kDefaultVolume));
@@ -153,9 +151,7 @@ TEST_F(AudioRtpReceiverTest, SetFrameTransformerUsesSignaledSsrc) {
   receiver_->SetFrameTransformer(transformer);
 }
 
-TEST(AudioRtpReceiver, SetFrameTransformerUsesUnsignaledSsrc) {
-  // First packet already created an unsignaled stream. Must pass that SSRC
-  // (`ssrc()` → GetUnsignaledSsrc), not 0, or the live stream is missed.
+TEST(AudioRtpReceiver, SetFrameTransformerStashesUnsignaledWithZero) {
   AutoThread main_thread;
   Thread* worker = Thread::Current();
   MockVoiceMediaReceiveChannelInterface receive_channel;
@@ -172,7 +168,7 @@ TEST(AudioRtpReceiver, SetFrameTransformerUsesUnsignaledSsrc) {
   receiver->SetupUnsignaledMediaChannel();
 
   EXPECT_CALL(receive_channel,
-              SetDepacketizerToDecoderFrameTransformer(kSsrc, _));
+              SetDepacketizerToDecoderFrameTransformer(0, _));
   receiver->SetFrameTransformer(transformer);
 
   EXPECT_CALL(receive_channel, SetDefaultOutputVolume(kVolumeMuted)).Times(1);
@@ -180,8 +176,6 @@ TEST(AudioRtpReceiver, SetFrameTransformerUsesUnsignaledSsrc) {
 }
 
 TEST_F(AudioRtpReceiverTest, SetMediaChannelReappliesFrameTransformer) {
-  // No receive SSRC yet: 0 stashes the transformer as the unsignaled
-  // default. SetupMediaChannel then reapplies with the signaled SSRC.
   auto transformer = make_ref_counted<MockFrameTransformer>();
   receiver_->SetFrameTransformer(transformer);
 

@@ -23,6 +23,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <memory>
 #include <optional>
 #include <utility>
 
@@ -37,6 +38,7 @@
 #include "rtc_base/crypto_random.h"
 #include "rtc_base/event.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/platform_thread.h"
 #include "rtc_base/time_utils.h"
 
 namespace webrtc {
@@ -133,6 +135,21 @@ std::array<uint8_t, 8> FingerprintKey(const std::vector<uint8_t>& key) {
 // Missing-key / failure / plaintext events fire at most once a second per
 // track (and per key index for missing-key).
 constexpr int64_t kNotifyIntervalMs = 1000;
+
+// Join() DCHECKs !IsCurrent(); hop Stop off this thread if we are on it.
+void StopOwnedThread(std::unique_ptr<Thread> thread) {
+  if (!thread) {
+    return;
+  }
+  if (!thread->IsCurrent()) {
+    thread->Stop();
+    return;
+  }
+  thread->Quit();
+  PlatformThread::SpawnDetached(
+      [thread = std::move(thread)]() mutable { thread->Stop(); },
+      "JoinCryptoThrd");
+}
 
 bool ThrottleFire(std::optional<int64_t>* last_ms, int64_t now_ms) {
   if (!last_ms->has_value() || now_ms - **last_ms > kNotifyIntervalMs) {
@@ -285,9 +302,7 @@ DefaultEncryptionManager::~DefaultEncryptionManager() {
   if (perf_safety_) {
     perf_safety_->SetNotAlive();
   }
-  if (crypto_thread_) {
-    crypto_thread_->Stop();
-  }
+  StopOwnedThread(std::move(crypto_thread_));
 }
 
 TaskQueueBase* DefaultEncryptionManager::crypto_task_queue() {

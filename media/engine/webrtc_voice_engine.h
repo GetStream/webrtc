@@ -396,9 +396,6 @@ class WebRtcVoiceReceiveChannel final
 
   std::vector<RtpSource> GetSources(uint32_t ssrc) const override;
 
-  // `ssrc == 0` stashes as the unsignaled default (and applies to a live
-  // unsignaled stream). A non-zero `ssrc` applies to that stream only if it
-  // already exists. See MediaReceiveChannelInterface.
   void SetDepacketizerToDecoderFrameTransformer(
       uint32_t ssrc,
       scoped_refptr<FrameTransformerInterface> frame_transformer) override;
@@ -488,8 +485,6 @@ class WebRtcVoiceReceiveChannel final
   // Unsignaled streams have an option to have a frame decryptor set on them.
   scoped_refptr<FrameDecryptorInterface> unsignaled_frame_decryptor_
       RTC_GUARDED_BY(worker_thread_);
-  // Default transformer for `SetDepacketizerToDecoderFrameTransformer(0, …)`.
-  // Copied onto each new unsignaled receive stream at AddRecvStream.
   scoped_refptr<FrameTransformerInterface> unsignaled_frame_transformer_
       RTC_GUARDED_BY(worker_thread_);
 };

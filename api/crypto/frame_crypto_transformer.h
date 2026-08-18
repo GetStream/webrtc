@@ -439,9 +439,6 @@ class RTC_EXPORT FrameCryptorTransformer
                           MediaType type,
                           webrtc::scoped_refptr<EncryptionManager> manager);
   ~FrameCryptorTransformer();
-  void SetEncryptionManager(
-      webrtc::scoped_refptr<EncryptionManager> manager);
-  webrtc::scoped_refptr<EncryptionManager> encryption_manager() const;
   // Pin the encode-side codec name (JS encrypt(sender, codec)). Empty
   // clears the pin and we read the codec from the frame instead.
   void SetEncodeCodec(std::string codec);

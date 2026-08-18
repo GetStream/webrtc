@@ -104,7 +104,6 @@ class AudioRtpReceiver : public ObserverInterface,
   void Stop() override;
   void SetupMediaChannel(uint32_t ssrc) override;
   void SetupUnsignaledMediaChannel() override;
-  // Signaled SDP `a=ssrc`, else the SSRC learned from the first RTP packet.
   std::optional<uint32_t> ssrc() const override;
   void NotifyFirstPacketReceived() override;
   void NotifyFirstPacketReceivedAfterReceptiveChange() override;
@@ -141,8 +140,6 @@ class AudioRtpReceiver : public ObserverInterface,
       RTC_RUN_ON(worker_thread_);
   void Reconfigure(bool track_enabled) RTC_RUN_ON(worker_thread_);
   void SetOutputVolume_w(double volume) RTC_RUN_ON(worker_thread_);
-  // Pushes `frame_transformer_` onto the current receive stream. Uses
-  // `ssrc()` so an unsignaled stream is addressed by its real SSRC, not 0.
   void ApplyFrameTransformer_w() RTC_RUN_ON(worker_thread_);
 
   RTC_NO_UNIQUE_ADDRESS SequenceChecker signaling_thread_checker_;
@@ -152,8 +149,6 @@ class AudioRtpReceiver : public ObserverInterface,
   const scoped_refptr<AudioTrackProxyWithInternal<AudioTrack>> track_;
   VoiceMediaReceiveChannelInterface* media_channel_
       RTC_GUARDED_BY(worker_thread_) = nullptr;
-  // SSRC from SDP (`SetupMediaChannel`). Empty when the receiver is
-  // unsignaled; `ssrc()` then falls back to `GetUnsignaledSsrc()`.
   std::optional<uint32_t> signaled_ssrc_ RTC_GUARDED_BY(worker_thread_);
   std::vector<scoped_refptr<MediaStreamInterface>> streams_
       RTC_GUARDED_BY(&signaling_thread_checker_);

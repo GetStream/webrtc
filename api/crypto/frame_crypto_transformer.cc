@@ -27,9 +27,11 @@
 #include <cstring>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <utility>
 
 #include "absl/container/inlined_vector.h"
 #include "absl/types/optional.h"
@@ -44,6 +46,7 @@
 #include "rtc_base/crypto_random.h"
 #include "rtc_base/event.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/platform_thread.h"
 #include "rtc_base/time_utils.h"
 
 enum class EncryptOrDecrypt { kEncrypt = 0, kDecrypt };
@@ -357,6 +360,20 @@ FrameCryptorTransformer::TrackType TrackTypeFromMediaType(
              ? FrameCryptorTransformer::TrackType::kAudio
              : FrameCryptorTransformer::TrackType::kVideo;
 }
+
+void StopOwnedThread(std::unique_ptr<Thread> thread) {
+  if (!thread) {
+    return;
+  }
+  if (!thread->IsCurrent()) {
+    thread->Stop();
+    return;
+  }
+  thread->Quit();
+  PlatformThread::SpawnDetached(
+      [thread = std::move(thread)]() mutable { thread->Stop(); },
+      "JoinCryptoThrd");
+}
 }  // namespace
 
 FrameCryptorTransformer::FrameCryptorTransformer(
@@ -407,26 +424,18 @@ FrameCryptorTransformer::FrameCryptorTransformer(
 
 FrameCryptorTransformer::~FrameCryptorTransformer() {
   if (thread_) {
-    thread_->Stop();
-  } else if (encryption_manager_) {
-    if (TaskQueueBase* q = encryption_manager_->crypto_task_queue()) {
-      Event done;
-      q->PostTask([&done] { done.Set(); });
-      done.Wait(Event::kForever);
-    }
+    StopOwnedThread(std::move(thread_));
+    return;
   }
-}
-
-void FrameCryptorTransformer::SetEncryptionManager(
-    webrtc::scoped_refptr<EncryptionManager> manager) {
-  webrtc::MutexLock lock(&mutex_);
-  encryption_manager_ = std::move(manager);
-}
-
-webrtc::scoped_refptr<EncryptionManager>
-FrameCryptorTransformer::encryption_manager() const {
-  webrtc::MutexLock lock(&mutex_);
-  return encryption_manager_;
+  if (!encryption_manager_) {
+    return;
+  }
+  TaskQueueBase* q = encryption_manager_->crypto_task_queue();
+  if (q && !q->IsCurrent()) {
+    Event done;
+    q->PostTask([&done] { done.Set(); });
+    done.Wait(Event::kForever);
+  }
 }
 
 void FrameCryptorTransformer::SetEncodeCodec(std::string codec) {
@@ -462,16 +471,16 @@ void FrameCryptorTransformer::Transform(
   }
   RTC_DCHECK(queue != nullptr);
 
-  // do encrypt or decrypt here...
+  scoped_refptr<FrameCryptorTransformer> self(this);
   switch (frame->GetDirection()) {
     case webrtc::TransformableFrameInterface::Direction::kSender:
-      queue->PostTask([frame = std::move(frame), this]() mutable {
-        encryptFrame(std::move(frame));
+      queue->PostTask([frame = std::move(frame), self]() mutable {
+        self->encryptFrame(std::move(frame));
       });
       break;
     case webrtc::TransformableFrameInterface::Direction::kReceiver:
-      queue->PostTask([frame = std::move(frame), this]() mutable {
-        decryptFrame(std::move(frame));
+      queue->PostTask([frame = std::move(frame), self]() mutable {
+        self->decryptFrame(std::move(frame));
       });
       break;
     case webrtc::TransformableFrameInterface::Direction::kUnknown:

@@ -250,8 +250,6 @@ void AudioRtpReceiver::SetupUnsignaledMediaChannel() {
   RestartMediaChannel(std::nullopt);
 }
 
-// Signaled SDP `a=ssrc`, else the SSRC of the unsignaled stream created
-// from the first packet. Empty if neither exists yet.
 std::optional<uint32_t> AudioRtpReceiver::ssrc() const {
   RTC_DCHECK_RUN_ON(worker_thread_);
   if (!signaled_ssrc_.has_value() && media_channel_) {
@@ -340,13 +338,8 @@ void AudioRtpReceiver::ApplyFrameTransformer_w() {
   if (!media_channel_ || !frame_transformer_) {
     return;
   }
-  // `SetDepacketizerToDecoderFrameTransformer` treats 0 as "unsignaled
-  // default", not an RTP SSRC. A non-zero value is applied to that stream
-  // only if it already exists. `ssrc()` is the signaled id, or the
-  // unsignaled stream's real SSRC, so a live stream is not left running
-  // without the transformer (ciphertext into Opus -> silence).
   media_channel_->SetDepacketizerToDecoderFrameTransformer(
-      ssrc().value_or(0), frame_transformer_);
+      signaled_ssrc_.value_or(0), frame_transformer_);
 }
 
 void AudioRtpReceiver::SetObserver(RtpReceiverObserverInterface* observer) {
