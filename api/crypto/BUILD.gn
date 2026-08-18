@@ -16,14 +16,33 @@ group("crypto") {
   ]
 }
 
-rtc_library("frame_crypto_transformer") {
+# Header-only so Stream framing can include TrackType without depending on
+# frame_crypto_transformer.cc (which constructs DefaultEncryptionManager).
+rtc_source_set("frame_crypto_transformer_api") {
+  visibility = [ "*" ]
+  sources = [ "frame_crypto_transformer.h" ]
+  deps = [
+    "..:frame_transformer_interface",
+    "..:make_ref_counted",
+    "..:rtc_error",
+    "../../rtc_base:buffer",
+    "../../rtc_base:threading",
+    "../../rtc_base/synchronization:mutex",
+    "../../rtc_base/system:rtc_export",
+    "../task_queue",
+    "../task_queue:pending_task_safety_flag",
+  ]
+}
+
+# STREAM-CUSTOM: JS-compatible framed AES-GCM. Isolated so m-branch syncs
+# only touch frame_crypto_transformer sources, not this list.
+# source_set (not rtc_library): DefaultEncryptionManager::CreateEncryptor
+# constructs FrameCryptorTransformer, whose .cc constructs the manager.
+rtc_source_set("frame_encryption") {
   visibility = [ "*" ]
   sources = [
     "default_encryption_manager.cc",
     "default_encryption_manager.h",
-    "frame_crypto_transformer.cc",
-    "frame_crypto_transformer.h",
-    "frame_encryption_manager.h",
     "frame_crypto_codec.cc",
     "frame_crypto_codec.h",
     "frame_crypto_replay.cc",
@@ -34,21 +53,16 @@ rtc_library("frame_crypto_transformer") {
     "frame_crypto_replay_window.h",
     "frame_crypto_trailer.cc",
     "frame_crypto_trailer.h",
+    "frame_encryption_manager.h",
   ]
+
+  public_deps = [ ":frame_crypto_transformer_api" ]
 
   deps = [
     "..:array_view",
-    "..:frame_transformer_interface",
-    "..:make_ref_counted",
     "..:ref_count",
-    "..:rtc_error",
     "..:scoped_refptr",
-    "../units:timestamp",
-    "../units:time_delta",
-    "../video:video_frame",
-    "../video:video_frame_metadata",
-    "../../common_video:common_video",
-    "../../modules/rtp_rtcp:rtp_rtcp",
+    "../../common_video",
     "../../rtc_base:buffer",
     "../../rtc_base:byte_buffer",
     "../../rtc_base:crypto_random",
@@ -60,8 +74,51 @@ rtc_library("frame_crypto_transformer") {
     "../../rtc_base/system:rtc_export",
     "../task_queue",
     "../task_queue:pending_task_safety_flag",
-    "//third_party/abseil-cpp/absl/functional:any_invocable",
+    "../units:time_delta",
+    "../video:video_frame",
+  ]
+
+  if (rtc_build_ssl) {
+    deps += [ "//third_party/boringssl" ]
+  } else {
+    configs += [ ":external_ssl_library" ]
+  }
+}
+
+rtc_library("frame_crypto_transformer") {
+  visibility = [ "*" ]
+  sources = [ "frame_crypto_transformer.cc" ]
+
+  public_deps = [
+    ":frame_crypto_transformer_api",
+    ":frame_encryption",
+  ]
+
+  deps = [
+    "..:array_view",
+    "..:frame_transformer_interface",
+    "..:make_ref_counted",
+    "..:ref_count",
+    "..:rtc_error",
+    "..:scoped_refptr",
+    "../../common_video",
+    "../../modules/rtp_rtcp",
+    "../../rtc_base:buffer",
+    "../../rtc_base:byte_buffer",
+    "../../rtc_base:crypto_random",
+    "../../rtc_base:logging",
+    "../../rtc_base:rtc_event",
+    "../../rtc_base:threading",
+    "../../rtc_base:timeutils",
+    "../../rtc_base/synchronization:mutex",
+    "../../rtc_base/system:rtc_export",
+    "../task_queue",
+    "../task_queue:pending_task_safety_flag",
+    "../units:timestamp",
+    "../video:video_frame",
+    "../video:video_frame_metadata",
     "//third_party/abseil-cpp/absl/container:inlined_vector",
+    "//third_party/abseil-cpp/absl/functional:any_invocable",
     "//third_party/abseil-cpp/absl/types:variant",
   ]
 
@@ -127,7 +184,7 @@ if (rtc_include_tests) {
     }
   }
 
-  rtc_library("frame_crypto_transformer_unittest") {
+  rtc_library("frame_encryption_unittest") {
     visibility = [ "*" ]
     testonly = true
     sources = [
@@ -137,19 +194,37 @@ if (rtc_include_tests) {
       "frame_crypto_replay_unittest.cc",
       "frame_crypto_replay_window_unittest.cc",
       "frame_crypto_trailer_unittest.cc",
-      "frame_crypto_transformer_unittest.cc",
     ]
     deps = [
       ":frame_crypto_transformer",
+      ":frame_encryption",
+      "..:make_ref_counted",
+      "../../rtc_base:logging",
+      "../../rtc_base:threading",
+      "../../test:test_support",
+      "//testing/gtest",
+    ]
+    if (rtc_build_ssl) {
+      deps += [ "//third_party/boringssl" ]
+    }
+  }
+
+  rtc_library("frame_crypto_transformer_unittest") {
+    visibility = [ "*" ]
+    testonly = true
+    sources = [ "frame_crypto_transformer_unittest.cc" ]
+    deps = [
+      ":frame_crypto_transformer",
+      ":frame_encryption_unittest",
       "..:make_ref_counted",
       "..:mock_transformable_audio_frame",
       "..:mock_transformable_video_frame",
-      "../video:video_frame",
-      "../video:video_frame_metadata",
       "../../rtc_base:logging",
       "../../rtc_base:rtc_event",
       "../../rtc_base:threading",
       "../../test:test_support",
+      "../video:video_frame",
+      "../video:video_frame_metadata",
       "//testing/gtest",
     ]
     if (rtc_build_ssl) {
