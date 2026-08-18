@@ -2239,6 +2239,7 @@ if (rtc_include_tests && !build_with_chromium) {
       "../api:make_ref_counted",
       "../api:media_stream_interface",
       "../api:mock_datagram_connection_observer",
+      "../api:mock_frame_transformer",
       "../api:peer_connection_interface",
       "../api:priority",
       "../api:rtc_error",

@@ -250,6 +250,8 @@ void AudioRtpReceiver::SetupUnsignaledMediaChannel() {
   RestartMediaChannel(std::nullopt);
 }
 
+// Signaled SDP `a=ssrc`, else the SSRC of the unsignaled stream created
+// from the first packet. Empty if neither exists yet.
 std::optional<uint32_t> AudioRtpReceiver::ssrc() const {
   RTC_DCHECK_RUN_ON(worker_thread_);
   if (!signaled_ssrc_.has_value() && media_channel_) {
@@ -315,11 +317,8 @@ std::vector<RtpSource> AudioRtpReceiver::GetSources() const {
 void AudioRtpReceiver::SetFrameTransformer(
     scoped_refptr<FrameTransformerInterface> frame_transformer) {
   RTC_DCHECK_RUN_ON(worker_thread_);
-  if (media_channel_) {
-    media_channel_->SetDepacketizerToDecoderFrameTransformer(
-        signaled_ssrc_.value_or(0), frame_transformer);
-  }
   frame_transformer_ = std::move(frame_transformer);
+  ApplyFrameTransformer_w();
 }
 
 void AudioRtpReceiver::Reconfigure(bool track_enabled) {
@@ -333,10 +332,21 @@ void AudioRtpReceiver::Reconfigure(bool track_enabled) {
     media_channel_->SetFrameDecryptor(*signaled_ssrc_, frame_decryptor_);
   }
 
-  if (frame_transformer_ && track_enabled) {
-    media_channel_->SetDepacketizerToDecoderFrameTransformer(
-        signaled_ssrc_.value_or(0), frame_transformer_);
+  ApplyFrameTransformer_w();
+}
+
+void AudioRtpReceiver::ApplyFrameTransformer_w() {
+  RTC_DCHECK_RUN_ON(worker_thread_);
+  if (!media_channel_ || !frame_transformer_) {
+    return;
   }
+  // `SetDepacketizerToDecoderFrameTransformer` treats 0 as "unsignaled
+  // default", not an RTP SSRC. A non-zero value is applied to that stream
+  // only if it already exists. `ssrc()` is the signaled id, or the
+  // unsignaled stream's real SSRC, so a live stream is not left running
+  // without the transformer (ciphertext into Opus -> silence).
+  media_channel_->SetDepacketizerToDecoderFrameTransformer(
+      ssrc().value_or(0), frame_transformer_);
 }
 
 void AudioRtpReceiver::SetObserver(RtpReceiverObserverInterface* observer) {
@@ -369,6 +379,7 @@ void AudioRtpReceiver::SetMediaChannel(
                 : worker_thread_safety_->SetNotAlive();
   media_channel_ =
       static_cast<VoiceMediaReceiveChannelInterface*>(media_channel);
+  ApplyFrameTransformer_w();
 }
 
 void AudioRtpReceiver::NotifyFirstPacketReceived() {

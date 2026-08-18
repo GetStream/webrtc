@@ -20,8 +20,13 @@ NS_ASSUME_NONNULL_BEGIN
 ()
 
     @property(nonatomic, readonly)
-        webrtc::scoped_refptr<webrtc::RtpSenderInterface>
-            nativeRtpSender;
+    webrtc::scoped_refptr<webrtc::RtpSenderInterface>
+        nativeRtpSender;
+
+// EncryptionManager.encrypt reads this to hop SetFrameTransformer onto the
+// PeerConnection signaling thread. create(userId) does not take a factory.
+@property(nonatomic, readonly)
+    RTC_OBJC_TYPE(RTCPeerConnectionFactory) * factory;
 
 /** Initialize an RTCRtpSender with a native RtpSenderInterface. */
 - (instancetype)

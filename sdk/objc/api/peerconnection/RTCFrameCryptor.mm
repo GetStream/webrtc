@@ -105,6 +105,14 @@ void RTCFrameCryptorDelegateAdapter::OnFrameCryptionStateChanged(
                                       RTC_OBJC_TYPE(
                                           RTCFrameCryptorStateInternalError)];
         break;
+      case FrameCryptionState::kStalled:
+      case FrameCryptionState::kResumed:
+      case FrameCryptionState::kUnencrypted:
+      case FrameCryptionState::kUnsupportedVersion:
+      case FrameCryptionState::kCounterExhausted:
+        // Private-v1 host events go through RTCEncryptionManager. LiveKit's
+        // per-track delegate only understands the original states.
+        break;
     }
   }
 }

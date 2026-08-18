@@ -307,6 +307,17 @@ class MediaReceiveChannelInterface {
       uint32_t ssrc,
       scoped_refptr<FrameDecryptorInterface> frame_decryptor) = 0;
 
+  // Install `frame_transformer` between depacketizer and decoder.
+  //
+  // Non-zero `ssrc` is a real RTP SSRC. The transformer is applied to that
+  // receive stream if it already exists. If it does not, the call is ignored
+  // and not remembered: re-apply after the stream is created, or pass 0 to
+  // stash as the unsignaled default.
+  //
+  // `ssrc == 0` is a sentinel for an unsignaled receiver (no `a=ssrc` in
+  // SDP / SSRC not known yet). It is not RTP SSRC 0. The transformer is
+  // saved as the default for the next unsignaled stream. Voice also applies
+  // it immediately to an unsignaled stream the first packet already created.
   virtual void SetDepacketizerToDecoderFrameTransformer(
       uint32_t ssrc,
       scoped_refptr<FrameTransformerInterface> frame_transformer) = 0;

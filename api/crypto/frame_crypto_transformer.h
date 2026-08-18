@@ -19,6 +19,7 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -44,6 +45,7 @@ const size_t DEFAULT_KEYRING_SIZE = 16;
 const size_t MAX_KEYRING_SIZE = 255;
 
 class ParticipantKeyHandler;
+class EncryptionManager;
 
 struct KeyProviderOptions {
   bool shared_key;
@@ -54,19 +56,26 @@ struct KeyProviderOptions {
   // key ring size should be between 1 and 255
   int key_ring_size;
   bool discard_frame_when_cryptor_not_ready;
+  // Unused by the trailer manager; kept so KeyProviderOptions copy stays
+  // complete. Prefer DefaultEncryptionManager + Cipher instead.
+  bool use_frame_trailer;
   KeyProviderOptions()
       : shared_key(false),
         ratchet_window_size(0),
         failure_tolerance(-1),
         key_ring_size(DEFAULT_KEYRING_SIZE),
-        discard_frame_when_cryptor_not_ready(false) {}
-  KeyProviderOptions(KeyProviderOptions& copy)
+        discard_frame_when_cryptor_not_ready(false),
+        use_frame_trailer(false) {}
+  KeyProviderOptions(const KeyProviderOptions& copy)
       : shared_key(copy.shared_key),
         ratchet_salt(copy.ratchet_salt),
         uncrypted_magic_bytes(copy.uncrypted_magic_bytes),
         ratchet_window_size(copy.ratchet_window_size),
         failure_tolerance(copy.failure_tolerance),
-        key_ring_size(copy.key_ring_size) {}
+        key_ring_size(copy.key_ring_size),
+        discard_frame_when_cryptor_not_ready(
+            copy.discard_frame_when_cryptor_not_ready),
+        use_frame_trailer(copy.use_frame_trailer) {}
 };
 
 class KeyProvider : public webrtc::RefCountInterface {
@@ -370,6 +379,11 @@ enum FrameCryptionState {
   kMissingKey,
   kKeyRatcheted,
   kInternalError,
+  kStalled,
+  kResumed,
+  kUnencrypted,
+  kUnsupportedVersion,
+  kCounterExhausted,
 };
 
 class FrameCryptorTransformerObserver : public webrtc::RefCountInterface {
@@ -389,9 +403,22 @@ class RTC_EXPORT FrameCryptorTransformer
     kVideoFrame,
   };
 
+  // Product track kind. Replay, decode failures, and encode failure
+  // latching are keyed by (participant_id, TrackType), so audio and video
+  // from the same person are independent.
+  enum class TrackType {
+    kAudio = 0,
+    kVideo,
+    kScreenshare,
+    kScreenshareAudio,
+  };
+
+  // kAesGcm / kAesCbc: LiveKit frame cryptor (no 20-byte trailer).
+  // kAesGcmTrailer: AES-GCM plus the 20-byte trailer (ordinal 2).
   enum class Algorithm {
     kAesGcm = 0,
     kAesCbc,
+    kAesGcmTrailer,
   };
 
   explicit FrameCryptorTransformer(
@@ -400,7 +427,24 @@ class RTC_EXPORT FrameCryptorTransformer
       MediaType type,
       Algorithm algorithm,
       webrtc::scoped_refptr<KeyProvider> key_provider);
+  // Same ctor for audio, video, screenshare, screenshare-audio.
+  // MediaType (RTP audio vs video) is derived from TrackType.
+  FrameCryptorTransformer(webrtc::Thread* signaling_thread,
+                          const std::string participant_id,
+                          TrackType track_type,
+                          webrtc::scoped_refptr<EncryptionManager> manager);
+  // Maps kAudioFrame → kAudio, kVideoFrame → kVideo.
+  FrameCryptorTransformer(webrtc::Thread* signaling_thread,
+                          const std::string participant_id,
+                          MediaType type,
+                          webrtc::scoped_refptr<EncryptionManager> manager);
   ~FrameCryptorTransformer();
+  void SetEncryptionManager(
+      webrtc::scoped_refptr<EncryptionManager> manager);
+  webrtc::scoped_refptr<EncryptionManager> encryption_manager() const;
+  // Pin the encode-side codec name (JS encrypt(sender, codec)). Empty
+  // clears the pin and we read the codec from the frame instead.
+  void SetEncodeCodec(std::string codec);
   virtual void RegisterFrameCryptorTransformerObserver(
       webrtc::scoped_refptr<FrameCryptorTransformerObserver> observer) {
     webrtc::MutexLock lock(&mutex_);
@@ -427,7 +471,13 @@ class RTC_EXPORT FrameCryptorTransformer
     webrtc::MutexLock lock(&mutex_);
     return enabled_cryption_;
   }
+  virtual TrackType track_type() const {
+    webrtc::MutexLock lock(&mutex_);
+    return track_type_;
+  }
   virtual const std::string participant_id() const { return participant_id_; }
+
+  bool has_dedicated_thread_for_test() const { return thread_ != nullptr; }
 
  protected:
   virtual void RegisterTransformedFrameCallback(
@@ -463,6 +513,8 @@ class RTC_EXPORT FrameCryptorTransformer
   void onFrameCryptionStateChanged(FrameCryptionState error);
   webrtc::Buffer makeIv(uint32_t ssrc, uint32_t timestamp);
   uint8_t getIvSize();
+  webrtc::scoped_refptr<webrtc::TransformedFrameCallback> SinkFor(
+      webrtc::TransformableFrameInterface* frame);
 
  private:
   TaskQueueBase* const signaling_thread_;
@@ -472,6 +524,7 @@ class RTC_EXPORT FrameCryptorTransformer
   mutable webrtc::Mutex sink_mutex_;
   bool enabled_cryption_ RTC_GUARDED_BY(mutex_) = false;
   MediaType type_;
+  TrackType track_type_ RTC_GUARDED_BY(mutex_) = TrackType::kAudio;
   Algorithm algorithm_;
   webrtc::scoped_refptr<webrtc::TransformedFrameCallback> sink_callback_;
   std::map<uint32_t, webrtc::scoped_refptr<webrtc::TransformedFrameCallback>>
@@ -479,7 +532,10 @@ class RTC_EXPORT FrameCryptorTransformer
   int key_index_ = 0;
   std::map<uint32_t, uint32_t> send_counts_;
   webrtc::scoped_refptr<KeyProvider> key_provider_;
+  webrtc::scoped_refptr<EncryptionManager> encryption_manager_;
   webrtc::scoped_refptr<FrameCryptorTransformerObserver> observer_;
+  // Encode-only pin from encrypt(sender, codec). Empty/absent → frame codec.
+  std::optional<std::string> encode_codec_;
   FrameCryptionState last_enc_error_ = FrameCryptionState::kNew;
   FrameCryptionState last_dec_error_ = FrameCryptionState::kNew;
 };

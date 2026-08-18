@@ -19,17 +19,33 @@ group("crypto") {
 rtc_library("frame_crypto_transformer") {
   visibility = [ "*" ]
   sources = [
+    "default_encryption_manager.cc",
+    "default_encryption_manager.h",
     "frame_crypto_transformer.cc",
     "frame_crypto_transformer.h",
+    "frame_encryption_manager.h",
+    "frame_crypto_codec.cc",
+    "frame_crypto_codec.h",
+    "frame_crypto_replay.cc",
+    "frame_crypto_replay.h",
+    "frame_crypto_replay_epoch.cc",
+    "frame_crypto_replay_epoch.h",
+    "frame_crypto_replay_window.cc",
+    "frame_crypto_replay_window.h",
+    "frame_crypto_trailer.cc",
+    "frame_crypto_trailer.h",
   ]
 
   deps = [
     "..:array_view",
     "..:frame_transformer_interface",
     "..:make_ref_counted",
+    "..:ref_count",
     "..:rtc_error",
     "..:scoped_refptr",
     "../units:timestamp",
+    "../units:time_delta",
+    "../video:video_frame",
     "../video:video_frame_metadata",
     "../../common_video:common_video",
     "../../modules/rtp_rtcp:rtp_rtcp",
@@ -37,12 +53,14 @@ rtc_library("frame_crypto_transformer") {
     "../../rtc_base:byte_buffer",
     "../../rtc_base:crypto_random",
     "../../rtc_base:logging",
+    "../../rtc_base:rtc_event",
     "../../rtc_base:threading",
     "../../rtc_base:timeutils",
     "../../rtc_base/synchronization:mutex",
     "../../rtc_base/system:rtc_export",
     "../task_queue",
     "../task_queue:pending_task_safety_flag",
+    "//third_party/abseil-cpp/absl/functional:any_invocable",
     "//third_party/abseil-cpp/absl/container:inlined_vector",
     "//third_party/abseil-cpp/absl/types:variant",
   ]
@@ -107,5 +125,41 @@ if (rtc_include_tests) {
     if (rtc_build_ssl) {
       deps += [ "//third_party/boringssl" ]
     }
+  }
+
+  rtc_library("frame_crypto_transformer_unittest") {
+    visibility = [ "*" ]
+    testonly = true
+    sources = [
+      "default_encryption_manager_unittest.cc",
+      "frame_crypto_codec_unittest.cc",
+      "frame_crypto_replay_epoch_unittest.cc",
+      "frame_crypto_replay_unittest.cc",
+      "frame_crypto_replay_window_unittest.cc",
+      "frame_crypto_trailer_unittest.cc",
+      "frame_crypto_transformer_unittest.cc",
+    ]
+    deps = [
+      ":frame_crypto_transformer",
+      "..:make_ref_counted",
+      "..:mock_transformable_audio_frame",
+      "..:mock_transformable_video_frame",
+      "../video:video_frame",
+      "../video:video_frame_metadata",
+      "../../rtc_base:logging",
+      "../../rtc_base:rtc_event",
+      "../../rtc_base:threading",
+      "../../test:test_support",
+      "//testing/gtest",
+    ]
+    if (rtc_build_ssl) {
+      deps += [ "//third_party/boringssl" ]
+    }
+  }
+
+  # ponytail: standalone binary so we can land without ninja of full rtc_unittests.
+  rtc_test("frame_crypto_transformer_unittests") {
+    testonly = true
+    deps = [ ":frame_crypto_transformer_unittest" ]
   }
 }

@@ -4147,8 +4147,7 @@ void WebRtcVideoReceiveChannel::SetDepacketizerToDecoderFrameTransformer(
   RTC_DCHECK(frame_transformer);
   RTC_DCHECK_RUN_ON(&thread_checker_);
   if (ssrc == 0) {
-    // If the receiver is unsignaled, save the frame transformer and set it
-    // when the stream is associated with an ssrc.
+    // Sentinel, not RTP SSRC 0: stash for the next unsignaled stream.
     unsignaled_frame_transformer_ = std::move(frame_transformer);
     return;
   }

@@ -2465,7 +2465,8 @@ bool WebRtcVoiceReceiveChannel::AddRecvStream(const StreamParams& sp) {
     return false;
   }
 
-  // Create a new channel for receiving audio data.
+  // Create a new channel for receiving audio data. The ssrc==0 stash is
+  // copied in so an unsignaled first packet does not start without decrypt.
   auto config = BuildReceiveStreamConfig(
       ssrc, receiver_reports_ssrc_, recv_nack_enabled_, enable_non_sender_rtt_,
       recv_rtcp_mode_, sp.stream_ids(), recv_rtp_extensions_, transport(),
@@ -2888,12 +2889,24 @@ void WebRtcVoiceReceiveChannel::SetDepacketizerToDecoderFrameTransformer(
     scoped_refptr<FrameTransformerInterface> frame_transformer) {
   RTC_DCHECK_RUN_ON(worker_thread_);
   if (ssrc == 0) {
-    // If the receiver is unsignaled, save the frame transformer and set it when
-    // the stream is associated with an ssrc.
+    // Sentinel, not RTP SSRC 0: the receiver is unsignaled. Keep this as
+    // the default for the next AddRecvStream, and apply it now if the first
+    // packet already created a stream; otherwise that live stream keeps
+    // feeding ciphertext to Opus (silence, no decoder error).
     unsignaled_frame_transformer_ = std::move(frame_transformer);
+    if (auto existing = GetUnsignaledSsrc()) {
+      auto it = recv_streams_.find(*existing);
+      if (it != recv_streams_.end()) {
+        it->second->SetDepacketizerToDecoderFrameTransformer(
+            unsignaled_frame_transformer_);
+      }
+    }
     return;
   }
 
+  // Real RTP SSRC: attach to that stream immediately. If it is not in
+  // recv_streams_ yet, drop the call (do not stash). Pass 0 to stash as
+  // the unsignaled default, or re-apply after the stream exists.
   auto matching_stream = recv_streams_.find(ssrc);
   if (matching_stream == recv_streams_.end()) {
     RTC_LOG(LS_INFO) << "Attempting to set frame transformer for SSRC:" << ssrc
