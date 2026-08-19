@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 
+#include "api/frame_transformer_interface.h"
 #include "api/make_ref_counted.h"
 #include "api/scoped_refptr.h"
 #include "api/test/mock_frame_transformer.h"
@@ -32,6 +33,7 @@ using ::testing::_;
 using ::testing::AnyNumber;
 using ::testing::Eq;
 using ::testing::InvokeWithoutArgs;
+using ::testing::NiceMock;
 using ::testing::Return;
 
 static const int kTimeOut = 100;
@@ -63,7 +65,7 @@ class AudioRtpReceiverTest : public ::testing::Test {
   AutoThread main_thread_;
   Thread* worker_;
   scoped_refptr<AudioRtpReceiver> receiver_;
-  MockVoiceMediaReceiveChannelInterface receive_channel_;
+  NiceMock<MockVoiceMediaReceiveChannelInterface> receive_channel_;
 };
 
 TEST_F(AudioRtpReceiverTest, SetOutputVolumeIsCalled) {
@@ -114,7 +116,7 @@ TEST_F(AudioRtpReceiverTest, VolumesSetBeforeStartingAreRespected) {
 TEST(AudioRtpReceiver, OnChangedNotificationsAfterConstruction) {
   test::RunLoop loop;
   auto* thread = Thread::Current();  // Points to loop's thread.
-  MockVoiceMediaReceiveChannelInterface receive_channel;
+  NiceMock<MockVoiceMediaReceiveChannelInterface> receive_channel;
   auto receiver = make_ref_counted<AudioRtpReceiver>(
       thread, std::string(), std::vector<std::string>(), &receive_channel);
 
@@ -151,10 +153,29 @@ TEST_F(AudioRtpReceiverTest, SetFrameTransformerUsesSignaledSsrc) {
   receiver_->SetFrameTransformer(transformer);
 }
 
+TEST_F(AudioRtpReceiverTest, SetFrameTransformerNullClearsChannel) {
+  auto transformer = make_ref_counted<MockFrameTransformer>();
+
+  EXPECT_CALL(receive_channel_, SetOutputVolume(kSsrc, kDefaultVolume));
+  receiver_->track()->set_enabled(true);
+  receiver_->SetMediaChannel(&receive_channel_);
+  EXPECT_CALL(receive_channel_, SetDefaultRawAudioSink(_)).Times(0);
+  receiver_->SetupMediaChannel(kSsrc);
+
+  EXPECT_CALL(receive_channel_,
+              SetDepacketizerToDecoderFrameTransformer(kSsrc, _));
+  receiver_->SetFrameTransformer(transformer);
+
+  EXPECT_CALL(receive_channel_,
+              SetDepacketizerToDecoderFrameTransformer(
+                  kSsrc, scoped_refptr<FrameTransformerInterface>()));
+  receiver_->SetFrameTransformer(nullptr);
+}
+
 TEST(AudioRtpReceiver, SetFrameTransformerStashesUnsignaledWithZero) {
   AutoThread main_thread;
   Thread* worker = Thread::Current();
-  MockVoiceMediaReceiveChannelInterface receive_channel;
+  NiceMock<MockVoiceMediaReceiveChannelInterface> receive_channel;
   auto receiver = make_ref_counted<AudioRtpReceiver>(
       worker, std::string(), std::vector<std::string>());
   auto transformer = make_ref_counted<MockFrameTransformer>();

@@ -335,7 +335,7 @@ void AudioRtpReceiver::Reconfigure(bool track_enabled) {
 
 void AudioRtpReceiver::ApplyFrameTransformer_w() {
   RTC_DCHECK_RUN_ON(worker_thread_);
-  if (!media_channel_ || !frame_transformer_) {
+  if (!media_channel_) {
     return;
   }
   media_channel_->SetDepacketizerToDecoderFrameTransformer(

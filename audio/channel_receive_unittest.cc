@@ -273,6 +273,23 @@ TEST_F(ChannelReceiveTest, SettingFrameTransformerMultipleTimes) {
   channel->SetDepacketizerToDecoderFrameTransformer(mock_frame_transformer);
 }
 
+TEST_F(ChannelReceiveTest, ClearingFrameTransformerUnregistersCallback) {
+  auto channel = CreateTestChannelReceive();
+
+  scoped_refptr<MockFrameTransformer> mock_frame_transformer =
+      make_ref_counted<MockFrameTransformer>();
+
+  EXPECT_CALL(*mock_frame_transformer, RegisterTransformedFrameCallback);
+  channel->SetDepacketizerToDecoderFrameTransformer(mock_frame_transformer);
+
+  EXPECT_CALL(*mock_frame_transformer, UnregisterTransformedFrameCallback);
+  channel->SetDepacketizerToDecoderFrameTransformer(nullptr);
+
+  channel->StartPlayout();
+  EXPECT_CALL(*mock_frame_transformer, Transform).Times(0);
+  channel->OnRtpPacket(CreateRtpPacket());
+}
+
 }  // namespace
 }  // namespace voe
 }  // namespace webrtc
