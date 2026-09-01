@@ -969,9 +969,11 @@ int AudioProcessingImpl::ProcessStream(const float* const* src,
 }
 
 void AudioProcessingImpl::HandleCaptureRuntimeSettings() {
+    RTC_LOG(LS_INFO) << "AudioProcessingImpl::HandleCaptureRuntimeSettings: started to handle capture runtime settings";
   RuntimeSetting setting;
   int num_settings_processed = 0;
   while (capture_runtime_settings_.Remove(&setting)) {
+    RTC_LOG(LS_INFO) << "AudioProcessingImpl::HandleCaptureRuntimeSettings: handling capture runtime settings";
     if (aec_dump_) {
       aec_dump_->WriteRuntimeSetting(setting);
     }
@@ -1016,6 +1018,7 @@ void AudioProcessingImpl::HandleCaptureRuntimeSettings() {
         // TODO(bugs.chromium.org/9138): Log setting handling by Aec Dump.
         break;
       case RuntimeSetting::Type::kCaptureCompressionGain: {
+        RTC_LOG(LS_INFO) << "AudioProcessingImpl::HandleCaptureRuntimeSettings: received kCaptureCompressionGain";
         if (!submodules_.agc_manager &&
             !(submodules_.gain_controller2 &&
               config_.gain_controller2.input_volume_controller.enabled)) {
@@ -1027,7 +1030,11 @@ void AudioProcessingImpl::HandleCaptureRuntimeSettings() {
             int error =
                 submodules_.gain_control->set_compression_gain_db(int_value);
             RTC_DCHECK_EQ(kNoError, error);
+          } else {
+            RTC_LOG(LS_WARNING) << "AudioProcessingImpl::HandleCaptureRuntimeSettings: no gain_control, skip kCaptureCompressionGain";
           }
+        } else {
+          RTC_LOG(LS_WARNING) << "AudioProcessingImpl::HandleCaptureRuntimeSettings: no agc_manager || gain_controller2 || input_volume_controller enabled, skip kCaptureCompressionGain";
         }
         break;
       }

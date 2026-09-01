@@ -83,6 +83,15 @@ static jlong JNI_ExternalAudioProcessingFactory_GetDefaultApm(JNIEnv* env) {
   return webrtc::jni::jlongFromPointer(default_processor->apm().get());
 }
 
+static void JNI_ExternalAudioProcessingFactory_SetCaptureCompressionGain(
+    JNIEnv* env,
+    jint compression_gain_db) {
+  if (!default_processor) {
+    return;
+  }
+  default_processor->apm().get()->SetRuntimeSetting(AudioProcessing::RuntimeSetting::CreateCompressionGainDb(compression_gain_db));
+}
+
 static jlong JNI_ExternalAudioProcessingFactory_SetCapturePostProcessing(
     JNIEnv* env,
     const JavaParamRef<jobject>& j_processing) {

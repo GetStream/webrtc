@@ -80,6 +80,15 @@ public class ExternalAudioProcessingFactory implements AudioProcessingFactory {
   }
 
   /**
+   * Sets the compressionGainDb for the capture audio processing module.
+   * ranging [0, 90].
+   */
+  public void setCaptureCompressionGain(int compressionGainDb) {
+    checkExternalAudioProcessorExists();
+    nativeSetCaptureCompressionGain(compressionGainDb);
+  }
+
+  /**
    * Sets the render pre processing module.
    * This module is applied to the audio signal after receiving from the audio
    * decoder and before rendering.
@@ -135,6 +144,7 @@ public class ExternalAudioProcessingFactory implements AudioProcessingFactory {
     }
   }
 
+  private static native void nativeSetCaptureCompressionGain(int compressionGainDb);
   private static native long nativeGetDefaultApm();
   private static native long nativeSetCapturePostProcessing(AudioProcessing processing);
   private static native long nativeSetRenderPreProcessing(AudioProcessing processing);
