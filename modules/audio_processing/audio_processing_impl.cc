@@ -969,7 +969,6 @@ int AudioProcessingImpl::ProcessStream(const float* const* src,
 }
 
 void AudioProcessingImpl::HandleCaptureRuntimeSettings() {
-    RTC_LOG(LS_INFO) << "AudioProcessingImpl::HandleCaptureRuntimeSettings: started to handle capture runtime settings";
   RuntimeSetting setting;
   int num_settings_processed = 0;
   while (capture_runtime_settings_.Remove(&setting)) {
@@ -1034,7 +1033,11 @@ void AudioProcessingImpl::HandleCaptureRuntimeSettings() {
             RTC_LOG(LS_WARNING) << "AudioProcessingImpl::HandleCaptureRuntimeSettings: no gain_control, skip kCaptureCompressionGain";
           }
         } else {
-          RTC_LOG(LS_WARNING) << "AudioProcessingImpl::HandleCaptureRuntimeSettings: no agc_manager || gain_controller2 || input_volume_controller enabled, skip kCaptureCompressionGain";
+          RTC_LOG(LS_WARNING) << "AudioProcessingImpl::HandleCaptureRuntimeSettings: \n"
+          << "agc_manager: " << submodules_.agc_manager << "\n"
+          << "gain_controller2: " << submodules_.gain_controller2 << "\n"
+          << "config_.gain_controller2.input_volume_controller.enabled: " << config_.gain_controller2.input_volume_controller.enabled << "\n"
+          << ", skip kCaptureCompressionGain";
         }
         break;
       }
@@ -2005,6 +2008,12 @@ void AudioProcessingImpl::InitializeEchoController() {
 }
 
 void AudioProcessingImpl::InitializeGainController1() {
+  RTC_LOG(LS_INFO) << "initalizing GainController1 with config: "
+                   << "config_.gain_controller1.enabled: " << config_.gain_controller1.enabled << ", "
+                   << "config_.gain_controller1.mode: " << config_.gain_controller1.mode << ", "
+                   << "config_.gain_controller1.target_level_dbfs: " << config_.gain_controller1.target_level_dbfs << ", "
+                   << "config_.gain_controller1.compression_gain_db: " << config_.gain_controller1.compression_gain_db << ", "
+                   << "config_.gain_controller1.enable_limiter: " << config_.gain_controller1.enable_limiter << ", ";
   if (config_.gain_controller2.enabled &&
       config_.gain_controller2.input_volume_controller.enabled &&
       config_.gain_controller1.enabled &&
