@@ -93,7 +93,7 @@ public class ExternalAudioProcessingFactory implements AudioProcessingFactory {
    * targetLevelDbfs: default(3)
    * compressionGainDb: ranging [0, 90].
    */
-  public void enableGainController1(AgcMode mode, int targetLevelDbfs, int compressionGainDb, boolean enableLimiter) {
+  public void enableGainController1(Agc1Mode mode, int targetLevelDbfs, int compressionGainDb, boolean enableLimiter) {
     checkExternalAudioProcessorExists();
     nativeEnableGainController1(mode.ordinal(), targetLevelDbfs, compressionGainDb, enableLimiter);
   }
