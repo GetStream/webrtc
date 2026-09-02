@@ -39,6 +39,11 @@ class RtpReceiverDelegateAdapter : public RtpReceiverObserverInterface {
         webrtc::scoped_refptr<webrtc::RtpReceiverInterface>
             nativeRtpReceiver;
 
+// EncryptionManager.decrypt reads this to hop SetFrameTransformer onto the
+// PeerConnection signaling thread. create(userId) does not take a factory.
+@property(nonatomic, readonly)
+    RTC_OBJC_TYPE(RTCPeerConnectionFactory) * factory;
+
 /** Initialize an RTCRtpReceiver with a native RtpReceiverInterface. */
 - (instancetype)
       initWithFactory:(RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)factory

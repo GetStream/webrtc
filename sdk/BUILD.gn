@@ -685,9 +685,7 @@ if (is_ios || is_mac) {
         ]
       }
       if (is_mac) {
-        sources += [
-          "objc/components/renderer/metal/RTCMTLNSVideoView.h",
-        ]
+        sources += [ "objc/components/renderer/metal/RTCMTLNSVideoView.h" ]
         frameworks += [ "AppKit.framework" ]
       }
       deps = [
@@ -1065,6 +1063,33 @@ if (is_ios || is_mac) {
       ]
     }
 
+    # STREAM-CUSTOM: framed AES-GCM host API. Isolated so m-branch syncs
+    # only add a deps line on peerconnectionfactory_base_objc.
+    rtc_library("encryption_manager_objc") {
+      visibility = [ "*" ]
+      sources = [
+        "objc/api/peerconnection/RTCEncryptionManager.h",
+        "objc/api/peerconnection/RTCEncryptionManager.mm",
+      ]
+      configs += [
+        "..:common_objc",
+        "..:no_global_constructors",
+      ]
+      public_configs = [ ":common_config_objc" ]
+      deps = [
+        ":base_objc",
+        ":helpers_objc",
+        "../api:array_view",
+        "../api:make_ref_counted",
+        "../api:rtp_parameters",
+        "../api:rtp_receiver_interface",
+        "../api:rtp_sender_interface",
+        "../api:scoped_refptr",
+        "../api/crypto:frame_crypto_transformer",
+        "../rtc_base:threading",
+      ]
+    }
+
     rtc_library("peerconnectionfactory_base_objc") {
       visibility = [ "*" ]
       allow_poison = [
@@ -1235,6 +1260,7 @@ if (is_ios || is_mac) {
         ":audiorendereradapter_objc",
         ":base_native_additions_objc",
         ":base_objc",
+        ":encryption_manager_objc",
         ":file_logger_objc",
         ":helpers_objc",
         ":mediaconstraints_objc",
@@ -1305,9 +1331,7 @@ if (is_ios || is_mac) {
       ]
 
       if (is_ios || is_mac) {
-        deps += [
-          ":native_api_audio_device_module",
-        ]
+        deps += [ ":native_api_audio_device_module" ]
       }
     }
 
@@ -1329,6 +1353,7 @@ if (is_ios || is_mac) {
             "objc/unittests/RTCConfigurationTest.mm",
             "objc/unittests/RTCDataChannelConfigurationTest.mm",
             "objc/unittests/RTCEncodedImage_xctest.mm",
+            "objc/unittests/RTCEncryptionManagerTest.mm",
             "objc/unittests/RTCFileVideoCapturer_xctest.mm",
             "objc/unittests/RTCH264ProfileLevelId_xctest.m",
             "objc/unittests/RTCIceCandidateTest.mm",
@@ -1360,6 +1385,7 @@ if (is_ios || is_mac) {
             ":base_native_additions_objc",
             ":base_objc",
             ":callback_logger_objc",
+            ":encryption_manager_objc",
             ":framework_objc",
             ":helpers_objc",
             ":mediaconstraints_objc",
@@ -1527,6 +1553,7 @@ if (is_ios || is_mac) {
           "objc/api/peerconnection/RTCDataChannel.h",
           "objc/api/peerconnection/RTCDataChannelConfiguration.h",
           "objc/api/peerconnection/RTCDataPacketCryptor.h",
+          "objc/api/peerconnection/RTCEncryptionManager.h",  # STREAM-CUSTOM
           "objc/api/peerconnection/RTCFrameCryptor.h",
           "objc/api/peerconnection/RTCFrameCryptorKeyProvider.h",
           "objc/api/peerconnection/RTCFieldTrials.h",
@@ -1718,6 +1745,7 @@ if (is_ios || is_mac) {
           "objc/api/peerconnection/RTCDataChannelConfiguration.h",
           "objc/api/peerconnection/RTCDataPacketCryptor.h",
           "objc/api/peerconnection/RTCDtmfSender.h",
+          "objc/api/peerconnection/RTCEncryptionManager.h",  # STREAM-CUSTOM
           "objc/api/peerconnection/RTCFieldTrials.h",
           "objc/api/peerconnection/RTCFrameCryptor.h",
           "objc/api/peerconnection/RTCFrameCryptorKeyProvider.h",

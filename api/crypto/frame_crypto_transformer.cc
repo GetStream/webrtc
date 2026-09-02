@@ -15,6 +15,8 @@
  */
 
 #include "api/crypto/frame_crypto_transformer.h"
+#include "api/crypto/default_encryption_manager.h"
+#include "api/crypto/frame_encryption_manager.h"
 
 #include <openssl/aes.h>
 #include <openssl/err.h>
@@ -22,10 +24,14 @@
 #include <openssl/pem.h>
 #include <openssl/rand.h>
 
+#include <cstring>
 #include <iomanip>
 #include <iostream>
+#include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <utility>
 
 #include "absl/container/inlined_vector.h"
 #include "absl/types/optional.h"
@@ -38,7 +44,9 @@
 #include "modules/rtp_rtcp/source/rtp_format_h264.h"
 #include "rtc_base/byte_buffer.h"
 #include "rtc_base/crypto_random.h"
+#include "rtc_base/event.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/platform_thread.h"
 #include "rtc_base/time_utils.h"
 
 enum class EncryptOrDecrypt { kEncrypt = 0, kDecrypt };
@@ -233,6 +241,9 @@ uint8_t get_unencrypted_bytes(webrtc::TransformableFrameInterface* frame,
   return unencrypted_bytes;
 }
 
+// Unencrypted-byte helpers for the LiveKit path. Trailer clear-byte rules
+// live in frame_crypto_codec.cc.
+
 int DerivePBKDF2KeyFromRawKey(const std::vector<uint8_t> raw_key,
                               const std::vector<uint8_t>& salt,
                               unsigned int optional_length_bits,
@@ -246,14 +257,6 @@ int DerivePBKDF2KeyFromRawKey(const std::vector<uint8_t> raw_key,
     RTC_LOG(LS_ERROR) << "Failed to derive AES key from password.";
     return ErrorUnexpected;
   }
-
-  RTC_LOG(LS_INFO) << "raw_key "
-                   << to_uint8_list(raw_key.data(), raw_key.size()) << " len "
-                   << raw_key.size() << " slat << "
-                   << to_uint8_list(salt.data(), salt.size()) << " len "
-                   << salt.size() << "\n derived_key "
-                   << to_uint8_list(derived_key->data(), derived_key->size())
-                   << " len " << derived_key->size();
 
   return Success;
 }
@@ -319,7 +322,8 @@ int AesEncryptDecrypt(EncryptOrDecrypt mode,
                       const webrtc::ArrayView<uint8_t> data,
                       std::vector<uint8_t>* buffer) {
   switch (algorithm) {
-    case webrtc::FrameCryptorTransformer::Algorithm::kAesGcm: {
+    case webrtc::FrameCryptorTransformer::Algorithm::kAesGcm:
+    case webrtc::FrameCryptorTransformer::Algorithm::kAesGcmTrailer: {
       unsigned int tag_length_bits = 128;
       const EVP_AEAD* cipher = GetAesGcmAlgorithmFromKeySize(raw_key.size());
       if (!cipher) {
@@ -336,25 +340,112 @@ int AesEncryptDecrypt(EncryptOrDecrypt mode,
 }
 namespace webrtc {
 
+namespace {
+FrameCryptorTransformer::MediaType MediaTypeFromTrackType(
+    FrameCryptorTransformer::TrackType track_type) {
+  switch (track_type) {
+    case FrameCryptorTransformer::TrackType::kAudio:
+    case FrameCryptorTransformer::TrackType::kScreenshareAudio:
+      return FrameCryptorTransformer::MediaType::kAudioFrame;
+    case FrameCryptorTransformer::TrackType::kVideo:
+    case FrameCryptorTransformer::TrackType::kScreenshare:
+      return FrameCryptorTransformer::MediaType::kVideoFrame;
+  }
+  return FrameCryptorTransformer::MediaType::kAudioFrame;
+}
+
+FrameCryptorTransformer::TrackType TrackTypeFromMediaType(
+    FrameCryptorTransformer::MediaType type) {
+  return type == FrameCryptorTransformer::MediaType::kAudioFrame
+             ? FrameCryptorTransformer::TrackType::kAudio
+             : FrameCryptorTransformer::TrackType::kVideo;
+}
+
+void StopOwnedThread(std::unique_ptr<Thread> thread) {
+  if (!thread) {
+    return;
+  }
+  if (!thread->IsCurrent()) {
+    thread->Stop();
+    return;
+  }
+  thread->Quit();
+  PlatformThread::SpawnDetached(
+      [thread = std::move(thread)]() mutable { thread->Stop(); },
+      "JoinCryptoThrd");
+}
+}  // namespace
+
 FrameCryptorTransformer::FrameCryptorTransformer(
     webrtc::Thread* signaling_thread,
     const std::string participant_id,
     MediaType type,
     Algorithm algorithm,
     webrtc::scoped_refptr<KeyProvider> key_provider)
+    : FrameCryptorTransformer(
+          signaling_thread,
+          participant_id,
+          TrackTypeFromMediaType(type),
+          webrtc::make_ref_counted<DefaultEncryptionManager>(algorithm,
+                                                             key_provider)) {
+  algorithm_ = algorithm;
+  key_provider_ = key_provider;
+}
+
+FrameCryptorTransformer::FrameCryptorTransformer(
+    webrtc::Thread* signaling_thread,
+    const std::string participant_id,
+    MediaType type,
+    webrtc::scoped_refptr<EncryptionManager> manager)
+    : FrameCryptorTransformer(signaling_thread,
+                              participant_id,
+                              TrackTypeFromMediaType(type),
+                              std::move(manager)) {}
+
+FrameCryptorTransformer::FrameCryptorTransformer(
+    webrtc::Thread* signaling_thread,
+    const std::string participant_id,
+    TrackType track_type,
+    webrtc::scoped_refptr<EncryptionManager> manager)
     : signaling_thread_(signaling_thread),
-      thread_(webrtc::Thread::Create()),
       participant_id_(participant_id),
-      type_(type),
-      algorithm_(algorithm),
-      key_provider_(key_provider) {
-  RTC_DCHECK(key_provider_ != nullptr);
-  thread_->SetName("FrameCryptorTransformer", this);
-  thread_->Start();
+      type_(MediaTypeFromTrackType(track_type)),
+      track_type_(track_type),
+      encryption_manager_(std::move(manager)) {
+  RTC_DCHECK(encryption_manager_ != nullptr);
+  // Trailer managers share one worker. LiveKit KeyProvider has none, so we
+  // start a per-transformer thread as the old FrameCryptor did.
+  if (!encryption_manager_->crypto_task_queue()) {
+    thread_ = webrtc::Thread::Create();
+    thread_->SetName("FrameCryptorTransformer", this);
+    thread_->Start();
+  }
 }
 
 FrameCryptorTransformer::~FrameCryptorTransformer() {
-  thread_->Stop();
+  if (thread_) {
+    StopOwnedThread(std::move(thread_));
+    return;
+  }
+  if (!encryption_manager_) {
+    return;
+  }
+  TaskQueueBase* q = encryption_manager_->crypto_task_queue();
+  if (q && !q->IsCurrent()) {
+    Event done;
+    q->PostTask([&done] { done.Set(); });
+    done.Wait(Event::kForever);
+  }
+}
+
+void FrameCryptorTransformer::SetEncodeCodec(std::string codec) {
+  webrtc::MutexLock lock(&mutex_);
+  // Empty clears the pin: later frames use RTP codec metadata instead.
+  if (codec.empty()) {
+    encode_codec_.reset();
+  } else {
+    encode_codec_ = std::move(codec);
+  }
 }
 
 void FrameCryptorTransformer::Transform(
@@ -366,18 +457,30 @@ void FrameCryptorTransformer::Transform(
     return;
   }
 
-  // do encrypt or decrypt here...
+  TaskQueueBase* queue = nullptr;
+  {
+    webrtc::MutexLock manager_lock(&mutex_);
+    if (encryption_manager_) {
+      queue = encryption_manager_->crypto_task_queue();
+    }
+  }
+  // Prefer the manager worker so every track on this manager serializes.
+  // LiveKit falls back to the per-transformer thread created in the ctor.
+  if (!queue) {
+    queue = thread_.get();
+  }
+  RTC_DCHECK(queue != nullptr);
+
+  scoped_refptr<FrameCryptorTransformer> self(this);
   switch (frame->GetDirection()) {
     case webrtc::TransformableFrameInterface::Direction::kSender:
-      RTC_DCHECK(thread_ != nullptr);
-      thread_->PostTask([frame = std::move(frame), this]() mutable {
-        encryptFrame(std::move(frame));
+      queue->PostTask([frame = std::move(frame), self]() mutable {
+        self->encryptFrame(std::move(frame));
       });
       break;
     case webrtc::TransformableFrameInterface::Direction::kReceiver:
-      RTC_DCHECK(thread_ != nullptr);
-      thread_->PostTask([frame = std::move(frame), this]() mutable {
-        decryptFrame(std::move(frame));
+      queue->PostTask([frame = std::move(frame), self]() mutable {
+        self->decryptFrame(std::move(frame));
       });
       break;
     case webrtc::TransformableFrameInterface::Direction::kUnknown:
@@ -387,338 +490,158 @@ void FrameCryptorTransformer::Transform(
   }
 }
 
+namespace {
+FrameCryptoInput MakeCryptoInput(
+    TransformableFrameInterface* frame,
+    FrameCryptorTransformer::MediaType type,
+    FrameCryptorTransformer::TrackType track_type,
+    int key_index,
+    const std::string& participant_id,
+    const std::optional<std::string>& encode_codec) {
+  FrameCryptoInput in;
+  in.data = frame->GetData();
+  in.media_type = type;
+  in.track_type = track_type;
+  in.ssrc = frame->GetSsrc();
+  in.rtp_timestamp = frame->GetTimestamp();
+  in.key_index = key_index;
+  in.participant_id = participant_id;
+  // Encode may pin a lowercase codec name. Decode always passes nullopt:
+  // the trailer already says how many clear bytes to leave.
+  in.codec_name = encode_codec;
+  if (type == FrameCryptorTransformer::MediaType::kVideoFrame) {
+    auto* video = static_cast<TransformableVideoFrameInterface*>(frame);
+    in.video_codec = video->Metadata().GetCodec();
+    in.is_keyframe = video->IsKeyFrame();
+  }
+  return in;
+}
+}  // namespace
+
+webrtc::scoped_refptr<webrtc::TransformedFrameCallback>
+FrameCryptorTransformer::SinkFor(
+    webrtc::TransformableFrameInterface* frame) {
+  if (type_ == MediaType::kAudioFrame && sink_callback_) {
+    return sink_callback_;
+  }
+  auto it = sink_callbacks_.find(frame->GetSsrc());
+  if (it != sink_callbacks_.end()) {
+    return it->second;
+  }
+  return nullptr;
+}
+
 void FrameCryptorTransformer::encryptFrame(
     std::unique_ptr<webrtc::TransformableFrameInterface> frame) {
   bool enabled_cryption = false;
-  webrtc::scoped_refptr<webrtc::TransformedFrameCallback> sink_callback =
-      nullptr;
+  int key_index = 0;
+  FrameCryptorTransformer::TrackType track_type =
+      FrameCryptorTransformer::TrackType::kAudio;
+  webrtc::scoped_refptr<EncryptionManager> manager;
+  webrtc::scoped_refptr<webrtc::TransformedFrameCallback> sink_callback;
+  std::optional<std::string> encode_codec;
   {
     webrtc::MutexLock lock(&mutex_);
     enabled_cryption = enabled_cryption_;
-    if (type_ == webrtc::FrameCryptorTransformer::MediaType::kAudioFrame) {
-      sink_callback = sink_callback_;
-    } else {
-      sink_callback = sink_callbacks_[frame->GetSsrc()];
-    }
+    key_index = key_index_;
+    track_type = track_type_;
+    manager = encryption_manager_;
+    sink_callback = SinkFor(frame.get());
+    encode_codec = encode_codec_;
   }
-
   if (sink_callback == nullptr) {
-    RTC_LOG(LS_WARNING)
-        << "FrameCryptorTransformer::encryptFrame() sink_callback is NULL";
     if (last_enc_error_ != FrameCryptionState::kInternalError) {
       last_enc_error_ = FrameCryptionState::kInternalError;
       onFrameCryptionStateChanged(last_enc_error_);
     }
     return;
   }
-
-  ArrayView<const uint8_t> data_in = frame->GetData();
-  if (data_in.size() == 0 || !enabled_cryption) {
-    RTC_LOG(LS_WARNING) << "FrameCryptorTransformer::encryptFrame() "
-                           "data_in.size() == 0 || enabled_cryption == false";
-    if (key_provider_->options().discard_frame_when_cryptor_not_ready) {
+  if (!enabled_cryption) {
+    if (key_provider_ &&
+        key_provider_->options().discard_frame_when_cryptor_not_ready) {
       return;
     }
     sink_callback->OnTransformedFrame(std::move(frame));
     return;
   }
-
-  auto key_handler = key_provider_->options().shared_key
-                         ? key_provider_->GetSharedKey(participant_id_)
-                         : key_provider_->GetKey(participant_id_);
-
-  if (key_handler == nullptr || key_handler->GetKeySet(key_index_) == nullptr) {
-    RTC_LOG(LS_INFO) << "FrameCryptorTransformer::encryptFrame() no keys, or "
-                        "key_index["
-                     << key_index_ << "] out of range for participant "
-                     << participant_id_;
-    if (last_enc_error_ != FrameCryptionState::kMissingKey) {
-      last_enc_error_ = FrameCryptionState::kMissingKey;
+  if (!manager) {
+    return;
+  }
+  FrameCryptoInput input = MakeCryptoInput(frame.get(), type_, track_type,
+                                           key_index, participant_id_,
+                                           encode_codec);
+  Buffer out;
+  FrameCryptionState state = kNew;
+  if (!manager->Encrypt(input, out, &state)) {
+    if (state != kNew) {
+      last_enc_error_ = state;
       onFrameCryptionStateChanged(last_enc_error_);
     }
     return;
   }
-
-  auto key_set = key_handler->GetKeySet(key_index_);
-  uint8_t unencrypted_bytes = get_unencrypted_bytes(frame.get(), type_);
-
-  Buffer frame_header = Buffer::CreateUninitializedWithSize(unencrypted_bytes);
-  for (size_t i = 0; i < unencrypted_bytes; i++) {
-    frame_header[i] = data_in[i];
-  }
-
-  Buffer frame_trailer = Buffer::CreateUninitializedWithSize(2);
-  frame_trailer[0] = getIvSize();
-  frame_trailer[1] = key_index_;
-  Buffer iv = makeIv(frame->GetSsrc(), frame->GetTimestamp());
-
-  Buffer payload =
-      Buffer::CreateUninitializedWithSize(data_in.size() - unencrypted_bytes);
-  for (size_t i = unencrypted_bytes; i < data_in.size(); i++) {
-    payload[i - unencrypted_bytes] = data_in[i];
-  }
-
-  std::vector<uint8_t> buffer;
-  if (AesEncryptDecrypt(EncryptOrDecrypt::kEncrypt, algorithm_,
-                        key_set->encryption_key, iv, frame_header, payload,
-                        &buffer) == Success) {
-    Buffer encrypted_payload(buffer.data(), buffer.size());
-    Buffer tag(encrypted_payload.data() + encrypted_payload.size() - 16, 16);
-    Buffer data_without_header;
-    data_without_header.AppendData(encrypted_payload);
-    data_without_header.AppendData(iv);
-    data_without_header.AppendData(frame_trailer);
-
-    Buffer data_out;
-    data_out.AppendData(frame_header);
-
-    if (FrameIsH264(frame.get(), type_)) {
-      H264::WriteRbsp(data_without_header.data(), data_without_header.size(),
-                      &data_out);
-    } else if (FrameIsH265(frame.get(), type_)) {
-      H265::WriteRbsp(data_without_header.data(), data_without_header.size(),
-                      &data_out);
-    } else {
-      data_out.AppendData(data_without_header);
-      RTC_CHECK_EQ(data_out.size(), frame_header.size() +
-                                        encrypted_payload.size() + iv.size() +
-                                        frame_trailer.size());
-    }
-
-    frame->SetData(data_out);
-
-    if (last_enc_error_ != FrameCryptionState::kOk) {
-      last_enc_error_ = FrameCryptionState::kOk;
-      onFrameCryptionStateChanged(last_enc_error_);
-    }
-    sink_callback->OnTransformedFrame(std::move(frame));
+  frame->SetData(out);
+  if (state != kOk && state != kNew) {
+    last_enc_error_ = state;
+    onFrameCryptionStateChanged(last_enc_error_);
   } else {
-    if (last_enc_error_ != FrameCryptionState::kEncryptionFailed) {
-      last_enc_error_ = FrameCryptionState::kEncryptionFailed;
-      onFrameCryptionStateChanged(last_enc_error_);
-    }
-    RTC_LOG(LS_ERROR) << "FrameCryptorTransformer::encryptFrame() failed";
+    last_enc_error_ = state;
   }
+  sink_callback->OnTransformedFrame(std::move(frame));
 }
 
 void FrameCryptorTransformer::decryptFrame(
     std::unique_ptr<webrtc::TransformableFrameInterface> frame) {
   bool enabled_cryption = false;
-  webrtc::scoped_refptr<webrtc::TransformedFrameCallback> sink_callback =
-      nullptr;
+  int key_index = 0;
+  FrameCryptorTransformer::TrackType track_type =
+      FrameCryptorTransformer::TrackType::kAudio;
+  webrtc::scoped_refptr<EncryptionManager> manager;
+  webrtc::scoped_refptr<webrtc::TransformedFrameCallback> sink_callback;
   {
     webrtc::MutexLock lock(&mutex_);
     enabled_cryption = enabled_cryption_;
-    if (type_ == webrtc::FrameCryptorTransformer::MediaType::kAudioFrame) {
-      sink_callback = sink_callback_;
-    } else {
-      sink_callback = sink_callbacks_[frame->GetSsrc()];
-    }
+    key_index = key_index_;
+    track_type = track_type_;
+    manager = encryption_manager_;
+    sink_callback = SinkFor(frame.get());
   }
-
   if (sink_callback == nullptr) {
-    RTC_LOG(LS_WARNING)
-        << "FrameCryptorTransformer::decryptFrame() sink_callback is NULL";
     if (last_dec_error_ != FrameCryptionState::kInternalError) {
       last_dec_error_ = FrameCryptionState::kInternalError;
       onFrameCryptionStateChanged(last_dec_error_);
     }
     return;
   }
-
-  ArrayView<const uint8_t> data_in = frame->GetData();
-
-  if (data_in.size() == 0 || !enabled_cryption) {
-    RTC_LOG(LS_WARNING) << "FrameCryptorTransformer::decryptFrame() "
-                           "data_in.size() == 0 || enabled_cryption == false";
-    if (key_provider_->options().discard_frame_when_cryptor_not_ready) {
+  if (!enabled_cryption) {
+    if (key_provider_ &&
+        key_provider_->options().discard_frame_when_cryptor_not_ready) {
       return;
     }
-
     sink_callback->OnTransformedFrame(std::move(frame));
     return;
   }
-
-  auto uncrypted_magic_bytes = key_provider_->options().uncrypted_magic_bytes;
-  if (uncrypted_magic_bytes.size() > 0 &&
-      data_in.size() >= uncrypted_magic_bytes.size()) {
-    auto tmp = data_in.subview(data_in.size() - (uncrypted_magic_bytes.size()),
-                               uncrypted_magic_bytes.size());
-    auto data = std::vector<uint8_t>(tmp.begin(), tmp.end());
-    if (uncrypted_magic_bytes == data) {
-      RTC_CHECK_EQ(tmp.size(), uncrypted_magic_bytes.size());
-      RTC_LOG(LS_INFO) << "FrameCryptorTransformer::uncrypted_magic_bytes( tmp "
-                       << to_hex(tmp.data(), tmp.size()) << ", magic bytes "
-                       << to_hex(uncrypted_magic_bytes.data(),
-                                 uncrypted_magic_bytes.size())
-                       << ")";
-
-      // magic bytes detected, this is a non-encrypted frame, skip frame
-      // decryption.
-      Buffer data_out;
-      data_out.AppendData(
-          data_in.subview(0, data_in.size() - uncrypted_magic_bytes.size()));
-      frame->SetData(data_out);
-      sink_callback->OnTransformedFrame(std::move(frame));
-      return;
-    }
+  if (!manager) {
+    return;
   }
-
-  uint8_t unencrypted_bytes = get_unencrypted_bytes(frame.get(), type_);
-
-  Buffer frame_header = Buffer::CreateUninitializedWithSize(unencrypted_bytes);
-  for (size_t i = 0; i < unencrypted_bytes; i++) {
-    frame_header[i] = data_in[i];
-  }
-
-  Buffer frame_trailer = Buffer::CreateUninitializedWithSize(2);
-  frame_trailer[0] = data_in[data_in.size() - 2];
-  frame_trailer[1] = data_in[data_in.size() - 1];
-  uint8_t ivLength = frame_trailer[0];
-  uint8_t key_index = frame_trailer[1];
-
-  if (ivLength != getIvSize()) {
-    RTC_LOG(LS_WARNING) << "FrameCryptorTransformer::decryptFrame() ivLength["
-                        << static_cast<int>(ivLength) << "] != getIvSize()["
-                        << static_cast<int>(getIvSize()) << "]";
-    if (last_dec_error_ != FrameCryptionState::kDecryptionFailed) {
-      last_dec_error_ = FrameCryptionState::kDecryptionFailed;
+  // Decode never pins a codec: clear-byte count comes from the trailer.
+  FrameCryptoInput input = MakeCryptoInput(frame.get(), type_, track_type,
+                                           key_index, participant_id_,
+                                           std::nullopt);
+  Buffer out;
+  FrameCryptionState state = kNew;
+  if (!manager->Decrypt(input, out, &state)) {
+    if (state != kNew) {
+      last_dec_error_ = state;
       onFrameCryptionStateChanged(last_dec_error_);
     }
     return;
   }
-
-  auto key_handler = key_provider_->options().shared_key
-                         ? key_provider_->GetSharedKey(participant_id_)
-                         : key_provider_->GetKey(participant_id_);
-
-  if (0 > key_index || key_index >= key_provider_->options().key_ring_size ||
-      key_handler == nullptr || key_handler->GetKeySet(key_index) == nullptr) {
-    RTC_LOG(LS_INFO) << "FrameCryptorTransformer::decryptFrame() no keys, or "
-                        "key_index["
-                     << key_index << "] out of range for participant "
-                     << participant_id_;
-    if (last_dec_error_ != FrameCryptionState::kMissingKey) {
-      last_dec_error_ = FrameCryptionState::kMissingKey;
-      onFrameCryptionStateChanged(last_dec_error_);
-    }
-    return;
-  }
-
-  if (last_dec_error_ == kDecryptionFailed && !key_handler->HasValidKey()) {
-    // if decryption failed and we have an invalid key,
-    // please try to decrypt with the next new key
-    return;
-  }
-
-  auto key_set = key_handler->GetKeySet(key_index);
-
-  Buffer iv = Buffer::CreateUninitializedWithSize(ivLength);
-  for (size_t i = 0; i < ivLength; i++) {
-    iv[i] = data_in[data_in.size() - 2 - ivLength + i];
-  }
-
-  Buffer encrypted_buffer =
-      Buffer::CreateUninitializedWithSize(data_in.size() - unencrypted_bytes);
-  for (size_t i = unencrypted_bytes; i < data_in.size(); i++) {
-    encrypted_buffer[i - unencrypted_bytes] = data_in[i];
-  }
-
-  if (FrameIsH264(frame.get(), type_) &&
-      NeedsRbspUnescaping(encrypted_buffer.data(), encrypted_buffer.size())) {
-    encrypted_buffer.SetData(
-        H264::ParseRbsp(encrypted_buffer.data(), encrypted_buffer.size()));
-  } else if (FrameIsH265(frame.get(), type_) &&
-             NeedsRbspUnescaping(encrypted_buffer.data(),
-                                 encrypted_buffer.size())) {
-    encrypted_buffer.SetData(
-        H265::ParseRbsp(encrypted_buffer.data(), encrypted_buffer.size()));
-  }
-
-  Buffer encrypted_payload = Buffer::CreateUninitializedWithSize(
-      encrypted_buffer.size() - ivLength - 2);
-  for (size_t i = 0; i < encrypted_payload.size(); i++) {
-    encrypted_payload[i] = encrypted_buffer[i];
-  }
-
-  Buffer tag(encrypted_payload.data() + encrypted_payload.size() - 16, 16);
-  std::vector<uint8_t> buffer;
-
-  int ratchet_count = 0;
-  auto initialKeyMaterial = key_set->material;
-  bool decryption_success = false;
-  if (AesEncryptDecrypt(EncryptOrDecrypt::kDecrypt, algorithm_,
-                        key_set->encryption_key, iv, frame_header,
-                        encrypted_payload, &buffer) == Success) {
-    decryption_success = true;
-  } else {
-    RTC_LOG(LS_WARNING) << "FrameCryptorTransformer::decryptFrame() failed";
-    webrtc::scoped_refptr<ParticipantKeyHandler::KeySet> ratcheted_key_set;
-    auto currentKeyMaterial = key_set->material;
-    if (key_provider_->options().ratchet_window_size > 0) {
-      while (ratchet_count < key_provider_->options().ratchet_window_size) {
-        ratchet_count++;
-
-        RTC_LOG(LS_INFO) << "ratcheting key attempt " << ratchet_count << " of "
-                         << key_provider_->options().ratchet_window_size;
-
-        auto new_material = key_handler->RatchetKeyMaterial(currentKeyMaterial);
-        ratcheted_key_set = key_handler->DeriveKeys(
-            new_material, key_provider_->options().ratchet_salt, 128);
-
-        if (AesEncryptDecrypt(EncryptOrDecrypt::kDecrypt, algorithm_,
-                              ratcheted_key_set->encryption_key, iv,
-                              frame_header, encrypted_payload,
-                              &buffer) == Success) {
-          RTC_LOG(LS_INFO) << "FrameCryptorTransformer::decryptFrame() "
-                              "ratcheted to key_index="
-                           << static_cast<int>(key_index);
-          decryption_success = true;
-          // success, so we set the new key
-          key_handler->SetKeyFromMaterial(new_material, key_index);
-          key_handler->SetHasValidKey();
-          if (last_dec_error_ != FrameCryptionState::kKeyRatcheted) {
-            last_dec_error_ = FrameCryptionState::kKeyRatcheted;
-            onFrameCryptionStateChanged(last_dec_error_);
-          }
-          break;
-        }
-        // for the next ratchet attempt
-        currentKeyMaterial = new_material;
-      }
-
-      /* Since the key it is first send and only afterwards actually used for
-        encrypting, there were situations when the decrypting failed due to the
-        fact that the received frame was not encrypted yet and ratcheting, of
-        course, did not solve the problem. So if we fail RATCHET_WINDOW_SIZE
-        times, we come back to the initial key.
-       */
-      if (!decryption_success ||
-          ratchet_count >= key_provider_->options().ratchet_window_size) {
-        key_handler->SetKeyFromMaterial(initialKeyMaterial, key_index);
-      }
-    }
-  }
-
-  if (!decryption_success) {
-    if (key_handler->DecryptionFailure()) {
-      if (last_dec_error_ != FrameCryptionState::kDecryptionFailed) {
-        last_dec_error_ = FrameCryptionState::kDecryptionFailed;
-        onFrameCryptionStateChanged(last_dec_error_);
-      }
-    }
-    return;
-  }
-
-  Buffer payload(buffer.data(), buffer.size());
-  Buffer data_out;
-  data_out.AppendData(frame_header);
-  data_out.AppendData(payload);
-  frame->SetData(data_out);
-
-  if (last_dec_error_ != FrameCryptionState::kOk) {
-    last_dec_error_ = FrameCryptionState::kOk;
+  frame->SetData(out);
+  if (state != kOk && state != kNew) {
+    last_dec_error_ = state;
     onFrameCryptionStateChanged(last_dec_error_);
+  } else {
+    last_dec_error_ = state;
   }
   sink_callback->OnTransformedFrame(std::move(frame));
 }
@@ -756,6 +679,7 @@ Buffer FrameCryptorTransformer::makeIv(uint32_t ssrc, uint32_t timestamp) {
 uint8_t FrameCryptorTransformer::getIvSize() {
   switch (algorithm_) {
     case Algorithm::kAesGcm:
+    case Algorithm::kAesGcmTrailer:
       return 12;
     default:
       return 0;
