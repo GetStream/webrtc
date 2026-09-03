@@ -641,6 +641,7 @@ if (rtc_include_tests && !build_with_chromium) {
       "api/audio:audio_api_unittests",
       "api/audio_codecs/test:audio_codecs_api_unittests",
       "api/crypto:crypto_options_unittest",
+      "api/crypto:frame_crypto_transformer_unittest",
       "api/crypto:options",
       "api/numerics:numerics_unittests",
       "api/task_queue:pending_task_safety_flag_unittests",

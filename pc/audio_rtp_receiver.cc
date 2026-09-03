@@ -315,11 +315,8 @@ std::vector<RtpSource> AudioRtpReceiver::GetSources() const {
 void AudioRtpReceiver::SetFrameTransformer(
     scoped_refptr<FrameTransformerInterface> frame_transformer) {
   RTC_DCHECK_RUN_ON(worker_thread_);
-  if (media_channel_) {
-    media_channel_->SetDepacketizerToDecoderFrameTransformer(
-        signaled_ssrc_.value_or(0), frame_transformer);
-  }
   frame_transformer_ = std::move(frame_transformer);
+  ApplyFrameTransformer_w();
 }
 
 void AudioRtpReceiver::Reconfigure(bool track_enabled) {
@@ -333,10 +330,16 @@ void AudioRtpReceiver::Reconfigure(bool track_enabled) {
     media_channel_->SetFrameDecryptor(*signaled_ssrc_, frame_decryptor_);
   }
 
-  if (frame_transformer_ && track_enabled) {
-    media_channel_->SetDepacketizerToDecoderFrameTransformer(
-        signaled_ssrc_.value_or(0), frame_transformer_);
+  ApplyFrameTransformer_w();
+}
+
+void AudioRtpReceiver::ApplyFrameTransformer_w() {
+  RTC_DCHECK_RUN_ON(worker_thread_);
+  if (!media_channel_) {
+    return;
   }
+  media_channel_->SetDepacketizerToDecoderFrameTransformer(
+      signaled_ssrc_.value_or(0), frame_transformer_);
 }
 
 void AudioRtpReceiver::SetObserver(RtpReceiverObserverInterface* observer) {
@@ -369,6 +372,7 @@ void AudioRtpReceiver::SetMediaChannel(
                 : worker_thread_safety_->SetNotAlive();
   media_channel_ =
       static_cast<VoiceMediaReceiveChannelInterface*>(media_channel);
+  ApplyFrameTransformer_w();
 }
 
 void AudioRtpReceiver::NotifyFirstPacketReceived() {

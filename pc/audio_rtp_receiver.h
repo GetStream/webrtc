@@ -140,6 +140,7 @@ class AudioRtpReceiver : public ObserverInterface,
       RTC_RUN_ON(worker_thread_);
   void Reconfigure(bool track_enabled) RTC_RUN_ON(worker_thread_);
   void SetOutputVolume_w(double volume) RTC_RUN_ON(worker_thread_);
+  void ApplyFrameTransformer_w() RTC_RUN_ON(worker_thread_);
 
   RTC_NO_UNIQUE_ADDRESS SequenceChecker signaling_thread_checker_;
   Thread* const worker_thread_;

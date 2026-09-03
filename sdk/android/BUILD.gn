@@ -56,12 +56,12 @@ if (is_android) {
       ":swcodecs_java",
       ":video_api_java",
       ":video_java",
-      "../../rtc_base:base_java",
-      "../../third_party/jni_zero:jni_zero_java",
-      "../../extensions/android/audio-processing:native_plugin_java",  # STREAM-CUSTOM
       "../../extensions/android/audio-processing:audio_effects_java",  # STREAM-CUSTOM
+      "../../extensions/android/audio-processing:native_plugin_java",  # STREAM-CUSTOM
       "../../extensions/android/simulcast:simulcast_java",  # STREAM-CUSTOM
       "../../extensions/android/utilities:utilities_java",  # STREAM-CUSTOM
+      "../../rtc_base:base_java",
+      "../../third_party/jni_zero:jni_zero_java",
     ]
   }
 
@@ -145,13 +145,13 @@ if (is_android) {
       ":libjingle_peerconnection_metrics_default_jni",
       ":native_api_jni",
       ":video_egl_jni",
+      "../../extensions/android/audio-processing:audio_effects",  # STREAM-CUSTOM
+      "../../extensions/android/audio-processing:native_plugin",  # STREAM-CUSTOM
       "../../pc:libjingle_peerconnection",
       "../../rtc_base:logging",
+      "../../rtc_base:ssl",
       "../../rtc_base:ssl_adapter",
       "//third_party/jni_zero",
-      "../../rtc_base:ssl",
-      "../../extensions/android/audio-processing:native_plugin",  # STREAM-CUSTOM
-      "../../extensions/android/audio-processing:audio_effects",  # STREAM-CUSTOM
     ]
     output_extension = "so"
   }
@@ -299,6 +299,8 @@ if (is_android) {
       "api/org/webrtc/CryptoOptions.java",
       "api/org/webrtc/DataChannel.java",
       "api/org/webrtc/DtmfSender.java",
+      "api/org/webrtc/E2EEManager.java",  # STREAM-CUSTOM (E2EE)
+      "api/org/webrtc/EncryptionManager.java",  # STREAM-CUSTOM (E2EE)
       "api/org/webrtc/FecControllerFactoryFactoryInterface.java",
       "api/org/webrtc/FrameDecryptor.java",
       "api/org/webrtc/FrameEncryptor.java",
@@ -352,6 +354,7 @@ if (is_android) {
       ":default_video_codec_factory_java",
       ":environment_java",
       ":generated_base_jni_java",
+      ":generated_encryption_manager_jni_java",
       ":generated_peerconnection_jni_java",
 
       #TODO(bugs.webrtc.org/7452): Make injection mandatory and remove this dep.
@@ -463,6 +466,7 @@ if (is_android) {
     visibility = [ "*" ]
     sources = [
       "api/org/webrtc/audio/JavaAudioDeviceModule.java",
+      "src/java/org/webrtc/audio/AudioRecordDataCallback.java",
       "src/java/org/webrtc/audio/LowLatencyAudioBufferManager.java",
       "src/java/org/webrtc/audio/VolumeLogger.java",
       "src/java/org/webrtc/audio/WebRtcAudioEffects.java",
@@ -470,7 +474,6 @@ if (is_android) {
       "src/java/org/webrtc/audio/WebRtcAudioRecord.java",
       "src/java/org/webrtc/audio/WebRtcAudioTrack.java",
       "src/java/org/webrtc/audio/WebRtcAudioUtils.java",
-      "src/java/org/webrtc/audio/AudioRecordDataCallback.java",
     ]
 
     deps = [
@@ -753,6 +756,28 @@ if (current_os == "linux" || is_android) {
     ]
   }
 
+  # STREAM-CUSTOM: framed AES-GCM JNI. Isolated so m-branch syncs only add a
+  # deps line on peerconnection_jni. source_set so JNI natives are not
+  # dropped from the .so (static libs only pull referenced .o files).
+  rtc_source_set("encryption_manager_jni") {
+    visibility = [ "*" ]
+    sources = [ "src/jni/pc/encryption_manager.cc" ]
+    deps = [
+      ":base_jni",
+      ":generated_encryption_manager_jni",
+      ":native_api_jni",
+      "../../api:array_view",
+      "../../api:make_ref_counted",
+      "../../api:rtp_parameters",
+      "../../api:rtp_receiver_interface",
+      "../../api:rtp_sender_interface",
+      "../../api:scoped_refptr",
+      "../../api/crypto:frame_crypto_transformer",
+      "../../rtc_base:threading",
+      "//third_party/jni_zero",
+    ]
+  }
+
   rtc_library("peerconnection_jni") {
     # Do not depend on this target externally unless you absolute have to. It is
     # made public because we don't have a proper NDK yet. Header APIs here are not
@@ -816,7 +841,7 @@ if (current_os == "linux" || is_android) {
 
     deps = [
       ":base_jni",
-      ":generated_external_classes_jni",
+      ":encryption_manager_jni",
       ":generated_external_classes_jni",
       ":generated_peerconnection_jni",
       ":generated_rtcerror_jni",
@@ -836,8 +861,10 @@ if (current_os == "linux" || is_android) {
       "../../api/audio:audio_device",
       "../../api/audio:audio_processing",
       "../../api/audio:builtin_audio_processing_builder",
+      "../../api/crypto:frame_crypto_transformer",
       "../../api/crypto:options",
       "../../api/environment",
+      "../../api/environment:deprecated_global_field_trials",
       "../../api/rtc_event_log:rtc_event_log_factory",
       "../../api/task_queue:default_task_queue_factory",
       "../../api/video_codecs:video_codecs_api",
@@ -859,7 +886,6 @@ if (current_os == "linux" || is_android) {
       "../../rtc_base:stringutils",
       "../../rtc_base:threading",
       "../../stats:rtc_stats",
-      "../../api/environment:deprecated_global_field_trials",
       "//third_party/abseil-cpp/absl/memory",
       "//third_party/jni_zero",
     ]
@@ -952,7 +978,6 @@ if (current_os == "linux" || is_android) {
     ]
   }
 
-
   rtc_library("swcodecs_jni") {
     visibility = [ "*" ]
     allow_poison = [ "software_video_codecs" ]
@@ -966,12 +991,12 @@ if (current_os == "linux" || is_android) {
       ":libvpx_vp8_jni",
       ":libvpx_vp9_jni",
       ":native_api_jni",
-      "../../extensions/android/simulcast:simulcast_jni",  # STREAM-CUSTOM
       ":video_jni",
       "../../api/environment",
       "../../api/video_codecs:builtin_video_decoder_factory",
       "../../api/video_codecs:builtin_video_encoder_factory",
       "../../api/video_codecs:video_codecs_api",
+      "../../extensions/android/simulcast:simulcast_jni",  # STREAM-CUSTOM
       "//third_party/jni_zero",
     ]
   }
@@ -1451,6 +1476,13 @@ if (current_os == "linux" || is_android) {
     namespace = "webrtc::jni"
   }
 
+  # STREAM-CUSTOM (E2EE): keep EncryptionManager.java off the LiveKit
+  # generated_peerconnection_jni list.
+  generate_jni("generated_encryption_manager_jni") {
+    sources = [ "api/org/webrtc/EncryptionManager.java" ]
+    namespace = "webrtc::jni"
+  }
+
   generate_jni("generated_peerconnection_jni") {
     sources = [
       "api/org/webrtc/AddIceObserver.java",
@@ -1728,8 +1760,8 @@ if (is_android) {
       "../../rtc_base/synchronization:mutex",
       "../../rtc_base/system:inline",
       "../../system_wrappers",
-      "../../test:fileutils",
       "../../test:create_test_field_trials",
+      "../../test:fileutils",
       "../../test:test_support",
       "../../testing/gtest",
       "//third_party/abseil-cpp/absl/memory",

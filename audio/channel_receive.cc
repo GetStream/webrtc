@@ -953,20 +953,20 @@ void ChannelReceive::SetDepacketizerToDecoderFrameTransformer(
     RTC_DLOG(LS_INFO) << "Frame transformer delegate has been reset.";
   }
 
-  // Initialize the delegate if needed
+  // Initialize the delegate if needed. nullptr is a reset: the block
+  // above already dropped any previous delegate.
+  if (!frame_transformer) {
+    return;
+  }
   if (frame_transformer_delegate_ &&
       frame_transformer_delegate_->FrameTransformer() == frame_transformer) {
     RTC_DLOG(LS_INFO)
         << "Frame transformer is already set to the provided transformer.";
-  } else {
-    if (!frame_transformer) {
-      RTC_DCHECK_NOTREACHED() << "Attempted to set a null frame transformer.";
-    } else {
-      RTC_DLOG(LS_INFO) << "Initializing frame transformer delegate with the "
-                           "new frame transformer.";
-      InitFrameTransformerDelegate(std::move(frame_transformer));
-    }
+    return;
   }
+  RTC_DLOG(LS_INFO) << "Initializing frame transformer delegate with the "
+                       "new frame transformer.";
+  InitFrameTransformerDelegate(std::move(frame_transformer));
 }
 
 void ChannelReceive::SetFrameDecryptor(

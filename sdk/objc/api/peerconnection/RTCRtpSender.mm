@@ -118,6 +118,10 @@
   return _nativeRtpSender;
 }
 
+- (RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)factory {
+  return _factory;
+}
+
 - (instancetype)
     initWithFactory:(RTC_OBJC_TYPE(RTCPeerConnectionFactory) *)factory
     nativeRtpSender:

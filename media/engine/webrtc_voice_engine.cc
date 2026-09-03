@@ -2888,9 +2888,15 @@ void WebRtcVoiceReceiveChannel::SetDepacketizerToDecoderFrameTransformer(
     scoped_refptr<FrameTransformerInterface> frame_transformer) {
   RTC_DCHECK_RUN_ON(worker_thread_);
   if (ssrc == 0) {
-    // If the receiver is unsignaled, save the frame transformer and set it when
-    // the stream is associated with an ssrc.
+    // Unsignaled sentinel: stash, and apply if a stream already exists.
     unsignaled_frame_transformer_ = std::move(frame_transformer);
+    if (auto existing = GetUnsignaledSsrc()) {
+      auto it = recv_streams_.find(*existing);
+      if (it != recv_streams_.end()) {
+        it->second->SetDepacketizerToDecoderFrameTransformer(
+            unsignaled_frame_transformer_);
+      }
+    }
     return;
   }
 
