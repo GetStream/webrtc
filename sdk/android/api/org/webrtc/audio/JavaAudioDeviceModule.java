@@ -542,6 +542,29 @@ public class JavaAudioDeviceModule implements AudioDeviceModule {
   }
 
   /**
+   * Enables or disables the platform's hardware acoustic echo canceller on the live capture
+   * session, the counterpart of {@link #setNoiseSuppressorEnabled}. Turning it off is useful when
+   * capturing music, which the echo canceller otherwise attenuates and distorts.
+   *
+   * <p>Unlike {@link Builder#setUseHardwareAcousticEchoCanceler}, this takes effect immediately and
+   * recreates nothing. It requires the effect to be attached, which happens when recording is
+   * initialized, so a call made before then returns false; it also returns false if the device has
+   * no usable hardware AEC, which {@link #isBuiltInAcousticEchoCancelerSupported} reports.
+   *
+   * <p>The setting is remembered and reapplied if the AudioRecord is rebuilt, for instance by
+   * {@link #setAudioSource}, so a source change will not silently restore the built-in canceller.
+   *
+   * <p>Disabling this does not enable WebRtc's software echo canceller in its place; that is fixed
+   * when the AudioDeviceModule is built. Leaving both off while audio is playing out of the speaker
+   * will send the far end its own echo.
+   */
+  @Override
+  public boolean setAcousticEchoCancelerEnabled(boolean enabled) {
+    Logging.d(TAG, "setAcousticEchoCancelerEnabled: " + enabled);
+    return audioInput.setAcousticEchoCancelerEnabled(enabled);
+  }
+
+  /**
    * Start to prefer a specific {@link AudioDeviceInfo} device for recording. Typically this should
    * only be used if a client gives an explicit option for choosing a physical device to record
    * from. Otherwise the best-matching device for other parameters will be used. Calling after

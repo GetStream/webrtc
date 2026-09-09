@@ -70,7 +70,7 @@ class WebRtcAudioEffects {
   // `shouldEnableAec` which is used in enable() where the actual state
   // of the AEC effect is modified. Returns true if HW AEC is supported and
   // false otherwise.
-  public boolean setAEC(boolean enable) {
+  public synchronized boolean setAEC(boolean enable) {
     Logging.d(TAG, "setAEC(" + enable + ")");
     if (!isAcousticEchoCancelerSupported()) {
       Logging.w(TAG, "Platform AEC is not supported");
@@ -89,7 +89,7 @@ class WebRtcAudioEffects {
   // `shouldEnableNs` which is used in enable() where the actual state
   // of the NS effect is modified. Returns true if HW NS is supported and
   // false otherwise.
-  public boolean setNS(boolean enable) {
+  public synchronized boolean setNS(boolean enable) {
     Logging.d(TAG, "setNS(" + enable + ")");
     if (!isNoiseSuppressorSupported()) {
       Logging.w(TAG, "Platform NS is not supported");
@@ -104,20 +104,43 @@ class WebRtcAudioEffects {
     return true;
   }
 
+  // Toggles an existing AcousticEchoCanceler to be enabled or disabled.
+  // Returns true if the toggling was successful, otherwise false is returned (this is also the case
+  // if no AcousticEchoCanceler was present).
+  public synchronized boolean toggleAEC(boolean enable) {
+    if (aec == null) {
+      Logging.e(TAG, "Attempting to enable or disable nonexistent AcousticEchoCanceler.");
+      return false;
+    }
+    Logging.d(TAG, "toggleAEC(" + enable + ")");
+    boolean toggling_succeeded = aec.setEnabled(enable) == AudioEffect.SUCCESS;
+    if (toggling_succeeded) {
+      // Remember the choice, so that it survives the release/recreate cycle that a mid-call
+      // AudioRecord rebuild goes through. Otherwise changing the audio source would silently
+      // revert the caller's decision to whatever the ADM was built with.
+      shouldEnableAec = enable;
+    }
+    return toggling_succeeded;
+  }
+
   // Toggles an existing NoiseSuppressor to be enabled or disabled.
   // Returns true if the toggling was successful, otherwise false is returned (this is also the case
   // if no NoiseSuppressor was present).
-  public boolean toggleNS(boolean enable) {
+  public synchronized boolean toggleNS(boolean enable) {
     if (ns == null) {
       Logging.e(TAG, "Attempting to enable or disable nonexistent NoiseSuppressor.");
       return false;
     }
     Logging.d(TAG, "toggleNS(" + enable + ")");
     boolean toggling_succeeded = ns.setEnabled(enable) == AudioEffect.SUCCESS;
+    if (toggling_succeeded) {
+      // Sticky for the same reason as in toggleAEC().
+      shouldEnableNs = enable;
+    }
     return toggling_succeeded;
   }
 
-  public void enable(int audioSession) {
+  public synchronized void enable(int audioSession) {
     Logging.d(TAG, "enable(audioSession=" + audioSession + ")");
     assertTrue(aec == null);
     assertTrue(ns == null);
@@ -177,7 +200,7 @@ class WebRtcAudioEffects {
   // Releases all native audio effect resources. It is a good practice to
   // release the effect engine when not in use as control can be returned
   // to other applications or the native resources released.
-  public void release() {
+  public synchronized void release() {
     Logging.d(TAG, "release");
     if (aec != null) {
       aec.release();

@@ -904,6 +904,19 @@ class WebRtcAudioRecord {
     microphoneMute = mute;
   }
 
+  // Sets whether the platform AcousticEchoCanceler should be enabled or disabled.
+  // Returns true if the enabling was successful, otherwise false is returned (this is also the case
+  // if the AcousticEchoCanceler effect is not supported, or if recording has not been initialized
+  // yet, since the effect is only attached once an AudioRecord exists).
+  public boolean setAcousticEchoCancelerEnabled(boolean enabled) {
+    if (!WebRtcAudioEffects.isAcousticEchoCancelerSupported()) {
+      Logging.e(TAG, "Acoustic echo canceler is not supported.");
+      return false;
+    }
+    Logging.w(TAG, "setAcousticEchoCancelerEnabled(" + enabled + ")");
+    return effects.toggleAEC(enabled);
+  }
+
   // Sets whether NoiseSuppressor should be enabled or disabled.
   // Returns true if the enabling was successful, otherwise false is returned (this is also the case
   // if the NoiseSuppressor effect is not supported).
