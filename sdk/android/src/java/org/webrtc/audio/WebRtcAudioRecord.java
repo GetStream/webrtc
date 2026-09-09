@@ -83,7 +83,19 @@ class WebRtcAudioRecord {
 
   private final Context context;
   private final AudioManager audioManager;
-  private final int audioSource;
+  // Guarded by `audioRecordStateLock`. Mutable so that the source can be changed mid-call; see
+  // setAudioSource().
+  private int audioSource;
+  // The most recent source that actually opened, restored if a requested source cannot be. Only
+  // assigned once an AudioRecord has reached STATE_INITIALIZED, so that a run of failed switches
+  // cannot erode it into a source that was never usable.
+  private int lastKnownGoodAudioSource;
+  // Set by setAudioSource() when the capture thread owns the AudioRecord, and acted on by that
+  // thread between two reads. The thread has to do the swap itself: a null `audioRecord` is how the
+  // rest of this class spells "recording was never initialized", so releasing it from another
+  // thread would make initRecordingIfNeeded() reallocate the byte buffer whose address native code
+  // has already cached. Guarded by `audioRecordStateLock`.
+  private boolean captureRestartPending;
   private final int audioFormat;
   private int channelCount;
   private int sampleRate;
@@ -154,38 +166,20 @@ class WebRtcAudioRecord {
         AudioRecord audioRecord;
         boolean shouldReportData;
         synchronized (audioRecordStateLock) {
+          // Release and rebuild in one critical section, so that no other thread can observe the
+          // AudioRecord as absent and mistake a source change for an uninitialized recording.
+          if (captureRestartPending) {
+            captureRestartPending = false;
+            releaseAudioResources();
+          }
+          if (WebRtcAudioRecord.this.audioRecord == null && useAudioRecord
+              && openAudioRecordWithFallback(/* startRecording= */ true) == null) {
+            // Neither the requested source nor the last known good one could be opened; don't
+            // try again.
+            useAudioRecord = false;
+          }
           audioRecord = WebRtcAudioRecord.this.audioRecord;
           shouldReportData = nativeCalledInitRecording.get();
-        }
-        
-        if (audioRecord == null && useAudioRecord) {
-          boolean result = initAudioRecord();
-
-          if (!result) {
-            // Failed audio record init, don't try again.
-            useAudioRecord = false;
-          } else {
-            synchronized (audioRecordStateLock) {
-              audioRecord = WebRtcAudioRecord.this.audioRecord;
-            }
-
-            assertTrue(audioRecord != null);
-            try {
-              audioRecord.startRecording();
-            } catch (IllegalStateException e) {
-              reportWebRtcAudioRecordStartError(AudioRecordStartErrorCode.AUDIO_RECORD_START_EXCEPTION,
-                  "AudioRecord.startRecording failed: " + e.getMessage());
-              audioRecord = null;
-              useAudioRecord = false;
-            }
-            if (useAudioRecord && audioRecord.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
-              reportWebRtcAudioRecordStartError(AudioRecordStartErrorCode.AUDIO_RECORD_START_STATE_MISMATCH,
-                  "AudioRecord.startRecording failed - incorrect state: "
-                      + audioRecord.getRecordingState());
-              audioRecord = null;
-              useAudioRecord = false;
-            }
-          }
         }
 
         if (audioRecord != null && !useAudioRecord) {
@@ -297,6 +291,7 @@ class WebRtcAudioRecord {
     this.executor = scheduler;
     this.audioManager = audioManager;
     this.audioSource = audioSource;
+    this.lastKnownGoodAudioSource = audioSource;
     this.audioFormat = audioFormat;
     this.errorCallback = errorCallback;
     this.stateCallback = stateCallback;
@@ -363,6 +358,55 @@ class WebRtcAudioRecord {
   }
 
   /**
+   * Changes the audio source used for capture. The argument should be one of the values from
+   * android.media.MediaRecorder.AudioSource.
+   *
+   * <p>Android cannot change the source of a live AudioRecord, so the current instance is released
+   * and rebuilt. If capture is running the rebuild happens on the capture thread, which produces a
+   * short gap of missed buffers; otherwise it happens inline. If the requested source cannot be
+   * opened, the last source known to work is restored, so capture is never left dead.
+   */
+  public void setAudioSource(int audioSource) {
+    synchronized (audioRecordStateLock) {
+      if (this.audioSource == audioSource) {
+        return;
+      }
+      Logging.d(TAG, "setAudioSource(" + audioSource + "), was " + this.audioSource);
+      this.audioSource = audioSource;
+
+      if (audioRecord == null) {
+        // Nothing to rebuild; the next initAudioRecord() picks the new source up.
+        return;
+      }
+
+      final boolean captureThreadRunning;
+      synchronized (audioThreadStateLock) {
+        captureThreadRunning = audioThread != null;
+      }
+      if (captureThreadRunning) {
+        // The capture thread owns the AudioRecord; it swaps it between two reads, which costs at
+        // most one 10 ms buffer.
+        captureRestartPending = true;
+        return;
+      }
+
+      // Recording was initialized but not started, i.e. initRecording() ran but startRecording()
+      // has not. Rebuild inline, still holding the lock, so that no other thread sees the gap.
+      releaseAudioResources();
+      if (openAudioRecordWithFallback(/* startRecording= */ false) == null) {
+        reportWebRtcAudioRecordInitError("Failed to open audio source " + audioSource);
+      }
+    }
+  }
+
+  /** Returns the audio source currently in effect on the AudioRecord. */
+  public int getAudioSource() {
+    synchronized (audioRecordStateLock) {
+      return audioSource;
+    }
+  }
+
+  /**
    * Allows clients to init recording manually.
    * 
    * @return true if recording was initialized correctly.
@@ -411,7 +455,7 @@ class WebRtcAudioRecord {
     this.channelCount = channels;
     final int bytesPerFrame = getBytesPerFrame(channels, this.audioFormat);
     final int framesPerBuffer = getFramesPerBuffer(sampleRate);
-    byteBuffer = ByteBuffer.allocateDirect(bytesPerFrame * framesPerBuffer);
+    byteBuffer = allocateByteBuffer(bytesPerFrame * framesPerBuffer);
     if (!byteBuffer.hasArray()) {
       reportWebRtcAudioRecordInitError("ByteBuffer does not have backing array.");
       return -1;
@@ -427,8 +471,7 @@ class WebRtcAudioRecord {
     }
 
     if(useAudioRecord) {
-      boolean result = initAudioRecord();
-      if (!result) {
+      if (openAudioRecordWithFallback(/* startRecording= */ false) == null) {
         return -1;
       }
     }
@@ -461,7 +504,7 @@ class WebRtcAudioRecord {
       // an AudioRecord object, in byte units.
       // Note that this size doesn't guarantee a smooth recording under load.
       final int channelConfig = channelCountToConfiguration(channelCount);
-      int minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat);
+      int minBufferSize = getMinBufferSize(sampleRate, channelConfig, audioFormat);
       if (minBufferSize == AudioRecord.ERROR || minBufferSize == AudioRecord.ERROR_BAD_VALUE) {
         reportWebRtcAudioRecordInitError("AudioRecord.getMinBufferSize failed: " + minBufferSize);
         return false;
@@ -475,21 +518,11 @@ class WebRtcAudioRecord {
       Logging.d(TAG, "bufferSizeInBytes: " + bufferSizeInBytes);
 
       try {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-          // Use the AudioRecord.Builder class on Android M (23) and above.
-          // Throws IllegalArgumentException.
-          audioRecord = createAudioRecordOnMOrHigher(
-              audioSource, sampleRate, channelConfig, audioFormat, bufferSizeInBytes);
-          audioSourceMatchesRecordingSessionRef.set(null);
-          if (preferredDevice != null) {
-            setPreferredDevice(preferredDevice);
-          }
-        } else {
-          // Use the old AudioRecord constructor for API levels below 23.
-          // Throws UnsupportedOperationException.
-          audioRecord = createAudioRecordOnLowerThanM(
-              audioSource, sampleRate, channelConfig, audioFormat, bufferSizeInBytes);
-          audioSourceMatchesRecordingSessionRef.set(null);
+        audioRecord = createAudioRecord(
+            audioSource, sampleRate, channelConfig, audioFormat, bufferSizeInBytes);
+        audioSourceMatchesRecordingSessionRef.set(null);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && preferredDevice != null) {
+          setPreferredDevice(preferredDevice);
         }
       } catch (IllegalArgumentException | UnsupportedOperationException e) {
         // Report of exception message is sufficient. Example: "Cannot create AudioRecord".
@@ -502,7 +535,6 @@ class WebRtcAudioRecord {
         releaseAudioResources();
         return false;
       }
-
       effects.enable(audioRecord.getAudioSessionId());
 
       logMainParameters();
@@ -510,6 +542,74 @@ class WebRtcAudioRecord {
     }
     return true;
   }
+
+  /**
+   * Opens an AudioRecord for the current audio source. If that fails, the last source known to
+   * have opened on this device is restored and retried once, so that a source the device rejects
+   * cannot silence capture for the rest of the call.
+   *
+   * @param startRecording whether to also start capturing, as the capture thread needs; callers
+   *     that only need an initialized instance, such as a rebuild while prewarmed, pass false.
+   * @return the open AudioRecord, or null if neither source could be opened.
+   */
+  // Package-private rather than private so that tests can drive the capture thread's path.
+  @Nullable AudioRecord openAudioRecordWithFallback(boolean startRecording) {
+    synchronized (audioRecordStateLock) {
+      AudioRecord opened = openAudioRecord(startRecording);
+      if (opened != null) {
+        return opened;
+      }
+      if (audioSource == lastKnownGoodAudioSource) {
+        return null;
+      }
+      Logging.e(TAG,
+          "Could not open audio source " + audioSource + ", falling back to "
+              + lastKnownGoodAudioSource);
+      audioSource = lastKnownGoodAudioSource;
+      return openAudioRecord(startRecording);
+    }
+  }
+
+  /**
+   * Creates an AudioRecord for the current audio source, optionally starting it, and releases it
+   * again if any step fails so that a subsequent attempt can re-create it. The whole sequence runs
+   * under `audioRecordStateLock` so that a concurrent setAudioSource() cannot release the instance
+   * part-way through.
+   */
+  private @Nullable AudioRecord openAudioRecord(boolean startRecording) {
+    synchronized (audioRecordStateLock) {
+      if (!initAudioRecord()) {
+        return null;
+      }
+      final AudioRecord audioRecord = this.audioRecord;
+      assertTrue(audioRecord != null);
+      if (startRecording) {
+        try {
+          audioRecord.startRecording();
+        } catch (IllegalStateException e) {
+          reportWebRtcAudioRecordStartError(AudioRecordStartErrorCode.AUDIO_RECORD_START_EXCEPTION,
+              "AudioRecord.startRecording failed: " + e.getMessage());
+          releaseAudioResources();
+          return null;
+        }
+        if (audioRecord.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
+          reportWebRtcAudioRecordStartError(
+              AudioRecordStartErrorCode.AUDIO_RECORD_START_STATE_MISMATCH,
+              "AudioRecord.startRecording failed - incorrect state: "
+                  + audioRecord.getRecordingState());
+          releaseAudioResources();
+          return null;
+        }
+      }
+      // The only place this is assigned, and only once everything this call was asked to do has
+      // succeeded. In particular it must not move on a successful init when a start was also
+      // requested, or a source that opens but refuses to start would nominate itself as the
+      // fallback and so disable the fallback exactly when it is needed.
+      lastKnownGoodAudioSource = audioSource;
+      return audioRecord;
+    }
+  }
+
   /**
    * Prefer a specific {@link AudioDeviceInfo} device for recording. Calling after recording starts
    * is valid but may cause a temporary interruption if the audio routing changes.
@@ -579,7 +679,16 @@ class WebRtcAudioRecord {
         // Disabling useAudioRecord allows for "recordingless" recording, 
         // where we emit audio buffers to be mixed in by client.
         if (useAudioRecord) {
-          assertTrue(audioRecord != null);
+          // A source change that could open neither the requested source nor the fallback leaves
+          // no AudioRecord behind. Try once more here rather than asserting, so that a failed
+          // switch degrades to a start error the caller can handle instead of throwing across the
+          // JNI boundary.
+          if (audioRecord == null
+              && openAudioRecordWithFallback(/* startRecording= */ false) == null) {
+            reportWebRtcAudioRecordStartError(AudioRecordStartErrorCode.AUDIO_RECORD_START_EXCEPTION,
+                "No AudioRecord to start; audio source " + audioSource + " could not be opened");
+            return false;
+          }
           try {
             audioRecord.startRecording();
           } catch (IllegalStateException e) {
@@ -652,6 +761,33 @@ class WebRtcAudioRecord {
       releaseAudioResources();
       return true;
     }
+  }
+
+  // Visible for testing. Android backs direct buffers with a non-movable array, so hasArray() holds
+  // there, but it does not on a host JVM, where tests substitute a heap buffer.
+  ByteBuffer allocateByteBuffer(int capacity) {
+    return ByteBuffer.allocateDirect(capacity);
+  }
+
+  // Visible for testing, where the underlying static native call is unavailable.
+  int getMinBufferSize(int sampleRate, int channelConfig, int audioFormat) {
+    return AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat);
+  }
+
+  // Visible for testing so that an audio source the device rejects can be simulated.
+  @Nullable
+  AudioRecord createAudioRecord(
+      int audioSource, int sampleRate, int channelConfig, int audioFormat, int bufferSizeInBytes) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+      // Use the AudioRecord.Builder class on Android M (23) and above.
+      // Throws IllegalArgumentException.
+      return createAudioRecordOnMOrHigher(
+          audioSource, sampleRate, channelConfig, audioFormat, bufferSizeInBytes);
+    }
+    // Use the old AudioRecord constructor for API levels below 23.
+    // Throws UnsupportedOperationException.
+    return createAudioRecordOnLowerThanM(
+        audioSource, sampleRate, channelConfig, audioFormat, bufferSizeInBytes);
   }
 
   @TargetApi(Build.VERSION_CODES.M)
@@ -769,9 +905,14 @@ class WebRtcAudioRecord {
   }
 
   // Releases the native AudioRecord resources.
-  private void releaseAudioResources() {
+  // Package-private rather than private so that tests can reproduce the state the capture thread
+  // is left in by setAudioSource(): source swapped, AudioRecord dropped, byte buffer intact.
+  void releaseAudioResources() {
     Logging.d(TAG, "releaseAudioResources");
     synchronized (audioRecordStateLock) {
+      // A pending source change is meaningless once there is nothing to rebuild, and leaving it
+      // set would make the next capture thread discard its first AudioRecord for no reason.
+      captureRestartPending = false;
       effects.release();
       if (audioRecord != null) {
         audioRecord.release();

@@ -486,6 +486,36 @@ public class JavaAudioDeviceModule implements AudioDeviceModule {
     audioInput.setUseAudioRecord(enable);
   }
 
+  /**
+   * Changes the audio source used for capture, by releasing the current AudioRecord and building a
+   * new one with the given source. The argument should be one of the values from
+   * android.media.MediaRecorder.AudioSource: VOICE_COMMUNICATION applies the platform's voice
+   * pre-processing, while MIC or UNPROCESSED bypass it, which is preferable for music.
+   *
+   * <p>Safe to call mid-call: nothing about the AudioDeviceModule, the PeerConnectionFactory or
+   * any PeerConnection is recreated. Expect a short gap in captured audio while the new
+   * AudioRecord is created and started, which is audible as a click and makes the echo canceller
+   * re-converge, so this is meant for deliberate mode changes rather than frequent tweaks.
+   *
+   * <p>If the requested source cannot be opened -- a device may refuse a given source under the
+   * current routing, or accept it and then refuse to start -- the last source known to work is
+   * restored so that capture is never left dead. The source actually in effect is reported by
+   * {@link #getAudioSource}, and failures are reported to the {@link AudioRecordErrorCallback}.
+   *
+   * <p>Note that moving off VOICE_COMMUNICATION also gives up the platform's built-in echo control
+   * on many devices, so keep the hardware AEC enabled or enable the software AEC when playout is
+   * active.
+   */
+  public void setAudioSource(int audioSource) {
+    Logging.d(TAG, "setAudioSource: " + audioSource);
+    audioInput.setAudioSource(audioSource);
+  }
+
+  /** Returns the audio source currently in effect on the AudioRecord. */
+  public int getAudioSource() {
+    return audioInput.getAudioSource();
+  }
+
   public void prewarmRecording(){
     audioInput.initRecordingIfNeeded();
     audioInput.prewarmRecordingIfNeeded();
