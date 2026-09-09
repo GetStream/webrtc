@@ -96,6 +96,12 @@ class WebRtcAudioRecord {
   // thread would make initRecordingIfNeeded() reallocate the byte buffer whose address native code
   // has already cached. Guarded by `audioRecordStateLock`.
   private boolean captureRestartPending;
+  // True once initRecordingImpl() has allocated the byte buffer and, when native asked for it,
+  // handed that buffer's address to native code. Deliberately distinct from `audioRecord != null`:
+  // a source change whose candidates all failed leaves no AudioRecord behind while the buffer is
+  // still live and still the one native reads from, and reallocating it then would strand native
+  // code on a freed address. Guarded by `audioRecordStateLock`.
+  private boolean recordingInitialized;
   private final int audioFormat;
   private int channelCount;
   private int sampleRate;
@@ -413,7 +419,7 @@ class WebRtcAudioRecord {
    */
   public boolean initRecordingIfNeeded() {
     synchronized (audioRecordStateLock) {
-      if (audioRecord == null){
+      if (!recordingInitialized) {
         return initRecordingImpl(expectedSampleRate, expectedChannelCount, false) >= 0;
       }
     }
@@ -469,6 +475,9 @@ class WebRtcAudioRecord {
     if (nativeCall) {
       nativeCacheDirectBufferAddress(nativeAudioRecord, byteBuffer);
     }
+    // From here on `byteBuffer` is the buffer native code reads from, so it must outlive every
+    // AudioRecord we build below and must not be swapped out until recording is torn down.
+    recordingInitialized = true;
 
     if(useAudioRecord) {
       if (openAudioRecordWithFallback(/* startRecording= */ false) == null) {
@@ -759,6 +768,9 @@ class WebRtcAudioRecord {
       }
       audioThread = null;
       releaseAudioResources();
+      // Recording is genuinely torn down here, unlike the release that precedes a source change,
+      // so the next initRecordingIfNeeded() should build a fresh buffer.
+      recordingInitialized = false;
       return true;
     }
   }

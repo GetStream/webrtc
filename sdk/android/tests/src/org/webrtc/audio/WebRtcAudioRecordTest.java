@@ -58,6 +58,7 @@ public class WebRtcAudioRecordTest {
     final Set<Integer> unstartableSources = new HashSet<>();
     final List<Integer> createdSources = new ArrayList<>();
     final List<AudioRecord> createdRecords = new ArrayList<>();
+    int byteBufferAllocations;
 
     TestWebRtcAudioRecord(Context context, AudioManager audioManager) {
       super(context, newDefaultScheduler(), audioManager, AudioSource.VOICE_COMMUNICATION,
@@ -69,6 +70,7 @@ public class WebRtcAudioRecordTest {
 
     @Override
     ByteBuffer allocateByteBuffer(int capacity) {
+      byteBufferAllocations++;
       // A host-JVM direct buffer has no backing array, which initRecordingImpl() rejects.
       return ByteBuffer.allocate(capacity);
     }
@@ -230,6 +232,24 @@ public class WebRtcAudioRecordTest {
     int createdAfterFallback = webRtcAudioRecord.createdSources.size();
     assertThat(webRtcAudioRecord.initRecordingIfNeeded()).isTrue();
     assertThat(webRtcAudioRecord.createdSources).hasSize(createdAfterFallback);
+  }
+
+  /**
+   * When every candidate source fails there is no AudioRecord left, but the byte buffer whose
+   * address native code cached is still live. Reallocating it would leave native code reading
+   * freed memory, since the reallocation path does not re-cache the address.
+   */
+  @Test
+  public void failedSourceChangeKeepsTheBufferNativeCodeCached() {
+    assertThat(webRtcAudioRecord.initRecordingIfNeeded()).isTrue();
+    int allocationsAfterInit = webRtcAudioRecord.byteBufferAllocations;
+
+    webRtcAudioRecord.rejectedSources.add(AudioSource.MIC);
+    webRtcAudioRecord.rejectedSources.add(AudioSource.VOICE_COMMUNICATION);
+    webRtcAudioRecord.setAudioSource(AudioSource.MIC);
+
+    assertThat(webRtcAudioRecord.initRecordingIfNeeded()).isTrue();
+    assertThat(webRtcAudioRecord.byteBufferAllocations).isEqualTo(allocationsAfterInit);
   }
 
   @Test

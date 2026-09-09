@@ -497,6 +497,10 @@ public class JavaAudioDeviceModule implements AudioDeviceModule {
    * AudioRecord is created and started, which is audible as a click and makes the echo canceller
    * re-converge, so this is meant for deliberate mode changes rather than frequent tweaks.
    *
+   * <p>Do not call this from the main thread. It takes the same lock that recording teardown holds
+   * while it joins the capture thread, and when recording is initialized but not yet started it
+   * builds the new AudioRecord inline, so it can block for as long as that join takes.
+   *
    * <p>If the requested source cannot be opened -- a device may refuse a given source under the
    * current routing, or accept it and then refuse to start -- the last source known to work is
    * restored so that capture is never left dead. The source actually in effect is reported by
