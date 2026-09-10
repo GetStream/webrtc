@@ -100,6 +100,13 @@ jobs:
     needs: validate_inputs
     runs-on: ubuntu-latest
     outputs:
+      config: ${{ inputs.config }}
+      mode: ${{ inputs.mode }}
+      run_ios: ${{ steps.plan.outputs.run_ios }}
+      run_macos: ${{ steps.plan.outputs.run_macos }}
+      run_android: ${{ steps.plan.outputs.run_android }}
+      run_windows: ${{ steps.plan.outputs.run_windows }}
+      run_apple: ${{ steps.plan.outputs.run_apple }}
       apple_target_os: ${{ steps.plan.outputs.apple_target_os }}
       apple_target_os_cache_key: ${{ steps.plan.outputs.apple_target_os_cache_key }}
       apple_target_os_label: ${{ steps.plan.outputs.apple_target_os_label }}
@@ -117,7 +124,7 @@ jobs:
           platform_windows: ${{ inputs.windows }}
 
   deps_apple:
-    name: Deps macOS (${{ needs.plan.outputs.apple_target_os_label }})
+    name: Deps Apple (${{ needs.plan.outputs.run_apple == 'true' && needs.plan.outputs.apple_target_os_label || 'skipped' }})
     needs: plan
     if: ${{ inputs.ios || inputs.macos }}
     runs-on: macos-26
@@ -134,7 +141,7 @@ jobs:
           ignore_cache: ${{ inputs.ignore_cache }}
 
   deps_android:
-    name: Deps Android
+    name: ${{ needs.plan.outputs.run_android == 'true' && 'Deps Android' || 'Deps Android (skipped)' }}
     needs: plan
     if: ${{ inputs.android }}
     runs-on: ${{ vars.WEBRTC_ANDROID_RUNNER != '' && vars.WEBRTC_ANDROID_RUNNER || 'runner-extra-capacity' }}
@@ -151,7 +158,7 @@ jobs:
           ignore_cache: ${{ inputs.ignore_cache }}
 
   build_ios:
-    name: Build iOS (${{ inputs.config }})
+    name: Build iOS (${{ (needs.plan.outputs.mode == 'build' && needs.plan.outputs.run_ios == 'true') && needs.plan.outputs.config || 'skipped' }})
     needs: [plan, deps_apple]
     if: ${{ inputs.mode == 'build' && inputs.ios }}
     runs-on: macos-26
@@ -178,7 +185,7 @@ jobs:
           config: ${{ inputs.config }}
 
   build_macos:
-    name: Build macOS (${{ inputs.config }})
+    name: Build macOS (${{ (needs.plan.outputs.mode == 'build' && needs.plan.outputs.run_macos == 'true') && needs.plan.outputs.config || 'skipped' }})
     needs: [plan, deps_apple]
     if: ${{ inputs.mode == 'build' && inputs.macos }}
     runs-on: macos-26
@@ -205,7 +212,7 @@ jobs:
           config: ${{ inputs.config }}
 
   build_android:
-    name: Build Android (${{ inputs.config }})
+    name: Build Android (${{ (needs.plan.outputs.mode == 'build' && needs.plan.outputs.run_android == 'true') && needs.plan.outputs.config || 'skipped' }})
     needs: [plan, deps_android]
     if: ${{ inputs.mode == 'build' && inputs.android }}
     runs-on: ${{ vars.WEBRTC_ANDROID_RUNNER != '' && vars.WEBRTC_ANDROID_RUNNER || 'runner-extra-capacity' }}
@@ -240,7 +247,7 @@ jobs:
           config: ${{ inputs.config }}
 
   test_ios:
-    name: Test iOS (build + debug test)
+    name: Test iOS (${{ ((needs.plan.outputs.mode == 'test' || needs.plan.outputs.mode == 'release') && needs.plan.outputs.run_ios == 'true') && needs.plan.outputs.config || 'skipped' }})
     needs: [plan, deps_apple]
     if: ${{ (inputs.mode == 'test' || inputs.mode == 'release') && inputs.ios }}
     runs-on: macos-26
@@ -273,7 +280,7 @@ jobs:
           config: ${{ inputs.config }}
 
   test_macos:
-    name: Test macOS (build + debug test)
+    name: Test macOS (${{ ((needs.plan.outputs.mode == 'test' || needs.plan.outputs.mode == 'release') && needs.plan.outputs.run_macos == 'true') && needs.plan.outputs.config || 'skipped' }})
     needs: [plan, deps_apple]
     if: ${{ (inputs.mode == 'test' || inputs.mode == 'release') && inputs.macos }}
     runs-on: macos-26
@@ -306,7 +313,7 @@ jobs:
           config: ${{ inputs.config }}
 
   test_windows:
-    name: Test Windows (build + debug test)
+    name: Test Windows (${{ ((needs.plan.outputs.mode == 'test' || needs.plan.outputs.mode == 'release') && needs.plan.outputs.run_windows == 'true') && needs.plan.outputs.config || 'skipped' }})
     needs: plan
     if: ${{ (inputs.mode == 'test' || inputs.mode == 'release') && inputs.windows }}
     runs-on: windows-latest
@@ -335,7 +342,7 @@ jobs:
         env:
           DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
           TARGET_OS: win
-          JOBS: "2"
+          JOBS: "8"
           WEBRTC_REPO: https://github.com/GetStream/webrtc.git
         run: make deps
       - name: Build Windows
@@ -355,8 +362,8 @@ jobs:
         run: make test windows
 
   tests_passed:
-    name: Tests passed
-    needs: [test_ios, test_macos, test_windows]
+    name: ${{ (needs.plan.outputs.mode == 'package' || needs.plan.outputs.mode == 'release') && 'Tests passed' || 'Tests passed (skipped)' }}
+    needs: [plan, test_ios, test_macos, test_windows]
     if: ${{ always() && !cancelled() && (inputs.mode == 'package' || inputs.mode == 'release') }}
     runs-on: ubuntu-latest
     steps:
@@ -395,7 +402,7 @@ jobs:
           echo "Selected-platform tests passed (Android tests are unwired and skipped)."
 
   package_ios:
-    name: Package iOS (${{ inputs.config }})
+    name: Package iOS (${{ ((needs.plan.outputs.mode == 'package' || needs.plan.outputs.mode == 'release') && needs.plan.outputs.run_ios == 'true') && needs.plan.outputs.config || 'skipped' }})
     needs: [plan, deps_apple, tests_passed]
     if: ${{ (inputs.mode == 'package' || inputs.mode == 'release') && inputs.ios && !cancelled() && needs.tests_passed.result == 'success' }}
     runs-on: macos-26
@@ -438,7 +445,7 @@ jobs:
           retention-days: 7
 
   package_macos:
-    name: Package macOS (${{ inputs.config }})
+    name: Package macOS (${{ ((needs.plan.outputs.mode == 'package' || needs.plan.outputs.mode == 'release') && needs.plan.outputs.run_macos == 'true') && needs.plan.outputs.config || 'skipped' }})
     needs: [plan, deps_apple, tests_passed]
     if: ${{ (inputs.mode == 'package' || inputs.mode == 'release') && inputs.macos && !cancelled() && needs.tests_passed.result == 'success' }}
     runs-on: macos-26
@@ -481,7 +488,7 @@ jobs:
           retention-days: 7
 
   package_android:
-    name: Package Android (${{ inputs.config }})
+    name: Package Android (${{ ((needs.plan.outputs.mode == 'package' || needs.plan.outputs.mode == 'release') && needs.plan.outputs.run_android == 'true') && needs.plan.outputs.config || 'skipped' }})
     needs: [plan, deps_android, tests_passed]
     if: ${{ (inputs.mode == 'package' || inputs.mode == 'release') && inputs.android && !cancelled() && needs.tests_passed.result == 'success' }}
     runs-on: ${{ vars.WEBRTC_ANDROID_RUNNER != '' && vars.WEBRTC_ANDROID_RUNNER || 'runner-extra-capacity' }}
@@ -539,7 +546,7 @@ jobs:
           retention-days: 7
 
   build_windows:
-    name: Build Windows (${{ inputs.config }})
+    name: Build Windows (${{ (needs.plan.outputs.mode == 'build' && needs.plan.outputs.run_windows == 'true') && needs.plan.outputs.config || 'skipped' }})
     needs: plan
     if: ${{ inputs.mode == 'build' && inputs.windows }}
     runs-on: windows-latest
@@ -568,7 +575,7 @@ jobs:
         env:
           DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
           TARGET_OS: win
-          JOBS: "2"
+          JOBS: "8"
           WEBRTC_REPO: https://github.com/GetStream/webrtc.git
         run: make deps
       - name: Build Windows
@@ -581,7 +588,7 @@ jobs:
         run: make build windows
 
   package_windows:
-    name: Package Windows (${{ inputs.config }})
+    name: Package Windows (${{ ((needs.plan.outputs.mode == 'package' || needs.plan.outputs.mode == 'release') && needs.plan.outputs.run_windows == 'true') && needs.plan.outputs.config || 'skipped' }})
     needs: [plan, tests_passed]
     if: ${{ (inputs.mode == 'package' || inputs.mode == 'release') && inputs.windows && !cancelled() && needs.tests_passed.result == 'success' }}
     runs-on: windows-latest
@@ -610,7 +617,7 @@ jobs:
         env:
           DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
           TARGET_OS: win
-          JOBS: "2"
+          JOBS: "8"
           WEBRTC_REPO: https://github.com/GetStream/webrtc.git
         run: make deps
       - name: Build Windows

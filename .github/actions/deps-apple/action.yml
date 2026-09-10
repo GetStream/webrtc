@@ -40,7 +40,7 @@ runs:
       env:
         DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
         TARGET_OS: ${{ inputs.target_os }}
-        JOBS: "2"
+        JOBS: "8"
         WEBRTC_REPO: https://github.com/GetStream/webrtc.git
       run: make deps
 

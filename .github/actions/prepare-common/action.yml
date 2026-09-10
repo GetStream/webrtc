@@ -15,6 +15,10 @@ inputs:
     required: false
     default: "false"
     description: Whether Windows is selected.
+  skip_maccatalyst:
+    required: false
+    default: "false"
+    description: Omit Mac Catalyst from the Apple deps label.
 
 outputs:
   run_ios:
@@ -54,19 +58,29 @@ runs:
         macos='${{ inputs.platform_macos }}'
         android='${{ inputs.platform_android }}'
         windows='${{ inputs.platform_windows }}'
+        skip_maccatalyst='${{ inputs.skip_maccatalyst }}'
 
-        apple_os_list=()
-        if [[ "${ios}" == "true" ]]; then apple_os_list+=("ios"); fi
-        if [[ "${macos}" == "true" ]]; then apple_os_list+=("mac"); fi
+        # Display follows the selected platforms. gclient TARGET_OS is the
+        # Apple superset so iOS-only and macOS-only share one cache tree.
+        apple_label_list=()
+        if [[ "${ios}" == "true" ]]; then apple_label_list+=("ios"); fi
+        if [[ "${macos}" == "true" ]]; then apple_label_list+=("macos"); fi
+        if [[ "${ios}" == "true" && "${skip_maccatalyst}" != "true" ]]; then
+          apple_label_list+=("maccatalyst")
+        fi
 
         run_apple=false
         apple_target_os=""
+        apple_target_os_cache_key=""
         apple_target_os_label=""
-        if [[ ${#apple_os_list[@]} -gt 0 ]]; then
+        if [[ "${ios}" == "true" || "${macos}" == "true" ]]; then
           run_apple=true
-          IFS=','
-          apple_target_os="${apple_os_list[*]}"
-          apple_target_os_label="${apple_target_os//,/, }"
+          apple_target_os="ios,mac"
+          apple_target_os_cache_key="apple"
+          old_ifs="$IFS"
+          IFS=', '
+          apple_target_os_label="${apple_label_list[*]}"
+          IFS="$old_ifs"
         fi
 
         android_target_os=""
@@ -85,7 +99,7 @@ runs:
         echo "run_windows=${windows}" >> "${GITHUB_OUTPUT}"
         echo "run_apple=${run_apple}" >> "${GITHUB_OUTPUT}"
         echo "apple_target_os=${apple_target_os}" >> "${GITHUB_OUTPUT}"
-        echo "apple_target_os_cache_key=${apple_target_os//,/-}" >> "${GITHUB_OUTPUT}"
+        echo "apple_target_os_cache_key=${apple_target_os_cache_key}" >> "${GITHUB_OUTPUT}"
         echo "apple_target_os_label=${apple_target_os_label}" >> "${GITHUB_OUTPUT}"
         echo "android_target_os=${android_target_os}" >> "${GITHUB_OUTPUT}"
         echo "android_target_os_cache_key=${android_target_os//,/-}" >> "${GITHUB_OUTPUT}"
