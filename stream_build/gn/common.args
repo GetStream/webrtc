@@ -1,0 +1,10 @@
+# Stream policy defaults applied to every gn gen.
+rtc_allow_deprecated_namespaces = true
+stream_enable_rendering_backend = true
+is_component_build = false
+rtc_include_tests = false
+rtc_build_examples = false
+treat_warnings_as_errors = false
+use_siso = false
+use_remoteexec = false
+use_reclient = false

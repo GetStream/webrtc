@@ -1,16 +1,20 @@
-name: Plan platform validation
-description: Resolve selected platform flags into host-specific prepare plans.
+name: Plan platform deps
+description: Map selected platforms to gclient target_os and cache key suffixes.
 
 inputs:
   platform_ios:
     required: true
-    description: Whether iOS validation is enabled.
+    description: Whether iOS is selected.
   platform_macos:
     required: true
-    description: Whether macOS validation is enabled.
+    description: Whether macOS is selected.
   platform_android:
     required: true
-    description: Whether Android validation is enabled.
+    description: Whether Android is selected.
+  platform_windows:
+    required: false
+    default: "false"
+    description: Whether Windows is selected.
 
 outputs:
   run_ios:
@@ -19,16 +23,24 @@ outputs:
     value: ${{ steps.flags.outputs.run_macos }}
   run_android:
     value: ${{ steps.flags.outputs.run_android }}
+  run_windows:
+    value: ${{ steps.flags.outputs.run_windows }}
   run_apple:
     value: ${{ steps.flags.outputs.run_apple }}
   apple_target_os:
     value: ${{ steps.flags.outputs.apple_target_os }}
   apple_target_os_cache_key:
     value: ${{ steps.flags.outputs.apple_target_os_cache_key }}
+  apple_target_os_label:
+    value: ${{ steps.flags.outputs.apple_target_os_label }}
   android_target_os:
     value: ${{ steps.flags.outputs.android_target_os }}
   android_target_os_cache_key:
     value: ${{ steps.flags.outputs.android_target_os_cache_key }}
+  windows_target_os:
+    value: ${{ steps.flags.outputs.windows_target_os }}
+  windows_target_os_cache_key:
+    value: ${{ steps.flags.outputs.windows_target_os_cache_key }}
 
 runs:
   using: composite
@@ -41,10 +53,7 @@ runs:
         ios='${{ inputs.platform_ios }}'
         macos='${{ inputs.platform_macos }}'
         android='${{ inputs.platform_android }}'
-        if [[ "${ios}" != "true" && "${macos}" != "true" && "${android}" != "true" ]]; then
-          echo "Select at least one platform (enable one or more checkboxes above)."
-          exit 1
-        fi
+        windows='${{ inputs.platform_windows }}'
 
         apple_os_list=()
         if [[ "${ios}" == "true" ]]; then apple_os_list+=("ios"); fi
@@ -52,10 +61,12 @@ runs:
 
         run_apple=false
         apple_target_os=""
+        apple_target_os_label=""
         if [[ ${#apple_os_list[@]} -gt 0 ]]; then
           run_apple=true
           IFS=','
           apple_target_os="${apple_os_list[*]}"
+          apple_target_os_label="${apple_target_os//,/, }"
         fi
 
         android_target_os=""
@@ -63,11 +74,20 @@ runs:
           android_target_os="android,unix"
         fi
 
+        windows_target_os=""
+        if [[ "${windows}" == "true" ]]; then
+          windows_target_os="win"
+        fi
+
         echo "run_ios=${ios}" >> "${GITHUB_OUTPUT}"
         echo "run_macos=${macos}" >> "${GITHUB_OUTPUT}"
         echo "run_android=${android}" >> "${GITHUB_OUTPUT}"
+        echo "run_windows=${windows}" >> "${GITHUB_OUTPUT}"
         echo "run_apple=${run_apple}" >> "${GITHUB_OUTPUT}"
         echo "apple_target_os=${apple_target_os}" >> "${GITHUB_OUTPUT}"
         echo "apple_target_os_cache_key=${apple_target_os//,/-}" >> "${GITHUB_OUTPUT}"
+        echo "apple_target_os_label=${apple_target_os_label}" >> "${GITHUB_OUTPUT}"
         echo "android_target_os=${android_target_os}" >> "${GITHUB_OUTPUT}"
         echo "android_target_os_cache_key=${android_target_os//,/-}" >> "${GITHUB_OUTPUT}"
+        echo "windows_target_os=${windows_target_os}" >> "${GITHUB_OUTPUT}"
+        echo "windows_target_os_cache_key=${windows_target_os}" >> "${GITHUB_OUTPUT}"

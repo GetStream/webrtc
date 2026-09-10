@@ -1,0 +1,93 @@
+name: Setup WebRTC checkout
+description: Check out webrtc_ref, keep this workflow's stream_build, install depot_tools.
+
+inputs:
+  webrtc_ref:
+    required: true
+    description: Branch, tag, or SHA for GetStream/webrtc.
+  install_android_packages:
+    required: false
+    default: "false"
+    description: Install apt packages needed for Android builds.
+
+runs:
+  using: composite
+  steps:
+    - name: Preserve pipeline from the workflow revision
+      shell: bash
+      run: |
+        set -euo pipefail
+        test -d "${GITHUB_WORKSPACE}/stream_build" || {
+          echo "::error::stream_build is missing from the workflow checkout."
+          exit 1
+        }
+        mkdir -p "${RUNNER_TEMP}/pipeline"
+        rm -rf "${RUNNER_TEMP}/pipeline/stream_build" "${RUNNER_TEMP}/pipeline/actions"
+        cp -R "${GITHUB_WORKSPACE}/stream_build" "${RUNNER_TEMP}/pipeline/stream_build"
+        cp -R "${GITHUB_WORKSPACE}/.github/actions" "${RUNNER_TEMP}/pipeline/actions"
+
+    - name: Check out GetStream/webrtc
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.webrtc_ref }}
+
+    - name: Restore pipeline from the workflow revision
+      shell: bash
+      run: |
+        set -euo pipefail
+        rm -rf "${GITHUB_WORKSPACE}/stream_build" "${GITHUB_WORKSPACE}/.github/actions"
+        mkdir -p "${GITHUB_WORKSPACE}/.github"
+        cp -R "${RUNNER_TEMP}/pipeline/stream_build" "${GITHUB_WORKSPACE}/stream_build"
+        cp -R "${RUNNER_TEMP}/pipeline/actions" "${GITHUB_WORKSPACE}/.github/actions"
+        test -f "${GITHUB_WORKSPACE}/DEPS"
+        test -f "${GITHUB_WORKSPACE}/stream_build/Makefile"
+
+    - name: Install Android host packages
+      if: ${{ inputs.install_android_packages == 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get update
+        sudo apt-get install -y python3-pip openjdk-8-jdk lsb-release software-properties-common
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.x"
+
+    - name: Git authentication for HTTPS fetches
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        git config --global credential.helper store
+        git credential approve <<EOF
+        protocol=https
+        host=github.com
+        username=x-access-token
+        password=${GITHUB_TOKEN}
+        EOF
+        git config --global url."https://github.com/".insteadOf "git@github.com:"
+        git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+
+    - name: Install depot_tools
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ ! -d "${HOME}/depot_tools" ]]; then
+          git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "${HOME}/depot_tools"
+        fi
+        echo "${HOME}/depot_tools" >> "${GITHUB_PATH}"
+        echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
+        echo "DEPS_ROOT=${GITHUB_WORKSPACE}/.gclient_deps" >> "${GITHUB_ENV}"
+        echo "WEBRTC_SRC=${GITHUB_WORKSPACE}" >> "${GITHUB_ENV}"
+        echo "WEBRTC_REPO=https://github.com/GetStream/webrtc.git" >> "${GITHUB_ENV}"
+
+    - name: Ensure DEPS_ROOT src symlink
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "${GITHUB_WORKSPACE}/.gclient_deps"
+        ln -sfn .. "${GITHUB_WORKSPACE}/.gclient_deps/src"
+        test -f "${GITHUB_WORKSPACE}/.gclient_deps/src/DEPS"

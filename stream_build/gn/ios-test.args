@@ -1,0 +1,10 @@
+target_os = "ios"
+target_environment = "simulator"
+target_cpu = "arm64"
+ios_enable_code_signing = false
+ios_deployment_target = "13.0"
+rtc_include_tests = true
+is_debug = true
+use_siso = false
+use_remoteexec = false
+use_reclient = false

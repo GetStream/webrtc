@@ -1,0 +1,69 @@
+name: Cache WebRTC deps and out
+description: OS-keyed cache of gclient trees plus DEPS_ROOT/out. Never share across OS.
+
+inputs:
+  operation:
+    required: true
+    description: restore or save
+  target_os_cache_key:
+    required: true
+    description: Cache-safe target_os suffix (ios-mac, android-unix, win).
+  config:
+    required: true
+    description: release, debug, or deps-only label included in the key.
+  ignore_cache:
+    required: false
+    default: "false"
+    description: Skip restore (save still runs).
+
+runs:
+  using: composite
+  steps:
+    - id: key
+      name: Compute cache key
+      shell: bash
+      run: |
+        set -euo pipefail
+        deps_hash="${{ hashFiles('DEPS') }}"
+        prefix="webrtc-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.target_os_cache_key }}-${{ inputs.config }}-${deps_hash}"
+        echo "prefix=${prefix}" >> "${GITHUB_OUTPUT}"
+        echo "key=${prefix}-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}" >> "${GITHUB_OUTPUT}"
+        echo "Cache prefix: ${prefix}"
+
+    - name: Restore deps and out cache
+      if: ${{ inputs.operation == 'restore' && inputs.ignore_cache != 'true' }}
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          .gclient_deps
+          third_party
+          build
+          buildtools
+          testing
+          ios
+          tools
+        key: ${{ steps.key.outputs.key }}
+        restore-keys: |
+          ${{ steps.key.outputs.prefix }}-
+
+    - name: Re-link DEPS_ROOT src after cache restore
+      if: ${{ inputs.operation == 'restore' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "${GITHUB_WORKSPACE}/.gclient_deps"
+        ln -sfn .. "${GITHUB_WORKSPACE}/.gclient_deps/src"
+
+    - name: Save deps and out cache
+      if: ${{ inputs.operation == 'save' }}
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          .gclient_deps
+          third_party
+          build
+          buildtools
+          testing
+          ios
+          tools
+        key: ${{ steps.key.outputs.key }}

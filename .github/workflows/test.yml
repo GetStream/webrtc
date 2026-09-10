@@ -1,0 +1,47 @@
+# WebRTC tests. Not dispatchable until this file exists on the default branch.
+
+name: Test
+
+run-name: >-
+  Test config:debug${{ inputs.ios == 'true' && ' iOS' || '' }}${{ inputs.macos == 'true' && (inputs.ios == 'true' && ', macOS' || ' macOS') || '' }}${{ inputs.windows == 'true' && ((inputs.ios == 'true' || inputs.macos == 'true') && ', Windows' || ' Windows') || '' }}
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      webrtc_ref:
+        description: Branch, tag, or SHA for this repo (GetStream/webrtc)
+        required: true
+        default: main
+      ios:
+        description: Run iOS simulator tests
+        type: boolean
+        default: true
+      macos:
+        description: Run macOS host tests
+        type: boolean
+        default: true
+      windows:
+        description: Run Windows tests (fails clearly if the runner is not a WebRTC host)
+        type: boolean
+        default: false
+      ignore_cache:
+        description: Skip restoring dependency caches and force a fresh sync
+        type: boolean
+        default: false
+
+jobs:
+  test:
+    uses: ./.github/workflows/_make.yml
+    secrets: inherit
+    with:
+      mode: test
+      webrtc_ref: ${{ inputs.webrtc_ref }}
+      ios: ${{ inputs.ios }}
+      macos: ${{ inputs.macos }}
+      android: false
+      windows: ${{ inputs.windows }}
+      config: debug
+      ignore_cache: ${{ inputs.ignore_cache }}
