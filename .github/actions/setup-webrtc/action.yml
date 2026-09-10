@@ -88,6 +88,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        mkdir -p "${GITHUB_WORKSPACE}/.gclient_deps"
+        mkdir -p "${GITHUB_WORKSPACE}/.gclient_deps/.gclient-git-cache"
         ln -sfn .. "${GITHUB_WORKSPACE}/.gclient_deps/src"
+        echo "GIT_CACHE_PATH=${GITHUB_WORKSPACE}/.gclient_deps/.gclient-git-cache" >> "${GITHUB_ENV}"
         test -f "${GITHUB_WORKSPACE}/.gclient_deps/src/DEPS"

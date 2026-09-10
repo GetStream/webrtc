@@ -132,13 +132,44 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
-      - name: Deps Apple
-        uses: ./.github/actions/deps-apple
+      - name: Setup WebRTC checkout
+        uses: ./.github/actions/setup-webrtc
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
-          target_os: ${{ needs.plan.outputs.apple_target_os }}
+      - name: Restore Darwin object cache
+        uses: ./.github/actions/cache-webrtc
+        with:
+          operation: restore
           target_os_cache_key: ${{ needs.plan.outputs.apple_target_os_cache_key }}
           ignore_cache: ${{ inputs.ignore_cache }}
+      - name: gclient sync (Apple)
+        working-directory: stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
+          GIT_CACHE_PATH: ${{ github.workspace }}/.gclient_deps/.gclient-git-cache
+          TARGET_OS: ${{ needs.plan.outputs.apple_target_os }}
+          JOBS: "8"
+          WEBRTC_REPO: https://github.com/GetStream/webrtc.git
+        run: make deps
+      - name: Save Darwin object cache
+        uses: ./.github/actions/cache-webrtc
+        with:
+          operation: save
+          target_os_cache_key: ${{ needs.plan.outputs.apple_target_os_cache_key }}
+          ignore_cache: ${{ inputs.ignore_cache }}
+      # Same-run handoff. The full tree is ~20 GB (over the artifact cap);
+      # git-cache only. Build downloads this and runs make deps locally.
+      # Oversize git-cache skips actions/cache save (10 GiB cap in
+      # cache-webrtc); this artifact still uploads (separate quota).
+      - name: Upload deps-apple
+        uses: actions/upload-artifact@v7
+        with:
+          name: deps-apple
+          path: .gclient_deps/.gclient-git-cache
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
 
   deps_android:
     name: Deps Android
@@ -148,13 +179,96 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
-      - name: Deps Android
-        uses: ./.github/actions/deps-android
+      - name: Setup WebRTC checkout
+        uses: ./.github/actions/setup-webrtc
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
-          target_os: ${{ needs.plan.outputs.android_target_os }}
+          install_android_packages: "true"
+      - name: Restore Linux object cache
+        uses: ./.github/actions/cache-webrtc
+        with:
+          operation: restore
           target_os_cache_key: ${{ needs.plan.outputs.android_target_os_cache_key }}
           ignore_cache: ${{ inputs.ignore_cache }}
+      - name: gclient sync (Android)
+        working-directory: stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
+          GIT_CACHE_PATH: ${{ github.workspace }}/.gclient_deps/.gclient-git-cache
+          TARGET_OS: ${{ needs.plan.outputs.android_target_os }}
+          JOBS: "8"
+          WEBRTC_REPO: https://github.com/GetStream/webrtc.git
+        run: make deps
+      - name: Save Linux object cache
+        uses: ./.github/actions/cache-webrtc
+        with:
+          operation: save
+          target_os_cache_key: ${{ needs.plan.outputs.android_target_os_cache_key }}
+          ignore_cache: ${{ inputs.ignore_cache }}
+      - name: Upload deps-android
+        uses: actions/upload-artifact@v7
+        with:
+          name: deps-android
+          path: .gclient_deps/.gclient-git-cache
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  deps_windows:
+    name: Deps Windows
+    needs: plan
+    if: ${{ inputs.windows }}
+    runs-on: windows-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check Windows WebRTC host
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          command -v make >/dev/null || missing+=("GNU make")
+          command -v python3 >/dev/null || missing+=("python3")
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "::error::Windows WebRTC host is not ready on windows-latest (missing: ${missing[*]}). This job is wired for make deps windows, but the runner image cannot run it yet."
+            exit 1
+          fi
+      - name: Setup WebRTC checkout
+        uses: ./.github/actions/setup-webrtc
+        with:
+          webrtc_ref: ${{ inputs.webrtc_ref }}
+      - name: Restore Windows object cache
+        uses: ./.github/actions/cache-webrtc
+        with:
+          operation: restore
+          target_os_cache_key: ${{ needs.plan.outputs.windows_target_os_cache_key }}
+          ignore_cache: ${{ inputs.ignore_cache }}
+      - name: gclient sync (Windows)
+        working-directory: stream_build
+        shell: bash
+        env:
+          DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
+          GIT_CACHE_PATH: ${{ github.workspace }}/.gclient_deps/.gclient-git-cache
+          TARGET_OS: ${{ needs.plan.outputs.windows_target_os }}
+          JOBS: "8"
+          WEBRTC_REPO: https://github.com/GetStream/webrtc.git
+        run: make deps
+      - name: Save Windows object cache
+        uses: ./.github/actions/cache-webrtc
+        with:
+          operation: save
+          target_os_cache_key: ${{ needs.plan.outputs.windows_target_os_cache_key }}
+          ignore_cache: ${{ inputs.ignore_cache }}
+      - name: Upload deps-windows
+        uses: actions/upload-artifact@v7
+        with:
+          name: deps-windows
+          path: .gclient_deps/.gclient-git-cache
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
 
   build_ios:
     name: Build iOS
@@ -168,7 +282,7 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.apple_target_os }}
-          target_os_cache_key: ${{ needs.plan.outputs.apple_target_os_cache_key }}
+          deps_artifact: deps-apple
       - name: Build iOS
         working-directory: stream_build
         env:
@@ -176,11 +290,6 @@ jobs:
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
         run: make build ios
-      - uses: ./.github/actions/cache-webrtc
-        continue-on-error: true
-        with:
-          operation: save
-          target_os_cache_key: ${{ needs.plan.outputs.apple_target_os_cache_key }}
 
   build_macos:
     name: Build macOS
@@ -194,7 +303,7 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.apple_target_os }}
-          target_os_cache_key: ${{ needs.plan.outputs.apple_target_os_cache_key }}
+          deps_artifact: deps-apple
       - name: Build macOS
         working-directory: stream_build
         env:
@@ -202,11 +311,6 @@ jobs:
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
         run: make build macos
-      - uses: ./.github/actions/cache-webrtc
-        continue-on-error: true
-        with:
-          operation: save
-          target_os_cache_key: ${{ needs.plan.outputs.apple_target_os_cache_key }}
 
   build_android:
     name: Build Android
@@ -220,7 +324,7 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.android_target_os }}
-          target_os_cache_key: ${{ needs.plan.outputs.android_target_os_cache_key }}
+          deps_artifact: deps-android
           install_android_packages: "true"
       - name: Build Android
         working-directory: stream_build
@@ -236,11 +340,6 @@ jobs:
             extra+=(ARCHS="${ANDROID_ARCH}")
           fi
           make build android "${extra[@]}"
-      - uses: ./.github/actions/cache-webrtc
-        continue-on-error: true
-        with:
-          operation: save
-          target_os_cache_key: ${{ needs.plan.outputs.android_target_os_cache_key }}
 
   test_ios:
     name: Test iOS
@@ -254,7 +353,7 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.apple_target_os }}
-          target_os_cache_key: ${{ needs.plan.outputs.apple_target_os_cache_key }}
+          deps_artifact: deps-apple
       - name: Build iOS
         working-directory: stream_build
         env:
@@ -268,11 +367,6 @@ jobs:
           DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
           SKIP_DEPS: "1"
         run: make test ios
-      - uses: ./.github/actions/cache-webrtc
-        continue-on-error: true
-        with:
-          operation: save
-          target_os_cache_key: ${{ needs.plan.outputs.apple_target_os_cache_key }}
 
   test_macos:
     name: Test macOS
@@ -286,7 +380,7 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.apple_target_os }}
-          target_os_cache_key: ${{ needs.plan.outputs.apple_target_os_cache_key }}
+          deps_artifact: deps-apple
       - name: Build macOS
         working-directory: stream_build
         env:
@@ -300,15 +394,10 @@ jobs:
           DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
           SKIP_DEPS: "1"
         run: make test macos
-      - uses: ./.github/actions/cache-webrtc
-        continue-on-error: true
-        with:
-          operation: save
-          target_os_cache_key: ${{ needs.plan.outputs.apple_target_os_cache_key }}
 
   test_windows:
     name: Test Windows
-    needs: plan
+    needs: [plan, deps_windows]
     if: ${{ (inputs.mode == 'test' || inputs.mode == 'release') && inputs.windows }}
     runs-on: windows-latest
     timeout-minutes: 360
@@ -329,7 +418,7 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.windows_target_os }}
-          target_os_cache_key: ${{ needs.plan.outputs.windows_target_os_cache_key }}
+          deps_artifact: deps-windows
       - name: Build Windows
         working-directory: stream_build
         shell: bash
@@ -398,7 +487,7 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.apple_target_os }}
-          target_os_cache_key: ${{ needs.plan.outputs.apple_target_os_cache_key }}
+          deps_artifact: deps-apple
       - name: Build iOS
         working-directory: stream_build
         env:
@@ -415,11 +504,6 @@ jobs:
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
         run: make package ios
-      - uses: ./.github/actions/cache-webrtc
-        continue-on-error: true
-        with:
-          operation: save
-          target_os_cache_key: ${{ needs.plan.outputs.apple_target_os_cache_key }}
       - name: Upload products-ios
         uses: actions/upload-artifact@v7
         with:
@@ -440,7 +524,7 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.apple_target_os }}
-          target_os_cache_key: ${{ needs.plan.outputs.apple_target_os_cache_key }}
+          deps_artifact: deps-apple
       - name: Build macOS
         working-directory: stream_build
         env:
@@ -457,11 +541,6 @@ jobs:
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
         run: make package macos
-      - uses: ./.github/actions/cache-webrtc
-        continue-on-error: true
-        with:
-          operation: save
-          target_os_cache_key: ${{ needs.plan.outputs.apple_target_os_cache_key }}
       - name: Upload products-macos
         uses: actions/upload-artifact@v7
         with:
@@ -482,7 +561,7 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.android_target_os }}
-          target_os_cache_key: ${{ needs.plan.outputs.android_target_os_cache_key }}
+          deps_artifact: deps-android
           install_android_packages: "true"
       - name: Build Android
         working-directory: stream_build
@@ -514,11 +593,6 @@ jobs:
             extra+=(ARCHS="${ANDROID_ARCH}")
           fi
           make package android "${extra[@]}"
-      - uses: ./.github/actions/cache-webrtc
-        continue-on-error: true
-        with:
-          operation: save
-          target_os_cache_key: ${{ needs.plan.outputs.android_target_os_cache_key }}
       - name: Upload products-android
         uses: actions/upload-artifact@v7
         with:
@@ -529,7 +603,7 @@ jobs:
 
   build_windows:
     name: Build Windows
-    needs: plan
+    needs: [plan, deps_windows]
     if: ${{ inputs.mode == 'build' && inputs.windows }}
     runs-on: windows-latest
     timeout-minutes: 360
@@ -550,7 +624,7 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.windows_target_os }}
-          target_os_cache_key: ${{ needs.plan.outputs.windows_target_os_cache_key }}
+          deps_artifact: deps-windows
       - name: Build Windows
         working-directory: stream_build
         shell: bash
@@ -562,7 +636,7 @@ jobs:
 
   package_windows:
     name: Package Windows
-    needs: [plan, tests_passed]
+    needs: [plan, deps_windows, tests_passed]
     if: ${{ (inputs.mode == 'package' || inputs.mode == 'release') && inputs.windows && !cancelled() && needs.tests_passed.result == 'success' }}
     runs-on: windows-latest
     timeout-minutes: 360
@@ -583,7 +657,7 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.windows_target_os }}
-          target_os_cache_key: ${{ needs.plan.outputs.windows_target_os_cache_key }}
+          deps_artifact: deps-windows
       - name: Build Windows
         working-directory: stream_build
         shell: bash
