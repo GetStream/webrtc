@@ -27,7 +27,7 @@ runs:
         cp -R "${GITHUB_WORKSPACE}/.github/actions" "${RUNNER_TEMP}/pipeline/actions"
 
     - name: Check out GetStream/webrtc
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ inputs.webrtc_ref }}
 
@@ -51,7 +51,7 @@ runs:
         sudo apt-get install -y python3-pip openjdk-8-jdk lsb-release software-properties-common
 
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v7
       with:
         python-version: "3.x"
 

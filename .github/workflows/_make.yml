@@ -112,8 +112,25 @@ jobs:
       apple_target_os_label: ${{ steps.plan.outputs.apple_target_os_label }}
       android_target_os: ${{ steps.plan.outputs.android_target_os }}
       android_target_os_cache_key: ${{ steps.plan.outputs.android_target_os_cache_key }}
+      deps_apple_name: ${{ steps.names.outputs.deps_apple_name }}
+      deps_android_name: ${{ steps.names.outputs.deps_android_name }}
+      build_ios_name: ${{ steps.names.outputs.build_ios_name }}
+      build_macos_name: ${{ steps.names.outputs.build_macos_name }}
+      build_android_name: ${{ steps.names.outputs.build_android_name }}
+      build_windows_name: ${{ steps.names.outputs.build_windows_name }}
+      test_ios_name: ${{ steps.names.outputs.test_ios_name }}
+      test_macos_name: ${{ steps.names.outputs.test_macos_name }}
+      test_windows_name: ${{ steps.names.outputs.test_windows_name }}
+      tests_passed_name: ${{ steps.names.outputs.tests_passed_name }}
+      package_ios_name: ${{ steps.names.outputs.package_ios_name }}
+      package_macos_name: ${{ steps.names.outputs.package_macos_name }}
+      package_android_name: ${{ steps.names.outputs.package_android_name }}
+      package_windows_name: ${{ steps.names.outputs.package_windows_name }}
+      finalise_package_name: ${{ steps.names.outputs.finalise_package_name }}
+      github_release_name: ${{ steps.names.outputs.github_release_name }}
+      trigger_downstream_name: ${{ steps.names.outputs.trigger_downstream_name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: plan
         name: Plan target_os
         uses: ./.github/actions/prepare-common
@@ -122,15 +139,102 @@ jobs:
           platform_macos: ${{ inputs.macos }}
           platform_android: ${{ inputs.android }}
           platform_windows: ${{ inputs.windows }}
+      - id: names
+        name: Plan job display names
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIG: ${{ inputs.config }}
+          VERSION: ${{ inputs.version }}
+          RUN_IOS: ${{ steps.plan.outputs.run_ios }}
+          RUN_MACOS: ${{ steps.plan.outputs.run_macos }}
+          RUN_ANDROID: ${{ steps.plan.outputs.run_android }}
+          RUN_WINDOWS: ${{ steps.plan.outputs.run_windows }}
+          RUN_APPLE: ${{ steps.plan.outputs.run_apple }}
+          APPLE_LABEL: ${{ steps.plan.outputs.apple_target_os_label }}
+        run: |
+          set -euo pipefail
+          # Job `name:` does not evaluate nested ==/&&/||. Emit plain strings.
+
+          active_or_skipped() {
+            local prefix="$1"
+            local is_active="$2"
+            local detail="${3:-}"
+            if [[ "${is_active}" == "true" ]]; then
+              if [[ -n "${detail}" ]]; then
+                printf '%s (%s)\n' "${prefix}" "${detail}"
+              else
+                printf '%s\n' "${prefix}"
+              fi
+            else
+              printf '%s (skipped)\n' "${prefix}"
+            fi
+          }
+
+          apple_label="${APPLE_LABEL//, /,}"
+          apple_label="${apple_label//,/, }"
+
+          is_build=false
+          is_test=false
+          is_package=false
+          is_release=false
+          [[ "${MODE}" == "build" ]] && is_build=true
+          [[ "${MODE}" == "test" || "${MODE}" == "release" ]] && is_test=true
+          [[ "${MODE}" == "package" || "${MODE}" == "release" ]] && is_package=true
+          [[ "${MODE}" == "release" ]] && is_release=true
+
+          run_build_ios=false
+          run_build_macos=false
+          run_build_android=false
+          run_build_windows=false
+          run_test_ios=false
+          run_test_macos=false
+          run_test_windows=false
+          run_package_ios=false
+          run_package_macos=false
+          run_package_android=false
+          run_package_windows=false
+          [[ "${is_build}" == "true" && "${RUN_IOS}" == "true" ]] && run_build_ios=true
+          [[ "${is_build}" == "true" && "${RUN_MACOS}" == "true" ]] && run_build_macos=true
+          [[ "${is_build}" == "true" && "${RUN_ANDROID}" == "true" ]] && run_build_android=true
+          [[ "${is_build}" == "true" && "${RUN_WINDOWS}" == "true" ]] && run_build_windows=true
+          [[ "${is_test}" == "true" && "${RUN_IOS}" == "true" ]] && run_test_ios=true
+          [[ "${is_test}" == "true" && "${RUN_MACOS}" == "true" ]] && run_test_macos=true
+          [[ "${is_test}" == "true" && "${RUN_WINDOWS}" == "true" ]] && run_test_windows=true
+          [[ "${is_package}" == "true" && "${RUN_IOS}" == "true" ]] && run_package_ios=true
+          [[ "${is_package}" == "true" && "${RUN_MACOS}" == "true" ]] && run_package_macos=true
+          [[ "${is_package}" == "true" && "${RUN_ANDROID}" == "true" ]] && run_package_android=true
+          [[ "${is_package}" == "true" && "${RUN_WINDOWS}" == "true" ]] && run_package_windows=true
+
+          {
+            echo "deps_apple_name=$(active_or_skipped "Deps Apple" "${RUN_APPLE}" "${apple_label}")"
+            echo "deps_android_name=$(active_or_skipped "Deps Android" "${RUN_ANDROID}")"
+            echo "build_ios_name=$(active_or_skipped "Build iOS" "${run_build_ios}" "${CONFIG}")"
+            echo "build_macos_name=$(active_or_skipped "Build macOS" "${run_build_macos}" "${CONFIG}")"
+            echo "build_android_name=$(active_or_skipped "Build Android" "${run_build_android}" "${CONFIG}")"
+            echo "build_windows_name=$(active_or_skipped "Build Windows" "${run_build_windows}" "${CONFIG}")"
+            echo "test_ios_name=$(active_or_skipped "Test iOS" "${run_test_ios}" "${CONFIG}")"
+            echo "test_macos_name=$(active_or_skipped "Test macOS" "${run_test_macos}" "${CONFIG}")"
+            echo "test_windows_name=$(active_or_skipped "Test Windows" "${run_test_windows}" "${CONFIG}")"
+            echo "tests_passed_name=$(active_or_skipped "Tests passed" "${is_package}")"
+            echo "package_ios_name=$(active_or_skipped "Package iOS" "${run_package_ios}" "${CONFIG}")"
+            echo "package_macos_name=$(active_or_skipped "Package macOS" "${run_package_macos}" "${CONFIG}")"
+            echo "package_android_name=$(active_or_skipped "Package Android" "${run_package_android}" "${CONFIG}")"
+            echo "package_windows_name=$(active_or_skipped "Package Windows" "${run_package_windows}" "${CONFIG}")"
+            echo "finalise_package_name=$(active_or_skipped "Finalise package" "${is_package}")"
+            release_title="Release (skipped)"
+            [[ "${is_release}" == "true" ]] && release_title="Release ${VERSION}"
+            echo "github_release_name=${release_title}"
+            echo "trigger_downstream_name=$(active_or_skipped "Trigger downstream WebRTC releases" "${is_release}")"
+          } >> "${GITHUB_OUTPUT}"
 
   deps_apple:
-    name: Deps Apple (${{ needs.plan.outputs.run_apple == 'true' && needs.plan.outputs.apple_target_os_label || 'skipped' }})
+    name: ${{ needs.plan.outputs.deps_apple_name }}
     needs: plan
     if: ${{ inputs.ios || inputs.macos }}
     runs-on: macos-26
     timeout-minutes: 360
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Deps Apple
         uses: ./.github/actions/deps-apple
         with:
@@ -141,13 +245,13 @@ jobs:
           ignore_cache: ${{ inputs.ignore_cache }}
 
   deps_android:
-    name: ${{ needs.plan.outputs.run_android == 'true' && 'Deps Android' || 'Deps Android (skipped)' }}
+    name: ${{ needs.plan.outputs.deps_android_name }}
     needs: plan
     if: ${{ inputs.android }}
     runs-on: ${{ vars.WEBRTC_ANDROID_RUNNER != '' && vars.WEBRTC_ANDROID_RUNNER || 'runner-extra-capacity' }}
     timeout-minutes: 360
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Deps Android
         uses: ./.github/actions/deps-android
         with:
@@ -158,13 +262,13 @@ jobs:
           ignore_cache: ${{ inputs.ignore_cache }}
 
   build_ios:
-    name: Build iOS (${{ (needs.plan.outputs.mode == 'build' && needs.plan.outputs.run_ios == 'true') && needs.plan.outputs.config || 'skipped' }})
+    name: ${{ needs.plan.outputs.build_ios_name }}
     needs: [plan, deps_apple]
     if: ${{ inputs.mode == 'build' && inputs.ios }}
     runs-on: macos-26
     timeout-minutes: 360
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/restore-tree
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
@@ -185,13 +289,13 @@ jobs:
           config: ${{ inputs.config }}
 
   build_macos:
-    name: Build macOS (${{ (needs.plan.outputs.mode == 'build' && needs.plan.outputs.run_macos == 'true') && needs.plan.outputs.config || 'skipped' }})
+    name: ${{ needs.plan.outputs.build_macos_name }}
     needs: [plan, deps_apple]
     if: ${{ inputs.mode == 'build' && inputs.macos }}
     runs-on: macos-26
     timeout-minutes: 360
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/restore-tree
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
@@ -212,13 +316,13 @@ jobs:
           config: ${{ inputs.config }}
 
   build_android:
-    name: Build Android (${{ (needs.plan.outputs.mode == 'build' && needs.plan.outputs.run_android == 'true') && needs.plan.outputs.config || 'skipped' }})
+    name: ${{ needs.plan.outputs.build_android_name }}
     needs: [plan, deps_android]
     if: ${{ inputs.mode == 'build' && inputs.android }}
     runs-on: ${{ vars.WEBRTC_ANDROID_RUNNER != '' && vars.WEBRTC_ANDROID_RUNNER || 'runner-extra-capacity' }}
     timeout-minutes: 360
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/restore-tree
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
@@ -247,13 +351,13 @@ jobs:
           config: ${{ inputs.config }}
 
   test_ios:
-    name: Test iOS (${{ ((needs.plan.outputs.mode == 'test' || needs.plan.outputs.mode == 'release') && needs.plan.outputs.run_ios == 'true') && needs.plan.outputs.config || 'skipped' }})
+    name: ${{ needs.plan.outputs.test_ios_name }}
     needs: [plan, deps_apple]
     if: ${{ (inputs.mode == 'test' || inputs.mode == 'release') && inputs.ios }}
     runs-on: macos-26
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/restore-tree
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
@@ -280,13 +384,13 @@ jobs:
           config: ${{ inputs.config }}
 
   test_macos:
-    name: Test macOS (${{ ((needs.plan.outputs.mode == 'test' || needs.plan.outputs.mode == 'release') && needs.plan.outputs.run_macos == 'true') && needs.plan.outputs.config || 'skipped' }})
+    name: ${{ needs.plan.outputs.test_macos_name }}
     needs: [plan, deps_apple]
     if: ${{ (inputs.mode == 'test' || inputs.mode == 'release') && inputs.macos }}
     runs-on: macos-26
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/restore-tree
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
@@ -313,13 +417,13 @@ jobs:
           config: ${{ inputs.config }}
 
   test_windows:
-    name: Test Windows (${{ ((needs.plan.outputs.mode == 'test' || needs.plan.outputs.mode == 'release') && needs.plan.outputs.run_windows == 'true') && needs.plan.outputs.config || 'skipped' }})
+    name: ${{ needs.plan.outputs.test_windows_name }}
     needs: plan
     if: ${{ (inputs.mode == 'test' || inputs.mode == 'release') && inputs.windows }}
     runs-on: windows-latest
     timeout-minutes: 360
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check Windows WebRTC host
         shell: bash
         run: |
@@ -362,7 +466,7 @@ jobs:
         run: make test windows
 
   tests_passed:
-    name: ${{ (needs.plan.outputs.mode == 'package' || needs.plan.outputs.mode == 'release') && 'Tests passed' || 'Tests passed (skipped)' }}
+    name: ${{ needs.plan.outputs.tests_passed_name }}
     needs: [plan, test_ios, test_macos, test_windows]
     if: ${{ always() && !cancelled() && (inputs.mode == 'package' || inputs.mode == 'release') }}
     runs-on: ubuntu-latest
@@ -402,13 +506,13 @@ jobs:
           echo "Selected-platform tests passed (Android tests are unwired and skipped)."
 
   package_ios:
-    name: Package iOS (${{ ((needs.plan.outputs.mode == 'package' || needs.plan.outputs.mode == 'release') && needs.plan.outputs.run_ios == 'true') && needs.plan.outputs.config || 'skipped' }})
+    name: ${{ needs.plan.outputs.package_ios_name }}
     needs: [plan, deps_apple, tests_passed]
     if: ${{ (inputs.mode == 'package' || inputs.mode == 'release') && inputs.ios && !cancelled() && needs.tests_passed.result == 'success' }}
     runs-on: macos-26
     timeout-minutes: 360
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/restore-tree
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
@@ -437,7 +541,7 @@ jobs:
           target_os_cache_key: ${{ needs.plan.outputs.apple_target_os_cache_key }}
           config: ${{ inputs.config }}
       - name: Upload products-ios
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: products-ios
           path: products/ios
@@ -445,13 +549,13 @@ jobs:
           retention-days: 7
 
   package_macos:
-    name: Package macOS (${{ ((needs.plan.outputs.mode == 'package' || needs.plan.outputs.mode == 'release') && needs.plan.outputs.run_macos == 'true') && needs.plan.outputs.config || 'skipped' }})
+    name: ${{ needs.plan.outputs.package_macos_name }}
     needs: [plan, deps_apple, tests_passed]
     if: ${{ (inputs.mode == 'package' || inputs.mode == 'release') && inputs.macos && !cancelled() && needs.tests_passed.result == 'success' }}
     runs-on: macos-26
     timeout-minutes: 360
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/restore-tree
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
@@ -480,7 +584,7 @@ jobs:
           target_os_cache_key: ${{ needs.plan.outputs.apple_target_os_cache_key }}
           config: ${{ inputs.config }}
       - name: Upload products-macos
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: products-macos
           path: products/macos
@@ -488,13 +592,13 @@ jobs:
           retention-days: 7
 
   package_android:
-    name: Package Android (${{ ((needs.plan.outputs.mode == 'package' || needs.plan.outputs.mode == 'release') && needs.plan.outputs.run_android == 'true') && needs.plan.outputs.config || 'skipped' }})
+    name: ${{ needs.plan.outputs.package_android_name }}
     needs: [plan, deps_android, tests_passed]
     if: ${{ (inputs.mode == 'package' || inputs.mode == 'release') && inputs.android && !cancelled() && needs.tests_passed.result == 'success' }}
     runs-on: ${{ vars.WEBRTC_ANDROID_RUNNER != '' && vars.WEBRTC_ANDROID_RUNNER || 'runner-extra-capacity' }}
     timeout-minutes: 360
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/restore-tree
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
@@ -538,7 +642,7 @@ jobs:
           target_os_cache_key: ${{ needs.plan.outputs.android_target_os_cache_key }}
           config: ${{ inputs.config }}
       - name: Upload products-android
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: products-android
           path: products
@@ -546,13 +650,13 @@ jobs:
           retention-days: 7
 
   build_windows:
-    name: Build Windows (${{ (needs.plan.outputs.mode == 'build' && needs.plan.outputs.run_windows == 'true') && needs.plan.outputs.config || 'skipped' }})
+    name: ${{ needs.plan.outputs.build_windows_name }}
     needs: plan
     if: ${{ inputs.mode == 'build' && inputs.windows }}
     runs-on: windows-latest
     timeout-minutes: 360
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check Windows WebRTC host
         shell: bash
         run: |
@@ -588,13 +692,13 @@ jobs:
         run: make build windows
 
   package_windows:
-    name: Package Windows (${{ ((needs.plan.outputs.mode == 'package' || needs.plan.outputs.mode == 'release') && needs.plan.outputs.run_windows == 'true') && needs.plan.outputs.config || 'skipped' }})
+    name: ${{ needs.plan.outputs.package_windows_name }}
     needs: [plan, tests_passed]
     if: ${{ (inputs.mode == 'package' || inputs.mode == 'release') && inputs.windows && !cancelled() && needs.tests_passed.result == 'success' }}
     runs-on: windows-latest
     timeout-minutes: 360
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check Windows WebRTC host
         shell: bash
         run: |
@@ -639,7 +743,7 @@ jobs:
           SKIP_DEPS: "1"
         run: make package windows
       - name: Upload products-windows
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: products-windows
           path: products/windows
@@ -647,16 +751,16 @@ jobs:
           retention-days: 7
 
   finalise_package:
-    name: Finalise package
-    needs: [tests_passed, package_ios, package_macos, package_android, package_windows]
+    name: ${{ needs.plan.outputs.finalise_package_name }}
+    needs: [plan, tests_passed, package_ios, package_macos, package_android, package_windows]
     if: ${{ (inputs.mode == 'package' || inputs.mode == 'release') && !cancelled() && needs.tests_passed.result == 'success' && !failure() }}
     runs-on: ${{ (inputs.ios || inputs.macos) && 'macos-26' || 'ubuntu-latest' }}
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Download product artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: products-*
           path: combine-in
@@ -727,7 +831,7 @@ jobs:
 
       - name: Upload WebRTC.xcframework.zip
         if: ${{ inputs.ios || inputs.macos }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: final-apple
           path: WebRTC.xcframework.zip
@@ -736,7 +840,7 @@ jobs:
 
       - name: Upload libwebrtc.aar
         if: ${{ inputs.android }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: final-android
           path: final-android
@@ -745,7 +849,7 @@ jobs:
 
       - name: Upload Windows libs
         if: ${{ inputs.windows }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: final-windows
           path: windows-libs
@@ -754,7 +858,7 @@ jobs:
 
       - name: Upload StreamWebRTC.xcframework.zip
         if: ${{ inputs.mode == 'release' && (inputs.ios || inputs.macos) }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: final-apple-renamed
           path: StreamWebRTC.xcframework.zip
@@ -763,7 +867,7 @@ jobs:
 
       - name: Upload renamed Android AAR
         if: ${{ inputs.mode == 'release' && inputs.android }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: final-android-renamed
           path: libwebrtc-renamed.aar
@@ -771,17 +875,17 @@ jobs:
           retention-days: 7
 
   github_release:
-    name: Release ${{ inputs.version }}
-    needs: finalise_package
+    name: ${{ needs.plan.outputs.github_release_name }}
+    needs: [plan, finalise_package]
     if: ${{ inputs.mode == 'release' && !cancelled() && !failure() }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.webrtc_ref }}
 
       - name: Download finalised artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: final-*
           merge-multiple: true
@@ -824,8 +928,8 @@ jobs:
           gh release create "${release_args[@]}"
 
   trigger_downstream_releases:
-    name: Trigger downstream WebRTC releases
-    needs: github_release
+    name: ${{ needs.plan.outputs.trigger_downstream_name }}
+    needs: [plan, github_release]
     if: ${{ inputs.mode == 'release' && !cancelled() && !failure() }}
     runs-on: ubuntu-latest
     steps:
