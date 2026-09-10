@@ -1,16 +1,16 @@
 name: Restore WebRTC tree
-description: Same-OS cache restore, then SKIP_DEPS=1 consumers can make.
+description: Restore the warm OS cache, then gclient sync so SKIP_DEPS=1 can follow.
 
 inputs:
   webrtc_ref:
     required: true
     description: Branch, tag, or SHA for GetStream/webrtc.
+  target_os:
+    required: true
+    description: gclient TARGET_OS (ios,mac / android,unix / win).
   target_os_cache_key:
     required: true
-    description: Cache-safe target_os key suffix.
-  config:
-    required: true
-    description: Cache key config (release or debug).
+    description: apple, android, or windows.
   install_android_packages:
     required: false
     default: "false"
@@ -30,5 +30,14 @@ runs:
       with:
         operation: restore
         target_os_cache_key: ${{ inputs.target_os_cache_key }}
-        config: ${{ inputs.config }}
         ignore_cache: "false"
+
+    - name: gclient sync
+      working-directory: stream_build
+      shell: bash
+      env:
+        DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
+        TARGET_OS: ${{ inputs.target_os }}
+        JOBS: "8"
+        WEBRTC_REPO: https://github.com/GetStream/webrtc.git
+      run: make deps

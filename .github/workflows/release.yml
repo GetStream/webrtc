@@ -4,7 +4,7 @@
 name: Release
 
 run-name: >-
-  Release config:${{ inputs.config }}${{ inputs.prerelease == 'true' && ' Pre-Release' || '' }} ${{ inputs.version }}${{ inputs.ios == 'true' && ' iOS' || '' }}${{ inputs.macos == 'true' && (inputs.ios == 'true' && ', macOS' || ' macOS') || '' }}${{ inputs.android == 'true' && ((inputs.ios == 'true' || inputs.macos == 'true') && ', Android' || ' Android') || '' }}${{ inputs.windows == 'true' && ((inputs.ios == 'true' || inputs.macos == 'true' || inputs.android == 'true') && ', Windows' || ' Windows') || '' }}
+  Release config:${{ inputs.config }}${{ inputs.prerelease == 'true' && ' Pre-Release' || '' }} ${{ inputs.version }}${{ inputs.ios == 'true' && ' iOS' || '' }}${{ inputs.macos == 'true' && (inputs.ios == 'true' && ', macOS' || ' macOS') || '' }}${{ inputs.android == 'true' && format('{0} Android{1}', (inputs.ios == 'true' || inputs.macos == 'true') && ',' || '', inputs.android_arch != '' && format(' ({0})', inputs.android_arch) || '') || '' }}${{ inputs.windows == 'true' && ((inputs.ios == 'true' || inputs.macos == 'true' || inputs.android == 'true') && ', Windows' || ' Windows') || '' }}
 
 permissions:
   contents: write

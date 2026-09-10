@@ -4,7 +4,7 @@
 name: Build
 
 run-name: >-
-  Build config:${{ inputs.config }}${{ inputs.ios == 'true' && ' iOS' || '' }}${{ inputs.macos == 'true' && (inputs.ios == 'true' && ', macOS' || ' macOS') || '' }}${{ inputs.android == 'true' && ((inputs.ios == 'true' || inputs.macos == 'true') && ', Android' || ' Android') || '' }}${{ inputs.windows == 'true' && ((inputs.ios == 'true' || inputs.macos == 'true' || inputs.android == 'true') && ', Windows' || ' Windows') || '' }}
+  Build config:${{ inputs.config }}${{ inputs.ios == 'true' && ' iOS' || '' }}${{ inputs.macos == 'true' && (inputs.ios == 'true' && ', macOS' || ' macOS') || '' }}${{ inputs.android == 'true' && format('{0} Android{1}', (inputs.ios == 'true' || inputs.macos == 'true') && ',' || '', inputs.android_arch != '' && format(' ({0})', inputs.android_arch) || '') || '' }}${{ inputs.windows == 'true' && ((inputs.ios == 'true' || inputs.macos == 'true' || inputs.android == 'true') && ', Windows' || ' Windows') || '' }}
 
 permissions:
   contents: read

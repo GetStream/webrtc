@@ -1,5 +1,5 @@
 name: Cache WebRTC deps and out
-description: OS-keyed cache of gclient trees plus DEPS_ROOT/out. Never share across OS.
+description: Warm gclient/third_party base keyed only by OS family.
 
 inputs:
   operation:
@@ -7,10 +7,7 @@ inputs:
     description: restore or save
   target_os_cache_key:
     required: true
-    description: Cache-safe target_os suffix (apple, android-unix, win).
-  config:
-    required: true
-    description: release, debug, or deps-only label included in the key.
+    description: apple, android, or windows.
   ignore_cache:
     required: false
     default: "false"
@@ -19,16 +16,12 @@ inputs:
 runs:
   using: composite
   steps:
-    - id: key
-      name: Compute cache key
+    # GHA caches are immutable: a second save of webrtc-apple|android|windows
+    # is a no-op. That is intended (warm base until eviction). Do not add
+    # run_id, DEPS hash, config, or github.job.
+    - name: Cache key
       shell: bash
-      run: |
-        set -euo pipefail
-        deps_hash="${{ hashFiles('DEPS') }}"
-        prefix="webrtc-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.target_os_cache_key }}-${{ inputs.config }}-${deps_hash}"
-        echo "prefix=${prefix}" >> "${GITHUB_OUTPUT}"
-        echo "key=${prefix}-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}" >> "${GITHUB_OUTPUT}"
-        echo "Cache prefix: ${prefix}"
+      run: echo "Cache key: webrtc-${{ inputs.target_os_cache_key }}"
 
     - name: Restore deps and out cache
       if: ${{ inputs.operation == 'restore' && inputs.ignore_cache != 'true' }}
@@ -42,9 +35,7 @@ runs:
           testing
           ios
           tools
-        key: ${{ steps.key.outputs.key }}
-        restore-keys: |
-          ${{ steps.key.outputs.prefix }}-
+        key: webrtc-${{ inputs.target_os_cache_key }}
 
     - name: Re-link DEPS_ROOT src after cache restore
       if: ${{ inputs.operation == 'restore' }}
@@ -66,4 +57,4 @@ runs:
           testing
           ios
           tools
-        key: ${{ steps.key.outputs.key }}
+        key: webrtc-${{ inputs.target_os_cache_key }}

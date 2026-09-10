@@ -1,5 +1,5 @@
 name: Deps Apple
-description: Darwin gclient sync for iOS/macOS. Caches deps trees and out/.
+description: Darwin gclient sync for iOS/macOS. Caches the warm apple deps tree.
 
 inputs:
   webrtc_ref:
@@ -10,10 +10,7 @@ inputs:
     description: Comma-separated gclient target_os (ios and/or mac).
   target_os_cache_key:
     required: true
-    description: Cache-safe target_os key suffix.
-  config:
-    required: true
-    description: Cache key config (release or debug).
+    description: apple
   ignore_cache:
     required: true
     description: Skip restoring caches and force a fresh sync.
@@ -31,7 +28,6 @@ runs:
       with:
         operation: restore
         target_os_cache_key: ${{ inputs.target_os_cache_key }}
-        config: ${{ inputs.config }}
         ignore_cache: ${{ inputs.ignore_cache }}
 
     - name: gclient sync (Apple)
@@ -49,5 +45,4 @@ runs:
       with:
         operation: save
         target_os_cache_key: ${{ inputs.target_os_cache_key }}
-        config: ${{ inputs.config }}
         ignore_cache: ${{ inputs.ignore_cache }}

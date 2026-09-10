@@ -84,13 +84,17 @@ runs:
         fi
 
         android_target_os=""
+        android_target_os_cache_key=""
         if [[ "${android}" == "true" ]]; then
           android_target_os="android,unix"
+          android_target_os_cache_key="android"
         fi
 
         windows_target_os=""
+        windows_target_os_cache_key=""
         if [[ "${windows}" == "true" ]]; then
           windows_target_os="win"
+          windows_target_os_cache_key="windows"
         fi
 
         echo "run_ios=${ios}" >> "${GITHUB_OUTPUT}"
@@ -102,6 +106,6 @@ runs:
         echo "apple_target_os_cache_key=${apple_target_os_cache_key}" >> "${GITHUB_OUTPUT}"
         echo "apple_target_os_label=${apple_target_os_label}" >> "${GITHUB_OUTPUT}"
         echo "android_target_os=${android_target_os}" >> "${GITHUB_OUTPUT}"
-        echo "android_target_os_cache_key=${android_target_os//,/-}" >> "${GITHUB_OUTPUT}"
+        echo "android_target_os_cache_key=${android_target_os_cache_key}" >> "${GITHUB_OUTPUT}"
         echo "windows_target_os=${windows_target_os}" >> "${GITHUB_OUTPUT}"
-        echo "windows_target_os_cache_key=${windows_target_os}" >> "${GITHUB_OUTPUT}"
+        echo "windows_target_os_cache_key=${windows_target_os_cache_key}" >> "${GITHUB_OUTPUT}"

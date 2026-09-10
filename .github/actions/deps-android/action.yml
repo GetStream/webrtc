@@ -1,5 +1,5 @@
 name: Deps Android
-description: Linux gclient sync for Android. Caches deps trees and out/.
+description: Linux gclient sync for Android. Caches the warm android deps tree.
 
 inputs:
   webrtc_ref:
@@ -10,10 +10,7 @@ inputs:
     description: Comma-separated gclient target_os (android,unix).
   target_os_cache_key:
     required: true
-    description: Cache-safe target_os key suffix.
-  config:
-    required: true
-    description: Cache key config (release or debug).
+    description: android
   ignore_cache:
     required: true
     description: Skip restoring caches and force a fresh sync.
@@ -32,7 +29,6 @@ runs:
       with:
         operation: restore
         target_os_cache_key: ${{ inputs.target_os_cache_key }}
-        config: ${{ inputs.config }}
         ignore_cache: ${{ inputs.ignore_cache }}
 
     - name: gclient sync (Android)
@@ -50,5 +46,4 @@ runs:
       with:
         operation: save
         target_os_cache_key: ${{ inputs.target_os_cache_key }}
-        config: ${{ inputs.config }}
         ignore_cache: ${{ inputs.ignore_cache }}
