@@ -21,7 +21,8 @@ runs:
     # run_id, DEPS hash, config, or github.job.
     - name: Cache key
       shell: bash
-      run: echo "Cache key: webrtc-${{ inputs.target_os_cache_key }}"
+      run: |
+        echo "Cache key: webrtc-${{ inputs.target_os_cache_key }}"
 
     - name: Restore deps and out cache
       if: ${{ inputs.operation == 'restore' && inputs.ignore_cache != 'true' }}
