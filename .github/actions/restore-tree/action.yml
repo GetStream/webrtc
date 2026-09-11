@@ -1,5 +1,5 @@
 name: Restore WebRTC tree
-description: Download the same-run git-cache artifact, then gclient sync from local objects so SKIP_DEPS=1 can follow.
+description: Restore same-run deps (Hetzner tarball for deps-git, GH artifact for deps-windows).
 
 inputs:
   webrtc_ref:
@@ -15,6 +15,18 @@ inputs:
     required: false
     default: "false"
     description: Install apt packages needed for Android builds.
+  hetzner_access_key:
+    required: false
+    default: ""
+    description: Pass ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }} (deps-git).
+  hetzner_secret_access_key:
+    required: false
+    default: ""
+    description: Pass ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }} (deps-git).
+  hetzner_bucket:
+    required: false
+    default: ""
+    description: Pass ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }} (deps-git).
 
 runs:
   using: composite
@@ -25,15 +37,39 @@ runs:
         webrtc_ref: ${{ inputs.webrtc_ref }}
         install_android_packages: ${{ inputs.install_android_packages }}
 
-    # Same-run handoff. Artifact is git-cache only; the full tree exceeds
-    # the per-artifact cap.
+    # Linux Deps packed the gclient working tree. Extract in place and
+    # run hooks only (no second gclient sync).
+    - name: Download same-run deps from Hetzner
+      if: ${{ inputs.deps_artifact == 'deps-git' }}
+      uses: ./src/.github/actions/artifact-download
+      with:
+        path: ${{ inputs.deps_artifact }}
+        hetzner_access_key: ${{ inputs.hetzner_access_key }}
+        hetzner_secret_access_key: ${{ inputs.hetzner_secret_access_key }}
+        hetzner_bucket: ${{ inputs.hetzner_bucket }}
+
+    - name: Run gclient hooks
+      if: ${{ inputs.deps_artifact == 'deps-git' }}
+      working-directory: src/stream_build
+      shell: bash
+      env:
+        DEPS_ROOT: ${{ github.workspace }}
+        WEBRTC_SRC: ${{ github.workspace }}/src
+        GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
+        TARGET_OS: ${{ inputs.target_os }}
+        WEBRTC_REPO: https://github.com/GetStream/webrtc.git
+      run: make runhooks
+
+    # Windows is still a git-cache-only GitHub artifact.
     - name: Download same-run deps artifact
+      if: ${{ inputs.deps_artifact != 'deps-git' }}
       uses: actions/download-artifact@v8
       with:
         name: ${{ inputs.deps_artifact }}
         path: ${{ runner.temp }}/deps-git-cache
 
     - name: Install same-run gclient object cache
+      if: ${{ inputs.deps_artifact != 'deps-git' }}
       shell: bash
       run: |
         set -euo pipefail
@@ -49,6 +85,7 @@ runs:
         test ! -L "${GITHUB_WORKSPACE}/src"
 
     - name: gclient sync
+      if: ${{ inputs.deps_artifact != 'deps-git' }}
       working-directory: src/stream_build
       shell: bash
       env:

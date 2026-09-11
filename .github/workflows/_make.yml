@@ -2,11 +2,12 @@
 # Not listed in the Actions dispatch UI (workflow_call only).
 # Callers pass mode: build | test | package | release.
 #
-# I/O: Linux Deps (RUN_HOOKS=0) uploads deps-git for selected ios/mac/android,unix.
-# Windows Deps stays separate (deps-windows). Build mode is ninja only (no
-# products). Package/Release Build jobs also make package and upload products-*.
-# Package combine consumes products-* (no third ninja) and uploads final-*.
-# Release attaches final-*. Tests need Deps only (make test, no make build).
+# I/O: Linux Deps (RUN_HOOKS=0) stream-tars gclient deps to Hetzner as
+# deps-git.tar (not a GitHub artifact). Windows Deps stays deps-windows on
+# GitHub. Build mode is ninja only (no products). Package/Release Build jobs
+# also make package and upload products-* (GitHub). Package combine consumes
+# products-* (no third ninja) and uploads final-*. Release attaches final-*.
+# Tests need Deps only (make test, no make build).
 
 name: WebRTC make
 
@@ -56,6 +57,9 @@ env:
   DEPS_ROOT: ${{ github.workspace }}
   WEBRTC_SRC: ${{ github.workspace }}/src
   GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
+  HETZNER_ACCESS_KEY_CI_ARTIFACTS: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+  HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+  HETZNER_BUCKET_CI_ARTIFACTS: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
 
 jobs:
   validate_inputs:
@@ -158,18 +162,16 @@ jobs:
           JOBS: "8"
           WEBRTC_REPO: https://github.com/GetStream/webrtc.git
         run: make deps
-      # Same-run handoff. The full tree is ~20 GB (over the artifact cap);
-      # git-cache only. Build/Test download this and run make deps locally.
-      # RUN_HOOKS=0: no hermetic Xcode CIPD on Linux.
+      # Same-run handoff. Stream-tar the gclient working tree to Hetzner
+      # (no zip on disk, no GitHub artifact quota). RUN_HOOKS=0: no
+      # hermetic Xcode CIPD on Linux; Build/Test run make runhooks.
       - name: Upload deps-git
-        uses: actions/upload-artifact@v7
+        uses: ./src/.github/actions/artifact-upload
         with:
-          name: deps-git
-          path: .gclient-git-cache
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 1
-          compression-level: 0
+          path: deps-git
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
 
   deps_windows:
     name: Deps Windows
@@ -234,6 +236,9 @@ jobs:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.apple_target_os }}
           deps_artifact: deps-git
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
       - name: Build iOS
         working-directory: src/stream_build
         env:
@@ -276,6 +281,9 @@ jobs:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.apple_target_os }}
           deps_artifact: deps-git
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
       - name: Build macOS
         working-directory: src/stream_build
         env:
@@ -319,6 +327,9 @@ jobs:
           target_os: ${{ needs.plan.outputs.android_target_os }}
           deps_artifact: deps-git
           install_android_packages: "true"
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
       - name: Build Android
         working-directory: src/stream_build
         env:
@@ -375,6 +386,9 @@ jobs:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.apple_target_os }}
           deps_artifact: deps-git
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
       - name: Test iOS
         working-directory: src/stream_build
         env:
@@ -398,6 +412,9 @@ jobs:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.apple_target_os }}
           deps_artifact: deps-git
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
       - name: Test macOS
         working-directory: src/stream_build
         env:

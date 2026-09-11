@@ -1,0 +1,85 @@
+# Hetzner-only. Callers pass org secrets:
+#   ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+#   ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+#   ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+name: Upload WebRTC deps to Hetzner
+description: Stream-tar gclient deps at $GITHUB_WORKSPACE to one Hetzner object.
+
+inputs:
+  path:
+    description: Object stem. Uploads artifacts/<repo>/<run_id>/<path>.tar
+    required: true
+  hetzner_access_key:
+    description: Pass ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}.
+    required: true
+  hetzner_secret_access_key:
+    description: Pass ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}.
+    required: true
+  hetzner_bucket:
+    description: Pass ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Ensure aws CLI
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v aws >/dev/null; then
+          exit 0
+        fi
+        if [[ "$(uname -s)" == Darwin ]]; then
+          brew install awscli
+        else
+          sudo apt-get update
+          sudo apt-get install -y awscli
+        fi
+
+    - name: Upload deps tarball
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        HETZNER_ACCESS_KEY_CI_ARTIFACTS: ${{ inputs.hetzner_access_key }}
+        HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS: ${{ inputs.hetzner_secret_access_key }}
+        HETZNER_BUCKET_CI_ARTIFACTS: ${{ inputs.hetzner_bucket }}
+        OBJECT_STEM: ${{ inputs.path }}
+      run: |
+        set -euo pipefail
+        export AWS_ACCESS_KEY_ID="${HETZNER_ACCESS_KEY_CI_ARTIFACTS:?}"
+        export AWS_SECRET_ACCESS_KEY="${HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS:?}"
+        export AWS_DEFAULT_REGION=hel1
+        export AWS_EC2_METADATA_DISABLED=true
+        endpoint="--endpoint-url https://hel1.your-objectstorage.com"
+        members=()
+        for p in \
+          .gclient \
+          .gclient_entries \
+          .gclient_previous_sync_commits \
+          .gcs_entries \
+          .cipd \
+          .gclient-git-cache \
+          src/.landmines \
+          src/third_party \
+          src/build \
+          src/buildtools \
+          src/testing \
+          src/tools \
+          src/ios
+        do
+          if [[ -e "${p}" ]]; then
+            members+=("${p}")
+          fi
+        done
+        if [[ ${#members[@]} -eq 0 ]]; then
+          echo "::error::no webrtc deps members to pack under ${GITHUB_WORKSPACE}"
+          exit 1
+        fi
+        test -f .gclient
+        test -d .gclient-git-cache
+        test -d src/third_party
+        BUCKET="${HETZNER_BUCKET_CI_ARTIFACTS:?}"
+        object="artifacts/${{ github.repository }}/${{ github.run_id }}/${OBJECT_STEM}.tar"
+        echo "packing ${members[*]} -> ${object}"
+        # aws s3 cp talks to Hetzner's S3-compatible API, not AWS.
+        tar cf - "${members[@]}" | aws ${endpoint} s3 cp - "s3://${BUCKET}/${object}"
