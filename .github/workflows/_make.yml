@@ -3,7 +3,8 @@
 # Callers pass mode: build | test | package | release.
 #
 # I/O: Linux Deps restores Hetzner deps-key (skip if missing), shallow
-# gclient sync (RUN_HOOKS=0), overwrites the same object. Key:
+# gclient sync (RUN_HOOKS=0), fetches chromium-webrtc-resources into
+# src/resources, overwrites the same object. Key:
 # artifacts/<github.repository>/deps-key.tar
 # (not a GitHub artifact, not run_id, not webrtc_ref). Windows Deps stays
 # deps-windows on GitHub. Build/Test restore that key after Deps (missing = fail). Build
@@ -174,6 +175,16 @@ jobs:
           JOBS: "8"
           WEBRTC_REPO: https://github.com/GetStream/webrtc.git
         run: make deps
+      # Same command as src/DEPS chromium-webrtc-resources. Do not set
+      # RUN_HOOKS=1 here: that runs mac_toolchain.py CIPD when mac is in
+      # TARGET_OS. Build restore still RUN_HOOKS=1 (rust-toolchain).
+      - name: Fetch chromium-webrtc-resources
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          download_from_google_storage --directory --recursive \
+            --num_threads=10 --no_auth --quiet \
+            --bucket chromium-webrtc-resources src/resources
       # Overwrite the stable deps-key object. Stream-tar (no zip on disk,
       # no GitHub artifact quota). RUN_HOOKS=0: no hermetic Xcode CIPD on
       # Linux; Build/Test restore this key then make deps (host GCS + hooks).

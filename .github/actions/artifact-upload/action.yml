@@ -65,7 +65,8 @@ runs:
           src/buildtools \
           src/testing \
           src/tools \
-          src/ios
+          src/ios \
+          src/resources
         do
           if [[ -e "${p}" ]]; then
             members+=("${p}")

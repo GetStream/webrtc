@@ -95,7 +95,8 @@ runs:
           src/buildtools \
           src/testing \
           src/tools \
-          src/ios
+          src/ios \
+          src/resources
         do
           if [[ -d "${p}" ]]; then
             find "${p}" -type f -exec touch {} +
