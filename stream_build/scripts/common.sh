@@ -39,6 +39,126 @@ require_webrtc_src() {
   [[ -f "$src/DEPS" ]] || die "No WebRTC checkout at $src (missing DEPS)"
 }
 
+quote_target_os() {
+  local raw="$1"
+  local os first=1
+  printf '['
+  # shellcheck disable=SC2086
+  for os in ${raw//,/ }; do
+    [[ -z "$os" ]] && continue
+    if [[ $first -eq 1 ]]; then
+      first=0
+    else
+      printf ', '
+    fi
+    printf '"%s"' "$os"
+  done
+  printf ']\n'
+}
+
+# Write Chromium .gclient at the gclient parent. managed: False, no revision.
+write_gclient() {
+  local dest="$1"
+  local repo="${2:-${WEBRTC_REPO:-git@github.com:GetStream/webrtc.git}}"
+  local target_os="${3:-${TARGET_OS:-ios}}"
+  cat >"${dest}/.gclient" <<EOF
+solutions = [
+  {
+    "name": "src",
+    "url": "${repo}",
+    "deps_file": "DEPS",
+    "managed": False,
+    "custom_deps": {},
+  },
+]
+target_os = $(quote_target_os "$target_os")
+EOF
+}
+
+# After git-cache moves off .gclient_deps/.gclient-git-cache, nested checkouts
+# still point objects/info/alternates (and origin urls) at the old path.
+# Rewrite those to GIT_CACHE_PATH. No-op if the cache itself is the old path.
+rewrite_git_cache_alternates() {
+  local src="$1"
+  local git_cache="$2"
+  [[ -d "$src" && -n "$git_cache" ]] || return 0
+  python3 - "$src" "$git_cache" <<'PY'
+import subprocess
+import sys
+
+src, new_cache = sys.argv[1], sys.argv[2].rstrip("/")
+frag = ".gclient_deps/.gclient-git-cache"
+if new_cache.endswith(frag):
+    raise SystemExit(0)
+
+cmd = [
+    "find",
+    src,
+    "(",
+    "-path",
+    "*/.git/objects/info/alternates",
+    "-o",
+    "-path",
+    "*/.git/objects/info/http-alternates",
+    "-o",
+    "-path",
+    "*/.git/config",
+    "-o",
+    "-path",
+    "*/.git/modules/*/objects/info/alternates",
+    "-o",
+    "-path",
+    "*/.git/modules/*/objects/info/http-alternates",
+    "-o",
+    "-path",
+    "*/.git/modules/*/config",
+    ")",
+    "-type",
+    "f",
+]
+try:
+    listing = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL)
+except subprocess.CalledProcessError:
+    raise SystemExit(0)
+
+stops = frozenset(" \t\n=\"'")
+
+
+def rewrite_line(line: str) -> str:
+    idx = line.find(frag)
+    if idx < 0:
+        return line
+    start = idx
+    while start > 0 and line[start - 1] not in stops:
+        start -= 1
+    return line[:start] + new_cache + line[idx + len(frag) :]
+
+
+repos = set()
+for path in listing.splitlines():
+    if not path:
+        continue
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except OSError:
+        continue
+    if frag not in text:
+        continue
+    rewritten = "".join(rewrite_line(line) for line in text.splitlines(True))
+    if rewritten == text:
+        continue
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(rewritten)
+    marker = "/.git/"
+    i = path.find(marker)
+    repos.add(path[:i] if i >= 0 else path)
+
+if repos:
+    print("rewrote git-cache paths in %d repos" % len(repos))
+PY
+}
+
 abspath() {
   local path="$1"
   (cd "$(dirname "$path")" && printf '%s/%s\n' "$(pwd)" "$(basename "$path")")

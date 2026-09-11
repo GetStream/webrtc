@@ -1,10 +1,14 @@
 # Public API:
+#   make bootstrap
 #   make build|test|package ios|android|macos|windows [VAR=value ...]
 #   make combine
 #   make rename apple|android
 # GN overrides: CONFIG=debug GN_ARGS='key=value key2=value'
 #
+# Layout: Chromium-style webrtc/src (this git checkout). Run make bootstrap
+# once. Other verbs assume that layout.
 # From the git root:  cd stream_build && make build ios
+# From webrtc/:        make build ios  (bootstrap writes parent Makefile)
 # SKIP_DEPS=1 skips gclient sync only; gn/ninja still run.
 # SKIP_LICENSES=1 skips license generation only; lipo/zip still run.
 # SKIP_MACCATALYST=1 drops catalyst-* from ios build+package only.
@@ -21,21 +25,25 @@ SCRIPTS  := $(PIPELINE)scripts
 CONFIG        ?= release
 TARGET_OS     ?= ios
 JOBS          ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8)
+SHALLOW            ?= 1
 SKIP_DEPS          ?= 0
 SKIP_LICENSES      ?= 0
 SKIP_MACCATALYST   ?= 0
 RUN_HOOKS     ?= 1
+CONFIRM       ?= 0
 GN_ARGS       ?=
 EXTRA_GN_ARGS ?=
 WEBRTC_REPO   ?= git@github.com:GetStream/webrtc.git
 WEBRTC_ROOT   ?=
-WEBRTC_SRC    ?= $(abspath $(PIPELINE)/..)
+REPO_ROOT     := $(abspath $(PIPELINE)/..)
+WEBRTC_SRC    ?= $(REPO_ROOT)
 ifneq ($(WEBRTC_ROOT),)
 DEPS_ROOT     ?= $(WEBRTC_ROOT)
 endif
-DEPS_ROOT     ?= $(WEBRTC_SRC)/.gclient_deps
+DEPS_ROOT     ?= $(abspath $(REPO_ROOT)/..)
 OUT           ?= $(DEPS_ROOT)/out
 PRODUCTS      ?= $(DEPS_ROOT)/products
+GIT_CACHE_PATH ?= $(DEPS_ROOT)/.gclient-git-cache
 TARGET        ?=
 NINJA_TARGET  ?=
 ARCHS         ?=
@@ -68,13 +76,14 @@ VERBS     := build test package
 PLATFORM  := $(firstword $(filter $(PLATFORMS),$(MAKECMDGOALS)))
 
 export DEPS_ROOT WEBRTC_SRC WEBRTC_ROOT WEBRTC_REPO WEBRTC_REVISION WEBRTC_REF
-export TARGET_OS JOBS RUN_HOOKS CONFIG OUT PRODUCTS ARCHS SKIP_LICENSES
-export GN_ARGS EXTRA_GN_ARGS ALL_GN_ARGS
+export TARGET_OS JOBS SHALLOW RUN_HOOKS CONFIG OUT PRODUCTS ARCHS SKIP_LICENSES
+export GN_ARGS EXTRA_GN_ARGS ALL_GN_ARGS GIT_CACHE_PATH CONFIRM BOOTSTRAP_SRC
 
 .DEFAULT_GOAL := help
 
-.PHONY: help check deps runhooks gen ninja slice clean print-gn-args \
-	announce require-src require-darwin require-linux require-windows maybe-deps \
+.PHONY: help check bootstrap deps runhooks gen ninja slice clean print-gn-args \
+	announce require-layout require-gclient require-src require-darwin \
+	require-linux require-windows maybe-deps \
 	combine apple rename rename-apple rename-android \
 	$(PLATFORMS) $(VERBS) \
 	build-ios build-macos build-android build-windows \
@@ -89,10 +98,12 @@ ifneq ($(filter build,$(MAKECMDGOALS)),)
 endif
 
 help:
+	@echo "make bootstrap"
 	@echo "make build|test|package ios|android|macos|windows [VAR=value ...]"
 	@echo "make combine"
 	@echo "make rename apple|android"
 	@echo
+	@echo "  bootstrap  wrap this checkout as webrtc/src (CONFIRM=1 in CI)"
 	@echo "  build    gn gen + ninja"
 	@echo "  test     build and run tests"
 	@echo "  package  assemble artifacts (xcframework, aar, zip)"
@@ -101,40 +112,53 @@ help:
 	@echo
 	@echo "  CONFIG=release (default, is_debug=false) or CONFIG=debug"
 	@echo "  tests always gn-gen with debug, ignoring CONFIG"
+	@echo "  SHALLOW=1 (default) gclient --no-history --shallow; SHALLOW=0 full history"
 	@echo "  SKIP_DEPS=1 skips gclient sync only; build/test/package still run"
 	@echo "  SKIP_LICENSES=1 skips license generation only; lipo/zip still run"
 	@echo "  SKIP_MACCATALYST=1 drops catalyst-arm64 catalyst-x64 from ios"
 	@echo
 	@echo "  make package ios"
 	@echo "  make package macos"
+	@echo "  from webrtc/: make build ios"
 	@echo "  make combine          # merges whatever platform dirs exist under PRODUCTS"
 	@echo "  make rename apple XCFRAMEWORK=path/to/WebRTC.xcframework"
 	@echo "  make rename android AAR=path/to/libwebrtc.aar"
 	@echo "  make build package ios     compile then pack"
 	@echo "  make build android ARCHS=arm64-v8a"
 	@echo "  make build ios GN_ARGS='rtc_use_h264=false' CONFIG=debug"
-	@echo "  make build ios DEPS_ROOT=/tmp/webrtc-deps"
+	@echo "  make bootstrap CONFIRM=1"
 	@echo "  make build ios SKIP_MACCATALYST=1"
 	@echo
 	@echo "Also: deps runhooks check clean print-gn-args TARGET=slice"
-	@echo "Vars: DEPS_ROOT WEBRTC_SRC OUT PRODUCTS CONFIG GN_ARGS JOBS ARCHS ZIP XCFRAMEWORK AAR RENAMED SKIP_DEPS SKIP_LICENSES SKIP_MACCATALYST"
+	@echo "Vars: DEPS_ROOT WEBRTC_SRC OUT PRODUCTS GIT_CACHE_PATH CONFIG GN_ARGS JOBS SHALLOW ARCHS ZIP XCFRAMEWORK AAR RENAMED SKIP_DEPS SKIP_LICENSES SKIP_MACCATALYST CONFIRM"
+	@echo "OUT defaults to DEPS_ROOT/out (sibling of src)."
 
 check:
 	@$(SCRIPTS)/check.sh
 
-deps:
+bootstrap:
+	@$(SCRIPTS)/bootstrap.sh
+
+deps: require-gclient
 	@$(SCRIPTS)/deps.sh sync
 
-runhooks:
+runhooks: require-gclient
 	@$(SCRIPTS)/deps.sh runhooks
 
-print-gn-args:
+print-gn-args: require-layout
 	@test -n "$(TARGET)" || { echo "TARGET is required (slice name)"; exit 1; }
 	@$(SCRIPTS)/gn-gen.sh --print --slice "$(TARGET)" --config "$(CONFIG)" --extra "$(ALL_GN_ARGS)"
 
-require-src:
-	@test -n "$(WEBRTC_SRC)" || { echo "WEBRTC_SRC is required"; exit 1; }
-	@test -f "$(WEBRTC_SRC)/DEPS" || { echo "No WebRTC checkout at $(WEBRTC_SRC)"; exit 1; }
+require-layout:
+	@$(SCRIPTS)/bootstrap.sh --check
+
+require-gclient:
+	@$(SCRIPTS)/bootstrap.sh --check --gclient
+
+require-src: require-layout
+	@test -n "$(WEBRTC_SRC)" || { echo "run: make bootstrap"; exit 1; }
+	@test ! -L "$(WEBRTC_SRC)" || { echo "run: make bootstrap"; exit 1; }
+	@test -f "$(WEBRTC_SRC)/DEPS" || { echo "run: make bootstrap"; exit 1; }
 
 require-darwin:
 	@test "$$(uname -s)" = Darwin || { echo "Apple targets require macOS"; exit 1; }
@@ -146,7 +170,7 @@ require-windows:
 	@case "$$(uname -s)" in MINGW*|MSYS*|CYGWIN*) exit 0 ;; esac; \
 	 test "$${OS}" = Windows_NT || { echo "Windows targets require Windows"; exit 1; }
 
-maybe-deps:
+maybe-deps: require-gclient
 ifneq ($(SKIP_DEPS),1)
 	$(MAKE) deps
 endif
@@ -173,6 +197,7 @@ announce:
 	 esac; \
 	 echo "    products:   $$products"; \
 	 echo "    jobs:       $(JOBS)"; \
+	 echo "    shallow:    $(SHALLOW)"; \
 	 echo "    skip_deps:  $(SKIP_DEPS)"; \
 	 echo "    skip_licenses: $(SKIP_LICENSES)"; \
 	 echo "    skip_maccatalyst: $(SKIP_MACCATALYST)"; \
@@ -206,7 +231,7 @@ announce:
 	   echo "    developer:  $${DEVELOPER_DIR:-$$(xcode-select -p 2>/dev/null)}"; \
 	 fi
 
-build test package:
+build test package: require-gclient
 	@test -n "$(PLATFORM)" || { echo "usage: make $@ ios|android|macos|windows"; exit 1; }
 	@$(MAKE) --no-print-directory announce VERB=$@ PLATFORM="$(PLATFORM)"
 	@$(MAKE) --no-print-directory $@-$(PLATFORM)
@@ -219,7 +244,7 @@ combine: require-darwin require-src
 		--products "$(PRODUCTS)" \
 		$(if $(filter 1,$(ZIP)),--zip,)
 
-rename:
+rename: require-layout
 	@target="$(firstword $(filter apple android,$(MAKECMDGOALS)))"; \
 	 test -n "$$target" || { echo "usage: make rename apple|android"; exit 1; }; \
 	 $(MAKE) --no-print-directory announce VERB=rename PLATFORM="$$target"; \
@@ -350,5 +375,5 @@ test-windows: require-windows maybe-deps require-src
 	   "$(OUT)/windows_tests/$$target" $(EXTRA_ARGS); \
 	 done
 
-clean: require-src
+clean: require-layout
 	rm -rf "$(OUT)" "$(PRODUCTS)"

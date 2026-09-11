@@ -43,10 +43,6 @@ on:
         description: Optional Android ABI, for example arm64-v8a. Empty = default ABI set.
         required: false
         default: ""
-      ignore_cache:
-        description: Skip restoring dependency caches and force a fresh sync
-        type: boolean
-        default: false
 
 jobs:
   package:
@@ -60,5 +56,4 @@ jobs:
       android: ${{ inputs.android }}
       windows: ${{ inputs.windows }}
       config: ${{ inputs.config }}
-      ignore_cache: ${{ inputs.ignore_cache }}
       android_arch: ${{ inputs.android_arch }}

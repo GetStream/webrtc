@@ -1,5 +1,5 @@
 name: Plan platform deps
-description: Map selected platforms to gclient target_os and cache key suffixes.
+description: Map selected platforms to gclient target_os.
 
 inputs:
   platform_ios:
@@ -33,18 +33,12 @@ outputs:
     value: ${{ steps.flags.outputs.run_apple }}
   apple_target_os:
     value: ${{ steps.flags.outputs.apple_target_os }}
-  apple_target_os_cache_key:
-    value: ${{ steps.flags.outputs.apple_target_os_cache_key }}
   apple_target_os_label:
     value: ${{ steps.flags.outputs.apple_target_os_label }}
   android_target_os:
     value: ${{ steps.flags.outputs.android_target_os }}
-  android_target_os_cache_key:
-    value: ${{ steps.flags.outputs.android_target_os_cache_key }}
   windows_target_os:
     value: ${{ steps.flags.outputs.windows_target_os }}
-  windows_target_os_cache_key:
-    value: ${{ steps.flags.outputs.windows_target_os_cache_key }}
 
 runs:
   using: composite
@@ -61,7 +55,7 @@ runs:
         skip_maccatalyst='${{ inputs.skip_maccatalyst }}'
 
         # Display follows the selected platforms. gclient TARGET_OS is the
-        # Apple superset so iOS-only and macOS-only share one cache tree.
+        # Apple superset so iOS-only and macOS-only share one deps job.
         apple_label_list=()
         if [[ "${ios}" == "true" ]]; then apple_label_list+=("ios"); fi
         if [[ "${macos}" == "true" ]]; then apple_label_list+=("macos"); fi
@@ -71,12 +65,10 @@ runs:
 
         run_apple=false
         apple_target_os=""
-        apple_target_os_cache_key=""
         apple_target_os_label=""
         if [[ "${ios}" == "true" || "${macos}" == "true" ]]; then
           run_apple=true
           apple_target_os="ios,mac"
-          apple_target_os_cache_key="apple"
           old_ifs="$IFS"
           IFS=', '
           apple_target_os_label="${apple_label_list[*]}"
@@ -84,17 +76,13 @@ runs:
         fi
 
         android_target_os=""
-        android_target_os_cache_key=""
         if [[ "${android}" == "true" ]]; then
           android_target_os="android,unix"
-          android_target_os_cache_key="android"
         fi
 
         windows_target_os=""
-        windows_target_os_cache_key=""
         if [[ "${windows}" == "true" ]]; then
           windows_target_os="win"
-          windows_target_os_cache_key="windows"
         fi
 
         echo "run_ios=${ios}" >> "${GITHUB_OUTPUT}"
@@ -103,9 +91,6 @@ runs:
         echo "run_windows=${windows}" >> "${GITHUB_OUTPUT}"
         echo "run_apple=${run_apple}" >> "${GITHUB_OUTPUT}"
         echo "apple_target_os=${apple_target_os}" >> "${GITHUB_OUTPUT}"
-        echo "apple_target_os_cache_key=${apple_target_os_cache_key}" >> "${GITHUB_OUTPUT}"
         echo "apple_target_os_label=${apple_target_os_label}" >> "${GITHUB_OUTPUT}"
         echo "android_target_os=${android_target_os}" >> "${GITHUB_OUTPUT}"
-        echo "android_target_os_cache_key=${android_target_os_cache_key}" >> "${GITHUB_OUTPUT}"
         echo "windows_target_os=${windows_target_os}" >> "${GITHUB_OUTPUT}"
-        echo "windows_target_os_cache_key=${windows_target_os_cache_key}" >> "${GITHUB_OUTPUT}"

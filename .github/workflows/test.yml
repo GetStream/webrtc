@@ -27,10 +27,6 @@ on:
         description: Run Windows tests (fails clearly if the runner is not a WebRTC host)
         type: boolean
         default: false
-      ignore_cache:
-        description: Skip restoring dependency caches and force a fresh sync
-        type: boolean
-        default: false
 
 jobs:
   test:
@@ -44,4 +40,3 @@ jobs:
       android: false
       windows: ${{ inputs.windows }}
       config: debug
-      ignore_cache: ${{ inputs.ignore_cache }}

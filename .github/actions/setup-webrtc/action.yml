@@ -1,10 +1,10 @@
 name: Setup WebRTC checkout
-description: Check out webrtc_ref, keep this workflow's stream_build, install depot_tools.
+description: Install depot_tools against GITHUB_WORKSPACE/src (this checkout). No second clone.
 
 inputs:
   webrtc_ref:
     required: true
-    description: Branch, tag, or SHA for GetStream/webrtc.
+    description: Branch, tag, or SHA already checked out at path src.
   install_android_packages:
     required: false
     default: "false"
@@ -13,35 +13,10 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Preserve pipeline from the workflow revision
-      shell: bash
-      run: |
-        set -euo pipefail
-        test -d "${GITHUB_WORKSPACE}/stream_build" || {
-          echo "::error::stream_build is missing from the workflow checkout."
-          exit 1
-        }
-        mkdir -p "${RUNNER_TEMP}/pipeline"
-        rm -rf "${RUNNER_TEMP}/pipeline/stream_build" "${RUNNER_TEMP}/pipeline/actions"
-        cp -R "${GITHUB_WORKSPACE}/stream_build" "${RUNNER_TEMP}/pipeline/stream_build"
-        cp -R "${GITHUB_WORKSPACE}/.github/actions" "${RUNNER_TEMP}/pipeline/actions"
-
-    - name: Check out GetStream/webrtc
-      uses: actions/checkout@v7
-      with:
-        ref: ${{ inputs.webrtc_ref }}
-
-    - name: Restore pipeline from the workflow revision
-      shell: bash
-      run: |
-        set -euo pipefail
-        rm -rf "${GITHUB_WORKSPACE}/stream_build" "${GITHUB_WORKSPACE}/.github/actions"
-        mkdir -p "${GITHUB_WORKSPACE}/.github"
-        cp -R "${RUNNER_TEMP}/pipeline/stream_build" "${GITHUB_WORKSPACE}/stream_build"
-        cp -R "${RUNNER_TEMP}/pipeline/actions" "${GITHUB_WORKSPACE}/.github/actions"
-        test -f "${GITHUB_WORKSPACE}/DEPS"
-        test -f "${GITHUB_WORKSPACE}/stream_build/Makefile"
-
+    # Caller checks out webrtc_ref with path: src. GITHUB_WORKSPACE is the
+    # webrtc-named gclient parent.
+    # gclient realpath()s gclient_gn_args_file (src/build/config/gclient_args.gni)
+    # and rejects a src that resolves outside DEPS_ROOT (depot_tools a6ba01c).
     - name: Install Android host packages
       if: ${{ inputs.install_android_packages == 'true' }}
       shell: bash
@@ -80,15 +55,23 @@ runs:
         fi
         echo "${HOME}/depot_tools" >> "${GITHUB_PATH}"
         echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
-        echo "DEPS_ROOT=${GITHUB_WORKSPACE}/.gclient_deps" >> "${GITHUB_ENV}"
-        echo "WEBRTC_SRC=${GITHUB_WORKSPACE}" >> "${GITHUB_ENV}"
+        echo "DEPS_ROOT=${GITHUB_WORKSPACE}" >> "${GITHUB_ENV}"
+        echo "WEBRTC_SRC=${GITHUB_WORKSPACE}/src" >> "${GITHUB_ENV}"
         echo "WEBRTC_REPO=https://github.com/GetStream/webrtc.git" >> "${GITHUB_ENV}"
 
-    - name: Ensure DEPS_ROOT src symlink
+    - name: Ensure git-cache directory
       shell: bash
       run: |
         set -euo pipefail
-        mkdir -p "${GITHUB_WORKSPACE}/.gclient_deps/.gclient-git-cache"
-        ln -sfn .. "${GITHUB_WORKSPACE}/.gclient_deps/src"
-        echo "GIT_CACHE_PATH=${GITHUB_WORKSPACE}/.gclient_deps/.gclient-git-cache" >> "${GITHUB_ENV}"
-        test -f "${GITHUB_WORKSPACE}/.gclient_deps/src/DEPS"
+        mkdir -p "${GITHUB_WORKSPACE}/.gclient-git-cache"
+        echo "GIT_CACHE_PATH=${GITHUB_WORKSPACE}/.gclient-git-cache" >> "${GITHUB_ENV}"
+        test -f "${GITHUB_WORKSPACE}/src/DEPS"
+        test -f "${GITHUB_WORKSPACE}/src/stream_build/Makefile"
+        test ! -L "${GITHUB_WORKSPACE}/src"
+
+    - name: Chromium webrtc/src layout
+      working-directory: src/stream_build
+      shell: bash
+      env:
+        CONFIRM: "1"
+      run: make bootstrap

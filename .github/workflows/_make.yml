@@ -29,9 +29,6 @@ on:
       config:
         required: true
         type: string
-      ignore_cache:
-        required: true
-        type: boolean
       android_arch:
         required: false
         type: string
@@ -48,6 +45,11 @@ on:
         required: false
         type: string
         default: ""
+
+env:
+  DEPS_ROOT: ${{ github.workspace }}
+  WEBRTC_SRC: ${{ github.workspace }}/src
+  GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
 
 jobs:
   validate_inputs:
@@ -108,16 +110,15 @@ jobs:
       run_windows: ${{ steps.plan.outputs.run_windows }}
       run_apple: ${{ steps.plan.outputs.run_apple }}
       apple_target_os: ${{ steps.plan.outputs.apple_target_os }}
-      apple_target_os_cache_key: ${{ steps.plan.outputs.apple_target_os_cache_key }}
       android_target_os: ${{ steps.plan.outputs.android_target_os }}
-      android_target_os_cache_key: ${{ steps.plan.outputs.android_target_os_cache_key }}
       windows_target_os: ${{ steps.plan.outputs.windows_target_os }}
-      windows_target_os_cache_key: ${{ steps.plan.outputs.windows_target_os_cache_key }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          path: src
       - id: plan
         name: Plan target_os
-        uses: ./.github/actions/prepare-common
+        uses: ./src/.github/actions/prepare-common
         with:
           platform_ios: ${{ inputs.ios }}
           platform_macos: ${{ inputs.macos }}
@@ -132,40 +133,30 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
       - name: Setup WebRTC checkout
-        uses: ./.github/actions/setup-webrtc
+        uses: ./src/.github/actions/setup-webrtc
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
-      - name: Restore Darwin object cache
-        uses: ./.github/actions/cache-webrtc
-        with:
-          operation: restore
-          target_os_cache_key: ${{ needs.plan.outputs.apple_target_os_cache_key }}
-          ignore_cache: ${{ inputs.ignore_cache }}
       - name: gclient sync (Apple)
-        working-directory: stream_build
+        working-directory: src/stream_build
         env:
-          DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
-          GIT_CACHE_PATH: ${{ github.workspace }}/.gclient_deps/.gclient-git-cache
+          DEPS_ROOT: ${{ github.workspace }}
+          WEBRTC_SRC: ${{ github.workspace }}/src
+          GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
           TARGET_OS: ${{ needs.plan.outputs.apple_target_os }}
           JOBS: "8"
           WEBRTC_REPO: https://github.com/GetStream/webrtc.git
         run: make deps
-      - name: Save Darwin object cache
-        uses: ./.github/actions/cache-webrtc
-        with:
-          operation: save
-          target_os_cache_key: ${{ needs.plan.outputs.apple_target_os_cache_key }}
-          ignore_cache: ${{ inputs.ignore_cache }}
       # Same-run handoff. The full tree is ~20 GB (over the artifact cap);
       # git-cache only. Build downloads this and runs make deps locally.
-      # Oversize git-cache skips actions/cache save (10 GiB cap in
-      # cache-webrtc); this artifact still uploads (separate quota).
       - name: Upload deps-apple
         uses: actions/upload-artifact@v7
         with:
           name: deps-apple
-          path: .gclient_deps/.gclient-git-cache
+          path: .gclient-git-cache
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
@@ -179,37 +170,29 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
       - name: Setup WebRTC checkout
-        uses: ./.github/actions/setup-webrtc
+        uses: ./src/.github/actions/setup-webrtc
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           install_android_packages: "true"
-      - name: Restore Linux object cache
-        uses: ./.github/actions/cache-webrtc
-        with:
-          operation: restore
-          target_os_cache_key: ${{ needs.plan.outputs.android_target_os_cache_key }}
-          ignore_cache: ${{ inputs.ignore_cache }}
       - name: gclient sync (Android)
-        working-directory: stream_build
+        working-directory: src/stream_build
         env:
-          DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
-          GIT_CACHE_PATH: ${{ github.workspace }}/.gclient_deps/.gclient-git-cache
+          DEPS_ROOT: ${{ github.workspace }}
+          WEBRTC_SRC: ${{ github.workspace }}/src
+          GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
           TARGET_OS: ${{ needs.plan.outputs.android_target_os }}
           JOBS: "8"
           WEBRTC_REPO: https://github.com/GetStream/webrtc.git
         run: make deps
-      - name: Save Linux object cache
-        uses: ./.github/actions/cache-webrtc
-        with:
-          operation: save
-          target_os_cache_key: ${{ needs.plan.outputs.android_target_os_cache_key }}
-          ignore_cache: ${{ inputs.ignore_cache }}
       - name: Upload deps-android
         uses: actions/upload-artifact@v7
         with:
           name: deps-android
-          path: .gclient_deps/.gclient-git-cache
+          path: .gclient-git-cache
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
@@ -223,6 +206,9 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
       - name: Check Windows WebRTC host
         shell: bash
         run: |
@@ -235,36 +221,25 @@ jobs:
             exit 1
           fi
       - name: Setup WebRTC checkout
-        uses: ./.github/actions/setup-webrtc
+        uses: ./src/.github/actions/setup-webrtc
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
-      - name: Restore Windows object cache
-        uses: ./.github/actions/cache-webrtc
-        with:
-          operation: restore
-          target_os_cache_key: ${{ needs.plan.outputs.windows_target_os_cache_key }}
-          ignore_cache: ${{ inputs.ignore_cache }}
       - name: gclient sync (Windows)
-        working-directory: stream_build
+        working-directory: src/stream_build
         shell: bash
         env:
-          DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
-          GIT_CACHE_PATH: ${{ github.workspace }}/.gclient_deps/.gclient-git-cache
+          DEPS_ROOT: ${{ github.workspace }}
+          WEBRTC_SRC: ${{ github.workspace }}/src
+          GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
           TARGET_OS: ${{ needs.plan.outputs.windows_target_os }}
           JOBS: "8"
           WEBRTC_REPO: https://github.com/GetStream/webrtc.git
         run: make deps
-      - name: Save Windows object cache
-        uses: ./.github/actions/cache-webrtc
-        with:
-          operation: save
-          target_os_cache_key: ${{ needs.plan.outputs.windows_target_os_cache_key }}
-          ignore_cache: ${{ inputs.ignore_cache }}
       - name: Upload deps-windows
         uses: actions/upload-artifact@v7
         with:
           name: deps-windows
-          path: .gclient_deps/.gclient-git-cache
+          path: .gclient-git-cache
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
@@ -278,15 +253,18 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/restore-tree
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+      - uses: ./src/.github/actions/restore-tree
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.apple_target_os }}
           deps_artifact: deps-apple
       - name: Build iOS
-        working-directory: stream_build
+        working-directory: src/stream_build
         env:
-          DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
+          DEPS_ROOT: ${{ github.workspace }}
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
         run: make build ios
@@ -299,15 +277,18 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/restore-tree
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+      - uses: ./src/.github/actions/restore-tree
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.apple_target_os }}
           deps_artifact: deps-apple
       - name: Build macOS
-        working-directory: stream_build
+        working-directory: src/stream_build
         env:
-          DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
+          DEPS_ROOT: ${{ github.workspace }}
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
         run: make build macos
@@ -320,16 +301,19 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/restore-tree
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+      - uses: ./src/.github/actions/restore-tree
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.android_target_os }}
           deps_artifact: deps-android
           install_android_packages: "true"
       - name: Build Android
-        working-directory: stream_build
+        working-directory: src/stream_build
         env:
-          DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
+          DEPS_ROOT: ${{ github.workspace }}
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
           ANDROID_ARCH: ${{ inputs.android_arch }}
@@ -349,22 +333,25 @@ jobs:
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/restore-tree
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+      - uses: ./src/.github/actions/restore-tree
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.apple_target_os }}
           deps_artifact: deps-apple
       - name: Build iOS
-        working-directory: stream_build
+        working-directory: src/stream_build
         env:
-          DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
+          DEPS_ROOT: ${{ github.workspace }}
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
         run: make build ios
       - name: Test iOS
-        working-directory: stream_build
+        working-directory: src/stream_build
         env:
-          DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
+          DEPS_ROOT: ${{ github.workspace }}
           SKIP_DEPS: "1"
         run: make test ios
 
@@ -376,22 +363,25 @@ jobs:
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/restore-tree
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+      - uses: ./src/.github/actions/restore-tree
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.apple_target_os }}
           deps_artifact: deps-apple
       - name: Build macOS
-        working-directory: stream_build
+        working-directory: src/stream_build
         env:
-          DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
+          DEPS_ROOT: ${{ github.workspace }}
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
         run: make build macos
       - name: Test macOS
-        working-directory: stream_build
+        working-directory: src/stream_build
         env:
-          DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
+          DEPS_ROOT: ${{ github.workspace }}
           SKIP_DEPS: "1"
         run: make test macos
 
@@ -403,6 +393,9 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
       - name: Check Windows WebRTC host
         shell: bash
         run: |
@@ -414,24 +407,24 @@ jobs:
             echo "::error::Windows WebRTC host is not ready on windows-latest (missing: ${missing[*]}). This job is wired for make test windows, but the runner image cannot run it yet."
             exit 1
           fi
-      - uses: ./.github/actions/restore-tree
+      - uses: ./src/.github/actions/restore-tree
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.windows_target_os }}
           deps_artifact: deps-windows
       - name: Build Windows
-        working-directory: stream_build
+        working-directory: src/stream_build
         shell: bash
         env:
-          DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
+          DEPS_ROOT: ${{ github.workspace }}
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
         run: make build windows
       - name: Test Windows
-        working-directory: stream_build
+        working-directory: src/stream_build
         shell: bash
         env:
-          DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
+          DEPS_ROOT: ${{ github.workspace }}
           SKIP_DEPS: "1"
         run: make test windows
 
@@ -483,23 +476,26 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/restore-tree
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+      - uses: ./src/.github/actions/restore-tree
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.apple_target_os }}
           deps_artifact: deps-apple
       - name: Build iOS
-        working-directory: stream_build
+        working-directory: src/stream_build
         env:
-          DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
+          DEPS_ROOT: ${{ github.workspace }}
           PRODUCTS: ${{ github.workspace }}/products
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
         run: make build ios
       - name: Package iOS
-        working-directory: stream_build
+        working-directory: src/stream_build
         env:
-          DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
+          DEPS_ROOT: ${{ github.workspace }}
           PRODUCTS: ${{ github.workspace }}/products
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
@@ -520,23 +516,26 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/restore-tree
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+      - uses: ./src/.github/actions/restore-tree
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.apple_target_os }}
           deps_artifact: deps-apple
       - name: Build macOS
-        working-directory: stream_build
+        working-directory: src/stream_build
         env:
-          DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
+          DEPS_ROOT: ${{ github.workspace }}
           PRODUCTS: ${{ github.workspace }}/products
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
         run: make build macos
       - name: Package macOS
-        working-directory: stream_build
+        working-directory: src/stream_build
         env:
-          DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
+          DEPS_ROOT: ${{ github.workspace }}
           PRODUCTS: ${{ github.workspace }}/products
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
@@ -557,16 +556,19 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/restore-tree
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+      - uses: ./src/.github/actions/restore-tree
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.android_target_os }}
           deps_artifact: deps-android
           install_android_packages: "true"
       - name: Build Android
-        working-directory: stream_build
+        working-directory: src/stream_build
         env:
-          DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
+          DEPS_ROOT: ${{ github.workspace }}
           PRODUCTS: ${{ github.workspace }}/products
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
@@ -579,9 +581,9 @@ jobs:
           fi
           make build android "${extra[@]}"
       - name: Package Android
-        working-directory: stream_build
+        working-directory: src/stream_build
         env:
-          DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
+          DEPS_ROOT: ${{ github.workspace }}
           PRODUCTS: ${{ github.workspace }}/products
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
@@ -609,6 +611,9 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
       - name: Check Windows WebRTC host
         shell: bash
         run: |
@@ -620,16 +625,16 @@ jobs:
             echo "::error::Windows WebRTC host is not ready on windows-latest (missing: ${missing[*]}). This job is wired for make build windows, but the runner image cannot run it yet."
             exit 1
           fi
-      - uses: ./.github/actions/restore-tree
+      - uses: ./src/.github/actions/restore-tree
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.windows_target_os }}
           deps_artifact: deps-windows
       - name: Build Windows
-        working-directory: stream_build
+        working-directory: src/stream_build
         shell: bash
         env:
-          DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
+          DEPS_ROOT: ${{ github.workspace }}
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
         run: make build windows
@@ -642,6 +647,9 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
       - name: Check Windows WebRTC host
         shell: bash
         run: |
@@ -653,25 +661,25 @@ jobs:
             echo "::error::Windows WebRTC host is not ready on windows-latest (missing: ${missing[*]}). This job is wired for make package windows, but the runner image cannot run it yet."
             exit 1
           fi
-      - uses: ./.github/actions/restore-tree
+      - uses: ./src/.github/actions/restore-tree
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.windows_target_os }}
           deps_artifact: deps-windows
       - name: Build Windows
-        working-directory: stream_build
+        working-directory: src/stream_build
         shell: bash
         env:
-          DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
+          DEPS_ROOT: ${{ github.workspace }}
           PRODUCTS: ${{ github.workspace }}/products
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
         run: make build windows
       - name: Package Windows
-        working-directory: stream_build
+        working-directory: src/stream_build
         shell: bash
         env:
-          DEPS_ROOT: ${{ github.workspace }}/.gclient_deps
+          DEPS_ROOT: ${{ github.workspace }}
           PRODUCTS: ${{ github.workspace }}/products
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
@@ -692,6 +700,14 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
+        with:
+          path: src
+
+      - name: Chromium webrtc/src layout
+        working-directory: src/stream_build
+        env:
+          CONFIRM: "1"
+        run: make bootstrap
 
       - name: Download product artifacts
         uses: actions/download-artifact@v8
@@ -701,7 +717,7 @@ jobs:
 
       - name: Combine Apple xcframeworks
         if: ${{ inputs.ios || inputs.macos }}
-        working-directory: stream_build
+        working-directory: src/stream_build
         env:
           PRODUCTS: ${{ github.workspace }}/combine-in
           SKIP_LICENSES: "1"
@@ -746,7 +762,7 @@ jobs:
 
       - name: Rename copies for wrapper SDKs
         if: ${{ inputs.mode == 'release' }}
-        working-directory: stream_build
+        working-directory: src/stream_build
         env:
           PRODUCTS: ${{ github.workspace }}/combine-in
         run: |
@@ -816,6 +832,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          path: src
           ref: ${{ inputs.webrtc_ref }}
 
       - name: Download finalised artifacts
