@@ -1,5 +1,7 @@
 # Package WebRTC artifacts. Same path as today's Publish so a PR can dispatch it.
 # Does not create a GitHub release.
+# _make.yml runs Build then Package combine (products-* in, final-* out).
+# Package does not rebuild from git-cache.
 
 name: Package
 

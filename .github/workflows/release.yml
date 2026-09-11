@@ -1,5 +1,6 @@
 # GitHub release of packaged WebRTC artifacts, then downstream wrapper publishes.
 # Not dispatchable until this file exists on the default branch.
+# Tests run parallel with Build (needs Deps only). Publish waits on Test + Package.
 
 name: Release
 

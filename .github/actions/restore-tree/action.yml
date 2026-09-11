@@ -7,10 +7,10 @@ inputs:
     description: Branch, tag, or SHA already checked out at path src.
   target_os:
     required: true
-    description: gclient TARGET_OS (ios,mac / android,unix / win).
+    description: gclient TARGET_OS (selected tokens only).
   deps_artifact:
     required: true
-    description: Same-run artifact (deps-apple / deps-android / deps-windows).
+    description: Same-run artifact (deps-git / deps-windows).
   install_android_packages:
     required: false
     default: "false"

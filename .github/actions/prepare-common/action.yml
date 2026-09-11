@@ -39,6 +39,8 @@ outputs:
     value: ${{ steps.flags.outputs.android_target_os }}
   windows_target_os:
     value: ${{ steps.flags.outputs.windows_target_os }}
+  linux_target_os:
+    value: ${{ steps.flags.outputs.linux_target_os }}
 
 runs:
   using: composite
@@ -54,25 +56,47 @@ runs:
         windows='${{ inputs.platform_windows }}'
         skip_maccatalyst='${{ inputs.skip_maccatalyst }}'
 
-        # Display follows the selected platforms. gclient TARGET_OS is the
-        # Apple superset so iOS-only and macOS-only share one deps job.
+        # TARGET_OS is only tokens selected this run (ios, mac, android,unix, win).
+        apple_os_list=()
         apple_label_list=()
-        if [[ "${ios}" == "true" ]]; then apple_label_list+=("ios"); fi
-        if [[ "${macos}" == "true" ]]; then apple_label_list+=("macos"); fi
+        linux_os_list=()
+        if [[ "${ios}" == "true" ]]; then
+          apple_os_list+=("ios")
+          apple_label_list+=("ios")
+          linux_os_list+=("ios")
+        fi
+        if [[ "${macos}" == "true" ]]; then
+          apple_os_list+=("mac")
+          apple_label_list+=("macos")
+          linux_os_list+=("mac")
+        fi
         if [[ "${ios}" == "true" && "${skip_maccatalyst}" != "true" ]]; then
           apple_label_list+=("maccatalyst")
         fi
+        if [[ "${android}" == "true" ]]; then
+          linux_os_list+=("android" "unix")
+        fi
+
+        join_csv() {
+          local IFS=,
+          printf '%s' "$*"
+        }
 
         run_apple=false
         apple_target_os=""
         apple_target_os_label=""
-        if [[ "${ios}" == "true" || "${macos}" == "true" ]]; then
+        if [[ ${#apple_os_list[@]} -gt 0 ]]; then
           run_apple=true
-          apple_target_os="ios,mac"
+          apple_target_os="$(join_csv "${apple_os_list[@]}")"
           old_ifs="$IFS"
           IFS=', '
           apple_target_os_label="${apple_label_list[*]}"
           IFS="$old_ifs"
+        fi
+
+        linux_target_os=""
+        if [[ ${#linux_os_list[@]} -gt 0 ]]; then
+          linux_target_os="$(join_csv "${linux_os_list[@]}")"
         fi
 
         android_target_os=""
@@ -94,3 +118,4 @@ runs:
         echo "apple_target_os_label=${apple_target_os_label}" >> "${GITHUB_OUTPUT}"
         echo "android_target_os=${android_target_os}" >> "${GITHUB_OUTPUT}"
         echo "windows_target_os=${windows_target_os}" >> "${GITHUB_OUTPUT}"
+        echo "linux_target_os=${linux_target_os}" >> "${GITHUB_OUTPUT}"

@@ -79,8 +79,14 @@ the tree is `webrtc/src` (real directory, not a symlink). `deps` /
 
 CI checks out with `path: src` so `GITHUB_WORKSPACE` is the webrtc-named
 folder. `DEPS_ROOT=$GITHUB_WORKSPACE`. gclient objects live at
-`$DEPS_ROOT/.gclient-git-cache`; same-run jobs hand that directory off as
-the `deps-*` artifact (no GitHub Actions cache).
+`$DEPS_ROOT/.gclient-git-cache` (no GitHub Actions cache). Linux Deps
+(`RUN_HOOKS=0`) uploads one `deps-git` artifact for the selected
+`ios` / `mac` / `android,unix` tokens; Windows Deps uploads `deps-windows`.
+Build restores that cache then `make deps` + `make build`. Package/Release
+Build jobs also `make package` and upload `products-*`. Package combine
+consumes `products-*` (no third ninja) and uploads `final-*`. Release
+attaches `final-*`. Tests need Deps only and run `make test` (no extra
+framework-slice build). `TARGET_OS` is only the tokens selected this run.
 
 ## Host gates
 

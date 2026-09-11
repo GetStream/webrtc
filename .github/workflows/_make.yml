@@ -1,6 +1,12 @@
 # Called by Build / Test / Package / Release dispatch workflows.
 # Not listed in the Actions dispatch UI (workflow_call only).
 # Callers pass mode: build | test | package | release.
+#
+# I/O: Linux Deps (RUN_HOOKS=0) uploads deps-git for selected ios/mac/android,unix.
+# Windows Deps stays separate (deps-windows). Build mode is ninja only (no
+# products). Package/Release Build jobs also make package and upload products-*.
+# Package combine consumes products-* (no third ninja) and uploads final-*.
+# Release attaches final-*. Tests need Deps only (make test, no make build).
 
 name: WebRTC make
 
@@ -112,6 +118,7 @@ jobs:
       apple_target_os: ${{ steps.plan.outputs.apple_target_os }}
       android_target_os: ${{ steps.plan.outputs.android_target_os }}
       windows_target_os: ${{ steps.plan.outputs.windows_target_os }}
+      linux_target_os: ${{ steps.plan.outputs.linux_target_os }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -125,47 +132,10 @@ jobs:
           platform_android: ${{ inputs.android }}
           platform_windows: ${{ inputs.windows }}
 
-  deps_apple:
-    name: Deps Apple
+  deps:
+    name: Deps
     needs: plan
-    if: ${{ inputs.ios || inputs.macos }}
-    runs-on: macos-26
-    timeout-minutes: 360
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          path: src
-          ref: ${{ inputs.webrtc_ref }}
-      - name: Setup WebRTC checkout
-        uses: ./src/.github/actions/setup-webrtc
-        with:
-          webrtc_ref: ${{ inputs.webrtc_ref }}
-      - name: gclient sync (Apple)
-        working-directory: src/stream_build
-        env:
-          DEPS_ROOT: ${{ github.workspace }}
-          WEBRTC_SRC: ${{ github.workspace }}/src
-          GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
-          TARGET_OS: ${{ needs.plan.outputs.apple_target_os }}
-          JOBS: "8"
-          WEBRTC_REPO: https://github.com/GetStream/webrtc.git
-        run: make deps
-      # Same-run handoff. The full tree is ~20 GB (over the artifact cap);
-      # git-cache only. Build downloads this and runs make deps locally.
-      - name: Upload deps-apple
-        uses: actions/upload-artifact@v7
-        with:
-          name: deps-apple
-          path: .gclient-git-cache
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 1
-          compression-level: 0
-
-  deps_android:
-    name: Deps Android
-    needs: plan
-    if: ${{ inputs.android }}
+    if: ${{ inputs.ios || inputs.macos || inputs.android }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
@@ -177,21 +147,24 @@ jobs:
         uses: ./src/.github/actions/setup-webrtc
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
-          install_android_packages: "true"
-      - name: gclient sync (Android)
+      - name: gclient sync
         working-directory: src/stream_build
         env:
           DEPS_ROOT: ${{ github.workspace }}
           WEBRTC_SRC: ${{ github.workspace }}/src
           GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
-          TARGET_OS: ${{ needs.plan.outputs.android_target_os }}
+          TARGET_OS: ${{ needs.plan.outputs.linux_target_os }}
+          RUN_HOOKS: "0"
           JOBS: "8"
           WEBRTC_REPO: https://github.com/GetStream/webrtc.git
         run: make deps
-      - name: Upload deps-android
+      # Same-run handoff. The full tree is ~20 GB (over the artifact cap);
+      # git-cache only. Build/Test download this and run make deps locally.
+      # RUN_HOOKS=0: no hermetic Xcode CIPD on Linux.
+      - name: Upload deps-git
         uses: actions/upload-artifact@v7
         with:
-          name: deps-android
+          name: deps-git
           path: .gclient-git-cache
           include-hidden-files: true
           if-no-files-found: error
@@ -247,8 +220,8 @@ jobs:
 
   build_ios:
     name: Build iOS
-    needs: [plan, deps_apple]
-    if: ${{ inputs.mode == 'build' && inputs.ios }}
+    needs: [plan, deps]
+    if: ${{ (inputs.mode == 'build' || inputs.mode == 'package' || inputs.mode == 'release') && inputs.ios }}
     runs-on: macos-26
     timeout-minutes: 360
     steps:
@@ -260,19 +233,37 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.apple_target_os }}
-          deps_artifact: deps-apple
+          deps_artifact: deps-git
       - name: Build iOS
         working-directory: src/stream_build
         env:
           DEPS_ROOT: ${{ github.workspace }}
+          PRODUCTS: ${{ github.workspace }}/products
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
         run: make build ios
+      - name: Package iOS
+        if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          PRODUCTS: ${{ github.workspace }}/products
+          CONFIG: ${{ inputs.config }}
+          SKIP_DEPS: "1"
+        run: make package ios
+      - name: Upload products-ios
+        if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: products-ios
+          path: products/ios
+          if-no-files-found: error
+          retention-days: 7
 
   build_macos:
     name: Build macOS
-    needs: [plan, deps_apple]
-    if: ${{ inputs.mode == 'build' && inputs.macos }}
+    needs: [plan, deps]
+    if: ${{ (inputs.mode == 'build' || inputs.mode == 'package' || inputs.mode == 'release') && inputs.macos }}
     runs-on: macos-26
     timeout-minutes: 360
     steps:
@@ -284,19 +275,37 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.apple_target_os }}
-          deps_artifact: deps-apple
+          deps_artifact: deps-git
       - name: Build macOS
         working-directory: src/stream_build
         env:
           DEPS_ROOT: ${{ github.workspace }}
+          PRODUCTS: ${{ github.workspace }}/products
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
         run: make build macos
+      - name: Package macOS
+        if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          PRODUCTS: ${{ github.workspace }}/products
+          CONFIG: ${{ inputs.config }}
+          SKIP_DEPS: "1"
+        run: make package macos
+      - name: Upload products-macos
+        if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: products-macos
+          path: products/macos
+          if-no-files-found: error
+          retention-days: 7
 
   build_android:
     name: Build Android
-    needs: [plan, deps_android]
-    if: ${{ inputs.mode == 'build' && inputs.android }}
+    needs: [plan, deps]
+    if: ${{ (inputs.mode == 'build' || inputs.mode == 'package' || inputs.mode == 'release') && inputs.android }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
@@ -308,12 +317,13 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.android_target_os }}
-          deps_artifact: deps-android
+          deps_artifact: deps-git
           install_android_packages: "true"
       - name: Build Android
         working-directory: src/stream_build
         env:
           DEPS_ROOT: ${{ github.workspace }}
+          PRODUCTS: ${{ github.workspace }}/products
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
           ANDROID_ARCH: ${{ inputs.android_arch }}
@@ -324,10 +334,34 @@ jobs:
             extra+=(ARCHS="${ANDROID_ARCH}")
           fi
           make build android "${extra[@]}"
+      - name: Package Android
+        if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          PRODUCTS: ${{ github.workspace }}/products
+          CONFIG: ${{ inputs.config }}
+          SKIP_DEPS: "1"
+          ANDROID_ARCH: ${{ inputs.android_arch }}
+        run: |
+          set -euo pipefail
+          extra=()
+          if [[ -n "${ANDROID_ARCH}" ]]; then
+            extra+=(ARCHS="${ANDROID_ARCH}")
+          fi
+          make package android "${extra[@]}"
+      - name: Upload products-android
+        if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: products-android
+          path: products
+          if-no-files-found: error
+          retention-days: 7
 
   test_ios:
     name: Test iOS
-    needs: [plan, deps_apple]
+    needs: [plan, deps]
     if: ${{ (inputs.mode == 'test' || inputs.mode == 'release') && inputs.ios }}
     runs-on: macos-26
     timeout-minutes: 180
@@ -340,14 +374,7 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.apple_target_os }}
-          deps_artifact: deps-apple
-      - name: Build iOS
-        working-directory: src/stream_build
-        env:
-          DEPS_ROOT: ${{ github.workspace }}
-          CONFIG: ${{ inputs.config }}
-          SKIP_DEPS: "1"
-        run: make build ios
+          deps_artifact: deps-git
       - name: Test iOS
         working-directory: src/stream_build
         env:
@@ -357,7 +384,7 @@ jobs:
 
   test_macos:
     name: Test macOS
-    needs: [plan, deps_apple]
+    needs: [plan, deps]
     if: ${{ (inputs.mode == 'test' || inputs.mode == 'release') && inputs.macos }}
     runs-on: macos-26
     timeout-minutes: 180
@@ -370,14 +397,7 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.apple_target_os }}
-          deps_artifact: deps-apple
-      - name: Build macOS
-        working-directory: src/stream_build
-        env:
-          DEPS_ROOT: ${{ github.workspace }}
-          CONFIG: ${{ inputs.config }}
-          SKIP_DEPS: "1"
-        run: make build macos
+          deps_artifact: deps-git
       - name: Test macOS
         working-directory: src/stream_build
         env:
@@ -412,14 +432,6 @@ jobs:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.windows_target_os }}
           deps_artifact: deps-windows
-      - name: Build Windows
-        working-directory: src/stream_build
-        shell: bash
-        env:
-          DEPS_ROOT: ${{ github.workspace }}
-          CONFIG: ${{ inputs.config }}
-          SKIP_DEPS: "1"
-        run: make build windows
       - name: Test Windows
         working-directory: src/stream_build
         shell: bash
@@ -431,12 +443,11 @@ jobs:
   tests_passed:
     name: Tests passed
     needs: [plan, test_ios, test_macos, test_windows]
-    if: ${{ always() && !cancelled() && (inputs.mode == 'package' || inputs.mode == 'release') }}
+    if: ${{ always() && !cancelled() && inputs.mode == 'release' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Require tests before package on Release
+      - name: Require tests before publish
         env:
-          MODE: ${{ inputs.mode }}
           WANT_IOS: ${{ inputs.ios }}
           WANT_MACOS: ${{ inputs.macos }}
           WANT_WINDOWS: ${{ inputs.windows }}
@@ -445,10 +456,6 @@ jobs:
           WINDOWS_RESULT: ${{ needs.test_windows.result }}
         run: |
           set -euo pipefail
-          if [[ "${MODE}" != "release" ]]; then
-            echo "Package mode: tests are not required."
-            exit 0
-          fi
           failed=0
           if [[ "${WANT_IOS}" == "true" && "${IOS_RESULT}" != "success" ]]; then
             echo "::error::Release is blocked: iOS tests ${IOS_RESULT}."
@@ -463,150 +470,15 @@ jobs:
             failed=1
           fi
           if [[ "${failed}" -ne 0 ]]; then
-            echo "If tests fail, do not package or publish."
+            echo "If tests fail, do not publish."
             exit 1
           fi
           echo "Selected-platform tests passed (Android tests are unwired and skipped)."
 
-  package_ios:
-    name: Package iOS
-    needs: [plan, deps_apple, tests_passed]
-    if: ${{ (inputs.mode == 'package' || inputs.mode == 'release') && inputs.ios && !cancelled() && needs.tests_passed.result == 'success' }}
-    runs-on: macos-26
-    timeout-minutes: 360
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          path: src
-          ref: ${{ inputs.webrtc_ref }}
-      - uses: ./src/.github/actions/restore-tree
-        with:
-          webrtc_ref: ${{ inputs.webrtc_ref }}
-          target_os: ${{ needs.plan.outputs.apple_target_os }}
-          deps_artifact: deps-apple
-      - name: Build iOS
-        working-directory: src/stream_build
-        env:
-          DEPS_ROOT: ${{ github.workspace }}
-          PRODUCTS: ${{ github.workspace }}/products
-          CONFIG: ${{ inputs.config }}
-          SKIP_DEPS: "1"
-        run: make build ios
-      - name: Package iOS
-        working-directory: src/stream_build
-        env:
-          DEPS_ROOT: ${{ github.workspace }}
-          PRODUCTS: ${{ github.workspace }}/products
-          CONFIG: ${{ inputs.config }}
-          SKIP_DEPS: "1"
-        run: make package ios
-      - name: Upload products-ios
-        uses: actions/upload-artifact@v7
-        with:
-          name: products-ios
-          path: products/ios
-          if-no-files-found: error
-          retention-days: 7
-
-  package_macos:
-    name: Package macOS
-    needs: [plan, deps_apple, tests_passed]
-    if: ${{ (inputs.mode == 'package' || inputs.mode == 'release') && inputs.macos && !cancelled() && needs.tests_passed.result == 'success' }}
-    runs-on: macos-26
-    timeout-minutes: 360
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          path: src
-          ref: ${{ inputs.webrtc_ref }}
-      - uses: ./src/.github/actions/restore-tree
-        with:
-          webrtc_ref: ${{ inputs.webrtc_ref }}
-          target_os: ${{ needs.plan.outputs.apple_target_os }}
-          deps_artifact: deps-apple
-      - name: Build macOS
-        working-directory: src/stream_build
-        env:
-          DEPS_ROOT: ${{ github.workspace }}
-          PRODUCTS: ${{ github.workspace }}/products
-          CONFIG: ${{ inputs.config }}
-          SKIP_DEPS: "1"
-        run: make build macos
-      - name: Package macOS
-        working-directory: src/stream_build
-        env:
-          DEPS_ROOT: ${{ github.workspace }}
-          PRODUCTS: ${{ github.workspace }}/products
-          CONFIG: ${{ inputs.config }}
-          SKIP_DEPS: "1"
-        run: make package macos
-      - name: Upload products-macos
-        uses: actions/upload-artifact@v7
-        with:
-          name: products-macos
-          path: products/macos
-          if-no-files-found: error
-          retention-days: 7
-
-  package_android:
-    name: Package Android
-    needs: [plan, deps_android, tests_passed]
-    if: ${{ (inputs.mode == 'package' || inputs.mode == 'release') && inputs.android && !cancelled() && needs.tests_passed.result == 'success' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 360
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          path: src
-          ref: ${{ inputs.webrtc_ref }}
-      - uses: ./src/.github/actions/restore-tree
-        with:
-          webrtc_ref: ${{ inputs.webrtc_ref }}
-          target_os: ${{ needs.plan.outputs.android_target_os }}
-          deps_artifact: deps-android
-          install_android_packages: "true"
-      - name: Build Android
-        working-directory: src/stream_build
-        env:
-          DEPS_ROOT: ${{ github.workspace }}
-          PRODUCTS: ${{ github.workspace }}/products
-          CONFIG: ${{ inputs.config }}
-          SKIP_DEPS: "1"
-          ANDROID_ARCH: ${{ inputs.android_arch }}
-        run: |
-          set -euo pipefail
-          extra=()
-          if [[ -n "${ANDROID_ARCH}" ]]; then
-            extra+=(ARCHS="${ANDROID_ARCH}")
-          fi
-          make build android "${extra[@]}"
-      - name: Package Android
-        working-directory: src/stream_build
-        env:
-          DEPS_ROOT: ${{ github.workspace }}
-          PRODUCTS: ${{ github.workspace }}/products
-          CONFIG: ${{ inputs.config }}
-          SKIP_DEPS: "1"
-          ANDROID_ARCH: ${{ inputs.android_arch }}
-        run: |
-          set -euo pipefail
-          extra=()
-          if [[ -n "${ANDROID_ARCH}" ]]; then
-            extra+=(ARCHS="${ANDROID_ARCH}")
-          fi
-          make package android "${extra[@]}"
-      - name: Upload products-android
-        uses: actions/upload-artifact@v7
-        with:
-          name: products-android
-          path: products
-          if-no-files-found: error
-          retention-days: 7
-
   build_windows:
     name: Build Windows
     needs: [plan, deps_windows]
-    if: ${{ inputs.mode == 'build' && inputs.windows }}
+    if: ${{ (inputs.mode == 'build' || inputs.mode == 'package' || inputs.mode == 'release') && inputs.windows }}
     runs-on: windows-latest
     timeout-minutes: 360
     steps:
@@ -635,47 +507,12 @@ jobs:
         shell: bash
         env:
           DEPS_ROOT: ${{ github.workspace }}
-          CONFIG: ${{ inputs.config }}
-          SKIP_DEPS: "1"
-        run: make build windows
-
-  package_windows:
-    name: Package Windows
-    needs: [plan, deps_windows, tests_passed]
-    if: ${{ (inputs.mode == 'package' || inputs.mode == 'release') && inputs.windows && !cancelled() && needs.tests_passed.result == 'success' }}
-    runs-on: windows-latest
-    timeout-minutes: 360
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          path: src
-          ref: ${{ inputs.webrtc_ref }}
-      - name: Check Windows WebRTC host
-        shell: bash
-        run: |
-          set -euo pipefail
-          missing=()
-          command -v make >/dev/null || missing+=("GNU make")
-          command -v python3 >/dev/null || missing+=("python3")
-          if [[ ${#missing[@]} -gt 0 ]]; then
-            echo "::error::Windows WebRTC host is not ready on windows-latest (missing: ${missing[*]}). This job is wired for make package windows, but the runner image cannot run it yet."
-            exit 1
-          fi
-      - uses: ./src/.github/actions/restore-tree
-        with:
-          webrtc_ref: ${{ inputs.webrtc_ref }}
-          target_os: ${{ needs.plan.outputs.windows_target_os }}
-          deps_artifact: deps-windows
-      - name: Build Windows
-        working-directory: src/stream_build
-        shell: bash
-        env:
-          DEPS_ROOT: ${{ github.workspace }}
           PRODUCTS: ${{ github.workspace }}/products
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
         run: make build windows
       - name: Package Windows
+        if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
         working-directory: src/stream_build
         shell: bash
         env:
@@ -685,6 +522,7 @@ jobs:
           SKIP_DEPS: "1"
         run: make package windows
       - name: Upload products-windows
+        if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
         uses: actions/upload-artifact@v7
         with:
           name: products-windows
@@ -692,10 +530,10 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  finalise_package:
-    name: Finalise package
-    needs: [plan, tests_passed, package_ios, package_macos, package_android, package_windows]
-    if: ${{ (inputs.mode == 'package' || inputs.mode == 'release') && !cancelled() && needs.tests_passed.result == 'success' && !failure() }}
+  package:
+    name: Package
+    needs: [plan, build_ios, build_macos, build_android, build_windows]
+    if: ${{ always() && !cancelled() && (inputs.mode == 'package' || inputs.mode == 'release') && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && (needs.build_ios.result == 'success' || needs.build_macos.result == 'success' || needs.build_android.result == 'success' || needs.build_windows.result == 'success') }}
     runs-on: ${{ (inputs.ios || inputs.macos) && 'macos-26' || 'ubuntu-latest' }}
     timeout-minutes: 60
     steps:
@@ -826,8 +664,8 @@ jobs:
 
   github_release:
     name: Release
-    needs: [plan, finalise_package]
-    if: ${{ inputs.mode == 'release' && !cancelled() && !failure() }}
+    needs: [plan, tests_passed, package]
+    if: ${{ always() && !cancelled() && inputs.mode == 'release' && needs.tests_passed.result == 'success' && needs.package.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -881,7 +719,7 @@ jobs:
   trigger_downstream_releases:
     name: Trigger downstream WebRTC releases
     needs: [plan, github_release]
-    if: ${{ inputs.mode == 'release' && !cancelled() && !failure() }}
+    if: ${{ always() && !cancelled() && inputs.mode == 'release' && needs.github_release.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Trigger stream-video-swift-webrtc release

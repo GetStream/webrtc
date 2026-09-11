@@ -1,5 +1,6 @@
 # Manual WebRTC build. Dispatchable from a PR because this path exists on the
 # default branch. Implementation: .github/workflows/_make.yml
+# Deps → Build (restore-tree + make build). No package combine, no products.
 
 name: Build
 
