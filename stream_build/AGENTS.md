@@ -79,11 +79,12 @@ the tree is `webrtc/src` (real directory, not a symlink). `deps` /
 
 CI checks out with `path: src` so `GITHUB_WORKSPACE` is the webrtc-named
 folder. `DEPS_ROOT=$GITHUB_WORKSPACE`. gclient objects live at
-`$DEPS_ROOT/.gclient-git-cache`. Linux Deps (`RUN_HOOKS=0`) stream-tars
-the gclient working tree to Hetzner as `deps-git.tar` (not a GitHub
-artifact or Actions cache). Windows Deps still uploads `deps-windows` to
-GitHub. Build/Test restore `deps-git` via `artifact-download`, then
-`make runhooks` (no second `gclient sync`) and `SKIP_DEPS=1` on
+`$DEPS_ROOT/.gclient-git-cache`. Linux Deps restores the Hetzner
+`deps-git` tarball (skip if missing), `gclient sync --no-history
+--shallow` (`RUN_HOOKS=0`), and overwrites the same object. Not a GitHub
+artifact or Actions cache. Windows Deps still uploads `deps-windows` to
+GitHub. Build/Test restore that same key via `artifact-download` (missing
+fails), then `make deps` (host GCS + hooks) and `SKIP_DEPS=1` on
 build/test. Package/Release Build jobs also `make package` and upload
 `products-*` (GitHub). Package combine consumes `products-*` (no third
 ninja) and uploads `final-*`. Release attaches `final-*`. Tests need
@@ -95,7 +96,7 @@ Hetzner deps handoff:
 `aws s3 cp` talks to Hetzner's S3-compatible API, not AWS.
 Pipe `tar cf - … | aws s3 cp - "s3://${BUCKET}/…"` and
 `aws s3 cp "s3://${BUCKET}/…" - | tar xf -` (no tarball on disk). Object:
-`<bucket>/artifacts/<github.repository>/<github.run_id>/<path>.tar`
+`<bucket>/artifacts/<github.repository>/deps-git/<webrtc_ref>.tar`
 with `--endpoint-url https://hel1.your-objectstorage.com` and region
 `hel1`. Packs `.gclient*`, `.cipd`, `.gclient-git-cache`, and gclient
 checkouts under `src/` (`third_party`, `build`, `buildtools`, `testing`,

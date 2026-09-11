@@ -2,10 +2,13 @@
 # Not listed in the Actions dispatch UI (workflow_call only).
 # Callers pass mode: build | test | package | release.
 #
-# I/O: Linux Deps (RUN_HOOKS=0) stream-tars gclient deps to Hetzner as
-# deps-git.tar (not a GitHub artifact). Windows Deps stays deps-windows on
-# GitHub. Build mode is ninja only (no products). Package/Release Build jobs
-# also make package and upload products-* (GitHub). Package combine consumes
+# I/O: Linux Deps restores Hetzner deps-git (skip if missing), shallow
+# gclient sync (RUN_HOOKS=0), overwrites the same object. Key:
+# artifacts/<github.repository>/deps-git/<webrtc_ref>.tar
+# (not a GitHub artifact, not run_id). Windows Deps stays deps-windows on
+# GitHub. Build/Test restore that key after Deps (missing = fail). Build
+# mode is ninja only (no products). Package/Release Build jobs also make
+# package and upload products-* (GitHub). Package combine consumes
 # products-* (no third ninja) and uploads final-*. Release attaches final-*.
 # Tests need Deps only (make test, no make build).
 
@@ -151,6 +154,15 @@ jobs:
         uses: ./src/.github/actions/setup-webrtc
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
+      - name: Download cached deps-git
+        uses: ./src/.github/actions/artifact-download
+        with:
+          path: deps-git
+          webrtc_ref: ${{ inputs.webrtc_ref }}
+          if_missing: skip
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
       - name: gclient sync
         working-directory: src/stream_build
         env:
@@ -159,16 +171,18 @@ jobs:
           GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
           TARGET_OS: ${{ needs.plan.outputs.linux_target_os }}
           RUN_HOOKS: "0"
+          SHALLOW: "1"
           JOBS: "8"
           WEBRTC_REPO: https://github.com/GetStream/webrtc.git
         run: make deps
-      # Same-run handoff. Stream-tar the gclient working tree to Hetzner
-      # (no zip on disk, no GitHub artifact quota). RUN_HOOKS=0: no
-      # hermetic Xcode CIPD on Linux; Build/Test run make runhooks.
+      # Overwrite the stable deps-git object. Stream-tar (no zip on disk,
+      # no GitHub artifact quota). RUN_HOOKS=0: no hermetic Xcode CIPD on
+      # Linux; Build/Test restore this key then make deps (host GCS + hooks).
       - name: Upload deps-git
         uses: ./src/.github/actions/artifact-upload
         with:
           path: deps-git
+          webrtc_ref: ${{ inputs.webrtc_ref }}
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}

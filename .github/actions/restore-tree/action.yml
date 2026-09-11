@@ -1,5 +1,5 @@
 name: Restore WebRTC tree
-description: Restore same-run deps (Hetzner tarball for deps-git, GH artifact for deps-windows).
+description: Restore deps-git from Hetzner or deps-windows from a GitHub artifact.
 
 inputs:
   webrtc_ref:
@@ -10,7 +10,7 @@ inputs:
     description: gclient TARGET_OS (selected tokens only).
   deps_artifact:
     required: true
-    description: Same-run artifact (deps-git / deps-windows).
+    description: deps-git (Hetzner) or deps-windows (GitHub artifact).
   install_android_packages:
     required: false
     default: "false"
@@ -37,18 +37,20 @@ runs:
         webrtc_ref: ${{ inputs.webrtc_ref }}
         install_android_packages: ${{ inputs.install_android_packages }}
 
-    # Linux Deps packed the gclient working tree. Extract in place and
-    # run hooks only (no second gclient sync).
-    - name: Download same-run deps from Hetzner
+    # Linux Deps packed the gclient working tree. Extract, then shallow
+    # gclient sync so host GCS (rust-toolchain) matches this runner.
+    # runhooks does not download GCS. Missing object fails (Deps uploaded).
+    - name: Download deps from Hetzner
       if: ${{ inputs.deps_artifact == 'deps-git' }}
       uses: ./src/.github/actions/artifact-download
       with:
         path: ${{ inputs.deps_artifact }}
+        webrtc_ref: ${{ inputs.webrtc_ref }}
         hetzner_access_key: ${{ inputs.hetzner_access_key }}
         hetzner_secret_access_key: ${{ inputs.hetzner_secret_access_key }}
         hetzner_bucket: ${{ inputs.hetzner_bucket }}
 
-    - name: Run gclient hooks
+    - name: gclient sync and hooks
       if: ${{ inputs.deps_artifact == 'deps-git' }}
       working-directory: src/stream_build
       shell: bash
@@ -57,8 +59,11 @@ runs:
         WEBRTC_SRC: ${{ github.workspace }}/src
         GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
         TARGET_OS: ${{ inputs.target_os }}
+        JOBS: "8"
+        SHALLOW: "1"
+        RUN_HOOKS: "1"
         WEBRTC_REPO: https://github.com/GetStream/webrtc.git
-      run: make runhooks
+      run: make deps
 
     # Windows is still a git-cache-only GitHub artifact.
     - name: Download same-run deps artifact

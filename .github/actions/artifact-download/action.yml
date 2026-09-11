@@ -7,8 +7,15 @@ description: Stream a Hetzner deps tarball onto $GITHUB_WORKSPACE and untar.
 
 inputs:
   path:
-    description: Object stem. Downloads artifacts/<repo>/<run_id>/<path>.tar
+    description: Object stem. Downloads artifacts/<repo>/<path>/<webrtc_ref>.tar
     required: true
+  webrtc_ref:
+    description: Stable deps identity (branch, tag, or SHA).
+    required: true
+  if_missing:
+    description: error fails when the object is absent; skip continues.
+    required: false
+    default: error
   hetzner_access_key:
     description: Hetzner object storage access key.
     required: true
@@ -44,6 +51,8 @@ runs:
         HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS: ${{ inputs.hetzner_secret_access_key }}
         HETZNER_BUCKET_CI_ARTIFACTS: ${{ inputs.hetzner_bucket }}
         OBJECT_STEM: ${{ inputs.path }}
+        WEBRTC_REF: ${{ inputs.webrtc_ref }}
+        IF_MISSING: ${{ inputs.if_missing }}
       run: |
         set -euo pipefail
         export AWS_ACCESS_KEY_ID="${HETZNER_ACCESS_KEY_CI_ARTIFACTS:?}"
@@ -52,7 +61,23 @@ runs:
         export AWS_EC2_METADATA_DISABLED=true
         endpoint="--endpoint-url https://hel1.your-objectstorage.com"
         BUCKET="${HETZNER_BUCKET_CI_ARTIFACTS:?}"
-        object="artifacts/${{ github.repository }}/${{ github.run_id }}/${OBJECT_STEM}.tar"
+        [[ -n "${WEBRTC_REF}" ]]
+        object="artifacts/${{ github.repository }}/${OBJECT_STEM}/${WEBRTC_REF}.tar"
+        set +e
+        head_out="$(aws ${endpoint} s3api head-object \
+          --bucket "${BUCKET}" --key "${object}" 2>&1)"
+        head_rc=$?
+        set -e
+        if [[ "${head_rc}" -ne 0 ]]; then
+          if [[ "${IF_MISSING}" == "skip" ]] && \
+            grep -qiE '404|Not Found|NoSuchKey|NotFound' <<<"${head_out}"; then
+            echo "missing ${object}; skipping extract"
+            exit 0
+          fi
+          echo "::error::failed to access s3://${BUCKET}/${object}"
+          printf '%s\n' "${head_out}"
+          exit 1
+        fi
         echo "extracting ${object} -> ${GITHUB_WORKSPACE}"
         # aws s3 cp talks to Hetzner's S3-compatible API, not AWS.
         aws ${endpoint} s3 cp "s3://${BUCKET}/${object}" - | tar xf -

@@ -381,4 +381,14 @@ fi
 grep -q 'src is a symlink' "$deps_tmp/link_err"
 rm -rf "$deps_tmp" "$missing"
 
+gha="$ROOT/../.github"
+! grep -q 'github.run_id' "$gha/actions/artifact-upload/action.yml"
+! grep -q 'github.run_id' "$gha/actions/artifact-download/action.yml"
+grep -q '\${OBJECT_STEM}/\${WEBRTC_REF}.tar' \
+  "$gha/actions/artifact-upload/action.yml"
+grep -q '\${OBJECT_STEM}/\${WEBRTC_REF}.tar' \
+  "$gha/actions/artifact-download/action.yml"
+grep -q 'if_missing: skip' "$gha/workflows/_make.yml"
+grep -q 'SHALLOW: "1"' "$gha/workflows/_make.yml"
+
 echo "ok"
