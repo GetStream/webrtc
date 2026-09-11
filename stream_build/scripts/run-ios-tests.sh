@@ -38,55 +38,98 @@ done
 
 [[ -n "$BUILD_DIR" && -n "$TARGETS" ]] || die "run-ios-tests.sh requires --build-dir and --targets"
 
+# Match the SDK the .app was compiled with. Newest-device auto-select
+# picks iOS 27.0 on Xcode 26.6 (SDK 26.5), then Chromium creates a
+# simulator on that runtime and xcodebuild cannot launch the runner.
+compiled_ios_sdk() {
+  local target plist ver
+  # shellcheck disable=SC2086
+  for target in $TARGETS; do
+    plist="${BUILD_DIR}/${target}.app/Info.plist"
+    [[ -f "$plist" ]] || continue
+    ver="$(plutil -extract DTPlatformVersion raw "$plist" 2>/dev/null || true)"
+    if [[ -n "$ver" ]]; then
+      printf '%s\n' "$ver"
+      return 0
+    fi
+  done
+  xcrun --sdk iphonesimulator --show-sdk-version
+}
+
+# Chromium's wrapper bakes --xcode-path ../../src/Xcode.app (CIPD).
+# argparse last-wins; point at the selected Xcode so local runs do not
+# look for a hermetic tree. install_xcode() no-ops without LUCI_CONTEXT.
+selected_xcode_app() {
+  (cd "$(xcode-select -p)/../.." && pwd)
+}
+
 pick_simulator() {
   python3 - "$SIMULATOR_PLATFORM" "$SIMULATOR_VERSION" <<'PY'
 import json, subprocess, sys
 
 want_name, want_version = sys.argv[1], sys.argv[2]
 payload = json.loads(
-    subprocess.check_output(
-        ["xcrun", "simctl", "list", "devices", "available", "--json"],
-        text=True,
-    )
+    subprocess.check_output(["xcrun", "simctl", "list", "--json"], text=True)
 )
-candidates = []
-for runtime, devices in payload.get("devices", {}).items():
-    if "iOS" not in runtime:
+
+
+def matches(runtime_version):
+    rv, want = runtime_version.strip(), want_version.strip()
+    return rv == want or rv.startswith(want + ".") or want.startswith(rv + ".")
+
+
+def is_iphone(devicetype):
+    if devicetype.get("productFamily") == "iPhone":
+        return True
+    return (devicetype.get("name") or "").startswith("iPhone")
+
+
+for runtime in payload.get("runtimes") or []:
+    ident = runtime.get("identifier") or ""
+    name = runtime.get("name") or ""
+    if "iOS" not in ident and "iOS" not in name:
         continue
-    version = runtime.split("iOS-")[-1].replace("-", ".")
-    for device in devices:
-        if device.get("isAvailable") is False:
+    if runtime.get("isAvailable") is False:
+        continue
+    version = (runtime.get("version") or "").strip()
+    if want_version and not matches(version):
+        continue
+    types = [
+        dt.get("name") or ""
+        for dt in (runtime.get("supportedDeviceTypes") or [])
+        if is_iphone(dt)
+    ]
+    types = [t for t in types if t]
+    if want_name:
+        if want_name not in types:
             continue
-        name = device.get("name") or ""
-        if want_name and name != want_name:
-            continue
-        if want_version and version != want_version:
-            continue
-        candidates.append(
-            (
-                1 if device.get("state") == "Booted" else 0,
-                1 if name.startswith("iPhone") else 0,
-                tuple(int(p) for p in version.split(".") if p.isdigit()),
-                name,
-                version,
-            )
-        )
-if not candidates:
-    sys.exit("no available iOS simulator matched the request")
-best = max(candidates)
-print(f"{best[3]}\t{best[4]}")
+        print(f"{want_name}\t{version}")
+        raise SystemExit(0)
+    if types:
+        # ponytail: Apple lists newest iPhones first on Xcode 26.x.
+        # If that order flips, first-iPhone still matches the SDK.
+        print(f"{types[0]}\t{version}")
+        raise SystemExit(0)
+
+sys.exit(
+    f"no available iOS simulator runtime matched SDK {want_version or '?'}"
+)
 PY
 }
 
-if [[ -z "$SIMULATOR_PLATFORM" || -z "$SIMULATOR_VERSION" ]]; then
+if [[ -z "$SIMULATOR_VERSION" ]]; then
+  SIMULATOR_VERSION="$(compiled_ios_sdk)"
+fi
+if [[ -z "$SIMULATOR_PLATFORM" ]]; then
   selected="$(pick_simulator)"
   SIMULATOR_PLATFORM="${selected%%$'\t'*}"
   SIMULATOR_VERSION="${selected#*$'\t'}"
-  echo "auto-selected simulator: ${SIMULATOR_PLATFORM} (iOS ${SIMULATOR_VERSION})"
 fi
+echo "using simulator: ${SIMULATOR_PLATFORM} (iOS ${SIMULATOR_VERSION})"
 
 xcode_build_version="$(xcodebuild -version | awk '/Build version/{print $3; exit}')"
 xcode_build_version="${xcode_build_version:-local}"
+xcode_app="$(selected_xcode_app)"
 out_dir="${BUILD_DIR}/test_output"
 rm -rf "$out_dir"
 mkdir -p "$out_dir"
@@ -99,6 +142,7 @@ run_target() {
     --xctest
     --out-dir "$out_dir"
     --xcode-build-version "$xcode_build_version"
+    --xcode-path "$xcode_app"
     --platform "$SIMULATOR_PLATFORM"
     --version "$SIMULATOR_VERSION"
   )
