@@ -2,11 +2,11 @@
 # Not listed in the Actions dispatch UI (workflow_call only).
 # Callers pass mode: build | test | package | release.
 #
-# I/O: Linux Deps restores Hetzner deps-git (skip if missing), shallow
+# I/O: Linux Deps restores Hetzner deps-key (skip if missing), shallow
 # gclient sync (RUN_HOOKS=0), overwrites the same object. Key:
-# artifacts/<github.repository>/deps-git/<webrtc_ref>.tar
-# (not a GitHub artifact, not run_id). Windows Deps stays deps-windows on
-# GitHub. Build/Test restore that key after Deps (missing = fail). Build
+# artifacts/<github.repository>/deps-key.tar
+# (not a GitHub artifact, not run_id, not webrtc_ref). Windows Deps stays
+# deps-windows on GitHub. Build/Test restore that key after Deps (missing = fail). Build
 # mode is ninja only (no products). Package/Release Build jobs also make
 # package and upload products-* (GitHub). Package combine consumes
 # products-* (no third ninja) and uploads final-*. Release attaches final-*.
@@ -154,11 +154,10 @@ jobs:
         uses: ./src/.github/actions/setup-webrtc
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
-      - name: Download cached deps-git
+      - name: Download cached deps-key
         uses: ./src/.github/actions/artifact-download
         with:
-          path: deps-git
-          webrtc_ref: ${{ inputs.webrtc_ref }}
+          path: deps-key
           if_missing: skip
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
@@ -175,14 +174,13 @@ jobs:
           JOBS: "8"
           WEBRTC_REPO: https://github.com/GetStream/webrtc.git
         run: make deps
-      # Overwrite the stable deps-git object. Stream-tar (no zip on disk,
+      # Overwrite the stable deps-key object. Stream-tar (no zip on disk,
       # no GitHub artifact quota). RUN_HOOKS=0: no hermetic Xcode CIPD on
       # Linux; Build/Test restore this key then make deps (host GCS + hooks).
-      - name: Upload deps-git
+      - name: Upload deps-key
         uses: ./src/.github/actions/artifact-upload
         with:
-          path: deps-git
-          webrtc_ref: ${{ inputs.webrtc_ref }}
+          path: deps-key
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
@@ -249,7 +247,7 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.apple_target_os }}
-          deps_artifact: deps-git
+          deps_artifact: deps-key
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
@@ -294,7 +292,7 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.apple_target_os }}
-          deps_artifact: deps-git
+          deps_artifact: deps-key
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
@@ -339,7 +337,7 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.android_target_os }}
-          deps_artifact: deps-git
+          deps_artifact: deps-key
           install_android_packages: "true"
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
@@ -399,7 +397,7 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.apple_target_os }}
-          deps_artifact: deps-git
+          deps_artifact: deps-key
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
@@ -425,7 +423,7 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.apple_target_os }}
-          deps_artifact: deps-git
+          deps_artifact: deps-key
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}

@@ -384,10 +384,16 @@ rm -rf "$deps_tmp" "$missing"
 gha="$ROOT/../.github"
 ! grep -q 'github.run_id' "$gha/actions/artifact-upload/action.yml"
 ! grep -q 'github.run_id' "$gha/actions/artifact-download/action.yml"
-grep -q '\${OBJECT_STEM}/\${WEBRTC_REF}.tar' \
+! grep -q 'WEBRTC_REF' "$gha/actions/artifact-upload/action.yml"
+! grep -q 'WEBRTC_REF' "$gha/actions/artifact-download/action.yml"
+! grep -q 'webrtc_ref:' "$gha/actions/artifact-upload/action.yml"
+! grep -q 'webrtc_ref:' "$gha/actions/artifact-download/action.yml"
+grep -q 'object="artifacts/\${{ github.repository }}/\${OBJECT_STEM}.tar"' \
   "$gha/actions/artifact-upload/action.yml"
-grep -q '\${OBJECT_STEM}/\${WEBRTC_REF}.tar' \
+grep -q 'object="artifacts/\${{ github.repository }}/\${OBJECT_STEM}.tar"' \
   "$gha/actions/artifact-download/action.yml"
+grep -q 'path: deps-key' "$gha/workflows/_make.yml"
+grep -q "deps_artifact == 'deps-key'" "$gha/actions/restore-tree/action.yml"
 grep -q 'if_missing: skip' "$gha/workflows/_make.yml"
 grep -q 'SHALLOW: "1"' "$gha/workflows/_make.yml"
 

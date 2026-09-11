@@ -1,5 +1,5 @@
 name: Restore WebRTC tree
-description: Restore deps-git from Hetzner or deps-windows from a GitHub artifact.
+description: Restore deps-key from Hetzner or deps-windows from a GitHub artifact.
 
 inputs:
   webrtc_ref:
@@ -10,7 +10,7 @@ inputs:
     description: gclient TARGET_OS (selected tokens only).
   deps_artifact:
     required: true
-    description: deps-git (Hetzner) or deps-windows (GitHub artifact).
+    description: deps-key (Hetzner) or deps-windows (GitHub artifact).
   install_android_packages:
     required: false
     default: "false"
@@ -18,15 +18,15 @@ inputs:
   hetzner_access_key:
     required: false
     default: ""
-    description: Hetzner access key for deps-git.
+    description: Hetzner access key for deps-key.
   hetzner_secret_access_key:
     required: false
     default: ""
-    description: Hetzner secret access key for deps-git.
+    description: Hetzner secret access key for deps-key.
   hetzner_bucket:
     required: false
     default: ""
-    description: Hetzner bucket for deps-git.
+    description: Hetzner bucket for deps-key.
 
 runs:
   using: composite
@@ -41,17 +41,16 @@ runs:
     # gclient sync so host GCS (rust-toolchain) matches this runner.
     # runhooks does not download GCS. Missing object fails (Deps uploaded).
     - name: Download deps from Hetzner
-      if: ${{ inputs.deps_artifact == 'deps-git' }}
+      if: ${{ inputs.deps_artifact == 'deps-key' }}
       uses: ./src/.github/actions/artifact-download
       with:
         path: ${{ inputs.deps_artifact }}
-        webrtc_ref: ${{ inputs.webrtc_ref }}
         hetzner_access_key: ${{ inputs.hetzner_access_key }}
         hetzner_secret_access_key: ${{ inputs.hetzner_secret_access_key }}
         hetzner_bucket: ${{ inputs.hetzner_bucket }}
 
     - name: gclient sync and hooks
-      if: ${{ inputs.deps_artifact == 'deps-git' }}
+      if: ${{ inputs.deps_artifact == 'deps-key' }}
       working-directory: src/stream_build
       shell: bash
       env:
@@ -67,14 +66,14 @@ runs:
 
     # Windows is still a git-cache-only GitHub artifact.
     - name: Download same-run deps artifact
-      if: ${{ inputs.deps_artifact != 'deps-git' }}
+      if: ${{ inputs.deps_artifact != 'deps-key' }}
       uses: actions/download-artifact@v8
       with:
         name: ${{ inputs.deps_artifact }}
         path: ${{ runner.temp }}/deps-git-cache
 
     - name: Install same-run gclient object cache
-      if: ${{ inputs.deps_artifact != 'deps-git' }}
+      if: ${{ inputs.deps_artifact != 'deps-key' }}
       shell: bash
       run: |
         set -euo pipefail
@@ -90,7 +89,7 @@ runs:
         test ! -L "${GITHUB_WORKSPACE}/src"
 
     - name: gclient sync
-      if: ${{ inputs.deps_artifact != 'deps-git' }}
+      if: ${{ inputs.deps_artifact != 'deps-key' }}
       working-directory: src/stream_build
       shell: bash
       env:

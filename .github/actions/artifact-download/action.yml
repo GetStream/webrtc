@@ -7,10 +7,7 @@ description: Stream a Hetzner deps tarball onto $GITHUB_WORKSPACE and untar.
 
 inputs:
   path:
-    description: Object stem. Downloads artifacts/<repo>/<path>/<webrtc_ref>.tar
-    required: true
-  webrtc_ref:
-    description: Stable deps identity (branch, tag, or SHA).
+    description: Object name. Downloads artifacts/<repo>/<path>.tar
     required: true
   if_missing:
     description: error fails when the object is absent; skip continues.
@@ -51,7 +48,6 @@ runs:
         HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS: ${{ inputs.hetzner_secret_access_key }}
         HETZNER_BUCKET_CI_ARTIFACTS: ${{ inputs.hetzner_bucket }}
         OBJECT_STEM: ${{ inputs.path }}
-        WEBRTC_REF: ${{ inputs.webrtc_ref }}
         IF_MISSING: ${{ inputs.if_missing }}
       run: |
         set -euo pipefail
@@ -61,8 +57,8 @@ runs:
         export AWS_EC2_METADATA_DISABLED=true
         endpoint="--endpoint-url https://hel1.your-objectstorage.com"
         BUCKET="${HETZNER_BUCKET_CI_ARTIFACTS:?}"
-        [[ -n "${WEBRTC_REF}" ]]
-        object="artifacts/${{ github.repository }}/${OBJECT_STEM}/${WEBRTC_REF}.tar"
+        [[ -n "${OBJECT_STEM}" ]]
+        object="artifacts/${{ github.repository }}/${OBJECT_STEM}.tar"
         set +e
         head_out="$(aws ${endpoint} s3api head-object \
           --bucket "${BUCKET}" --key "${object}" 2>&1)"
