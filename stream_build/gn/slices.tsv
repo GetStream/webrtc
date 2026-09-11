@@ -1,0 +1,14 @@
+# name	ninja_target	gn_args (space-separated key=value)
+ios-arm64-device	framework_objc	target_os="ios" target_environment="device" target_cpu="arm64" ios_deployment_target="13.0"
+ios-arm64-simulator	framework_objc	target_os="ios" target_environment="simulator" target_cpu="arm64" ios_deployment_target="13.0"
+ios-x64-simulator	framework_objc	target_os="ios" target_environment="simulator" target_cpu="x64" ios_deployment_target="13.0"
+catalyst-arm64	framework_objc	target_os="ios" target_environment="catalyst" target_cpu="arm64" ios_deployment_target="14.0" use_lld=false
+catalyst-x64	framework_objc	target_os="ios" target_environment="catalyst" target_cpu="x64" ios_deployment_target="14.0" use_lld=false
+macos-arm64	mac_framework_objc	target_os="mac" target_cpu="arm64"
+macos-x64	mac_framework_objc	target_os="mac" target_cpu="x64"
+android-armeabi-v7a	sdk/android:libwebrtc sdk/android:libjingle_peerconnection_so	target_os="android" target_cpu="arm" arm_version=7
+android-arm64-v8a	sdk/android:libwebrtc sdk/android:libjingle_peerconnection_so	target_os="android" target_cpu="arm64"
+android-x86	sdk/android:libwebrtc sdk/android:libjingle_peerconnection_so	target_os="android" target_cpu="x86"
+android-x86_64	sdk/android:libwebrtc sdk/android:libjingle_peerconnection_so	target_os="android" target_cpu="x64"
+windows-x64	webrtc	target_os="win" target_cpu="x64"
+windows-arm64	webrtc	target_os="win" target_cpu="arm64"

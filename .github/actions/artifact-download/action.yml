@@ -1,0 +1,106 @@
+# Hetzner-only. Callers pass org secrets via with:
+#   hetzner_access_key
+#   hetzner_secret_access_key
+#   hetzner_bucket
+name: Download WebRTC deps from Hetzner
+description: Stream a Hetzner deps tarball onto $GITHUB_WORKSPACE and untar.
+
+inputs:
+  path:
+    description: Object name. Downloads artifacts/<repo>/<path>.tar
+    required: true
+  if_missing:
+    description: error fails when the object is absent; skip continues.
+    required: false
+    default: error
+  hetzner_access_key:
+    description: Hetzner object storage access key.
+    required: true
+  hetzner_secret_access_key:
+    description: Hetzner object storage secret access key.
+    required: true
+  hetzner_bucket:
+    description: Hetzner object storage bucket name.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Ensure aws CLI
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v aws >/dev/null; then
+          exit 0
+        fi
+        if [[ "$(uname -s)" == Darwin ]]; then
+          brew install awscli
+        else
+          sudo apt-get update
+          sudo apt-get install -y awscli
+        fi
+
+    - name: Download and extract deps tarball
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        HETZNER_ACCESS_KEY_CI_ARTIFACTS: ${{ inputs.hetzner_access_key }}
+        HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS: ${{ inputs.hetzner_secret_access_key }}
+        HETZNER_BUCKET_CI_ARTIFACTS: ${{ inputs.hetzner_bucket }}
+        OBJECT_STEM: ${{ inputs.path }}
+        IF_MISSING: ${{ inputs.if_missing }}
+      run: |
+        set -euo pipefail
+        export AWS_ACCESS_KEY_ID="${HETZNER_ACCESS_KEY_CI_ARTIFACTS:?}"
+        export AWS_SECRET_ACCESS_KEY="${HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS:?}"
+        export AWS_DEFAULT_REGION=hel1
+        export AWS_EC2_METADATA_DISABLED=true
+        endpoint="--endpoint-url https://hel1.your-objectstorage.com"
+        BUCKET="${HETZNER_BUCKET_CI_ARTIFACTS:?}"
+        [[ -n "${OBJECT_STEM}" ]]
+        object="artifacts/${{ github.repository }}/${OBJECT_STEM}.tar"
+        set +e
+        head_out="$(aws ${endpoint} s3api head-object \
+          --bucket "${BUCKET}" --key "${object}" 2>&1)"
+        head_rc=$?
+        set -e
+        if [[ "${head_rc}" -ne 0 ]]; then
+          if [[ "${IF_MISSING}" == "skip" ]] && \
+            grep -qiE '404|Not Found|NoSuchKey|NotFound' <<<"${head_out}"; then
+            echo "missing ${object}; skipping extract"
+            exit 0
+          fi
+          echo "::error::failed to access s3://${BUCKET}/${object}"
+          printf '%s\n' "${head_out}"
+          exit 1
+        fi
+        echo "extracting ${object} -> ${GITHUB_WORKSPACE}"
+        # aws s3 cp talks to Hetzner's S3-compatible API, not AWS.
+        aws ${endpoint} s3 cp "s3://${BUCKET}/${object}" - | tar xf -
+        test -f .gclient
+        test -d .gclient-git-cache
+        test -d src/third_party
+        test -f src/DEPS
+        test ! -L src
+        for p in \
+          .gclient \
+          .gclient_entries \
+          .gclient_previous_sync_commits \
+          .gcs_entries \
+          .cipd \
+          .gclient-git-cache \
+          src/.landmines \
+          src/third_party \
+          src/build \
+          src/buildtools \
+          src/testing \
+          src/tools \
+          src/ios \
+          src/resources
+        do
+          if [[ -d "${p}" ]]; then
+            find "${p}" -type f -exec touch {} +
+          elif [[ -f "${p}" ]]; then
+            touch "${p}"
+          fi
+        done

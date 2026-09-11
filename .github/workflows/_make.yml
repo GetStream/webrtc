@@ -1,0 +1,791 @@
+# Called by Build / Test / Package / Release dispatch workflows.
+# Not listed in the Actions dispatch UI (workflow_call only).
+# Callers pass mode: build | test | package | release.
+#
+# I/O: Linux Deps restores Hetzner deps-key (skip if missing), shallow
+# gclient sync (RUN_HOOKS=0), fetches chromium-webrtc-resources into
+# src/resources, overwrites the same object. Key:
+# artifacts/<github.repository>/deps-key.tar
+# (not a GitHub artifact, not run_id, not webrtc_ref). Windows Deps stays
+# deps-windows on GitHub. Build/Test restore that key after Deps (missing = fail). Build
+# mode is ninja only (no products). Package/Release Build jobs also make
+# package and upload products-* (GitHub). Package combine consumes
+# products-* (no third ninja) and uploads final-*. Release attaches final-*.
+# Tests need Deps only (make test, no make build).
+
+name: WebRTC make
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: build, test, package, or release
+        required: true
+        type: string
+      webrtc_ref:
+        required: true
+        type: string
+      ios:
+        required: true
+        type: boolean
+      macos:
+        required: true
+        type: boolean
+      android:
+        required: true
+        type: boolean
+      windows:
+        required: true
+        type: boolean
+      config:
+        required: true
+        type: string
+      android_arch:
+        required: false
+        type: string
+        default: ""
+      version:
+        required: false
+        type: string
+        default: ""
+      prerelease:
+        required: false
+        type: boolean
+        default: false
+      release_notes:
+        required: false
+        type: string
+        default: ""
+
+env:
+  DEPS_ROOT: ${{ github.workspace }}
+  WEBRTC_SRC: ${{ github.workspace }}/src
+  GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
+  HETZNER_ACCESS_KEY_CI_ARTIFACTS: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+  HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+  HETZNER_BUCKET_CI_ARTIFACTS: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+
+jobs:
+  validate_inputs:
+    name: Validate inputs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure at least one platform is selected
+        env:
+          BUILD_IOS: ${{ inputs.ios }}
+          BUILD_MACOS: ${{ inputs.macos }}
+          BUILD_ANDROID: ${{ inputs.android }}
+          BUILD_WINDOWS: ${{ inputs.windows }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          case "${MODE}" in
+            build|test|package|release) ;;
+            *)
+              echo "mode must be build, test, package, or release (got '${MODE}')."
+              exit 1
+              ;;
+          esac
+          if [[ "${BUILD_IOS}" != "true" && "${BUILD_MACOS}" != "true" &&
+                "${BUILD_ANDROID}" != "true" && "${BUILD_WINDOWS}" != "true" ]]; then
+            echo "Select at least one platform."
+            exit 1
+          fi
+          if [[ "${MODE}" == "test" && "${BUILD_ANDROID}" == "true" ]]; then
+            echo "make test android is not wired. Disable Android on Test."
+            exit 1
+          fi
+          if [[ "${MODE}" == "release" && -z "${{ inputs.version }}" ]]; then
+            echo "Release requires a version."
+            exit 1
+          fi
+
+      - name: Validate Android build options
+        if: ${{ inputs.android }}
+        env:
+          ANDROID_ARCH: ${{ inputs.android_arch }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${ANDROID_ARCH}" && "${ANDROID_ARCH}" =~ [[:space:]] ]]; then
+            echo "::error::android_arch accepts a single ABI, for example arm64-v8a."
+            exit 1
+          fi
+
+  plan:
+    name: Plan
+    needs: validate_inputs
+    runs-on: ubuntu-latest
+    outputs:
+      config: ${{ inputs.config }}
+      mode: ${{ inputs.mode }}
+      run_ios: ${{ steps.plan.outputs.run_ios }}
+      run_macos: ${{ steps.plan.outputs.run_macos }}
+      run_android: ${{ steps.plan.outputs.run_android }}
+      run_windows: ${{ steps.plan.outputs.run_windows }}
+      run_apple: ${{ steps.plan.outputs.run_apple }}
+      apple_target_os: ${{ steps.plan.outputs.apple_target_os }}
+      android_target_os: ${{ steps.plan.outputs.android_target_os }}
+      windows_target_os: ${{ steps.plan.outputs.windows_target_os }}
+      linux_target_os: ${{ steps.plan.outputs.linux_target_os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: src
+      - id: plan
+        name: Plan target_os
+        uses: ./src/.github/actions/prepare-common
+        with:
+          platform_ios: ${{ inputs.ios }}
+          platform_macos: ${{ inputs.macos }}
+          platform_android: ${{ inputs.android }}
+          platform_windows: ${{ inputs.windows }}
+
+  deps:
+    name: Deps
+    needs: plan
+    if: ${{ inputs.ios || inputs.macos || inputs.android }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+      - name: Setup WebRTC checkout
+        uses: ./src/.github/actions/setup-webrtc
+        with:
+          webrtc_ref: ${{ inputs.webrtc_ref }}
+      - name: Download cached deps-key
+        uses: ./src/.github/actions/artifact-download
+        with:
+          path: deps-key
+          if_missing: skip
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+      - name: gclient sync
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          WEBRTC_SRC: ${{ github.workspace }}/src
+          GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
+          TARGET_OS: ${{ needs.plan.outputs.linux_target_os }}
+          RUN_HOOKS: "0"
+          SHALLOW: "1"
+          JOBS: "8"
+          WEBRTC_REPO: https://github.com/GetStream/webrtc.git
+        run: make deps
+      # Same command as src/DEPS chromium-webrtc-resources. Do not set
+      # RUN_HOOKS=1 here: that runs mac_toolchain.py CIPD when mac is in
+      # TARGET_OS. Build restore still RUN_HOOKS=1 (rust-toolchain).
+      - name: Fetch chromium-webrtc-resources
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          download_from_google_storage --directory --recursive \
+            --num_threads=10 --no_auth --quiet \
+            --bucket chromium-webrtc-resources src/resources
+      # Overwrite the stable deps-key object. Stream-tar (no zip on disk,
+      # no GitHub artifact quota). RUN_HOOKS=0: no hermetic Xcode CIPD on
+      # Linux; Build/Test restore this key then make deps (host GCS + hooks).
+      - name: Upload deps-key
+        uses: ./src/.github/actions/artifact-upload
+        with:
+          path: deps-key
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+
+  deps_windows:
+    name: Deps Windows
+    needs: plan
+    if: ${{ inputs.windows }}
+    runs-on: windows-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+      - name: Check Windows WebRTC host
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          command -v make >/dev/null || missing+=("GNU make")
+          command -v python3 >/dev/null || missing+=("python3")
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "::error::Windows WebRTC host is not ready on windows-latest (missing: ${missing[*]}). This job is wired for make deps windows, but the runner image cannot run it yet."
+            exit 1
+          fi
+      - name: Setup WebRTC checkout
+        uses: ./src/.github/actions/setup-webrtc
+        with:
+          webrtc_ref: ${{ inputs.webrtc_ref }}
+      - name: gclient sync (Windows)
+        working-directory: src/stream_build
+        shell: bash
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          WEBRTC_SRC: ${{ github.workspace }}/src
+          GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
+          TARGET_OS: ${{ needs.plan.outputs.windows_target_os }}
+          JOBS: "8"
+          WEBRTC_REPO: https://github.com/GetStream/webrtc.git
+        run: make deps
+      - name: Upload deps-windows
+        uses: actions/upload-artifact@v7
+        with:
+          name: deps-windows
+          path: .gclient-git-cache
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  build_ios:
+    name: Build iOS
+    needs: [plan, deps]
+    if: ${{ (inputs.mode == 'build' || inputs.mode == 'package' || inputs.mode == 'release') && inputs.ios }}
+    runs-on: macos-26
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+      - uses: ./src/.github/actions/restore-tree
+        with:
+          webrtc_ref: ${{ inputs.webrtc_ref }}
+          target_os: ${{ needs.plan.outputs.apple_target_os }}
+          deps_artifact: deps-key
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+      - name: Build iOS
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          PRODUCTS: ${{ github.workspace }}/products
+          CONFIG: ${{ inputs.config }}
+          SKIP_DEPS: "1"
+        run: make build ios
+      - name: Package iOS
+        if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          PRODUCTS: ${{ github.workspace }}/products
+          CONFIG: ${{ inputs.config }}
+          SKIP_DEPS: "1"
+        run: make package ios
+      - name: Upload products-ios
+        if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: products-ios
+          path: products/ios
+          if-no-files-found: error
+          retention-days: 7
+
+  build_macos:
+    name: Build macOS
+    needs: [plan, deps]
+    if: ${{ (inputs.mode == 'build' || inputs.mode == 'package' || inputs.mode == 'release') && inputs.macos }}
+    runs-on: macos-26
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+      - uses: ./src/.github/actions/restore-tree
+        with:
+          webrtc_ref: ${{ inputs.webrtc_ref }}
+          target_os: ${{ needs.plan.outputs.apple_target_os }}
+          deps_artifact: deps-key
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+      - name: Build macOS
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          PRODUCTS: ${{ github.workspace }}/products
+          CONFIG: ${{ inputs.config }}
+          SKIP_DEPS: "1"
+        run: make build macos
+      - name: Package macOS
+        if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          PRODUCTS: ${{ github.workspace }}/products
+          CONFIG: ${{ inputs.config }}
+          SKIP_DEPS: "1"
+        run: make package macos
+      - name: Upload products-macos
+        if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: products-macos
+          path: products/macos
+          if-no-files-found: error
+          retention-days: 7
+
+  build_android:
+    name: Build Android
+    needs: [plan, deps]
+    if: ${{ (inputs.mode == 'build' || inputs.mode == 'package' || inputs.mode == 'release') && inputs.android }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+      - uses: ./src/.github/actions/restore-tree
+        with:
+          webrtc_ref: ${{ inputs.webrtc_ref }}
+          target_os: ${{ needs.plan.outputs.android_target_os }}
+          deps_artifact: deps-key
+          install_android_packages: "true"
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+      - name: Build Android
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          PRODUCTS: ${{ github.workspace }}/products
+          CONFIG: ${{ inputs.config }}
+          SKIP_DEPS: "1"
+          ANDROID_ARCH: ${{ inputs.android_arch }}
+        run: |
+          set -euo pipefail
+          extra=()
+          if [[ -n "${ANDROID_ARCH}" ]]; then
+            extra+=(ARCHS="${ANDROID_ARCH}")
+          fi
+          make build android "${extra[@]}"
+      - name: Package Android
+        if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          PRODUCTS: ${{ github.workspace }}/products
+          CONFIG: ${{ inputs.config }}
+          SKIP_DEPS: "1"
+          ANDROID_ARCH: ${{ inputs.android_arch }}
+        run: |
+          set -euo pipefail
+          extra=()
+          if [[ -n "${ANDROID_ARCH}" ]]; then
+            extra+=(ARCHS="${ANDROID_ARCH}")
+          fi
+          make package android "${extra[@]}"
+      - name: Upload products-android
+        if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: products-android
+          path: products
+          if-no-files-found: error
+          retention-days: 7
+
+  test_ios:
+    name: Test iOS
+    needs: [plan, deps]
+    if: ${{ (inputs.mode == 'test' || inputs.mode == 'release') && inputs.ios }}
+    runs-on: macos-26
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+      - uses: ./src/.github/actions/restore-tree
+        with:
+          webrtc_ref: ${{ inputs.webrtc_ref }}
+          target_os: ${{ needs.plan.outputs.apple_target_os }}
+          deps_artifact: deps-key
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+      - name: Test iOS
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          SKIP_DEPS: "1"
+        run: make test ios
+
+  test_macos:
+    name: Test macOS
+    needs: [plan, deps]
+    if: ${{ (inputs.mode == 'test' || inputs.mode == 'release') && inputs.macos }}
+    runs-on: macos-26
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+      - uses: ./src/.github/actions/restore-tree
+        with:
+          webrtc_ref: ${{ inputs.webrtc_ref }}
+          target_os: ${{ needs.plan.outputs.apple_target_os }}
+          deps_artifact: deps-key
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+      - name: Test macOS
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          SKIP_DEPS: "1"
+        run: make test macos
+
+  test_windows:
+    name: Test Windows
+    needs: [plan, deps_windows]
+    if: ${{ (inputs.mode == 'test' || inputs.mode == 'release') && inputs.windows }}
+    runs-on: windows-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+      - name: Check Windows WebRTC host
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          command -v make >/dev/null || missing+=("GNU make")
+          command -v python3 >/dev/null || missing+=("python3")
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "::error::Windows WebRTC host is not ready on windows-latest (missing: ${missing[*]}). This job is wired for make test windows, but the runner image cannot run it yet."
+            exit 1
+          fi
+      - uses: ./src/.github/actions/restore-tree
+        with:
+          webrtc_ref: ${{ inputs.webrtc_ref }}
+          target_os: ${{ needs.plan.outputs.windows_target_os }}
+          deps_artifact: deps-windows
+      - name: Test Windows
+        working-directory: src/stream_build
+        shell: bash
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          SKIP_DEPS: "1"
+        run: make test windows
+
+  tests_passed:
+    name: Tests passed
+    needs: [plan, test_ios, test_macos, test_windows]
+    if: ${{ always() && !cancelled() && inputs.mode == 'release' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require tests before publish
+        env:
+          WANT_IOS: ${{ inputs.ios }}
+          WANT_MACOS: ${{ inputs.macos }}
+          WANT_WINDOWS: ${{ inputs.windows }}
+          IOS_RESULT: ${{ needs.test_ios.result }}
+          MACOS_RESULT: ${{ needs.test_macos.result }}
+          WINDOWS_RESULT: ${{ needs.test_windows.result }}
+        run: |
+          set -euo pipefail
+          failed=0
+          if [[ "${WANT_IOS}" == "true" && "${IOS_RESULT}" != "success" ]]; then
+            echo "::error::Release is blocked: iOS tests ${IOS_RESULT}."
+            failed=1
+          fi
+          if [[ "${WANT_MACOS}" == "true" && "${MACOS_RESULT}" != "success" ]]; then
+            echo "::error::Release is blocked: macOS tests ${MACOS_RESULT}."
+            failed=1
+          fi
+          if [[ "${WANT_WINDOWS}" == "true" && "${WINDOWS_RESULT}" != "success" ]]; then
+            echo "::error::Release is blocked: Windows tests ${WINDOWS_RESULT}."
+            failed=1
+          fi
+          if [[ "${failed}" -ne 0 ]]; then
+            echo "If tests fail, do not publish."
+            exit 1
+          fi
+          echo "Selected-platform tests passed (Android tests are unwired and skipped)."
+
+  build_windows:
+    name: Build Windows
+    needs: [plan, deps_windows]
+    if: ${{ (inputs.mode == 'build' || inputs.mode == 'package' || inputs.mode == 'release') && inputs.windows }}
+    runs-on: windows-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+      - name: Check Windows WebRTC host
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          command -v make >/dev/null || missing+=("GNU make")
+          command -v python3 >/dev/null || missing+=("python3")
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "::error::Windows WebRTC host is not ready on windows-latest (missing: ${missing[*]}). This job is wired for make build windows, but the runner image cannot run it yet."
+            exit 1
+          fi
+      - uses: ./src/.github/actions/restore-tree
+        with:
+          webrtc_ref: ${{ inputs.webrtc_ref }}
+          target_os: ${{ needs.plan.outputs.windows_target_os }}
+          deps_artifact: deps-windows
+      - name: Build Windows
+        working-directory: src/stream_build
+        shell: bash
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          PRODUCTS: ${{ github.workspace }}/products
+          CONFIG: ${{ inputs.config }}
+          SKIP_DEPS: "1"
+        run: make build windows
+      - name: Package Windows
+        if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
+        working-directory: src/stream_build
+        shell: bash
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          PRODUCTS: ${{ github.workspace }}/products
+          CONFIG: ${{ inputs.config }}
+          SKIP_DEPS: "1"
+        run: make package windows
+      - name: Upload products-windows
+        if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: products-windows
+          path: products/windows
+          if-no-files-found: error
+          retention-days: 7
+
+  package:
+    name: Package
+    needs: [plan, build_ios, build_macos, build_android, build_windows]
+    if: ${{ always() && !cancelled() && (inputs.mode == 'package' || inputs.mode == 'release') && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && (needs.build_ios.result == 'success' || needs.build_macos.result == 'success' || needs.build_android.result == 'success' || needs.build_windows.result == 'success') }}
+    runs-on: ${{ (inputs.ios || inputs.macos) && 'macos-26' || 'ubuntu-latest' }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: src
+
+      - name: Chromium webrtc/src layout
+        working-directory: src/stream_build
+        env:
+          CONFIRM: "1"
+        run: make bootstrap
+
+      - name: Download product artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: products-*
+          path: combine-in
+
+      - name: Combine Apple xcframeworks
+        if: ${{ inputs.ios || inputs.macos }}
+        working-directory: src/stream_build
+        env:
+          PRODUCTS: ${{ github.workspace }}/combine-in
+          SKIP_LICENSES: "1"
+        run: make combine
+
+      - name: Attach LICENSE.md and zip Apple artifact
+        if: ${{ inputs.ios || inputs.macos }}
+        run: |
+          set -euo pipefail
+          dest="${GITHUB_WORKSPACE}/combine-in/WebRTC.xcframework"
+          test -d "${dest}"
+          if [[ ! -f "${dest}/LICENSE.md" ]]; then
+            license="$(find "${GITHUB_WORKSPACE}/combine-in" -path '*/WebRTC.xcframework/LICENSE.md' ! -path "${dest}/LICENSE.md" | head -n 1 || true)"
+            if [[ -n "${license}" ]]; then
+              cp "${license}" "${dest}/LICENSE.md"
+            fi
+          fi
+          ditto -c -k --sequesterRsrc --keepParent \
+            "${dest}" \
+            "${GITHUB_WORKSPACE}/WebRTC.xcframework.zip"
+
+      - name: Pass through Android AAR
+        if: ${{ inputs.android }}
+        run: |
+          set -euo pipefail
+          src="$(find "${GITHUB_WORKSPACE}/combine-in" -name libwebrtc.aar -type f | head -n 1)"
+          test -n "${src}"
+          cp "${src}" "${GITHUB_WORKSPACE}/libwebrtc.aar"
+          mkdir -p "${GITHUB_WORKSPACE}/final-android"
+          cp "${src}" "${GITHUB_WORKSPACE}/final-android/libwebrtc.aar"
+          license="$(find "${GITHUB_WORKSPACE}/combine-in" -name LICENSE.md -type f | head -n 1 || true)"
+          if [[ -n "${license}" ]]; then
+            cp "${license}" "${GITHUB_WORKSPACE}/final-android/LICENSE.md"
+          fi
+
+      - name: Pass through Windows products
+        if: ${{ inputs.windows }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${GITHUB_WORKSPACE}/windows-libs"
+          cp -R "${GITHUB_WORKSPACE}/combine-in/products-windows/." "${GITHUB_WORKSPACE}/windows-libs/"
+
+      - name: Rename copies for wrapper SDKs
+        if: ${{ inputs.mode == 'release' }}
+        working-directory: src/stream_build
+        env:
+          PRODUCTS: ${{ github.workspace }}/combine-in
+        run: |
+          set -euo pipefail
+          if [[ "${{ inputs.ios }}" == "true" || "${{ inputs.macos }}" == "true" ]]; then
+            make rename apple XCFRAMEWORK="${PRODUCTS}/WebRTC.xcframework"
+            ditto -c -k --sequesterRsrc --keepParent \
+              "${PRODUCTS}/renamed/StreamWebRTC.xcframework" \
+              "${GITHUB_WORKSPACE}/StreamWebRTC.xcframework.zip"
+          fi
+          if [[ "${{ inputs.android }}" == "true" ]]; then
+            make rename android AAR="${GITHUB_WORKSPACE}/libwebrtc.aar"
+            cp "${PRODUCTS}/renamed/libwebrtc.aar" \
+              "${GITHUB_WORKSPACE}/libwebrtc-renamed.aar"
+          fi
+
+      - name: Upload WebRTC.xcframework.zip
+        if: ${{ inputs.ios || inputs.macos }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-apple
+          path: WebRTC.xcframework.zip
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload libwebrtc.aar
+        if: ${{ inputs.android }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-android
+          path: final-android
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload Windows libs
+        if: ${{ inputs.windows }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-windows
+          path: windows-libs
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload StreamWebRTC.xcframework.zip
+        if: ${{ inputs.mode == 'release' && (inputs.ios || inputs.macos) }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-apple-renamed
+          path: StreamWebRTC.xcframework.zip
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload renamed Android AAR
+        if: ${{ inputs.mode == 'release' && inputs.android }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-android-renamed
+          path: libwebrtc-renamed.aar
+          if-no-files-found: error
+          retention-days: 7
+
+  github_release:
+    name: Release
+    needs: [plan, tests_passed, package]
+    if: ${{ always() && !cancelled() && inputs.mode == 'release' && needs.tests_passed.result == 'success' && needs.package.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+
+      - name: Download finalised artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: final-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_REF: ${{ inputs.webrtc_ref }}
+          IS_PRERELEASE: ${{ inputs.prerelease }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          assets=(release-assets/*)
+          if [[ ${#assets[@]} -eq 0 ]]; then
+            echo "::error::No finalised artifacts to attach."
+            exit 1
+          fi
+          notes_file="$(mktemp)"
+          if [[ -n "${RELEASE_NOTES}" ]]; then
+            printf '%s\n' "${RELEASE_NOTES}" > "${notes_file}"
+          else
+            printf 'Automated WebRTC SDK release %s.\n' "${RELEASE_VERSION}" > "${notes_file}"
+          fi
+          release_args=(
+            "${RELEASE_VERSION}"
+            "${assets[@]}"
+            --repo "${{ github.repository }}"
+            --target "${RELEASE_REF}"
+            --title "${RELEASE_VERSION}"
+            --notes-file "${notes_file}"
+          )
+          if [[ "${IS_PRERELEASE}" == "true" ]]; then
+            release_args+=(--prerelease)
+          else
+            release_args+=(--latest)
+          fi
+          gh release create "${release_args[@]}"
+
+  trigger_downstream_releases:
+    name: Trigger downstream WebRTC releases
+    needs: [plan, github_release]
+    if: ${{ always() && !cancelled() && inputs.mode == 'release' && needs.github_release.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger stream-video-swift-webrtc release
+        if: ${{ inputs.ios || inputs.macos }}
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          IS_PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          webrtc_release_url="https://github.com/${{ github.repository }}/releases/tag/${RELEASE_VERSION}"
+          gh workflow run publish-from-webrtc.yml \
+            --repo GetStream/stream-video-swift-webrtc \
+            --field "webrtc_release_url=${webrtc_release_url}" \
+            --field "pre_release=${IS_PRERELEASE}"
+
+      - name: Trigger stream-video-android-webrtc release
+        if: ${{ inputs.android }}
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          IS_PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          webrtc_release_url="https://github.com/${{ github.repository }}/releases/tag/${RELEASE_VERSION}"
+          gh workflow run publish-from-webrtc.yml \
+            --repo GetStream/stream-video-android-webrtc \
+            --field "webrtc_release_url=${webrtc_release_url}" \
+            --field "pre_release=${IS_PRERELEASE}"

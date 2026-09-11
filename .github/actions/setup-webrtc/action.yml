@@ -1,0 +1,77 @@
+name: Setup WebRTC checkout
+description: Install depot_tools against GITHUB_WORKSPACE/src (this checkout). No second clone.
+
+inputs:
+  webrtc_ref:
+    required: true
+    description: Branch, tag, or SHA already checked out at path src.
+  install_android_packages:
+    required: false
+    default: "false"
+    description: Install apt packages needed for Android builds.
+
+runs:
+  using: composite
+  steps:
+    # Caller checks out webrtc_ref with path: src. GITHUB_WORKSPACE is the
+    # webrtc-named gclient parent.
+    # gclient realpath()s gclient_gn_args_file (src/build/config/gclient_args.gni)
+    # and rejects a src that resolves outside DEPS_ROOT (depot_tools a6ba01c).
+    - name: Install Android host packages
+      if: ${{ inputs.install_android_packages == 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get update
+        sudo apt-get install -y python3-pip openjdk-8-jdk lsb-release software-properties-common
+
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: "3.x"
+
+    - name: Git authentication for HTTPS fetches
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        git config --global credential.helper store
+        git credential approve <<EOF
+        protocol=https
+        host=github.com
+        username=x-access-token
+        password=${GITHUB_TOKEN}
+        EOF
+        git config --global url."https://github.com/".insteadOf "git@github.com:"
+        git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+
+    - name: Install depot_tools
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ ! -d "${HOME}/depot_tools" ]]; then
+          git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "${HOME}/depot_tools"
+        fi
+        echo "${HOME}/depot_tools" >> "${GITHUB_PATH}"
+        echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
+        echo "DEPS_ROOT=${GITHUB_WORKSPACE}" >> "${GITHUB_ENV}"
+        echo "WEBRTC_SRC=${GITHUB_WORKSPACE}/src" >> "${GITHUB_ENV}"
+        echo "WEBRTC_REPO=https://github.com/GetStream/webrtc.git" >> "${GITHUB_ENV}"
+
+    - name: Ensure git-cache directory
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "${GITHUB_WORKSPACE}/.gclient-git-cache"
+        echo "GIT_CACHE_PATH=${GITHUB_WORKSPACE}/.gclient-git-cache" >> "${GITHUB_ENV}"
+        test -f "${GITHUB_WORKSPACE}/src/DEPS"
+        test -f "${GITHUB_WORKSPACE}/src/stream_build/Makefile"
+        test ! -L "${GITHUB_WORKSPACE}/src"
+
+    - name: Chromium webrtc/src layout
+      working-directory: src/stream_build
+      shell: bash
+      env:
+        CONFIRM: "1"
+      run: make bootstrap

@@ -1,0 +1,74 @@
+# GitHub release of packaged WebRTC artifacts, then downstream wrapper publishes.
+# Not dispatchable until this file exists on the default branch.
+# Tests run parallel with Build (needs Deps only). Publish waits on Test + Package.
+
+name: Release
+
+run-name: >-
+  Release config:${{ inputs.config }}${{ inputs.prerelease == 'true' && ' Pre-Release' || '' }} ${{ inputs.version }}${{ inputs.ios == 'true' && ' iOS' || '' }}${{ inputs.macos == 'true' && (inputs.ios == 'true' && ', macOS' || ' macOS') || '' }}${{ inputs.android == 'true' && format('{0} Android{1}', (inputs.ios == 'true' || inputs.macos == 'true') && ',' || '', inputs.android_arch != '' && format(' ({0})', inputs.android_arch) || '') || '' }}${{ inputs.windows == 'true' && ((inputs.ios == 'true' || inputs.macos == 'true' || inputs.android == 'true') && ', Windows' || ' Windows') || '' }}
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version/tag to create
+        required: true
+      prerelease:
+        description: Mark the GitHub release as a pre-release
+        type: boolean
+        default: false
+      release_notes:
+        description: Optional release notes markdown. Empty uses a one-line fallback.
+        required: false
+        default: ""
+      webrtc_ref:
+        description: Branch, tag, or SHA for this repo (GetStream/webrtc)
+        required: true
+        default: main
+      ios:
+        description: Include iOS xcframework
+        type: boolean
+        default: true
+      macos:
+        description: Include macOS xcframework
+        type: boolean
+        default: true
+      android:
+        description: Include Android AAR
+        type: boolean
+        default: true
+      windows:
+        description: Include Windows libs (fails clearly if the runner is not a WebRTC host)
+        type: boolean
+        default: false
+      config:
+        description: GN configuration
+        type: choice
+        options:
+          - release
+          - debug
+        default: release
+      android_arch:
+        description: Optional Android ABI, for example arm64-v8a. Empty = default ABI set.
+        required: false
+        default: ""
+
+jobs:
+  release:
+    uses: ./.github/workflows/_make.yml
+    secrets: inherit
+    with:
+      mode: release
+      webrtc_ref: ${{ inputs.webrtc_ref }}
+      ios: ${{ inputs.ios }}
+      macos: ${{ inputs.macos }}
+      android: ${{ inputs.android }}
+      windows: ${{ inputs.windows }}
+      config: ${{ inputs.config }}
+      android_arch: ${{ inputs.android_arch }}
+      version: ${{ inputs.version }}
+      prerelease: ${{ inputs.prerelease }}
+      release_notes: ${{ inputs.release_notes }}
