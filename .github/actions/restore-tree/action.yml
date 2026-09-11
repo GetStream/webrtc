@@ -18,15 +18,15 @@ inputs:
   hetzner_access_key:
     required: false
     default: ""
-    description: Pass ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }} (deps-git).
+    description: Hetzner access key for deps-git.
   hetzner_secret_access_key:
     required: false
     default: ""
-    description: Pass ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }} (deps-git).
+    description: Hetzner secret access key for deps-git.
   hetzner_bucket:
     required: false
     default: ""
-    description: Pass ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }} (deps-git).
+    description: Hetzner bucket for deps-git.
 
 runs:
   using: composite

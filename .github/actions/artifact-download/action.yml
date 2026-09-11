@@ -1,7 +1,7 @@
-# Hetzner-only. Callers pass org secrets:
-#   ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
-#   ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
-#   ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+# Hetzner-only. Callers pass org secrets via with:
+#   hetzner_access_key
+#   hetzner_secret_access_key
+#   hetzner_bucket
 name: Download WebRTC deps from Hetzner
 description: Stream a Hetzner deps tarball onto $GITHUB_WORKSPACE and untar.
 
@@ -10,13 +10,13 @@ inputs:
     description: Object stem. Downloads artifacts/<repo>/<run_id>/<path>.tar
     required: true
   hetzner_access_key:
-    description: Pass ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}.
+    description: Hetzner object storage access key.
     required: true
   hetzner_secret_access_key:
-    description: Pass ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}.
+    description: Hetzner object storage secret access key.
     required: true
   hetzner_bucket:
-    description: Pass ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}.
+    description: Hetzner object storage bucket name.
     required: true
 
 runs:
