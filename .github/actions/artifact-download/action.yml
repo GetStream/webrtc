@@ -101,7 +101,10 @@ runs:
             stat -c %s "$1"
           fi
         }
-        attempts=3
+        # 20.8 GiB Android tar; IncompleteRead after ~1–3 GiB
+        # (run 34870017073). Resume appended. 20 tries covers
+        # the 1.2 GiB worst chunk; remaining bytes are logged.
+        attempts=20
         download_ok=0
         for attempt in $(seq 1 "${attempts}"); do
           if [[ -f "${partial}" ]]; then
@@ -114,11 +117,12 @@ runs:
             rm -f "${partial}"
             have=0
           fi
+          remaining=$((expected_size - have))
           echo "download attempt ${attempt}/${attempts}"
           if [[ "${have}" -lt "${expected_size}" ]]; then
             rm -f "${chunk}"
             if [[ "${have}" -eq 0 ]]; then
-              echo "download from 0"
+              echo "download from 0 remaining=${remaining}"
               set +e
               aws ${endpoint} "${aws_timeouts[@]}" s3api get-object \
                 --bucket "${BUCKET}" --key "${object}" \
@@ -126,7 +130,7 @@ runs:
               dl_rc=$?
               set -e
             else
-              echo "resume from byte ${have} / ${expected_size}"
+              echo "resume from byte ${have} / ${expected_size} remaining=${remaining}"
               set +e
               aws ${endpoint} "${aws_timeouts[@]}" s3api get-object \
                 --bucket "${BUCKET}" --key "${object}" \
@@ -150,12 +154,13 @@ runs:
           else
             have=0
           fi
+          remaining=$((expected_size - have))
           if [[ "${have}" -eq "${expected_size}" ]]; then
             mv "${partial}" "${tar_file}"
             download_ok=1
             break
           fi
-          echo "size mismatch after attempt ${attempt}: local=${have} expected=${expected_size}"
+          echo "size mismatch after attempt ${attempt}: local=${have} expected=${expected_size} remaining=${remaining}"
           if [[ "${attempt}" -lt "${attempts}" ]]; then
             sleep 10
           fi
@@ -167,7 +172,11 @@ runs:
           elif [[ -f "${tar_file}" ]]; then
             actual_size="$(file_size "${tar_file}")"
           fi
-          echo "::error::failed to download s3://${BUCKET}/${object} after ${attempts} attempts (local=${actual_size} expected=${expected_size})"
+          remaining="n/a"
+          if [[ "${actual_size}" =~ ^[0-9]+$ ]]; then
+            remaining=$((expected_size - actual_size))
+          fi
+          echo "::error::failed to download s3://${BUCKET}/${object} after ${attempts} attempts (local=${actual_size} expected=${expected_size} remaining=${remaining})"
           exit 1
         fi
         echo "extracting ${tar_file} -> ${GITHUB_WORKSPACE}"
