@@ -82,41 +82,48 @@ folder. `DEPS_ROOT=$GITHUB_WORKSPACE`. gclient objects live at
 `$DEPS_ROOT/.gclient-git-cache`. Linux Deps restores the Hetzner
 `deps-key.tar` (skip if missing), `gclient sync --no-history
 --shallow` (`RUN_HOOKS=0`), fetches `chromium-webrtc-resources` into
-`src/resources`, and uploads GitHub artifact `deps-key` of the deps
-members (`compression-level: 0`; GitHub zips once). No `deps-key.tar`
+`src/resources`, and uploads GitHub artifact `deps-key` of
+`.gclient-git-cache` and `src/resources` (`compression-level: 0`;
+GitHub zips once). Do not pack gclient working trees
+(`src/third_party`, `src/build`, `src/buildtools`, …) next to the
+cache: zip cannot store git hardlinks, so that dual pack doubles
+objects and transplants Linux checkouts onto Mac. No `deps-key.tar`
 on GitHub. Do not set `RUN_HOOKS=1` on Linux Deps (`mac` in
 `TARGET_OS` would run hermetic Xcode CIPD). Do not upload to Hetzner
 from Deps. Build/Test `needs: deps` only, `download-artifact`
-`deps-key` (unzip is the extract), then `make deps` (host GCS +
-hooks; packed `src/resources` makes the webrtc-resources hook a sha1
-no-op) and `SKIP_DEPS=1` on build/test. `Hetzner backfill` (`needs:
-deps` only) `download-artifact` then `tar cf - | aws s3 cp -` in
-parallel with Build. Windows Deps still uploads `deps-windows` to
-GitHub. Package/Release Build jobs also `make package` and upload
-`products-*` (GitHub). Package combine consumes `products-*` (no
-third ninja) and uploads `final-*`. Release attaches `final-*`. Tests
-need Deps only and run `make test` (no extra framework-slice build).
-`TARGET_OS` is only the tokens selected this run.
+`deps-key`, install the git-cache and `src/resources`, then
+`make deps` (gclient from cache; packed resources make the
+webrtc-resources hook a sha1 no-op; host GCS still fetches Apple
+`rust-toolchain`; `rewrite_git_cache_alternates` retargets cache
+paths) and `SKIP_DEPS=1` on build/test. `Hetzner backfill` (`needs:
+deps` only) `download-artifact` then
+`tar cf - .gclient-git-cache src/resources | aws s3 cp -` in
+parallel with Build.
+Windows Deps still uploads `deps-windows` to GitHub. Package/Release
+Build jobs also `make package` and upload `products-*` (GitHub).
+Package combine consumes `products-*` (no third ninja) and uploads
+`final-*`. Release attaches `final-*`. Tests need Deps only and run
+`make test` (no extra framework-slice build). `TARGET_OS` is only the
+tokens selected this run.
 
 Deps packing / Hetzner:
-Member list: `.gclient*`, `.cipd`, `.gclient-git-cache`, and gclient
-checkouts under `src/` (`third_party`, `build`, `buildtools`,
-`testing`, `tools`, `ios`, `resources`). Not the GetStream/webrtc
-`src` git worktree, `out/`, or `products/`. Same-run handoff is
-`actions/upload-artifact` name `deps-key` of those members
+Member list: `.gclient-git-cache` and `src/resources` only. Not
+gclient checkouts (`third_party`, `build`, `buildtools`, …), not the
+GetStream/webrtc `src` git worktree, `out/`, or `products/`. Same-run
+handoff is `actions/upload-artifact` name `deps-key` of those paths
 (`include-hidden-files: true`, `compression-level: 0`). GitHub zips
 once. No `deps-key.tar` for GH. `artifact-download` is Hetzner-only
 (Deps warm cache, `if_missing: skip`). `artifact-put` is Hetzner-only
-(`tar cf - -C <dir> . | aws s3 cp -`) to
-`<bucket>/artifacts/<github.repository>/deps-key.tar` with
+(`tar cf - -C <dir> .gclient-git-cache src/resources | aws s3 cp -`)
+to `<bucket>/artifacts/<github.repository>/deps-key.tar` with
 `--endpoint-url https://hel1.your-objectstorage.com` and region
 `hel1`. `aws s3 cp` talks to Hetzner's S3-compatible API, not AWS.
 Callers pass org secrets via `with:`
 `${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}`,
 `${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}`, and
-`${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}`. After extract, files are
-`touch`ed so make/ninja do not rebuild from mtime. `products-*` /
-`final-*` stay on `actions/upload-artifact`.
+`${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}`. After extract, packed
+files are `touch`ed so make/ninja do not rebuild from mtime.
+`products-*` / `final-*` stay on `actions/upload-artifact`.
 
 ## Host gates
 

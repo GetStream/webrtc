@@ -3,14 +3,14 @@
 #   hetzner_secret_access_key
 #   hetzner_bucket
 name: Upload WebRTC deps tarball to Hetzner
-description: Stream a tar of unpacked deps members to Hetzner. Does not zip.
+description: Stream a tar of .gclient-git-cache and src/resources to Hetzner. Does not zip.
 
 inputs:
   path:
     description: Object stem. Uploads artifacts/<repo>/<path>.tar
     required: true
   source:
-    description: Directory of unpacked deps members (archive root).
+    description: Directory with .gclient-git-cache and src/resources.
     required: true
   hetzner_access_key:
     description: Hetzner object storage access key.
@@ -57,12 +57,16 @@ runs:
         [[ -n "${OBJECT_STEM}" ]]
         [[ -n "${SOURCE}" ]]
         test -d "${SOURCE}"
-        test -f "${SOURCE}/.gclient"
         test -d "${SOURCE}/.gclient-git-cache"
-        test -d "${SOURCE}/src/third_party"
+        test -n "$(ls -A "${SOURCE}/.gclient-git-cache")"
+        if [[ ! -d "${SOURCE}/src/resources" ]] || \
+          [[ -z "$(ls -A "${SOURCE}/src/resources")" ]]; then
+          echo "::error::deps-key missing src/resources (chromium-webrtc-resources)"
+          exit 1
+        fi
         BUCKET="${HETZNER_BUCKET_CI_ARTIFACTS:?}"
         object="artifacts/${{ github.repository }}/${OBJECT_STEM}.tar"
-        echo "streaming ${SOURCE} -> ${object}"
+        echo "streaming ${SOURCE}/{.gclient-git-cache,src/resources} -> ${object}"
         # aws s3 cp talks to Hetzner's S3-compatible API, not AWS.
-        tar cf - -C "${SOURCE}" . | aws ${endpoint} s3 cp - \
-          "s3://${BUCKET}/${object}"
+        tar cf - -C "${SOURCE}" .gclient-git-cache src/resources | \
+          aws ${endpoint} s3 cp - "s3://${BUCKET}/${object}"

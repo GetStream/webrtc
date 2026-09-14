@@ -77,30 +77,11 @@ runs:
         echo "extracting ${object} -> ${GITHUB_WORKSPACE}"
         # aws s3 cp talks to Hetzner's S3-compatible API, not AWS.
         aws ${endpoint} s3 cp "s3://${BUCKET}/${object}" - | tar xf -
-        test -f .gclient
         test -d .gclient-git-cache
-        test -d src/third_party
+        test -n "$(ls -A .gclient-git-cache)"
         test -f src/DEPS
         test ! -L src
-        for p in \
-          .gclient \
-          .gclient_entries \
-          .gclient_previous_sync_commits \
-          .gcs_entries \
-          .cipd \
-          .gclient-git-cache \
-          src/.landmines \
-          src/third_party \
-          src/build \
-          src/buildtools \
-          src/testing \
-          src/tools \
-          src/ios \
-          src/resources
-        do
-          if [[ -d "${p}" ]]; then
-            find "${p}" -type f -exec touch {} +
-          elif [[ -f "${p}" ]]; then
-            touch "${p}"
-          fi
-        done
+        find .gclient-git-cache -type f -exec touch {} +
+        if [[ -d src/resources ]]; then
+          find src/resources -type f -exec touch {} +
+        fi

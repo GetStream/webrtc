@@ -419,9 +419,15 @@ grep -q 'if_missing: skip' "$gha/workflows/_make.yml"
 grep -q 'SHALLOW: "1"' "$gha/workflows/_make.yml"
 grep -q 'RUN_HOOKS: "0"' "$gha/workflows/_make.yml"
 ! grep -q 'RUN_HOOKS: "1"' "$gha/workflows/_make.yml"
+! grep -A20 'name: Upload deps-key' "$gha/workflows/_make.yml" | grep -q 'src/third_party'
+! grep -A20 'name: Upload deps-key' "$gha/workflows/_make.yml" | grep -q 'src/buildtools'
+grep -A20 'name: Upload deps-key' "$gha/workflows/_make.yml" | grep -q '.gclient-git-cache'
+grep -A20 'name: Upload deps-key' "$gha/workflows/_make.yml" | grep -q 'src/resources'
 grep -q 'chromium-webrtc-resources' "$gha/workflows/_make.yml"
-grep -q 'src/resources' "$gha/workflows/_make.yml"
-grep -q 'src/resources' "$gha/actions/artifact-download/action.yml"
+! grep -q 'src/third_party' "$gha/actions/artifact-download/action.yml"
+! grep -q 'src/third_party' "$gha/actions/restore-tree/action.yml"
+grep -q 'tar cf - -C "${SOURCE}" .gclient-git-cache src/resources' \
+  "$gha/actions/artifact-put/action.yml"
 grep -q 'uses: ./src/.github/actions/artifact-put' "$gha/workflows/_make.yml"
 
 echo "ok"

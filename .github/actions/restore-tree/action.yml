@@ -25,52 +25,45 @@ runs:
         webrtc_ref: ${{ inputs.webrtc_ref }}
         install_android_packages: ${{ inputs.install_android_packages }}
 
-    # Linux Deps uploaded the gclient working tree (including
-    # src/resources) as one GitHub artifact. download-artifact unzips
-    # that zip into $GITHUB_WORKSPACE; that unzip is the extract. Then
-    # shallow gclient sync so host GCS (rust-toolchain) matches this
-    # runner. Keep RUN_HOOKS=1; packed resources make the
-    # webrtc-resources GCS hook a sha1 no-op.
+    # Linux Deps uploaded .gclient-git-cache + src/resources. Unzip to
+    # a temp dir (do not overlay onto src/), install both, then shallow
+    # gclient sync from that cache. Packed resources make the
+    # webrtc-resources hook a sha1 no-op. RUN_HOOKS=1 still fetches
+    # host GCS (rust-toolchain on Apple). rewrite_git_cache_alternates
+    # runs inside make deps. Do not transplant a Linux working tree.
     - name: Download deps-key
       if: ${{ inputs.deps_artifact == 'deps-key' }}
       uses: actions/download-artifact@v8
       with:
         name: ${{ inputs.deps_artifact }}
-        path: ${{ github.workspace }}
+        path: ${{ runner.temp }}/deps-key
 
-    - name: Verify deps-key
+    - name: Install deps-key cache and resources
       if: ${{ inputs.deps_artifact == 'deps-key' }}
-      working-directory: ${{ github.workspace }}
       shell: bash
       run: |
         set -euo pipefail
-        test -f .gclient
-        test -d .gclient-git-cache
-        test -d src/third_party
-        test -f src/DEPS
-        test ! -L src
-        for p in \
-          .gclient \
-          .gclient_entries \
-          .gclient_previous_sync_commits \
-          .gcs_entries \
-          .cipd \
-          .gclient-git-cache \
-          src/.landmines \
-          src/third_party \
-          src/build \
-          src/buildtools \
-          src/testing \
-          src/tools \
-          src/ios \
-          src/resources
-        do
-          if [[ -d "${p}" ]]; then
-            find "${p}" -type f -exec touch {} +
-          elif [[ -f "${p}" ]]; then
-            touch "${p}"
-          fi
-        done
+        src="${RUNNER_TEMP}/deps-key"
+        cache="${src}/.gclient-git-cache"
+        resources="${src}/src/resources"
+        if [[ ! -d "${cache}" ]]; then
+          echo "::error::deps-key missing .gclient-git-cache"
+          exit 1
+        fi
+        if [[ ! -d "${resources}" ]]; then
+          echo "::error::deps-key missing src/resources (chromium-webrtc-resources)"
+          exit 1
+        fi
+        dest_cache="${GITHUB_WORKSPACE}/.gclient-git-cache"
+        dest_res="${GITHUB_WORKSPACE}/src/resources"
+        rm -rf "${dest_cache}" "${dest_res}"
+        mv "${cache}" "${dest_cache}"
+        mkdir -p "${GITHUB_WORKSPACE}/src"
+        mv "${resources}" "${dest_res}"
+        test -n "$(ls -A "${dest_cache}")"
+        test -n "$(ls -A "${dest_res}")"
+        test -f "${GITHUB_WORKSPACE}/src/DEPS"
+        test ! -L "${GITHUB_WORKSPACE}/src"
 
     - name: gclient sync and hooks
       if: ${{ inputs.deps_artifact == 'deps-key' }}

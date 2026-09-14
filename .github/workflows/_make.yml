@@ -4,11 +4,14 @@
 #
 # I/O: Linux Deps restores Hetzner deps-key.tar (skip if missing), shallow
 # gclient sync (RUN_HOOKS=0), fetches chromium-webrtc-resources into
-# src/resources, uploads GitHub artifact deps-key of the deps members
-# (compression-level: 0; GitHub zips once). No deps-key.tar on GitHub.
-# Does not upload to Hetzner. Build/Test download-artifact deps-key
-# (unzip is the extract), make deps (host GCS). Hetzner backfill
-# (needs: deps only) download-artifact then tar cf - | aws s3 cp - to
+# src/resources, uploads GitHub artifact deps-key of .gclient-git-cache
+# and src/resources (compression-level: 0; GitHub zips once). No
+# gclient checkout trees (third_party/build/buildtools/…). No
+# deps-key.tar on GitHub. Does not upload to Hetzner. Build/Test
+# download-artifact deps-key, install git-cache + src/resources, make
+# deps (gclient from cache; host GCS). Hetzner backfill (needs: deps
+# only) download-artifact then
+# tar cf - .gclient-git-cache src/resources | aws s3 cp - to
 # artifacts/<github.repository>/deps-key.tar in parallel with Build.
 # Windows Deps stays deps-windows on GitHub. Build mode is ninja only
 # (no products). Package/Release Build jobs also make package and upload
@@ -188,35 +191,26 @@ jobs:
           download_from_google_storage --directory --recursive \
             --num_threads=10 --no_auth --quiet \
             --bucket chromium-webrtc-resources src/resources
-      # GitHub artifact is the deps members (one zip). No deps-key.tar.
-      # RUN_HOOKS=0: no hermetic Xcode CIPD on Linux; Build/Test restore
-      # this key then make deps (host GCS). Hetzner backfill tars the
-      # same tree in parallel; this job does not.
+      # GitHub artifact is .gclient-git-cache + src/resources (one zip).
+      # Do not pack the gclient working tree: zip cannot store git
+      # hardlinks, so cache+checkout doubles objects (~33GB) and
+      # transplants Linux checkouts onto Mac. RUN_HOOKS=0: no hermetic
+      # Xcode CIPD on Linux; Build/Test restore this key then make deps
+      # (host GCS). Hetzner backfill tars the same members in parallel.
       - name: Check deps-key members
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
-          test -f .gclient
           test -d .gclient-git-cache
-          test -d src/third_party
+          test -n "$(ls -A .gclient-git-cache)"
+          test -d src/resources
+          test -n "$(ls -A src/resources)"
       - name: Upload deps-key
         uses: actions/upload-artifact@v7
         with:
           name: deps-key
           path: |
-            .gclient
-            .gclient_entries
-            .gclient_previous_sync_commits
-            .gcs_entries
-            .cipd
             .gclient-git-cache
-            src/.landmines
-            src/third_party
-            src/build
-            src/buildtools
-            src/testing
-            src/tools
-            src/ios
             src/resources
           include-hidden-files: true
           if-no-files-found: error
