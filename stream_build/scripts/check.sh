@@ -382,24 +382,46 @@ grep -q 'src is a symlink' "$deps_tmp/link_err"
 rm -rf "$deps_tmp" "$missing"
 
 gha="$ROOT/../.github"
-! grep -q 'github.run_id' "$gha/actions/artifact-upload/action.yml"
+[[ ! -e "$gha/actions/artifact-upload/action.yml" ]]
 ! grep -q 'github.run_id' "$gha/actions/artifact-download/action.yml"
-! grep -q 'WEBRTC_REF' "$gha/actions/artifact-upload/action.yml"
+! grep -q 'github.run_id' "$gha/actions/artifact-put/action.yml"
 ! grep -q 'WEBRTC_REF' "$gha/actions/artifact-download/action.yml"
-! grep -q 'webrtc_ref:' "$gha/actions/artifact-upload/action.yml"
+! grep -q 'WEBRTC_REF' "$gha/actions/artifact-put/action.yml"
 ! grep -q 'webrtc_ref:' "$gha/actions/artifact-download/action.yml"
+! grep -q 'webrtc_ref:' "$gha/actions/artifact-put/action.yml"
+! grep -q 'secrets\.' "$gha/actions/artifact-download/action.yml"
+! grep -q 'secrets\.' "$gha/actions/artifact-put/action.yml"
+! grep -q 'secrets\.' "$gha/actions/restore-tree/action.yml"
+grep -q 'tar cf -' "$gha/actions/artifact-put/action.yml"
+grep -q 's3 cp -' "$gha/actions/artifact-put/action.yml"
+! grep -q 's3 cp "${OBJECT_STEM}.tar"' "$gha/actions/artifact-put/action.yml"
 grep -q 'object="artifacts/\${{ github.repository }}/\${OBJECT_STEM}.tar"' \
-  "$gha/actions/artifact-upload/action.yml"
+  "$gha/actions/artifact-put/action.yml"
 grep -q 'object="artifacts/\${{ github.repository }}/\${OBJECT_STEM}.tar"' \
   "$gha/actions/artifact-download/action.yml"
 grep -q 'path: deps-key' "$gha/workflows/_make.yml"
+! grep -q 'path: deps-key.tar' "$gha/workflows/_make.yml"
+grep -q 'name: deps-key' "$gha/workflows/_make.yml"
+grep -q 'include-hidden-files: true' "$gha/workflows/_make.yml"
+grep -q 'compression-level: 0' "$gha/workflows/_make.yml"
+grep -q 'name: Hetzner backfill' "$gha/workflows/_make.yml"
+grep -A5 'name: Hetzner backfill' "$gha/workflows/_make.yml" | grep -q 'needs: \[deps\]'
+grep -A5 'name: Build iOS' "$gha/workflows/_make.yml" | grep -q 'needs: \[plan, deps\]'
+! grep -A8 'name: Build iOS' "$gha/workflows/_make.yml" | grep -q hetzner_backfill
+grep -A5 'name: Test iOS' "$gha/workflows/_make.yml" | grep -q 'needs: \[plan, deps\]'
+! grep -A8 'name: Test iOS' "$gha/workflows/_make.yml" | grep -q hetzner_backfill
 grep -q "deps_artifact == 'deps-key'" "$gha/actions/restore-tree/action.yml"
+! grep -q 'artifact-download' "$gha/actions/restore-tree/action.yml"
+! grep -q 'hetzner_access_key' "$gha/actions/restore-tree/action.yml"
+grep -q 'actions/download-artifact' "$gha/actions/restore-tree/action.yml"
+! grep -q 'tar xf' "$gha/actions/restore-tree/action.yml"
 grep -q 'if_missing: skip' "$gha/workflows/_make.yml"
 grep -q 'SHALLOW: "1"' "$gha/workflows/_make.yml"
 grep -q 'RUN_HOOKS: "0"' "$gha/workflows/_make.yml"
 ! grep -q 'RUN_HOOKS: "1"' "$gha/workflows/_make.yml"
 grep -q 'chromium-webrtc-resources' "$gha/workflows/_make.yml"
-grep -q 'src/resources' "$gha/actions/artifact-upload/action.yml"
+grep -q 'src/resources' "$gha/workflows/_make.yml"
 grep -q 'src/resources' "$gha/actions/artifact-download/action.yml"
+grep -q 'uses: ./src/.github/actions/artifact-put' "$gha/workflows/_make.yml"
 
 echo "ok"
