@@ -1,8 +1,8 @@
 # Package WebRTC artifacts. Same path as today's Publish so a PR can dispatch it.
 # Does not create a GitHub release.
-# _make.yml: Deps → Build → Package combine (products-* in, final-* out).
-# Hetzner backfill runs parallel with Build (needs: deps only).
-# Package does not rebuild from git-cache.
+# _make.yml: Build (HIT + make deps + make build + make package, upload
+# products-*) → Package combine (final-*). No Linux Deps job. No Test.
+# No GH release.
 
 name: Package
 

@@ -2,8 +2,8 @@
 #   hetzner_access_key
 #   hetzner_secret_access_key
 #   hetzner_bucket
-name: Download WebRTC deps from Hetzner
-description: Stream a Hetzner deps tarball onto $GITHUB_WORKSPACE and untar.
+name: Download WebRTC build cache from Hetzner
+description: Stream a Hetzner build tarball onto $GITHUB_WORKSPACE and untar.
 
 inputs:
   path:
@@ -40,7 +40,7 @@ runs:
           sudo apt-get install -y awscli
         fi
 
-    - name: Download and extract deps tarball
+    - name: Download and extract build tarball
       shell: bash
       working-directory: ${{ github.workspace }}
       env:
@@ -74,14 +74,21 @@ runs:
           printf '%s\n' "${head_out}"
           exit 1
         fi
+        test -d src/.git
         echo "extracting ${object} -> ${GITHUB_WORKSPACE}"
         # aws s3 cp talks to Hetzner's S3-compatible API, not AWS.
+        # Members are gclient dirs + out/; not src/.git.
         aws ${endpoint} s3 cp "s3://${BUCKET}/${object}" - | tar xf -
-        test -d .gclient-git-cache
-        test -n "$(ls -A .gclient-git-cache)"
+        test -d src/.git
         test -f src/DEPS
         test ! -L src
-        find .gclient-git-cache -type f -exec touch {} +
-        if [[ -d src/resources ]]; then
-          find src/resources -type f -exec touch {} +
-        fi
+        test -d src/third_party
+        test -n "$(ls -A src/third_party)"
+        # Checkout set src tracked-file mtimes to now. Bump restored
+        # tree + out/ so ninja does not see objects as stale.
+        for p in src/third_party src/build src/buildtools \
+          src/testing src/tools src/ios src/resources out; do
+          if [[ -d "${p}" ]]; then
+            find "${p}" -exec touch {} +
+          fi
+        done

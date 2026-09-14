@@ -78,54 +78,46 @@ the tree is `webrtc/src` (real directory, not a symlink). `deps` /
 `$(DEPS_ROOT)/Makefile` if that file is missing (parent is outside git).
 
 CI checks out with `path: src` so `GITHUB_WORKSPACE` is the webrtc-named
-folder. `DEPS_ROOT=$GITHUB_WORKSPACE`. gclient objects live at
-`$DEPS_ROOT/.gclient-git-cache`. Linux Deps restores the Hetzner
-`deps-key.tar` (skip if missing; Build dispatch `skip_deps_cache`
-skips the download so Deps does a cold `make deps`), `gclient sync --no-history
---shallow` (`RUN_HOOKS=0`), fetches `chromium-webrtc-resources` into
-`src/resources`, and uploads GitHub artifact `deps-key` of
-`.gclient-git-cache` and `src/resources` (`compression-level: 0`;
-GitHub zips once). Do not pack gclient working trees
-(`src/third_party`, `src/build`, `src/buildtools`, …) next to the
-cache: zip cannot store git hardlinks, so that dual pack doubles
-objects and transplants Linux checkouts onto Mac. No `deps-key.tar`
-on GitHub. Do not set `RUN_HOOKS=1` on Linux Deps (`mac` in
-`TARGET_OS` would run hermetic Xcode CIPD). Do not upload to Hetzner
-from Deps. Build/Test `needs: deps` only, `download-artifact`
-`deps-key`, install the git-cache and `src/resources`, then
-`make deps` (gclient from cache; packed resources make the
-webrtc-resources hook a sha1 no-op; host GCS still fetches Apple
-`rust-toolchain`; `rewrite_git_cache_alternates` retargets cache
-paths) and `SKIP_DEPS=1` on build/test. `Hetzner backfill` (`needs:
-deps` only) `download-artifact` then
-`tar cf - .gclient-git-cache src/resources | aws s3 cp -` in
-parallel with Build.
-Windows Deps still uploads `deps-windows` to GitHub. Package/Release
-Build jobs also `make package` and upload `products-*` (GitHub).
-Package combine consumes `products-*` (no third ninja) and uploads
-`final-*`. Release attaches `final-*`. Tests need Deps only and run
-`make test` (no extra framework-slice build). `TARGET_OS` is only the
-tokens selected this run.
+folder. `DEPS_ROOT=$GITHUB_WORKSPACE`. `OUT` is `$DEPS_ROOT/out`
+(sibling of `src`). There is no shared Linux Deps job. iOS, macOS,
+and Android jobs run in parallel after Plan:
 
-Deps packing / Hetzner:
-Member list: `.gclient-git-cache` and `src/resources` only. Not
-gclient checkouts (`third_party`, `build`, `buildtools`, …), not the
-GetStream/webrtc `src` git worktree, `out/`, or `products/`. Same-run
-handoff is `actions/upload-artifact` name `deps-key` of those paths
-(`include-hidden-files: true`, `compression-level: 0`). GitHub zips
-once. No `deps-key.tar` for GH. `artifact-download` is Hetzner-only
-(Deps warm cache, `if_missing: skip`; skipped when `skip_deps_cache`
-is true). `artifact-put` is Hetzner-only
-(`tar cf - -C <dir> .gclient-git-cache src/resources | aws s3 cp -`)
-to `<bucket>/artifacts/<github.repository>/deps-key.tar` with
+1. `actions/checkout` `src` at `webrtc_ref`
+2. HIT Hetzner `build-ios` / `build-macos` / `build-android` (`if_missing:
+   skip`; Build dispatch `skip_deps_cache` skips the download)
+3. `make deps` (`RUN_HOOKS=1`, host GCS rust-toolchain on Apple)
+4. `make build` / `make test` (`SKIP_DEPS=1`)
+5. `artifact-put` that host's tree + `out/` (always, including after a
+   skipped HIT)
+
+Keys: `artifacts/<github.repository>/build-{ios,macos,android}.tar`.
+Same-OS only (Linux tree on Mac is forbidden). Members: `.gclient`,
+`.gclient_entries`, `.gclient_previous_sync_commits`, `.cipd` if
+present, `src/{third_party,build,buildtools,testing,tools,ios,resources}`,
+`out/`. Not packed: `.gclient-git-cache`, `src/.git`, Stream-tracked
+`src` files, `products/`. Restore order: checkout `src` first, extract
+over gclient dirs + `out/` (not `src/.git`), `touch` those members so
+ninja does not see objects older than the fresh checkout. Build
+`CONFIG` is dispatch (default release); `make test` always uses debug
+in `out/ios_tests` / `out/webrtc_tests`, so those subdirs do not mix
+with slice dirs. Test.yml HITs the same `build-ios` / `build-macos`
+keys. Windows Deps still uploads `deps-windows` to GitHub.
+Package/Release Build jobs also `make package` and upload `products-*`
+(GitHub). Package combine consumes `products-*` (no third ninja) and
+uploads `final-*`. Release attaches `final-*`. `TARGET_OS` is the
+platform of that job (`ios`, `mac`, `android,unix`).
+
+Hetzner: `artifact-download` / `artifact-put` stream `tar cf - … |
+aws s3 cp -` to
+`<bucket>/artifacts/<github.repository>/<stem>.tar` with
 `--endpoint-url https://hel1.your-objectstorage.com` and region
 `hel1`. `aws s3 cp` talks to Hetzner's S3-compatible API, not AWS.
 Callers pass org secrets via `with:`
 `${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}`,
 `${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}`, and
-`${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}`. After extract, packed
-files are `touch`ed so make/ninja do not rebuild from mtime.
-`products-*` / `final-*` stay on `actions/upload-artifact`.
+`${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}`. Composite actions must
+not use `${{ secrets.* }}`. `products-*` / `final-*` stay on
+`actions/upload-artifact`.
 
 ## Host gates
 

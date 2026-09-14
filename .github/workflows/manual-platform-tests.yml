@@ -1,8 +1,8 @@
 # Manual WebRTC build. Dispatchable from a PR because this path exists on the
 # default branch. Implementation: .github/workflows/_make.yml
-# Deps → Build (GitHub deps-key + restore-tree + make build). Hetzner
-# backfill runs parallel with Build (needs: deps only). No package
-# combine, no products.
+# Build iOS / macOS / Android in parallel: HIT build-{ios,macos,android},
+# make deps, make build, put that host's tree + out/. No Linux Deps job.
+# No package combine, no products.
 
 name: Build
 
@@ -47,7 +47,7 @@ on:
         required: false
         default: ""
       skip_deps_cache:
-        description: Skip Hetzner deps cache (fresh gclient)
+        description: Skip Hetzner deps cache (fresh gclient + ninja)
         type: boolean
         default: false
 

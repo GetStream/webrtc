@@ -2,15 +2,15 @@
 #   hetzner_access_key
 #   hetzner_secret_access_key
 #   hetzner_bucket
-name: Upload WebRTC deps tarball to Hetzner
-description: Stream a tar of .gclient-git-cache and src/resources to Hetzner. Does not zip.
+name: Upload WebRTC build tarball to Hetzner
+description: Stream an uncompressed tar of the host gclient tree and out/ to Hetzner.
 
 inputs:
   path:
     description: Object stem. Uploads artifacts/<repo>/<path>.tar
     required: true
   source:
-    description: Directory with .gclient-git-cache and src/resources.
+    description: DEPS_ROOT with gclient checkouts, src/resources, and out/.
     required: true
   hetzner_access_key:
     description: Hetzner object storage access key.
@@ -39,7 +39,7 @@ runs:
           sudo apt-get install -y awscli
         fi
 
-    - name: Stream deps tarball to Hetzner
+    - name: Stream build tarball to Hetzner
       shell: bash
       env:
         HETZNER_ACCESS_KEY_CI_ARTIFACTS: ${{ inputs.hetzner_access_key }}
@@ -57,16 +57,30 @@ runs:
         [[ -n "${OBJECT_STEM}" ]]
         [[ -n "${SOURCE}" ]]
         test -d "${SOURCE}"
-        test -d "${SOURCE}/.gclient-git-cache"
-        test -n "$(ls -A "${SOURCE}/.gclient-git-cache")"
+        test -d "${SOURCE}/src/third_party"
+        test -n "$(ls -A "${SOURCE}/src/third_party")"
+        test -d "${SOURCE}/out"
+        test -n "$(ls -A "${SOURCE}/out")"
         if [[ ! -d "${SOURCE}/src/resources" ]] || \
           [[ -z "$(ls -A "${SOURCE}/src/resources")" ]]; then
-          echo "::error::deps-key missing src/resources (chromium-webrtc-resources)"
+          echo "::error::build cache missing src/resources"
           exit 1
         fi
+        members=()
+        # Host tree + ninja. Do not pack .gclient-git-cache (objects
+        # twice) or src/.git / Stream-tracked src files.
+        for p in .gclient .gclient_entries \
+          .gclient_previous_sync_commits .cipd \
+          src/third_party src/build src/buildtools \
+          src/testing src/tools src/ios src/resources out; do
+          if [[ -e "${SOURCE}/${p}" ]]; then
+            members+=("${p}")
+          fi
+        done
+        [[ ${#members[@]} -gt 0 ]]
         BUCKET="${HETZNER_BUCKET_CI_ARTIFACTS:?}"
         object="artifacts/${{ github.repository }}/${OBJECT_STEM}.tar"
-        echo "streaming ${SOURCE}/{.gclient-git-cache,src/resources} -> ${object}"
+        echo "streaming ${SOURCE}/{${members[*]}} -> ${object}"
         # aws s3 cp talks to Hetzner's S3-compatible API, not AWS.
-        tar cf - -C "${SOURCE}" .gclient-git-cache src/resources | \
+        tar cf - -C "${SOURCE}" "${members[@]}" | \
           aws ${endpoint} s3 cp - "s3://${BUCKET}/${object}"

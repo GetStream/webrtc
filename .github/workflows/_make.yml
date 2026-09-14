@@ -2,23 +2,14 @@
 # Not listed in the Actions dispatch UI (workflow_call only).
 # Callers pass mode: build | test | package | release.
 #
-# I/O: Linux Deps restores Hetzner deps-key.tar (skip if missing;
-# skip_deps_cache skips the download for a cold make deps), shallow
-# gclient sync (RUN_HOOKS=0), fetches chromium-webrtc-resources into
-# src/resources, uploads GitHub artifact deps-key of .gclient-git-cache
-# and src/resources (compression-level: 0; GitHub zips once). No
-# gclient checkout trees (third_party/build/buildtools/…). No
-# deps-key.tar on GitHub. Does not upload to Hetzner. Build/Test
-# download-artifact deps-key, install git-cache + src/resources, make
-# deps (gclient from cache; host GCS). Hetzner backfill (needs: deps
-# only) download-artifact then
-# tar cf - .gclient-git-cache src/resources | aws s3 cp - to
-# artifacts/<github.repository>/deps-key.tar in parallel with Build.
-# Windows Deps stays deps-windows on GitHub. Build mode is ninja only
-# (no products). Package/Release Build jobs also make package and upload
-# products-* (GitHub). Package combine consumes products-* (no third
-# ninja) and uploads final-*. Release attaches final-*. Tests need Deps
-# only (make test, no make build).
+# I/O: iOS / macOS / Android jobs HIT Hetzner build-{ios,macos,android}.tar
+# (skip_deps_cache skips download), make deps, make build|test, then put
+# that host's gclient tree + out/. No shared Linux Deps job. No GitHub
+# deps-key. Windows Deps stays deps-windows on GitHub. Build mode is
+# ninja only (no products). Package/Release Build jobs also make package
+# and upload products-* (GitHub). Package combine consumes products-*
+# (no third ninja) and uploads final-*. Release attaches final-*. Tests
+# HIT the same per-platform key (out/ios_tests vs slice dirs).
 
 name: WebRTC make
 
@@ -64,7 +55,7 @@ on:
         type: string
         default: ""
       skip_deps_cache:
-        description: Skip Hetzner deps-key.tar download (cold make deps)
+        description: Skip Hetzner build cache download (cold make deps)
         required: false
         type: boolean
         default: false
@@ -152,103 +143,6 @@ jobs:
           platform_android: ${{ inputs.android }}
           platform_windows: ${{ inputs.windows }}
 
-  deps:
-    name: Deps
-    needs: plan
-    if: ${{ inputs.ios || inputs.macos || inputs.android }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 360
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          path: src
-          ref: ${{ inputs.webrtc_ref }}
-      - name: Setup WebRTC checkout
-        uses: ./src/.github/actions/setup-webrtc
-        with:
-          webrtc_ref: ${{ inputs.webrtc_ref }}
-      - name: Download cached deps-key
-        if: ${{ !inputs.skip_deps_cache }}
-        uses: ./src/.github/actions/artifact-download
-        with:
-          path: deps-key
-          if_missing: skip
-          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
-      - name: gclient sync
-        working-directory: src/stream_build
-        env:
-          DEPS_ROOT: ${{ github.workspace }}
-          WEBRTC_SRC: ${{ github.workspace }}/src
-          GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
-          TARGET_OS: ${{ needs.plan.outputs.linux_target_os }}
-          RUN_HOOKS: "0"
-          SHALLOW: "1"
-          JOBS: "8"
-          WEBRTC_REPO: https://github.com/GetStream/webrtc.git
-        run: make deps
-      # Same command as src/DEPS chromium-webrtc-resources. Do not set
-      # RUN_HOOKS=1 here: that runs mac_toolchain.py CIPD when mac is in
-      # TARGET_OS. Build restore still RUN_HOOKS=1 (rust-toolchain).
-      - name: Fetch chromium-webrtc-resources
-        working-directory: ${{ github.workspace }}
-        run: |
-          set -euo pipefail
-          download_from_google_storage --directory --recursive \
-            --num_threads=10 --no_auth --quiet \
-            --bucket chromium-webrtc-resources src/resources
-      # GitHub artifact is .gclient-git-cache + src/resources (one zip).
-      # Do not pack the gclient working tree: zip cannot store git
-      # hardlinks, so cache+checkout doubles objects (~33GB) and
-      # transplants Linux checkouts onto Mac. RUN_HOOKS=0: no hermetic
-      # Xcode CIPD on Linux; Build/Test restore this key then make deps
-      # (host GCS). Hetzner backfill tars the same members in parallel.
-      - name: Check deps-key members
-        working-directory: ${{ github.workspace }}
-        run: |
-          set -euo pipefail
-          test -d .gclient-git-cache
-          test -n "$(ls -A .gclient-git-cache)"
-          test -d src/resources
-          test -n "$(ls -A src/resources)"
-      - name: Upload deps-key
-        uses: actions/upload-artifact@v7
-        with:
-          name: deps-key
-          path: |
-            .gclient-git-cache
-            src/resources
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 1
-          compression-level: 0
-
-  hetzner_backfill:
-    name: Hetzner backfill
-    needs: [deps]
-    if: ${{ inputs.ios || inputs.macos || inputs.android }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 360
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          path: src
-          ref: ${{ inputs.webrtc_ref }}
-      - name: Download deps-key
-        uses: actions/download-artifact@v8
-        with:
-          name: deps-key
-          path: ${{ github.workspace }}/deps-tree
-      - name: Upload deps-key to Hetzner
-        uses: ./src/.github/actions/artifact-put
-        with:
-          path: deps-key
-          source: ${{ github.workspace }}/deps-tree
-          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
-
   deps_windows:
     name: Deps Windows
     needs: plan
@@ -298,7 +192,7 @@ jobs:
 
   build_ios:
     name: Build iOS
-    needs: [plan, deps]
+    needs: [plan]
     if: ${{ (inputs.mode == 'build' || inputs.mode == 'package' || inputs.mode == 'release') && inputs.ios }}
     runs-on: macos-26
     timeout-minutes: 360
@@ -310,8 +204,12 @@ jobs:
       - uses: ./src/.github/actions/restore-tree
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
-          target_os: ${{ needs.plan.outputs.apple_target_os }}
-          deps_artifact: deps-key
+          target_os: ios
+          cache_key: build-ios
+          skip_cache: ${{ inputs.skip_deps_cache }}
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
       - name: Build iOS
         working-directory: src/stream_build
         env:
@@ -320,6 +218,14 @@ jobs:
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
         run: make build ios
+      - name: Upload build-ios to Hetzner
+        uses: ./src/.github/actions/artifact-put
+        with:
+          path: build-ios
+          source: ${{ github.workspace }}
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
       - name: Package iOS
         if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
         working-directory: src/stream_build
@@ -340,7 +246,7 @@ jobs:
 
   build_macos:
     name: Build macOS
-    needs: [plan, deps]
+    needs: [plan]
     if: ${{ (inputs.mode == 'build' || inputs.mode == 'package' || inputs.mode == 'release') && inputs.macos }}
     runs-on: macos-26
     timeout-minutes: 360
@@ -352,8 +258,12 @@ jobs:
       - uses: ./src/.github/actions/restore-tree
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
-          target_os: ${{ needs.plan.outputs.apple_target_os }}
-          deps_artifact: deps-key
+          target_os: mac
+          cache_key: build-macos
+          skip_cache: ${{ inputs.skip_deps_cache }}
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
       - name: Build macOS
         working-directory: src/stream_build
         env:
@@ -362,6 +272,14 @@ jobs:
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
         run: make build macos
+      - name: Upload build-macos to Hetzner
+        uses: ./src/.github/actions/artifact-put
+        with:
+          path: build-macos
+          source: ${{ github.workspace }}
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
       - name: Package macOS
         if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
         working-directory: src/stream_build
@@ -382,7 +300,7 @@ jobs:
 
   build_android:
     name: Build Android
-    needs: [plan, deps]
+    needs: [plan]
     if: ${{ (inputs.mode == 'build' || inputs.mode == 'package' || inputs.mode == 'release') && inputs.android }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
@@ -395,8 +313,12 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.android_target_os }}
-          deps_artifact: deps-key
+          cache_key: build-android
+          skip_cache: ${{ inputs.skip_deps_cache }}
           install_android_packages: "true"
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
       - name: Build Android
         working-directory: src/stream_build
         env:
@@ -412,6 +334,14 @@ jobs:
             extra+=(ARCHS="${ANDROID_ARCH}")
           fi
           make build android "${extra[@]}"
+      - name: Upload build-android to Hetzner
+        uses: ./src/.github/actions/artifact-put
+        with:
+          path: build-android
+          source: ${{ github.workspace }}
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
       - name: Package Android
         if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
         working-directory: src/stream_build
@@ -439,7 +369,7 @@ jobs:
 
   test_ios:
     name: Test iOS
-    needs: [plan, deps]
+    needs: [plan]
     if: ${{ (inputs.mode == 'test' || inputs.mode == 'release') && inputs.ios }}
     runs-on: macos-26
     timeout-minutes: 180
@@ -451,18 +381,31 @@ jobs:
       - uses: ./src/.github/actions/restore-tree
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
-          target_os: ${{ needs.plan.outputs.apple_target_os }}
-          deps_artifact: deps-key
+          target_os: ios
+          cache_key: build-ios
+          skip_cache: ${{ inputs.skip_deps_cache }}
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
       - name: Test iOS
         working-directory: src/stream_build
         env:
           DEPS_ROOT: ${{ github.workspace }}
           SKIP_DEPS: "1"
         run: make test ios
+      - name: Upload build-ios to Hetzner
+        if: ${{ inputs.mode == 'test' }}
+        uses: ./src/.github/actions/artifact-put
+        with:
+          path: build-ios
+          source: ${{ github.workspace }}
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
 
   test_macos:
     name: Test macOS
-    needs: [plan, deps]
+    needs: [plan]
     if: ${{ (inputs.mode == 'test' || inputs.mode == 'release') && inputs.macos }}
     runs-on: macos-26
     timeout-minutes: 180
@@ -474,14 +417,27 @@ jobs:
       - uses: ./src/.github/actions/restore-tree
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
-          target_os: ${{ needs.plan.outputs.apple_target_os }}
-          deps_artifact: deps-key
+          target_os: mac
+          cache_key: build-macos
+          skip_cache: ${{ inputs.skip_deps_cache }}
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
       - name: Test macOS
         working-directory: src/stream_build
         env:
           DEPS_ROOT: ${{ github.workspace }}
           SKIP_DEPS: "1"
         run: make test macos
+      - name: Upload build-macos to Hetzner
+        if: ${{ inputs.mode == 'test' }}
+        uses: ./src/.github/actions/artifact-put
+        with:
+          path: build-macos
+          source: ${{ github.workspace }}
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
 
   test_windows:
     name: Test Windows
