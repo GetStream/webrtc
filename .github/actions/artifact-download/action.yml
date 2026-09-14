@@ -212,16 +212,11 @@ runs:
         test -d src/.git
         test -f src/DEPS
         test ! -L src
-        test -d src/third_party
-        test -n "$(ls -A src/third_party)"
         printf '%s\n' "${expected_size}" > \
           "${GITHUB_WORKSPACE}/.hetzner-hit-bytes"
-        # Checkout set src tracked-file mtimes to now. Bump restored
-        # tree + out/ so ninja does not see objects as stale.
-        # -h: GNU/BSD no-dereference. Default GNU touch follows
-        # dangling NDK links (libc++.so*) and dies ENOENT (set -e).
-        for p in src/third_party src/build src/buildtools \
-          src/testing src/tools src/ios src/resources out; do
+        # Overlay members only. Do not touch .gclient-git-cache.
+        # -h: GNU/BSD no-dereference if a leftover symlink exists.
+        for p in src/resources .cipd; do
           if [[ -d "${p}" ]]; then
             find "${p}" -exec touch -h {} +
           fi

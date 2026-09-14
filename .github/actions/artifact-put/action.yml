@@ -3,14 +3,14 @@
 #   hetzner_secret_access_key
 #   hetzner_bucket
 name: Upload WebRTC build tarball to Hetzner
-description: Pack an uncompressed tar of the host tree and multipart-put it.
+description: Pack git-cache plus reusable src/resources and .cipd; multipart-put.
 
 inputs:
   path:
     description: Object stem. Uploads artifacts/<repo>/<path>.tar
     required: true
   source:
-    description: DEPS_ROOT with gclient checkouts, src/resources, and out/.
+    description: DEPS_ROOT with .gclient-git-cache; optional src/resources and .cipd.
     required: true
   hetzner_access_key:
     description: Hetzner object storage access key.
@@ -60,27 +60,27 @@ runs:
         [[ -n "${OBJECT_STEM}" ]]
         [[ -n "${SOURCE}" ]]
         test -d "${SOURCE}"
-        test -d "${SOURCE}/src/third_party"
-        test -n "$(ls -A "${SOURCE}/src/third_party")"
-        test -d "${SOURCE}/out"
-        test -n "$(ls -A "${SOURCE}/out")"
-        if [[ ! -d "${SOURCE}/src/resources" ]] || \
-          [[ -z "$(ls -A "${SOURCE}/src/resources")" ]]; then
-          echo "::error::build cache missing src/resources"
+        cache="${SOURCE}/.gclient-git-cache"
+        if [[ ! -d "${cache}" ]] || [[ -z "$(ls -A "${cache}")" ]]; then
+          echo "::error::build cache missing .gclient-git-cache"
           exit 1
         fi
-        members=()
-        # Host tree + ninja. Do not pack .gclient-git-cache (objects
-        # twice) or src/.git / Stream-tracked src files.
-        for p in .gclient .gclient_entries \
-          .gclient_previous_sync_commits .cipd \
-          src/third_party src/build src/buildtools \
-          src/testing src/tools src/ios src/resources out; do
-          if [[ -e "${SOURCE}/${p}" ]]; then
+        members=(.gclient-git-cache)
+        # Reusable only. Do not pack working trees or out/ (objects
+        # twice) or src/.git / Stream-tracked src files. setup-webrtc
+        # rewrites .gclient every job.
+        for p in src/resources .cipd; do
+          if [[ -d "${SOURCE}/${p}" ]] && \
+            [[ -n "$(ls -A "${SOURCE}/${p}")" ]]; then
             members+=("${p}")
+          else
+            echo "skip ${p} (missing or empty)"
           fi
         done
-        [[ ${#members[@]} -gt 0 ]]
+        echo "pack members: ${members[*]}"
+        for p in "${members[@]}"; do
+          du -sk "${SOURCE}/${p}"
+        done
         BUCKET="${HETZNER_BUCKET_CI_ARTIFACTS:?}"
         object="artifacts/${{ github.repository }}/${OBJECT_STEM}.tar"
         tar_file="${RUNNER_TEMP:?}/${OBJECT_STEM}.tar"

@@ -87,18 +87,23 @@ and Android jobs run in parallel after Plan:
    skip`; Build dispatch `skip_deps_cache` skips the download)
 3. `make deps` (`RUN_HOOKS=1`, host GCS rust-toolchain on Apple)
 4. `make build` / `make test` (`SKIP_DEPS=1`)
-5. `artifact-put` that host's tree + `out/` (always after miss /
-   `skip_deps_cache`; skip PUT when HIT size delta is < 1GiB)
+5. `artifact-put` `.gclient-git-cache` plus reusable `src/resources`
+   and `.cipd` if non-empty (always after miss / `skip_deps_cache`;
+   skip PUT when HIT size delta is < 1GiB)
 
 Keys: `artifacts/<github.repository>/build-{ios,macos,android}.tar`.
-Same-OS only (Linux tree on Mac is forbidden). Members: `.gclient`,
-`.gclient_entries`, `.gclient_previous_sync_commits`, `.cipd` if
-present, `src/{third_party,build,buildtools,testing,tools,ios,resources}`,
-`out/`. Not packed: `.gclient-git-cache`, `src/.git`, Stream-tracked
-`src` files, `products/`. Restore order: checkout `src` first, extract
-over gclient dirs + `out/` (not `src/.git`), `touch` those members so
-ninja does not see objects older than the fresh checkout. Build
-`CONFIG` is dispatch (default release); `make test` always uses debug
+Same-OS only (Linux tree on Mac is forbidden). Members: required
+`.gclient-git-cache`; `src/resources` and `.cipd` if non-empty.
+Not packed: working trees (`src/third_party`, `src/build`,
+`src/buildtools`, `src/testing`, `src/tools`, `src/ios`), `out/`,
+`.gclient` / `.gclient_entries` (setup-webrtc writes `.gclient` every
+job), `src/.git`, Stream-tracked `src` files, `products/`. Restore:
+checkout `src`, extract git-cache to `GIT_CACHE_PATH`
+(`${{ github.workspace }}/.gclient-git-cache`), `src/resources`, and
+`.cipd` if present. Do not strip git alternates; `make deps` runs
+`rewrite_git_cache_alternates` so Linux-packed cache paths retarget
+to this runner. Always `make deps` after HIT (cheap from cache).
+Build `CONFIG` is dispatch (default release); `make test` always uses debug
 in `out/ios_tests` / `out/webrtc_tests`, so those subdirs do not mix
 with slice dirs. Test.yml HITs the same `build-ios` / `build-macos`
 keys. Windows Deps still uploads `deps-windows` to GitHub.

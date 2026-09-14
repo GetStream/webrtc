@@ -75,8 +75,9 @@ target_os = $(quote_target_os "$target_os")
 EOF
 }
 
-# After git-cache moves off .gclient_deps/.gclient-git-cache, nested checkouts
-# still point objects/info/alternates (and origin urls) at the old path.
+# After git-cache moves, nested checkouts may still point
+# objects/info/alternates (and origin urls) at an old host path
+# (.gclient_deps/.gclient-git-cache or /home/runner/.../.gclient-git-cache).
 # Rewrite those to GIT_CACHE_PATH. No-op if the cache itself is the old path.
 rewrite_git_cache_alternates() {
   local src="$1"
@@ -87,8 +88,9 @@ import subprocess
 import sys
 
 src, new_cache = sys.argv[1], sys.argv[2].rstrip("/")
-frag = ".gclient_deps/.gclient-git-cache"
-if new_cache.endswith(frag):
+old_layout = ".gclient_deps/.gclient-git-cache"
+frag = ".gclient-git-cache"
+if new_cache.endswith(old_layout):
     raise SystemExit(0)
 
 cmd = [
@@ -131,6 +133,9 @@ def rewrite_line(line: str) -> str:
     start = idx
     while start > 0 and line[start - 1] not in stops:
         start -= 1
+    old_path = line[start : idx + len(frag)].rstrip("/")
+    if old_path == new_cache:
+        return line
     return line[:start] + new_cache + line[idx + len(frag) :]
 
 

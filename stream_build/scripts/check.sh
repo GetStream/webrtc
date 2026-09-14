@@ -329,6 +329,19 @@ grep -qx "$deps_tmp/webrtc/.gclient-git-cache/fake-repo/objects" \
   "$deps_tmp/webrtc/src/third_party/.git/objects/info/alternates"
 ! grep -q '.gclient_deps/.gclient-git-cache' \
   "$deps_tmp/webrtc/src/third_party/.git/objects/info/alternates"
+printf '%s\n' \
+  "/home/runner/work/webrtc/webrtc/.gclient-git-cache/fake-repo/objects" \
+  > "$deps_tmp/webrtc/src/third_party/.git/objects/info/alternates"
+PATH="$fake_bin:$PATH" \
+  DEPS_ROOT="$deps_tmp/webrtc" \
+  WEBRTC_SRC="$deps_tmp/webrtc/src" \
+  GIT_CACHE_PATH="$deps_tmp/webrtc/.gclient-git-cache" \
+  RUN_HOOKS=0 JOBS=2 \
+  "$ROOT/scripts/deps.sh" sync >/dev/null
+grep -qx "$deps_tmp/webrtc/.gclient-git-cache/fake-repo/objects" \
+  "$deps_tmp/webrtc/src/third_party/.git/objects/info/alternates"
+! grep -q '/home/runner/work' \
+  "$deps_tmp/webrtc/src/third_party/.git/objects/info/alternates"
 PATH="$fake_bin:$PATH" \
   DEPS_ROOT="$deps_tmp/webrtc" \
   WEBRTC_SRC="$deps_tmp/webrtc/src" \
@@ -401,8 +414,7 @@ grep -q 'tar cf "${tar_file}"' "$gha/actions/artifact-put/action.yml"
   "$gha/actions/artifact-download/action.yml"
 grep -q 's3api get-object' "$gha/actions/artifact-download/action.yml"
 grep -q 'bytes=${have}-' "$gha/actions/artifact-download/action.yml"
-grep -q 'resume from byte' "$gha/actions/artifact-download/action.yml"
-grep -q 'download from 0' "$gha/actions/artifact-download/action.yml"
+grep -q 'resume_from=' "$gha/actions/artifact-download/action.yml"
 grep -q 's3 cp "${tar_file}" "s3://${BUCKET}/${object}"' \
   "$gha/actions/artifact-put/action.yml"
 grep -q 'AWS_MAX_ATTEMPTS' "$gha/actions/artifact-download/action.yml"
@@ -439,14 +451,23 @@ grep -q 'if_missing: skip' "$gha/actions/restore-tree/action.yml"
 grep -q 'SHALLOW: "1"' "$gha/actions/restore-tree/action.yml"
 grep -q 'RUN_HOOKS: "1"' "$gha/actions/restore-tree/action.yml"
 ! grep -q 'RUN_HOOKS: "0"' "$gha/workflows/_make.yml"
-grep -q 'src/third_party' "$gha/actions/artifact-download/action.yml"
-grep -q 'src/third_party' "$gha/actions/artifact-put/action.yml"
-grep -q 'src/third_party' "$gha/actions/restore-tree/action.yml"
-grep -A8 'for p in .gclient' "$gha/actions/artifact-put/action.yml" | \
-  grep -q 'src/third_party'
-grep -A8 'for p in .gclient' "$gha/actions/artifact-put/action.yml" | grep -q ' out'
-! grep -A8 'for p in .gclient' "$gha/actions/artifact-put/action.yml" | \
-  grep -q 'gclient-git-cache'
+! grep -q 'Drop git-cache alternates' "$gha/actions/restore-tree/action.yml"
+grep -q 'GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache' \
+  "$gha/actions/restore-tree/action.yml"
+grep -q 'rewrite_git_cache_alternates' "$ROOT/scripts/deps.sh"
+grep -q '.gclient-git-cache' "$gha/actions/artifact-put/action.yml"
+grep -q 'src/resources' "$gha/actions/artifact-put/action.yml"
+grep -q '.cipd' "$gha/actions/artifact-put/action.yml"
+! grep -q 'src/third_party' "$gha/actions/artifact-put/action.yml"
+! grep -q 'src/third_party' "$gha/actions/artifact-download/action.yml"
+! grep -q 'src/third_party' "$gha/actions/restore-tree/action.yml"
+grep -A12 'members=(.gclient-git-cache)' "$gha/actions/artifact-put/action.yml" | \
+  grep -q 'src/resources'
+grep -A12 'members=(.gclient-git-cache)' "$gha/actions/artifact-put/action.yml" | \
+  grep -q '.cipd'
+! grep -A12 'members=(.gclient-git-cache)' "$gha/actions/artifact-put/action.yml" | \
+  grep -q 'third_party'
+grep -q 'pack members:' "$gha/actions/artifact-put/action.yml"
 grep -q 'uses: ./src/.github/actions/artifact-put' "$gha/workflows/_make.yml"
 
 echo "ok"

@@ -4,7 +4,7 @@
 #
 # I/O: iOS / macOS / Android jobs HIT Hetzner build-{ios,macos,android}.tar
 # (skip_deps_cache skips download), make deps, make build|test, then put
-# that host's gclient tree + out/. No shared Linux Deps job. No GitHub
+# git-cache + src/resources + .cipd. No shared Linux Deps job. No GitHub
 # deps-key. Windows Deps stays deps-windows on GitHub. Build mode is
 # ninja only (no products). Package/Release Build jobs also make package
 # and upload products-* (GitHub). Package combine consumes products-*
