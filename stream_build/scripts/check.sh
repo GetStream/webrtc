@@ -397,8 +397,12 @@ grep -q 'tar cf "${tar_file}"' "$gha/actions/artifact-put/action.yml"
 ! grep -q 's3 cp -' "$gha/actions/artifact-put/action.yml"
 ! grep -q 's3 cp "s3://${BUCKET}/${object}" -' \
   "$gha/actions/artifact-download/action.yml"
-grep -q 's3 cp "s3://${BUCKET}/${object}" "${tar_file}"' \
+! grep -q 's3 cp "s3://${BUCKET}/${object}" "${tar_file}"' \
   "$gha/actions/artifact-download/action.yml"
+grep -q 's3api get-object' "$gha/actions/artifact-download/action.yml"
+grep -q 'bytes=${have}-' "$gha/actions/artifact-download/action.yml"
+grep -q 'resume from byte' "$gha/actions/artifact-download/action.yml"
+grep -q 'download from 0' "$gha/actions/artifact-download/action.yml"
 grep -q 's3 cp "${tar_file}" "s3://${BUCKET}/${object}"' \
   "$gha/actions/artifact-put/action.yml"
 grep -q 'AWS_MAX_ATTEMPTS' "$gha/actions/artifact-download/action.yml"

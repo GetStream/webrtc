@@ -107,14 +107,16 @@ Package/Release Build jobs also `make package` and upload `products-*`
 uploads `final-*`. Release attaches `final-*`. `TARGET_OS` is the
 platform of that job (`ios`, `mac`, `android,unix`).
 
-Hetzner: `artifact-download` / `artifact-put` use a local tar file
-then multipart `aws s3 cp` (not a stdout/stdin pipe) to
+Hetzner: `artifact-download` Range-GETs with
+`s3api get-object --range bytes=${have}-` into a partial file and
+resumes from bytes already on disk (not `s3 cp` from 0).
+`artifact-put` tars to a file then multipart `aws s3 cp` to
 `<bucket>/artifacts/<github.repository>/<stem>.tar` with
 `--endpoint-url https://hel1.your-objectstorage.com` and region
 `hel1`. A pipe GET/PUT is one HTTP body; a drop is IncompleteRead
-of the whole object. File dest retries parts. Peak disk is tar +
-tree (~2x); delete the tar after extract/upload. `aws s3 cp` talks
-to Hetzner's S3-compatible API, not AWS.
+of the whole object. Peak disk is tar + tree (~2x); delete the tar
+after extract/upload. `aws s3 cp` / `s3api` talk to Hetzner's
+S3-compatible API, not AWS.
 Callers pass org secrets via `with:`
 `${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}`,
 `${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}`, and

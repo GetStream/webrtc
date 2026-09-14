@@ -3,7 +3,7 @@
 #   hetzner_secret_access_key
 #   hetzner_bucket
 name: Download WebRTC build cache from Hetzner
-description: Multipart-get a Hetzner build tarball to a file, verify size, untar.
+description: Range-get a Hetzner build tarball, resume on retry, verify size, untar.
 
 inputs:
   path:
@@ -58,15 +58,17 @@ runs:
         export AWS_MAX_ATTEMPTS=10
         export AWS_RETRY_MODE=adaptive
         endpoint="--endpoint-url https://hel1.your-objectstorage.com"
-        # File dest enables multipart GET (Range parts). A pipe to
-        # stdout is one streaming GET; a drop aborts the whole object.
+        # Sequential get-object leaves a valid prefix on drop.
+        # s3 cp multipart may not, and it truncates dest on start.
         # Peak disk is tar + extract (~2x); rm the tar after tar xf.
         aws_timeouts=(--cli-connect-timeout 60 --cli-read-timeout 0)
         BUCKET="${HETZNER_BUCKET_CI_ARTIFACTS:?}"
         [[ -n "${OBJECT_STEM}" ]]
         object="artifacts/${{ github.repository }}/${OBJECT_STEM}.tar"
         tar_file="${RUNNER_TEMP:?}/${OBJECT_STEM}.tar"
-        trap 'rm -f "${tar_file}"' EXIT
+        partial="${tar_file}.partial"
+        chunk="${tar_file}.chunk"
+        trap 'rm -f "${tar_file}" "${partial}" "${chunk}"' EXIT
         set +e
         head_out="$(aws ${endpoint} "${aws_timeouts[@]}" s3api head-object \
           --bucket "${BUCKET}" --key "${object}" \
@@ -102,33 +104,67 @@ runs:
         attempts=3
         download_ok=0
         for attempt in $(seq 1 "${attempts}"); do
-          rm -f "${tar_file}"
-          echo "download attempt ${attempt}/${attempts}"
-          set +e
-          aws ${endpoint} "${aws_timeouts[@]}" \
-            s3 cp "s3://${BUCKET}/${object}" "${tar_file}"
-          dl_rc=$?
-          set -e
-          if [[ "${dl_rc}" -ne 0 ]]; then
-            echo "download attempt ${attempt} failed (exit ${dl_rc})"
-          elif [[ ! -f "${tar_file}" ]]; then
-            echo "download attempt ${attempt}: missing ${tar_file}"
+          if [[ -f "${partial}" ]]; then
+            have="$(file_size "${partial}")"
           else
-            actual_size="$(file_size "${tar_file}")"
-            if [[ "${actual_size}" != "${expected_size}" ]]; then
-              echo "size mismatch after attempt ${attempt}: local=${actual_size} expected=${expected_size}"
+            have=0
+          fi
+          if [[ "${have}" -gt "${expected_size}" ]]; then
+            echo "partial ${have} > ${expected_size}; deleting"
+            rm -f "${partial}"
+            have=0
+          fi
+          echo "download attempt ${attempt}/${attempts}"
+          if [[ "${have}" -lt "${expected_size}" ]]; then
+            rm -f "${chunk}"
+            if [[ "${have}" -eq 0 ]]; then
+              echo "download from 0"
+              set +e
+              aws ${endpoint} "${aws_timeouts[@]}" s3api get-object \
+                --bucket "${BUCKET}" --key "${object}" \
+                --range "bytes=0-" "${partial}"
+              dl_rc=$?
+              set -e
             else
-              download_ok=1
-              break
+              echo "resume from byte ${have} / ${expected_size}"
+              set +e
+              aws ${endpoint} "${aws_timeouts[@]}" s3api get-object \
+                --bucket "${BUCKET}" --key "${object}" \
+                --range "bytes=${have}-" "${chunk}"
+              dl_rc=$?
+              set -e
+              if [[ -f "${chunk}" ]]; then
+                chunk_size="$(file_size "${chunk}")"
+                if [[ "${chunk_size}" -gt 0 ]]; then
+                  cat "${chunk}" >> "${partial}"
+                fi
+                rm -f "${chunk}"
+              fi
+            fi
+            if [[ "${dl_rc}" -ne 0 ]]; then
+              echo "download attempt ${attempt} failed (exit ${dl_rc})"
             fi
           fi
+          if [[ -f "${partial}" ]]; then
+            have="$(file_size "${partial}")"
+          else
+            have=0
+          fi
+          if [[ "${have}" -eq "${expected_size}" ]]; then
+            mv "${partial}" "${tar_file}"
+            download_ok=1
+            break
+          fi
+          echo "size mismatch after attempt ${attempt}: local=${have} expected=${expected_size}"
           if [[ "${attempt}" -lt "${attempts}" ]]; then
             sleep 10
           fi
         done
         if [[ "${download_ok}" -ne 1 ]]; then
           actual_size="missing"
-          if [[ -f "${tar_file}" ]]; then
+          if [[ -f "${partial}" ]]; then
+            actual_size="$(file_size "${partial}")"
+          elif [[ -f "${tar_file}" ]]; then
             actual_size="$(file_size "${tar_file}")"
           fi
           echo "::error::failed to download s3://${BUCKET}/${object} after ${attempts} attempts (local=${actual_size} expected=${expected_size})"
