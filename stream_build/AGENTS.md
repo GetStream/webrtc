@@ -110,6 +110,7 @@ platform of that job (`ios`, `mac`, `android,unix`).
 Hetzner: `artifact-download` Range-GETs with
 `s3api get-object --range bytes=${have}-` into a partial file and
 resumes from bytes already on disk (not `s3 cp` from 0).
+While GET runs, logs `have / ContentLength (%)` every ~15s.
 `artifact-put` tars to a file then multipart `aws s3 cp` to
 `<bucket>/artifacts/<github.repository>/<stem>.tar` with
 `--endpoint-url https://hel1.your-objectstorage.com` and region

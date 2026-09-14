@@ -96,7 +96,7 @@ runs:
         df -h "${GITHUB_WORKSPACE}" "${RUNNER_TEMP}" || true
         file_size() {
           if [[ "$(uname -s)" == Darwin ]]; then
-            stat -f %s "$1"
+            stat -f %z "$1"
           else
             stat -c %s "$1"
           fi
@@ -118,11 +118,37 @@ runs:
             have=0
           fi
           remaining=$((expected_size - have))
-          echo "download attempt ${attempt}/${attempts}"
+          echo "download attempt ${attempt}/${attempts} resume_from=${have} remaining=${remaining}"
           if [[ "${have}" -lt "${expected_size}" ]]; then
             rm -f "${chunk}"
+            start="${have}"
+            (
+              last="${start}"
+              stall_logged=0
+              t0="$(date +%s)"
+              while sleep 15; do
+                have_now=0
+                if [[ -f "${partial}" ]]; then
+                  have_now="$(file_size "${partial}")"
+                fi
+                if [[ -f "${chunk}" ]]; then
+                  have_now=$((have_now + $(file_size "${chunk}")))
+                fi
+                elapsed=$(( $(date +%s) - t0 ))
+                pct=0
+                if [[ "${expected_size}" -gt 0 ]]; then
+                  pct=$((have_now * 100 / expected_size))
+                fi
+                echo "download progress: ${have_now} / ${expected_size} (${pct}%) resume_from=${start} elapsed=${elapsed}s"
+                if [[ "${have_now}" -eq "${last}" && "${stall_logged}" -eq 0 ]]; then
+                  echo "download progress: size not growing yet (aws may buffer until GET completes)"
+                  stall_logged=1
+                fi
+                last="${have_now}"
+              done
+            ) &
+            prog_pid=$!
             if [[ "${have}" -eq 0 ]]; then
-              echo "download from 0 remaining=${remaining}"
               set +e
               aws ${endpoint} "${aws_timeouts[@]}" s3api get-object \
                 --bucket "${BUCKET}" --key "${object}" \
@@ -130,7 +156,6 @@ runs:
               dl_rc=$?
               set -e
             else
-              echo "resume from byte ${have} / ${expected_size} remaining=${remaining}"
               set +e
               aws ${endpoint} "${aws_timeouts[@]}" s3api get-object \
                 --bucket "${BUCKET}" --key "${object}" \
@@ -145,6 +170,8 @@ runs:
                 rm -f "${chunk}"
               fi
             fi
+            kill "${prog_pid}" 2>/dev/null || true
+            wait "${prog_pid}" 2>/dev/null || true
             if [[ "${dl_rc}" -ne 0 ]]; then
               echo "download attempt ${attempt} failed (exit ${dl_rc})"
             fi
@@ -191,9 +218,11 @@ runs:
           "${GITHUB_WORKSPACE}/.hetzner-hit-bytes"
         # Checkout set src tracked-file mtimes to now. Bump restored
         # tree + out/ so ninja does not see objects as stale.
+        # -h: GNU/BSD no-dereference. Default GNU touch follows
+        # dangling NDK links (libc++.so*) and dies ENOENT (set -e).
         for p in src/third_party src/build src/buildtools \
           src/testing src/tools src/ios src/resources out; do
           if [[ -d "${p}" ]]; then
-            find "${p}" -exec touch {} +
+            find "${p}" -exec touch -h {} +
           fi
         done

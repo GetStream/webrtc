@@ -88,7 +88,7 @@ runs:
         echo "packing ${SOURCE}/{${members[*]}} -> ${tar_file}"
         tar cf "${tar_file}" -C "${SOURCE}" "${members[@]}"
         if [[ "$(uname -s)" == Darwin ]]; then
-          size="$(stat -f %s "${tar_file}")"
+          size="$(stat -f %z "${tar_file}")"
         else
           size="$(stat -c %s "${tar_file}")"
         fi
