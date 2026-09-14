@@ -392,9 +392,24 @@ gha="$ROOT/../.github"
 ! grep -q 'secrets\.' "$gha/actions/artifact-download/action.yml"
 ! grep -q 'secrets\.' "$gha/actions/artifact-put/action.yml"
 ! grep -q 'secrets\.' "$gha/actions/restore-tree/action.yml"
-grep -q 'tar cf -' "$gha/actions/artifact-put/action.yml"
-grep -q 's3 cp -' "$gha/actions/artifact-put/action.yml"
-! grep -q 's3 cp "${OBJECT_STEM}.tar"' "$gha/actions/artifact-put/action.yml"
+grep -q 'tar cf "${tar_file}"' "$gha/actions/artifact-put/action.yml"
+! grep -q 'tar cf -' "$gha/actions/artifact-put/action.yml"
+! grep -q 's3 cp -' "$gha/actions/artifact-put/action.yml"
+! grep -q 's3 cp "s3://${BUCKET}/${object}" -' \
+  "$gha/actions/artifact-download/action.yml"
+grep -q 's3 cp "s3://${BUCKET}/${object}" "${tar_file}"' \
+  "$gha/actions/artifact-download/action.yml"
+grep -q 's3 cp "${tar_file}" "s3://${BUCKET}/${object}"' \
+  "$gha/actions/artifact-put/action.yml"
+grep -q 'AWS_MAX_ATTEMPTS' "$gha/actions/artifact-download/action.yml"
+grep -q 'AWS_RETRY_MODE' "$gha/actions/artifact-download/action.yml"
+grep -q 'cli-read-timeout' "$gha/actions/artifact-download/action.yml"
+grep -q 'size mismatch' "$gha/actions/artifact-download/action.yml"
+grep -q 'tar xf "${tar_file}"' "$gha/actions/artifact-download/action.yml"
+grep -q '.hetzner-hit-bytes' "$gha/actions/artifact-download/action.yml"
+grep -q '.hetzner-hit-bytes' "$gha/actions/artifact-put/action.yml"
+grep -q '1073741824' "$gha/actions/artifact-put/action.yml"
+grep -q 'skip upload:' "$gha/actions/artifact-put/action.yml"
 grep -q 'object="artifacts/\${{ github.repository }}/\${OBJECT_STEM}.tar"' \
   "$gha/actions/artifact-put/action.yml"
 grep -q 'object="artifacts/\${{ github.repository }}/\${OBJECT_STEM}.tar"' \

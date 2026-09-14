@@ -3,7 +3,7 @@
 #   hetzner_secret_access_key
 #   hetzner_bucket
 name: Download WebRTC build cache from Hetzner
-description: Stream a Hetzner build tarball onto $GITHUB_WORKSPACE and untar.
+description: Multipart-get a Hetzner build tarball to a file, verify size, untar.
 
 inputs:
   path:
@@ -55,13 +55,22 @@ runs:
         export AWS_SECRET_ACCESS_KEY="${HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS:?}"
         export AWS_DEFAULT_REGION=hel1
         export AWS_EC2_METADATA_DISABLED=true
+        export AWS_MAX_ATTEMPTS=10
+        export AWS_RETRY_MODE=adaptive
         endpoint="--endpoint-url https://hel1.your-objectstorage.com"
+        # File dest enables multipart GET (Range parts). A pipe to
+        # stdout is one streaming GET; a drop aborts the whole object.
+        # Peak disk is tar + extract (~2x); rm the tar after tar xf.
+        aws_timeouts=(--cli-connect-timeout 60 --cli-read-timeout 0)
         BUCKET="${HETZNER_BUCKET_CI_ARTIFACTS:?}"
         [[ -n "${OBJECT_STEM}" ]]
         object="artifacts/${{ github.repository }}/${OBJECT_STEM}.tar"
+        tar_file="${RUNNER_TEMP:?}/${OBJECT_STEM}.tar"
+        trap 'rm -f "${tar_file}"' EXIT
         set +e
-        head_out="$(aws ${endpoint} s3api head-object \
-          --bucket "${BUCKET}" --key "${object}" 2>&1)"
+        head_out="$(aws ${endpoint} "${aws_timeouts[@]}" s3api head-object \
+          --bucket "${BUCKET}" --key "${object}" \
+          --query ContentLength --output text 2>&1)"
         head_rc=$?
         set -e
         if [[ "${head_rc}" -ne 0 ]]; then
@@ -74,16 +83,67 @@ runs:
           printf '%s\n' "${head_out}"
           exit 1
         fi
+        expected_size="$(printf '%s' "${head_out}" | tr -d '[:space:]')"
+        if [[ ! "${expected_size}" =~ ^[0-9]+$ ]]; then
+          echo "::error::head-object missing ContentLength for ${object}"
+          printf '%s\n' "${head_out}"
+          exit 1
+        fi
         test -d src/.git
-        echo "extracting ${object} -> ${GITHUB_WORKSPACE}"
-        # aws s3 cp talks to Hetzner's S3-compatible API, not AWS.
-        # Members are gclient dirs + out/; not src/.git.
-        aws ${endpoint} s3 cp "s3://${BUCKET}/${object}" - | tar xf -
+        echo "downloading ${object} (${expected_size} bytes) -> ${tar_file}"
+        df -h "${GITHUB_WORKSPACE}" "${RUNNER_TEMP}" || true
+        file_size() {
+          if [[ "$(uname -s)" == Darwin ]]; then
+            stat -f %s "$1"
+          else
+            stat -c %s "$1"
+          fi
+        }
+        attempts=3
+        download_ok=0
+        for attempt in $(seq 1 "${attempts}"); do
+          rm -f "${tar_file}"
+          echo "download attempt ${attempt}/${attempts}"
+          set +e
+          aws ${endpoint} "${aws_timeouts[@]}" \
+            s3 cp "s3://${BUCKET}/${object}" "${tar_file}"
+          dl_rc=$?
+          set -e
+          if [[ "${dl_rc}" -ne 0 ]]; then
+            echo "download attempt ${attempt} failed (exit ${dl_rc})"
+          elif [[ ! -f "${tar_file}" ]]; then
+            echo "download attempt ${attempt}: missing ${tar_file}"
+          else
+            actual_size="$(file_size "${tar_file}")"
+            if [[ "${actual_size}" != "${expected_size}" ]]; then
+              echo "size mismatch after attempt ${attempt}: local=${actual_size} expected=${expected_size}"
+            else
+              download_ok=1
+              break
+            fi
+          fi
+          if [[ "${attempt}" -lt "${attempts}" ]]; then
+            sleep 10
+          fi
+        done
+        if [[ "${download_ok}" -ne 1 ]]; then
+          actual_size="missing"
+          if [[ -f "${tar_file}" ]]; then
+            actual_size="$(file_size "${tar_file}")"
+          fi
+          echo "::error::failed to download s3://${BUCKET}/${object} after ${attempts} attempts (local=${actual_size} expected=${expected_size})"
+          exit 1
+        fi
+        echo "extracting ${tar_file} -> ${GITHUB_WORKSPACE}"
+        tar xf "${tar_file}"
+        rm -f "${tar_file}"
         test -d src/.git
         test -f src/DEPS
         test ! -L src
         test -d src/third_party
         test -n "$(ls -A src/third_party)"
+        printf '%s\n' "${expected_size}" > \
+          "${GITHUB_WORKSPACE}/.hetzner-hit-bytes"
         # Checkout set src tracked-file mtimes to now. Bump restored
         # tree + out/ so ninja does not see objects as stale.
         for p in src/third_party src/build src/buildtools \

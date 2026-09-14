@@ -87,8 +87,8 @@ and Android jobs run in parallel after Plan:
    skip`; Build dispatch `skip_deps_cache` skips the download)
 3. `make deps` (`RUN_HOOKS=1`, host GCS rust-toolchain on Apple)
 4. `make build` / `make test` (`SKIP_DEPS=1`)
-5. `artifact-put` that host's tree + `out/` (always, including after a
-   skipped HIT)
+5. `artifact-put` that host's tree + `out/` (always after miss /
+   `skip_deps_cache`; skip PUT when HIT size delta is < 1GiB)
 
 Keys: `artifacts/<github.repository>/build-{ios,macos,android}.tar`.
 Same-OS only (Linux tree on Mac is forbidden). Members: `.gclient`,
@@ -107,11 +107,14 @@ Package/Release Build jobs also `make package` and upload `products-*`
 uploads `final-*`. Release attaches `final-*`. `TARGET_OS` is the
 platform of that job (`ios`, `mac`, `android,unix`).
 
-Hetzner: `artifact-download` / `artifact-put` stream `tar cf - … |
-aws s3 cp -` to
+Hetzner: `artifact-download` / `artifact-put` use a local tar file
+then multipart `aws s3 cp` (not a stdout/stdin pipe) to
 `<bucket>/artifacts/<github.repository>/<stem>.tar` with
 `--endpoint-url https://hel1.your-objectstorage.com` and region
-`hel1`. `aws s3 cp` talks to Hetzner's S3-compatible API, not AWS.
+`hel1`. A pipe GET/PUT is one HTTP body; a drop is IncompleteRead
+of the whole object. File dest retries parts. Peak disk is tar +
+tree (~2x); delete the tar after extract/upload. `aws s3 cp` talks
+to Hetzner's S3-compatible API, not AWS.
 Callers pass org secrets via `with:`
 `${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}`,
 `${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}`, and
