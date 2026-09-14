@@ -2,7 +2,8 @@
 # Not listed in the Actions dispatch UI (workflow_call only).
 # Callers pass mode: build | test | package | release.
 #
-# I/O: Linux Deps restores Hetzner deps-key.tar (skip if missing), shallow
+# I/O: Linux Deps restores Hetzner deps-key.tar (skip if missing;
+# skip_deps_cache skips the download for a cold make deps), shallow
 # gclient sync (RUN_HOOKS=0), fetches chromium-webrtc-resources into
 # src/resources, uploads GitHub artifact deps-key of .gclient-git-cache
 # and src/resources (compression-level: 0; GitHub zips once). No
@@ -62,6 +63,11 @@ on:
         required: false
         type: string
         default: ""
+      skip_deps_cache:
+        description: Skip Hetzner deps-key.tar download (cold make deps)
+        required: false
+        type: boolean
+        default: false
 
 env:
   DEPS_ROOT: ${{ github.workspace }}
@@ -162,6 +168,7 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
       - name: Download cached deps-key
+        if: ${{ !inputs.skip_deps_cache }}
         uses: ./src/.github/actions/artifact-download
         with:
           path: deps-key

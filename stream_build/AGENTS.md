@@ -80,7 +80,8 @@ the tree is `webrtc/src` (real directory, not a symlink). `deps` /
 CI checks out with `path: src` so `GITHUB_WORKSPACE` is the webrtc-named
 folder. `DEPS_ROOT=$GITHUB_WORKSPACE`. gclient objects live at
 `$DEPS_ROOT/.gclient-git-cache`. Linux Deps restores the Hetzner
-`deps-key.tar` (skip if missing), `gclient sync --no-history
+`deps-key.tar` (skip if missing; Build dispatch `skip_deps_cache`
+skips the download so Deps does a cold `make deps`), `gclient sync --no-history
 --shallow` (`RUN_HOOKS=0`), fetches `chromium-webrtc-resources` into
 `src/resources`, and uploads GitHub artifact `deps-key` of
 `.gclient-git-cache` and `src/resources` (`compression-level: 0`;
@@ -113,7 +114,8 @@ GetStream/webrtc `src` git worktree, `out/`, or `products/`. Same-run
 handoff is `actions/upload-artifact` name `deps-key` of those paths
 (`include-hidden-files: true`, `compression-level: 0`). GitHub zips
 once. No `deps-key.tar` for GH. `artifact-download` is Hetzner-only
-(Deps warm cache, `if_missing: skip`). `artifact-put` is Hetzner-only
+(Deps warm cache, `if_missing: skip`; skipped when `skip_deps_cache`
+is true). `artifact-put` is Hetzner-only
 (`tar cf - -C <dir> .gclient-git-cache src/resources | aws s3 cp -`)
 to `<bucket>/artifacts/<github.repository>/deps-key.tar` with
 `--endpoint-url https://hel1.your-objectstorage.com` and region
