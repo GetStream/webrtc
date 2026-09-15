@@ -58,6 +58,10 @@ on:
         description: Optional Android ABI, for example arm64-v8a. Empty = default ABI set.
         required: false
         default: ""
+      skip_deps_cache:
+        description: Skip Hetzner deps cache (fresh gclient + ninja)
+        type: boolean
+        default: false
 
 jobs:
   test:
@@ -83,6 +87,7 @@ jobs:
       windows: ${{ inputs.windows }}
       config: ${{ inputs.config }}
       android_arch: ${{ inputs.android_arch }}
+      skip_deps_cache: ${{ inputs.skip_deps_cache }}
 
   package:
     name: Package

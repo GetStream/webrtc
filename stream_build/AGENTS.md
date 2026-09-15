@@ -239,6 +239,8 @@ draw, so Test must not `uses:` a file that defines Build/Package/Release):
 | Package v2 | `build-v2.yml` then `_package.yml` (two caller nodes) |
 | Release v2 | `_test.yml` ∥ `build-v2.yml` then `_package.yml` then `_release.yml` |
 
+Package/Release dispatch duplicate every Build v2 input (`webrtc_ref`, platforms, `config`, `android_arch`, `skip_deps_cache`) and forward them into `build-v2.yml`; `_test.yml` does not get `skip_deps_cache`.
+
 No `_make.yml`. Android Test checkbox default true. Windows
 test/build default false. Actions: `restore-tree`, `artifact-put`,
 `artifact-download`, `setup-webrtc`, `prepare-common-v2`.
