@@ -1,0 +1,68 @@
+# Manual WebRTC build (v2 Makefile DAG). Implementation:
+# .github/workflows/_make.yml
+# Build iOS / macOS / Android in parallel: HIT build-{ios,macos,android},
+# make deps, make build, put that host's tree + out/. No Linux Deps job.
+# No package combine, no products.
+
+name: Build v2
+
+run-name: >-
+  Build v2 config:${{ inputs.config }}${{ inputs.ios == 'true' && ' iOS' || '' }}${{ inputs.macos == 'true' && (inputs.ios == 'true' && ', macOS' || ' macOS') || '' }}${{ inputs.android == 'true' && format('{0} Android{1}', (inputs.ios == 'true' || inputs.macos == 'true') && ',' || '', inputs.android_arch != '' && format(' ({0})', inputs.android_arch) || '') || '' }}${{ inputs.windows == 'true' && ((inputs.ios == 'true' || inputs.macos == 'true' || inputs.android == 'true') && ', Windows' || ' Windows') || '' }}
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      webrtc_ref:
+        description: Branch, tag, or SHA for this repo (GetStream/webrtc)
+        required: true
+        default: main
+      ios:
+        description: Build iOS
+        type: boolean
+        default: true
+      macos:
+        description: Build macOS
+        type: boolean
+        default: true
+      android:
+        description: Build Android
+        type: boolean
+        default: true
+      windows:
+        description: Build Windows (fails clearly if the runner is not a WebRTC host)
+        type: boolean
+        default: false
+      config:
+        description: GN configuration
+        type: choice
+        options:
+          - release
+          - debug
+        default: release
+      android_arch:
+        description: Optional Android ABI, for example arm64-v8a. Empty = default ABI set.
+        required: false
+        default: ""
+      skip_deps_cache:
+        description: Skip Hetzner deps cache (fresh gclient + ninja)
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    name: Build v2
+    uses: ./.github/workflows/_make.yml
+    secrets: inherit
+    with:
+      mode: build
+      webrtc_ref: ${{ inputs.webrtc_ref }}
+      ios: ${{ inputs.ios }}
+      macos: ${{ inputs.macos }}
+      android: ${{ inputs.android }}
+      windows: ${{ inputs.windows }}
+      config: ${{ inputs.config }}
+      android_arch: ${{ inputs.android_arch }}
+      skip_deps_cache: ${{ inputs.skip_deps_cache }}

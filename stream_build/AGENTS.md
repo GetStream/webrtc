@@ -105,7 +105,7 @@ checkout `src`, extract git-cache to `GIT_CACHE_PATH`
 to this runner. Always `make deps` after HIT (cheap from cache).
 Build `CONFIG` is dispatch (default release); `make test` always uses debug
 in `out/ios_tests` / `out/webrtc_tests`, so those subdirs do not mix
-with slice dirs. Test.yml HITs the same `build-ios` / `build-macos`
+with slice dirs. test-v2.yml HITs the same `build-ios` / `build-macos`
 keys. Windows Deps still uploads `deps-windows` to GitHub.
 Package/Release Build jobs also `make package` and upload `products-*`
 (GitHub). Package combine consumes `products-*` (no third ninja) and
@@ -171,3 +171,30 @@ make combine SKIP_LICENSES=1
 make rename apple
 make rename android
 ```
+
+## GitHub Actions DAGs
+
+Two independent dispatch DAGs. Either can `workflow_dispatch` without
+the other.
+
+**v2 (Makefile / this tree)**
+
+| UI name | File |
+|---|---|
+| Build v2 | `.github/workflows/build-v2.yml` |
+| Test v2 | `.github/workflows/test-v2.yml` |
+| Package v2 | `.github/workflows/package-v2.yml` |
+| Release v2 | `.github/workflows/release-v2.yml` |
+
+Reusable: `.github/workflows/_make.yml` (`name: WebRTC make`).
+Actions: `restore-tree`, `artifact-put`, `artifact-download`,
+`setup-webrtc`, `prepare-common-v2`.
+
+**main (legacy Fastlane / stream-webrtc-release-pipeline)**
+
+| UI name | File |
+|---|---|
+| Build | `.github/workflows/manual-platform-tests.yml` |
+| Publish | `.github/workflows/publish.yml` |
+
+Actions: `prepare-common`, `prepare-apple`, `prepare-android`.
