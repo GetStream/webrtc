@@ -41,7 +41,7 @@ Renamed copies feed stream-video-swift-webrtc and stream-video-android-webrtc.
 - `webrtc.mk` — catch-all parent `webrtc/Makefile` template (copied if missing)
 - `scripts/deps.sh` — `gclient sync` at `DEPS_ROOT`; uses this `src` (no second clone)
 - `scripts/gn-gen.sh` — args.gn + gn gen
-- `scripts/package-apple.sh` — lipo + create-xcframework
+- `scripts/package-apple.sh` — lipo + create-xcframework (dSYMs only for `CONFIG=debug`)
 - `scripts/combine-apple.sh` — discover platform xcframeworks and merge
 - `scripts/rename-apple.sh` — copy WebRTC.xcframework → StreamWebRTC
 - `scripts/rename-android.sh` — copy libwebrtc.aar into PRODUCTS/renamed/

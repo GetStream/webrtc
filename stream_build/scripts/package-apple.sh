@@ -124,7 +124,8 @@ add_framework() {
   local fw="$1"
   [[ -d "$fw" ]] || return 0
   xc_args+=(-framework "$fw")
-  if [[ -d "${fw}.dSYM" ]]; then
+  # Match legacy publish.yml: ship dSYMs only for CONFIG=debug.
+  if [[ "${CONFIG:-release}" == debug && -d "${fw}.dSYM" ]]; then
     xc_args+=(-debug-symbols "${fw}.dSYM")
   fi
   added=1
