@@ -1,0 +1,223 @@
+# Hetzner-only. Callers pass org secrets via with:
+#   hetzner_access_key
+#   hetzner_secret_access_key
+#   hetzner_bucket
+name: Download WebRTC build cache from Hetzner
+description: Range-get a Hetzner build tarball, resume on retry, verify size, untar.
+
+inputs:
+  path:
+    description: Object name. Downloads artifacts/<repo>/<path>.tar
+    required: true
+  if_missing:
+    description: error fails when the object is absent; skip continues.
+    required: false
+    default: error
+  hetzner_access_key:
+    description: Hetzner object storage access key.
+    required: true
+  hetzner_secret_access_key:
+    description: Hetzner object storage secret access key.
+    required: true
+  hetzner_bucket:
+    description: Hetzner object storage bucket name.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Ensure aws CLI
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v aws >/dev/null; then
+          exit 0
+        fi
+        if [[ "$(uname -s)" == Darwin ]]; then
+          brew install awscli
+        else
+          sudo apt-get update
+          sudo apt-get install -y awscli
+        fi
+
+    - name: Download and extract build tarball
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        HETZNER_ACCESS_KEY_CI_ARTIFACTS: ${{ inputs.hetzner_access_key }}
+        HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS: ${{ inputs.hetzner_secret_access_key }}
+        HETZNER_BUCKET_CI_ARTIFACTS: ${{ inputs.hetzner_bucket }}
+        OBJECT_STEM: ${{ inputs.path }}
+        IF_MISSING: ${{ inputs.if_missing }}
+      run: |
+        set -euo pipefail
+        export AWS_ACCESS_KEY_ID="${HETZNER_ACCESS_KEY_CI_ARTIFACTS:?}"
+        export AWS_SECRET_ACCESS_KEY="${HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS:?}"
+        export AWS_DEFAULT_REGION=hel1
+        export AWS_EC2_METADATA_DISABLED=true
+        export AWS_MAX_ATTEMPTS=10
+        export AWS_RETRY_MODE=adaptive
+        endpoint="--endpoint-url https://hel1.your-objectstorage.com"
+        # Sequential get-object leaves a valid prefix on drop.
+        # s3 cp multipart may not, and it truncates dest on start.
+        # Peak disk is tar + extract (~2x); rm the tar after tar xf.
+        aws_timeouts=(--cli-connect-timeout 60 --cli-read-timeout 0)
+        BUCKET="${HETZNER_BUCKET_CI_ARTIFACTS:?}"
+        [[ -n "${OBJECT_STEM}" ]]
+        object="artifacts/${{ github.repository }}/${OBJECT_STEM}.tar"
+        tar_file="${RUNNER_TEMP:?}/${OBJECT_STEM}.tar"
+        partial="${tar_file}.partial"
+        chunk="${tar_file}.chunk"
+        trap 'rm -f "${tar_file}" "${partial}" "${chunk}"' EXIT
+        set +e
+        head_out="$(aws ${endpoint} "${aws_timeouts[@]}" s3api head-object \
+          --bucket "${BUCKET}" --key "${object}" \
+          --query ContentLength --output text 2>&1)"
+        head_rc=$?
+        set -e
+        if [[ "${head_rc}" -ne 0 ]]; then
+          if [[ "${IF_MISSING}" == "skip" ]] && \
+            grep -qiE '404|Not Found|NoSuchKey|NotFound' <<<"${head_out}"; then
+            echo "missing ${object}; skipping extract"
+            exit 0
+          fi
+          echo "::error::failed to access s3://${BUCKET}/${object}"
+          printf '%s\n' "${head_out}"
+          exit 1
+        fi
+        expected_size="$(printf '%s' "${head_out}" | tr -d '[:space:]')"
+        if [[ ! "${expected_size}" =~ ^[0-9]+$ ]]; then
+          echo "::error::head-object missing ContentLength for ${object}"
+          printf '%s\n' "${head_out}"
+          exit 1
+        fi
+        test -d src/.git
+        echo "downloading ${object} (${expected_size} bytes) -> ${tar_file}"
+        df -h "${GITHUB_WORKSPACE}" "${RUNNER_TEMP}" || true
+        file_size() {
+          if [[ "$(uname -s)" == Darwin ]]; then
+            stat -f %z "$1"
+          else
+            stat -c %s "$1"
+          fi
+        }
+        # 20.8 GiB Android tar; IncompleteRead after ~1–3 GiB
+        # (run 34870017073). Resume appended. 20 tries covers
+        # the 1.2 GiB worst chunk; remaining bytes are logged.
+        attempts=20
+        download_ok=0
+        for attempt in $(seq 1 "${attempts}"); do
+          if [[ -f "${partial}" ]]; then
+            have="$(file_size "${partial}")"
+          else
+            have=0
+          fi
+          if [[ "${have}" -gt "${expected_size}" ]]; then
+            echo "partial ${have} > ${expected_size}; deleting"
+            rm -f "${partial}"
+            have=0
+          fi
+          remaining=$((expected_size - have))
+          echo "download attempt ${attempt}/${attempts} resume_from=${have} remaining=${remaining}"
+          if [[ "${have}" -lt "${expected_size}" ]]; then
+            rm -f "${chunk}"
+            start="${have}"
+            (
+              last="${start}"
+              stall_logged=0
+              t0="$(date +%s)"
+              while sleep 15; do
+                have_now=0
+                if [[ -f "${partial}" ]]; then
+                  have_now="$(file_size "${partial}")"
+                fi
+                if [[ -f "${chunk}" ]]; then
+                  have_now=$((have_now + $(file_size "${chunk}")))
+                fi
+                elapsed=$(( $(date +%s) - t0 ))
+                pct=0
+                if [[ "${expected_size}" -gt 0 ]]; then
+                  pct=$((have_now * 100 / expected_size))
+                fi
+                echo "download progress: ${have_now} / ${expected_size} (${pct}%) resume_from=${start} elapsed=${elapsed}s"
+                if [[ "${have_now}" -eq "${last}" && "${stall_logged}" -eq 0 ]]; then
+                  echo "download progress: size not growing yet (aws may buffer until GET completes)"
+                  stall_logged=1
+                fi
+                last="${have_now}"
+              done
+            ) &
+            prog_pid=$!
+            if [[ "${have}" -eq 0 ]]; then
+              set +e
+              aws ${endpoint} "${aws_timeouts[@]}" s3api get-object \
+                --bucket "${BUCKET}" --key "${object}" \
+                --range "bytes=0-" "${partial}"
+              dl_rc=$?
+              set -e
+            else
+              set +e
+              aws ${endpoint} "${aws_timeouts[@]}" s3api get-object \
+                --bucket "${BUCKET}" --key "${object}" \
+                --range "bytes=${have}-" "${chunk}"
+              dl_rc=$?
+              set -e
+              if [[ -f "${chunk}" ]]; then
+                chunk_size="$(file_size "${chunk}")"
+                if [[ "${chunk_size}" -gt 0 ]]; then
+                  cat "${chunk}" >> "${partial}"
+                fi
+                rm -f "${chunk}"
+              fi
+            fi
+            kill "${prog_pid}" 2>/dev/null || true
+            wait "${prog_pid}" 2>/dev/null || true
+            if [[ "${dl_rc}" -ne 0 ]]; then
+              echo "download attempt ${attempt} failed (exit ${dl_rc})"
+            fi
+          fi
+          if [[ -f "${partial}" ]]; then
+            have="$(file_size "${partial}")"
+          else
+            have=0
+          fi
+          remaining=$((expected_size - have))
+          if [[ "${have}" -eq "${expected_size}" ]]; then
+            mv "${partial}" "${tar_file}"
+            download_ok=1
+            break
+          fi
+          echo "size mismatch after attempt ${attempt}: local=${have} expected=${expected_size} remaining=${remaining}"
+          if [[ "${attempt}" -lt "${attempts}" ]]; then
+            sleep 10
+          fi
+        done
+        if [[ "${download_ok}" -ne 1 ]]; then
+          actual_size="missing"
+          if [[ -f "${partial}" ]]; then
+            actual_size="$(file_size "${partial}")"
+          elif [[ -f "${tar_file}" ]]; then
+            actual_size="$(file_size "${tar_file}")"
+          fi
+          remaining="n/a"
+          if [[ "${actual_size}" =~ ^[0-9]+$ ]]; then
+            remaining=$((expected_size - actual_size))
+          fi
+          echo "::error::failed to download s3://${BUCKET}/${object} after ${attempts} attempts (local=${actual_size} expected=${expected_size} remaining=${remaining})"
+          exit 1
+        fi
+        echo "extracting ${tar_file} -> ${GITHUB_WORKSPACE}"
+        tar xf "${tar_file}"
+        rm -f "${tar_file}"
+        test -d src/.git
+        test -f src/DEPS
+        test ! -L src
+        printf '%s\n' "${expected_size}" > \
+          "${GITHUB_WORKSPACE}/.hetzner-hit-bytes"
+        # Overlay members only. Do not touch .gclient-git-cache.
+        # -h: GNU/BSD no-dereference if a leftover symlink exists.
+        for p in src/resources .cipd; do
+          if [[ -d "${p}" ]]; then
+            find "${p}" -exec touch -h {} +
+          fi
+        done

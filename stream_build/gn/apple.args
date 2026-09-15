@@ -1,0 +1,7 @@
+# Overlay for Apple framework slices (iOS, Catalyst, macOS).
+rtc_enable_objc_symbol_export = true
+ios_enable_code_signing = false
+enable_dsyms = true
+enable_stripping = true
+rtc_libvpx_build_vp9 = true
+use_rtti = false
