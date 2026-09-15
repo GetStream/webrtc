@@ -161,6 +161,7 @@ expect_make_bootstrap() {
 
 expect_make_bootstrap build ios
 expect_make_bootstrap test macos
+expect_make_bootstrap test android
 expect_make_bootstrap package ios
 expect_make_bootstrap deps
 expect_make_bootstrap runhooks
@@ -430,19 +431,49 @@ grep -q 'object="artifacts/\${{ github.repository }}/\${OBJECT_STEM}.tar"' \
   "$gha/actions/artifact-put/action.yml"
 grep -q 'object="artifacts/\${{ github.repository }}/\${OBJECT_STEM}.tar"' \
   "$gha/actions/artifact-download/action.yml"
-! grep -qE 'name: Deps$' "$gha/workflows/_make.yml"
-! grep -q 'name: Hetzner backfill' "$gha/workflows/_make.yml"
-! grep -q 'path: deps-key' "$gha/workflows/_make.yml"
-! grep -q 'name: deps-key' "$gha/workflows/_make.yml"
-grep -q 'cache_key: build-ios' "$gha/workflows/_make.yml"
-grep -q 'cache_key: build-macos' "$gha/workflows/_make.yml"
-grep -q 'cache_key: build-android' "$gha/workflows/_make.yml"
-grep -q 'include-hidden-files: true' "$gha/workflows/_make.yml"
-grep -q 'compression-level: 0' "$gha/workflows/_make.yml"
-grep -A5 'name: Build iOS' "$gha/workflows/_make.yml" | grep -q 'needs: \[plan\]'
-! grep -A8 'name: Build iOS' "$gha/workflows/_make.yml" | grep -q deps
-grep -A5 'name: Test iOS' "$gha/workflows/_make.yml" | grep -q 'needs: \[plan\]'
-! grep -A8 'name: Test iOS' "$gha/workflows/_make.yml" | grep -q deps
+[[ ! -e "$gha/workflows/_make.yml" ]]
+! grep -q '_make.yml' "$gha/workflows/"*.yml
+grep -q 'uses: ./.github/workflows/_test.yml' "$gha/workflows/test-v2.yml"
+grep -q 'uses: ./.github/workflows/_build.yml' "$gha/workflows/build-v2.yml"
+grep -q 'uses: ./.github/workflows/build-v2.yml' \
+  "$gha/workflows/package-v2.yml"
+grep -q 'uses: ./.github/workflows/_package.yml' \
+  "$gha/workflows/package-v2.yml"
+grep -q 'uses: ./.github/workflows/_test.yml' \
+  "$gha/workflows/release-v2.yml"
+grep -q 'uses: ./.github/workflows/build-v2.yml' \
+  "$gha/workflows/release-v2.yml"
+grep -q 'uses: ./.github/workflows/_package.yml' \
+  "$gha/workflows/release-v2.yml"
+grep -q 'uses: ./.github/workflows/_release.yml' \
+  "$gha/workflows/release-v2.yml"
+grep -A2 'description: Run Android tests' "$gha/workflows/test-v2.yml" | \
+  grep -q 'default: true'
+! grep -qE 'name: Deps$' "$gha/workflows/_build.yml"
+! grep -q 'name: Hetzner backfill' "$gha/workflows/_build.yml"
+! grep -q 'path: deps-key' "$gha/workflows/_build.yml"
+! grep -q 'name: deps-key' "$gha/workflows/_build.yml"
+grep -q 'cache_key: build-ios' "$gha/workflows/_build.yml"
+grep -q 'cache_key: build-macos' "$gha/workflows/_build.yml"
+grep -q 'cache_key: build-android' "$gha/workflows/_build.yml"
+grep -q 'include-hidden-files: true' "$gha/workflows/_build.yml"
+grep -q 'compression-level: 0' "$gha/workflows/_build.yml"
+grep -A5 'name: Build iOS' "$gha/workflows/_build.yml" | grep -q 'needs: \[plan\]'
+! grep -A8 'name: Build iOS' "$gha/workflows/_build.yml" | grep -q deps
+grep -A5 'name: Test iOS' "$gha/workflows/_test.yml" | grep -q 'needs: \[plan\]'
+! grep -A8 'name: Test iOS' "$gha/workflows/_test.yml" | grep -q deps
+grep -A5 'name: Test Android' "$gha/workflows/_test.yml" | grep -q 'needs: \[plan\]'
+grep -q 'make test android' "$gha/workflows/_test.yml"
+! grep -q 'name: Build iOS' "$gha/workflows/_test.yml"
+! grep -q 'github_release' "$gha/workflows/_test.yml"
+! grep -q 'Trigger downstream' "$gha/workflows/_test.yml"
+! grep -q 'name: Test iOS' "$gha/workflows/_build.yml"
+! grep -q 'github_release' "$gha/workflows/_build.yml"
+! grep -q 'make test' "$gha/workflows/_package.yml"
+! grep -q 'name: Build iOS' "$gha/workflows/_package.yml"
+grep -q 'make combine' "$gha/workflows/_package.yml"
+! grep -q 'name: Test iOS' "$gha/workflows/package-v2.yml"
+! grep -q 'make test android is not wired' "$ROOT/Makefile"
 grep -q 'artifact-download' "$gha/actions/restore-tree/action.yml"
 grep -q 'hetzner_access_key' "$gha/actions/restore-tree/action.yml"
 grep -q 'actions/download-artifact' "$gha/actions/restore-tree/action.yml"
@@ -450,7 +481,7 @@ grep -q 'actions/download-artifact' "$gha/actions/restore-tree/action.yml"
 grep -q 'if_missing: skip' "$gha/actions/restore-tree/action.yml"
 grep -q 'SHALLOW: "1"' "$gha/actions/restore-tree/action.yml"
 grep -q 'RUN_HOOKS: "1"' "$gha/actions/restore-tree/action.yml"
-! grep -q 'RUN_HOOKS: "0"' "$gha/workflows/_make.yml"
+! grep -q 'RUN_HOOKS: "0"' "$gha/workflows/_build.yml"
 ! grep -q 'Drop git-cache alternates' "$gha/actions/restore-tree/action.yml"
 grep -q 'GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache' \
   "$gha/actions/restore-tree/action.yml"
@@ -469,6 +500,6 @@ grep -A12 'members=(.gclient-git-cache)' "$gha/actions/artifact-put/action.yml" 
   grep -q 'third_party'
 ! grep -q 'products' "$gha/actions/artifact-put/action.yml"
 grep -q 'pack members:' "$gha/actions/artifact-put/action.yml"
-grep -q 'uses: ./src/.github/actions/artifact-put' "$gha/workflows/_make.yml"
+grep -q 'uses: ./src/.github/actions/artifact-put' "$gha/workflows/_build.yml"
 
 echo "ok"

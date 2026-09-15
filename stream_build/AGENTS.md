@@ -36,6 +36,7 @@ Renamed copies feed stream-video-swift-webrtc and stream-video-android-webrtc.
 - `Makefile` — verb + platform dispatch
 - `gn/common.args` — Stream policy GN args
 - `gn/slices.tsv` — slice → ninja target + GN overlay
+- `gn/ios-test.args`, `gn/macos-test.args`, `gn/android-test.args`, `gn/windows-test.args`
 - `scripts/bootstrap.sh` — wrap this checkout as Chromium `webrtc/src`
 - `webrtc.mk` — catch-all parent `webrtc/Makefile` template (copied if missing)
 - `scripts/deps.sh` — `gclient sync` at `DEPS_ROOT`; uses this `src` (no second clone)
@@ -106,21 +107,22 @@ checkout `src`, extract git-cache to `GIT_CACHE_PATH`
 `rewrite_git_cache_alternates` so Linux-packed cache paths retarget
 to this runner. Always `make deps` after HIT (cheap from cache).
 Build `CONFIG` is dispatch (default release); `make test` always uses debug
-in `out/ios_tests` / `out/webrtc_tests`, so those subdirs do not mix
-with slice dirs. Test v2 / Release tests (`test_ios`, `test_macos`,
-`test_windows`) do not HIT or PUT Hetzner and do not use a git-cache
-artifact: checkout `webrtc_ref`, `setup-webrtc`, `make test` (cold
-gclient via maybe-deps). Independent of Build. Android tests stay
-unwired. Windows Build still uploads `deps-windows` to GitHub.
-Build jobs always `make package` and upload `products-*` whenever they
-compile (`mode` build, package, or release). Test jobs do not.
-Package v2 `uses` Build v2 (`workflow_call`, mode=build) then combine
-only: download `products-*`, `make combine`, upload `final-*`. No
-second HIT/ninja. Release keeps Test ∥ those same Build jobs inside
-`_make.yml` (`mode=release`) then combine there — do not nest Package
-v2 → Build v2 → `_make.yml`. Combine downloads `products-*` only —
-not `.gclient-git-cache` and not `out/` — then `make combine` / `make
-rename` and uploads `final-*`. Release attaches `final-*`.
+in `out/ios_tests` / `out/webrtc_tests` / `out/android_tests` /
+`out/windows_tests`, so those subdirs do not mix with slice dirs. Test
+v2 (`_test.yml`: `test_ios`, `test_macos`, `test_android`,
+`test_windows`) does not HIT or PUT Hetzner and does not use a
+git-cache artifact: checkout `webrtc_ref`, `setup-webrtc`, `make test`
+(cold gclient via maybe-deps). Independent of Build. Android tests
+are host Robolectric (`android_sdk_junit_tests`), not an emulator.
+Windows Build still uploads `deps-windows` to GitHub. Build jobs
+always `make package` and upload `products-*`. Test jobs do not.
+Package v2 `uses` Build v2 then `_package.yml` combine only: download
+`products-*`, `make combine`, upload `final-*`. No second HIT/ninja.
+Release v2 is four `uses:` jobs: `_test.yml` ∥ `build-v2.yml` →
+`_package.yml` (rename) → `_release.yml`. Combine downloads
+`products-*` only — not `.gclient-git-cache` and not `out/` — then
+`make combine` / `make rename` and uploads `final-*`. Release attaches
+`final-*`.
 
 Do not hand combine `out/` slice dirs. Names are `ios-arm64-device`,
 `ios-arm64-simulator`, `ios-x64-simulator`, `catalyst-arm64`,
@@ -131,8 +133,8 @@ Do not hand combine `out/` slice dirs. Names are `ios-arm64-device`,
 requires Linux and `src/sdk/android/AndroidManifest.xml`.
 `package-windows.sh` requires Windows. Combine is one job (`macos-26`
 if any Apple, else `ubuntu-latest`), so it cannot run the host-gated
-package scripts. Test dirs `out/ios_tests` / `out/webrtc_tests` are
-unused for package. `products/` after `make package` is the
+package scripts. Test dirs `out/ios_tests` / `out/webrtc_tests` /
+`out/android_tests` are unused for package. `products/` after `make package` is the
 xcframework / AAR / libs (smallest licensed handoff). Hetzner pack
 stays git-cache + resources + cipd (never `out/`). `TARGET_OS` is the
 platform of that job (`ios`, `mac`, `android,unix`).
@@ -159,7 +161,7 @@ not use `${{ secrets.* }}`. `products-*` / `final-*` stay on
 
 - bootstrap: any host (writes layout + `.gclient`; no depot_tools)
 - ios / macos / combine / rename apple: Darwin
-- android / rename android: Linux for build/package; rename android is a file copy on any host
+- android / rename android: Linux for build/package/test; rename android is a file copy on any host
 - windows: Windows
 - deps / runhooks: any host with depot_tools
 
@@ -211,11 +213,26 @@ the other.
 | Package v2 | `.github/workflows/package-v2.yml` |
 | Release v2 | `.github/workflows/release-v2.yml` |
 
-Reusable: `.github/workflows/_make.yml` (`name: WebRTC make v2`).
-Build v2 is also `workflow_call` (mode=build, always `products-*`).
-Package v2 calls Build v2 then combine; it does not call `_make.yml`.
-Actions: `restore-tree`, `artifact-put`, `artifact-download`,
-`setup-webrtc`, `prepare-common-v2`.
+Reusable (each slice only the jobs it needs; skipped `if:` jobs still
+draw, so Test must not `uses:` a file that defines Build/Package/Release):
+
+| File | Jobs |
+|---|---|
+| `_test.yml` | validate, plan, test_ios/macos/android/windows |
+| `_build.yml` | validate, plan, deps_windows, build ios/macos/android/windows + products-* |
+| `_package.yml` | combine products-* → final-* (rename on Release) |
+| `_release.yml` | GitHub release + trigger downstream |
+
+| Dispatch | `uses:` |
+|---|---|
+| Test v2 | `_test.yml` only |
+| Build v2 | `_build.yml` only (`workflow_dispatch` + `workflow_call`) |
+| Package v2 | `build-v2.yml` then `_package.yml` (two caller nodes) |
+| Release v2 | `_test.yml` ∥ `build-v2.yml` then `_package.yml` then `_release.yml` |
+
+No `_make.yml`. Android Test checkbox default true. Windows
+test/build default false. Actions: `restore-tree`, `artifact-put`,
+`artifact-download`, `setup-webrtc`, `prepare-common-v2`.
 
 **main (legacy Fastlane / stream-webrtc-release-pipeline)**
 

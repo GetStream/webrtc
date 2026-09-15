@@ -1,0 +1,375 @@
+# Called by Build v2 (dispatch or Package/Release workflow_call).
+# workflow_call only. HIT Hetzner, ninja, make package, products-* GH
+# artifact, Hetzner git-cache PUT. No Test, no combine, no GH release.
+
+name: WebRTC build v2
+
+on:
+  workflow_call:
+    inputs:
+      webrtc_ref:
+        required: true
+        type: string
+      ios:
+        required: true
+        type: boolean
+      macos:
+        required: true
+        type: boolean
+      android:
+        required: true
+        type: boolean
+      windows:
+        required: true
+        type: boolean
+      config:
+        required: true
+        type: string
+      android_arch:
+        required: false
+        type: string
+        default: ""
+      skip_deps_cache:
+        description: Skip Hetzner build cache download (cold make deps)
+        required: false
+        type: boolean
+        default: false
+
+env:
+  DEPS_ROOT: ${{ github.workspace }}
+  WEBRTC_SRC: ${{ github.workspace }}/src
+  GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
+  HETZNER_ACCESS_KEY_CI_ARTIFACTS: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+  HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+  HETZNER_BUCKET_CI_ARTIFACTS: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+
+jobs:
+  validate_inputs:
+    name: Validate inputs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure at least one platform is selected
+        env:
+          BUILD_IOS: ${{ inputs.ios }}
+          BUILD_MACOS: ${{ inputs.macos }}
+          BUILD_ANDROID: ${{ inputs.android }}
+          BUILD_WINDOWS: ${{ inputs.windows }}
+        run: |
+          set -euo pipefail
+          if [[ "${BUILD_IOS}" != "true" && "${BUILD_MACOS}" != "true" &&
+                "${BUILD_ANDROID}" != "true" && "${BUILD_WINDOWS}" != "true" ]]; then
+            echo "Select at least one platform."
+            exit 1
+          fi
+
+      - name: Validate Android build options
+        if: ${{ inputs.android }}
+        env:
+          ANDROID_ARCH: ${{ inputs.android_arch }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${ANDROID_ARCH}" && "${ANDROID_ARCH}" =~ [[:space:]] ]]; then
+            echo "::error::android_arch accepts a single ABI, for example arm64-v8a."
+            exit 1
+          fi
+
+  plan:
+    name: Plan
+    needs: validate_inputs
+    runs-on: ubuntu-latest
+    outputs:
+      android_target_os: ${{ steps.plan.outputs.android_target_os }}
+      windows_target_os: ${{ steps.plan.outputs.windows_target_os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: src
+      - id: plan
+        name: Plan target_os
+        uses: ./src/.github/actions/prepare-common-v2
+        with:
+          platform_ios: ${{ inputs.ios }}
+          platform_macos: ${{ inputs.macos }}
+          platform_android: ${{ inputs.android }}
+          platform_windows: ${{ inputs.windows }}
+
+  deps_windows:
+    name: Deps Windows
+    needs: plan
+    if: ${{ inputs.windows }}
+    runs-on: windows-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+      - name: Check Windows WebRTC host
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          command -v make >/dev/null || missing+=("GNU make")
+          command -v python3 >/dev/null || missing+=("python3")
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "::error::Windows WebRTC host is not ready on windows-latest (missing: ${missing[*]}). This job is wired for make deps windows, but the runner image cannot run it yet."
+            exit 1
+          fi
+      - name: Setup WebRTC checkout
+        uses: ./src/.github/actions/setup-webrtc
+        with:
+          webrtc_ref: ${{ inputs.webrtc_ref }}
+      - name: gclient sync (Windows)
+        working-directory: src/stream_build
+        shell: bash
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          WEBRTC_SRC: ${{ github.workspace }}/src
+          GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
+          TARGET_OS: ${{ needs.plan.outputs.windows_target_os }}
+          JOBS: "8"
+          WEBRTC_REPO: https://github.com/GetStream/webrtc.git
+        run: make deps
+      - name: Upload deps-windows
+        uses: actions/upload-artifact@v7
+        with:
+          name: deps-windows
+          path: .gclient-git-cache
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  build_ios:
+    name: Build iOS v2
+    needs: [plan]
+    if: ${{ inputs.ios }}
+    runs-on: macos-26
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+      - uses: ./src/.github/actions/restore-tree
+        with:
+          webrtc_ref: ${{ inputs.webrtc_ref }}
+          target_os: ios
+          cache_key: build-ios
+          skip_cache: ${{ inputs.skip_deps_cache }}
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+      - name: Build iOS
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          PRODUCTS: ${{ github.workspace }}/products
+          CONFIG: ${{ inputs.config }}
+          SKIP_DEPS: "1"
+        run: make build ios
+      # make package here: licenses need GN out + src; Darwin lipo.
+      # Handoff is products/ios (xcframework), not git-cache or out/
+      # (ios-arm64-device ~1.2GiB ninja; ios_tests unused).
+      - name: Package iOS
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          PRODUCTS: ${{ github.workspace }}/products
+          CONFIG: ${{ inputs.config }}
+          SKIP_DEPS: "1"
+        run: make package ios
+      - name: Upload build-ios to Hetzner
+        uses: ./src/.github/actions/artifact-put
+        with:
+          path: build-ios
+          source: ${{ github.workspace }}
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+      - name: Upload products-ios
+        uses: actions/upload-artifact@v7
+        with:
+          name: products-ios
+          path: products/ios
+          if-no-files-found: error
+          retention-days: 7
+
+  build_macos:
+    name: Build macOS v2
+    needs: [plan]
+    if: ${{ inputs.macos }}
+    runs-on: macos-26
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+      - uses: ./src/.github/actions/restore-tree
+        with:
+          webrtc_ref: ${{ inputs.webrtc_ref }}
+          target_os: mac
+          cache_key: build-macos
+          skip_cache: ${{ inputs.skip_deps_cache }}
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+      - name: Build macOS
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          PRODUCTS: ${{ github.workspace }}/products
+          CONFIG: ${{ inputs.config }}
+          SKIP_DEPS: "1"
+        run: make build macos
+      # make package here: licenses need GN out + src; Darwin lipo.
+      # Handoff is products/macos, not git-cache or out/macos-*.
+      - name: Package macOS
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          PRODUCTS: ${{ github.workspace }}/products
+          CONFIG: ${{ inputs.config }}
+          SKIP_DEPS: "1"
+        run: make package macos
+      - name: Upload build-macos to Hetzner
+        uses: ./src/.github/actions/artifact-put
+        with:
+          path: build-macos
+          source: ${{ github.workspace }}
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+      - name: Upload products-macos
+        uses: actions/upload-artifact@v7
+        with:
+          name: products-macos
+          path: products/macos
+          if-no-files-found: error
+          retention-days: 7
+
+  build_android:
+    name: Build Android v2
+    needs: [plan]
+    if: ${{ inputs.android }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+      - uses: ./src/.github/actions/restore-tree
+        with:
+          webrtc_ref: ${{ inputs.webrtc_ref }}
+          target_os: ${{ needs.plan.outputs.android_target_os }}
+          cache_key: build-android
+          skip_cache: ${{ inputs.skip_deps_cache }}
+          install_android_packages: "true"
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+      - name: Build Android
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          PRODUCTS: ${{ github.workspace }}/products
+          CONFIG: ${{ inputs.config }}
+          SKIP_DEPS: "1"
+          ANDROID_ARCH: ${{ inputs.android_arch }}
+        run: |
+          set -euo pipefail
+          extra=()
+          if [[ -n "${ANDROID_ARCH}" ]]; then
+            extra+=(ARCHS="${ANDROID_ARCH}")
+          fi
+          make build android "${extra[@]}"
+      # make package here: require-linux + AndroidManifest + licenses.
+      # Combine is macos-26 when Apple is selected, so it cannot pack
+      # the AAR. Handoff is products/ (AAR + LICENSE), not out/android-*.
+      - name: Package Android
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          PRODUCTS: ${{ github.workspace }}/products
+          CONFIG: ${{ inputs.config }}
+          SKIP_DEPS: "1"
+          ANDROID_ARCH: ${{ inputs.android_arch }}
+        run: |
+          set -euo pipefail
+          extra=()
+          if [[ -n "${ANDROID_ARCH}" ]]; then
+            extra+=(ARCHS="${ANDROID_ARCH}")
+          fi
+          make package android "${extra[@]}"
+      - name: Upload build-android to Hetzner
+        uses: ./src/.github/actions/artifact-put
+        with:
+          path: build-android
+          source: ${{ github.workspace }}
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+      - name: Upload products-android
+        uses: actions/upload-artifact@v7
+        with:
+          name: products-android
+          path: products
+          if-no-files-found: error
+          retention-days: 7
+
+  build_windows:
+    name: Build Windows v2
+    needs: [plan, deps_windows]
+    if: ${{ inputs.windows }}
+    runs-on: windows-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+      - name: Check Windows WebRTC host
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          command -v make >/dev/null || missing+=("GNU make")
+          command -v python3 >/dev/null || missing+=("python3")
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "::error::Windows WebRTC host is not ready on windows-latest (missing: ${missing[*]}). This job is wired for make build windows, but the runner image cannot run it yet."
+            exit 1
+          fi
+      - uses: ./src/.github/actions/restore-tree
+        with:
+          webrtc_ref: ${{ inputs.webrtc_ref }}
+          target_os: ${{ needs.plan.outputs.windows_target_os }}
+          deps_artifact: deps-windows
+      - name: Build Windows
+        working-directory: src/stream_build
+        shell: bash
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          PRODUCTS: ${{ github.workspace }}/products
+          CONFIG: ${{ inputs.config }}
+          SKIP_DEPS: "1"
+        run: make build windows
+      # make package here: require-windows. Combine is never Windows.
+      # Handoff is products/windows, not git-cache or out/windows-*.
+      - name: Package Windows
+        working-directory: src/stream_build
+        shell: bash
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          PRODUCTS: ${{ github.workspace }}/products
+          CONFIG: ${{ inputs.config }}
+          SKIP_DEPS: "1"
+        run: make package windows
+      - name: Upload products-windows
+        uses: actions/upload-artifact@v7
+        with:
+          name: products-windows
+          path: products/windows
+          if-no-files-found: error
+          retention-days: 7

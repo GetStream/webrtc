@@ -65,6 +65,7 @@ ANDROID_SLICES   := android-armeabi-v7a android-arm64-v8a android-x86 android-x8
 WINDOWS_SLICES   := windows-x64 windows-arm64
 IOS_TEST_TARGETS   ?= sdk_unittests sdk_framework_unittests
 MACOS_TEST_TARGETS ?= rtc_unittests rtc_pc_unittests rtc_stats_unittests
+ANDROID_TEST_TARGETS ?= android_sdk_junit_tests
 WINDOWS_TEST_TARGETS ?= rtc_unittests rtc_pc_unittests rtc_stats_unittests
 
 ios_slices      = $(if $(filter 1,$(SKIP_MACCATALYST)),$(filter-out $(CATALYST_SLICES),$(IOS_SLICES)),$(IOS_SLICES))
@@ -213,6 +214,7 @@ announce:
 	   case "$(PLATFORM)" in \
 	     ios) echo "    tests:      $(if $(TEST_TARGETS),$(TEST_TARGETS),$(IOS_TEST_TARGETS))" ;; \
 	     macos) echo "    tests:      $(if $(TEST_TARGETS),$(TEST_TARGETS),$(MACOS_TEST_TARGETS))" ;; \
+	     android) echo "    tests:      $(if $(TEST_TARGETS),$(TEST_TARGETS),$(ANDROID_TEST_TARGETS))" ;; \
 	     windows) echo "    tests:      $(if $(TEST_TARGETS),$(TEST_TARGETS),$(WINDOWS_TEST_TARGETS))" ;; \
 	   esac; \
 	 fi; \
@@ -354,10 +356,33 @@ test-macos: require-darwin maybe-deps require-src
 	   "$(OUT)/webrtc_tests/$$target" --gtest_filter="-$$filter" $(EXTRA_ARGS); \
 	 done
 
-test-android:
-	@echo "error: make test android is not wired (no device runner)." >&2
-	@echo "use: make build android && make package android" >&2
-	@exit 1
+# ponytail: host Robolectric (android_sdk_junit_tests), not an emulator
+# farm. Upgrade: bin/run_rtc_unittests + device/emulator.
+test-android: require-linux maybe-deps require-src
+	@$(SCRIPTS)/gn-gen.sh \
+		--src "$(WEBRTC_SRC)" \
+		--out "$(OUT)/android_tests" \
+		--config debug \
+		--overlay android-test \
+		--extra "$(ALL_GN_ARGS)"
+	@ninja_bin="$$($(SCRIPTS)/common.sh ninja "$(WEBRTC_SRC)")"; \
+	 targets="$(if $(TEST_TARGETS),$(TEST_TARGETS),$(ANDROID_TEST_TARGETS))"; \
+	 echo "$$ninja_bin -C $(OUT)/android_tests $$targets"; \
+	 "$$ninja_bin" -C "$(OUT)/android_tests" $$targets -j"$(JOBS)"; \
+	 for target in $$targets; do \
+	   run="$(OUT)/android_tests/bin/run_$$target"; \
+	   bin="$(OUT)/android_tests/$$target"; \
+	   if [[ -x "$$run" ]]; then \
+	     echo "$$run"; \
+	     "$$run" $(EXTRA_ARGS); \
+	   elif [[ -x "$$bin" ]]; then \
+	     echo "$$bin"; \
+	     "$$bin" $(EXTRA_ARGS); \
+	   else \
+	     echo "error: no test binary for $$target" >&2; \
+	     exit 1; \
+	   fi; \
+	 done
 
 test-windows: require-windows maybe-deps require-src
 	@$(SCRIPTS)/gn-gen.sh \

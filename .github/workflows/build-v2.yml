@@ -1,10 +1,11 @@
 # Manual WebRTC build (v2 Makefile DAG). Implementation:
-# .github/workflows/_make.yml
+# .github/workflows/_build.yml
 # Build iOS / macOS / Android in parallel: HIT build-{ios,macos,android},
 # make deps, make build, make package, Hetzner PUT git-cache pack
 # (not products), upload-artifact products-*. No Linux Deps job. No
-# Package combine (final-*).
-# Also workflow_call so Package v2 can chain this without a second ninja.
+# Package combine (final-*). No Test. No GH release.
+# Also workflow_call so Package v2 / Release v2 can chain this without
+# a second ninja.
 
 name: Build v2
 
@@ -85,10 +86,9 @@ on:
 jobs:
   build:
     name: Build v2
-    uses: ./.github/workflows/_make.yml
+    uses: ./.github/workflows/_build.yml
     secrets: inherit
     with:
-      mode: build
       webrtc_ref: ${{ inputs.webrtc_ref }}
       ios: ${{ inputs.ios }}
       macos: ${{ inputs.macos }}

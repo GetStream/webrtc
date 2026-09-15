@@ -1,0 +1,8 @@
+target_os = "android"
+target_cpu = "x64"
+rtc_include_tests = true
+android_static_analysis = "off"
+is_debug = true
+use_siso = false
+use_remoteexec = false
+use_reclient = false

@@ -1,0 +1,130 @@
+# Called by Release v2 after Test + Package. workflow_call only.
+# Attach final-* to a GitHub release, then trigger wrapper publishes.
+
+name: WebRTC release v2
+
+permissions:
+  contents: write
+
+on:
+  workflow_call:
+    inputs:
+      webrtc_ref:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      prerelease:
+        required: false
+        type: boolean
+        default: false
+      release_notes:
+        required: false
+        type: string
+        default: ""
+      ios:
+        required: true
+        type: boolean
+      macos:
+        required: true
+        type: boolean
+      android:
+        required: true
+        type: boolean
+
+jobs:
+  github_release:
+    name: Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require version
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${RELEASE_VERSION}" ]]; then
+            echo "Release requires a version."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+
+      - name: Download finalised artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: final-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_REF: ${{ inputs.webrtc_ref }}
+          IS_PRERELEASE: ${{ inputs.prerelease }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          assets=(release-assets/*)
+          if [[ ${#assets[@]} -eq 0 ]]; then
+            echo "::error::No finalised artifacts to attach."
+            exit 1
+          fi
+          notes_file="$(mktemp)"
+          if [[ -n "${RELEASE_NOTES}" ]]; then
+            printf '%s\n' "${RELEASE_NOTES}" > "${notes_file}"
+          else
+            printf 'Automated WebRTC SDK release %s.\n' "${RELEASE_VERSION}" > "${notes_file}"
+          fi
+          release_args=(
+            "${RELEASE_VERSION}"
+            "${assets[@]}"
+            --repo "${{ github.repository }}"
+            --target "${RELEASE_REF}"
+            --title "${RELEASE_VERSION}"
+            --notes-file "${notes_file}"
+          )
+          if [[ "${IS_PRERELEASE}" == "true" ]]; then
+            release_args+=(--prerelease)
+          else
+            release_args+=(--latest)
+          fi
+          gh release create "${release_args[@]}"
+
+  trigger_downstream_releases:
+    name: Trigger downstream WebRTC releases v2
+    needs: [github_release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger stream-video-swift-webrtc release
+        if: ${{ inputs.ios || inputs.macos }}
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          IS_PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          webrtc_release_url="https://github.com/${{ github.repository }}/releases/tag/${RELEASE_VERSION}"
+          gh workflow run publish-from-webrtc.yml \
+            --repo GetStream/stream-video-swift-webrtc \
+            --field "webrtc_release_url=${webrtc_release_url}" \
+            --field "pre_release=${IS_PRERELEASE}"
+
+      - name: Trigger stream-video-android-webrtc release
+        if: ${{ inputs.android }}
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          IS_PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          webrtc_release_url="https://github.com/${{ github.repository }}/releases/tag/${RELEASE_VERSION}"
+          gh workflow run publish-from-webrtc.yml \
+            --repo GetStream/stream-video-android-webrtc \
+            --field "webrtc_release_url=${webrtc_release_url}" \
+            --field "pre_release=${IS_PRERELEASE}"

@@ -1,0 +1,157 @@
+# Called by Package v2 and Release v2. workflow_call only.
+# Download products-* (never Hetzner), make combine, upload final-*.
+# rename=true (Release) also writes wrapper SDK copies.
+
+name: WebRTC package v2
+
+on:
+  workflow_call:
+    inputs:
+      ios:
+        required: true
+        type: boolean
+      macos:
+        required: true
+        type: boolean
+      android:
+        required: true
+        type: boolean
+      windows:
+        required: true
+        type: boolean
+      rename:
+        description: Copy+rebrand for wrapper SDKs (Release only)
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  package:
+    name: Package
+    runs-on: ${{ (inputs.ios || inputs.macos) && 'macos-26' || 'ubuntu-latest' }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: src
+
+      - name: Chromium webrtc/src layout
+        working-directory: src/stream_build
+        env:
+          CONFIRM: "1"
+        run: make bootstrap
+
+      - name: Download packaging handoff
+        uses: actions/download-artifact@v8
+        with:
+          pattern: products-*
+          path: combine-in
+
+      - name: Combine Apple xcframeworks
+        if: ${{ inputs.ios || inputs.macos }}
+        working-directory: src/stream_build
+        env:
+          PRODUCTS: ${{ github.workspace }}/combine-in
+          SKIP_LICENSES: "1"
+        run: make combine
+
+      - name: Attach LICENSE.md and zip Apple artifact
+        if: ${{ inputs.ios || inputs.macos }}
+        run: |
+          set -euo pipefail
+          dest="${GITHUB_WORKSPACE}/combine-in/WebRTC.xcframework"
+          test -d "${dest}"
+          if [[ ! -f "${dest}/LICENSE.md" ]]; then
+            license="$(find "${GITHUB_WORKSPACE}/combine-in" -path '*/WebRTC.xcframework/LICENSE.md' ! -path "${dest}/LICENSE.md" | head -n 1 || true)"
+            if [[ -n "${license}" ]]; then
+              cp "${license}" "${dest}/LICENSE.md"
+            fi
+          fi
+          ditto -c -k --sequesterRsrc --keepParent \
+            "${dest}" \
+            "${GITHUB_WORKSPACE}/WebRTC.xcframework.zip"
+
+      - name: Pass through Android AAR
+        if: ${{ inputs.android }}
+        run: |
+          set -euo pipefail
+          src="$(find "${GITHUB_WORKSPACE}/combine-in" -name libwebrtc.aar -type f | head -n 1)"
+          test -n "${src}"
+          cp "${src}" "${GITHUB_WORKSPACE}/libwebrtc.aar"
+          mkdir -p "${GITHUB_WORKSPACE}/final-android"
+          cp "${src}" "${GITHUB_WORKSPACE}/final-android/libwebrtc.aar"
+          license="$(find "${GITHUB_WORKSPACE}/combine-in" -name LICENSE.md -type f | head -n 1 || true)"
+          if [[ -n "${license}" ]]; then
+            cp "${license}" "${GITHUB_WORKSPACE}/final-android/LICENSE.md"
+          fi
+
+      - name: Pass through Windows products
+        if: ${{ inputs.windows }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${GITHUB_WORKSPACE}/windows-libs"
+          cp -R "${GITHUB_WORKSPACE}/combine-in/products-windows/." "${GITHUB_WORKSPACE}/windows-libs/"
+
+      - name: Rename copies for wrapper SDKs
+        if: ${{ inputs.rename }}
+        working-directory: src/stream_build
+        env:
+          PRODUCTS: ${{ github.workspace }}/combine-in
+        run: |
+          set -euo pipefail
+          if [[ "${{ inputs.ios }}" == "true" || "${{ inputs.macos }}" == "true" ]]; then
+            make rename apple XCFRAMEWORK="${PRODUCTS}/WebRTC.xcframework"
+            ditto -c -k --sequesterRsrc --keepParent \
+              "${PRODUCTS}/renamed/StreamWebRTC.xcframework" \
+              "${GITHUB_WORKSPACE}/StreamWebRTC.xcframework.zip"
+          fi
+          if [[ "${{ inputs.android }}" == "true" ]]; then
+            make rename android AAR="${GITHUB_WORKSPACE}/libwebrtc.aar"
+            cp "${PRODUCTS}/renamed/libwebrtc.aar" \
+              "${GITHUB_WORKSPACE}/libwebrtc-renamed.aar"
+          fi
+
+      - name: Upload WebRTC.xcframework.zip
+        if: ${{ inputs.ios || inputs.macos }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-apple
+          path: WebRTC.xcframework.zip
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload libwebrtc.aar
+        if: ${{ inputs.android }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-android
+          path: final-android
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload Windows libs
+        if: ${{ inputs.windows }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-windows
+          path: windows-libs
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload StreamWebRTC.xcframework.zip
+        if: ${{ inputs.rename && (inputs.ios || inputs.macos) }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-apple-renamed
+          path: StreamWebRTC.xcframework.zip
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload renamed Android AAR
+        if: ${{ inputs.rename && inputs.android }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-android-renamed
+          path: libwebrtc-renamed.aar
+          if-no-files-found: error
+          retention-days: 7
