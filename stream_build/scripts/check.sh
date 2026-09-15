@@ -498,6 +498,7 @@ grep -q 'make test android' "$gha/workflows/_test.yml"
 ! grep -q 'android-armeabi-v7a' "$gha/workflows/_test.yml"
 grep -A20 '^test-android:' "$ROOT/Makefile" | grep -q -- '--slice'
 grep -A20 '^test-android:' "$ROOT/Makefile" | grep -q 'android_tests'
+grep -A40 '^test-android:' "$ROOT/Makefile" | grep -q 'vpython-spec'
 grep -q 'ANDROID_TEST_SLICES := android-x86_64' "$ROOT/Makefile"
 ! grep -q 'name: Build iOS' "$gha/workflows/_test.yml"
 ! grep -q 'github_release' "$gha/workflows/_test.yml"

@@ -364,6 +364,9 @@ test-macos: require-darwin maybe-deps require-src
 
 # ponytail: host Robolectric (android_sdk_junit_tests), not an emulator
 # farm. Upgrade: bin/run_rtc_unittests + device/emulator.
+# Chromium bin/run_* wrappers are vpython3 and probe upward for
+# .vpython3. Stream out/ is a sibling of src/, so pass src/.vpython3
+# (protobuf) the same way run-ios-tests.sh does.
 test-android: require-linux maybe-deps require-src
 	@$(SCRIPTS)/gn-gen.sh \
 		--src "$(WEBRTC_SRC)" \
@@ -376,12 +379,14 @@ test-android: require-linux maybe-deps require-src
 	 targets="$(if $(TEST_TARGETS),$(TEST_TARGETS),$(ANDROID_TEST_TARGETS))"; \
 	 echo "$$ninja_bin -C $(OUT)/android_tests $$targets"; \
 	 "$$ninja_bin" -C "$(OUT)/android_tests" $$targets -j"$(JOBS)"; \
+	 spec="$(WEBRTC_SRC)/.vpython3"; \
+	 [[ -f "$$spec" ]] || { echo "error: missing $$spec" >&2; exit 1; }; \
 	 for target in $$targets; do \
 	   run="$(OUT)/android_tests/bin/run_$$target"; \
 	   bin="$(OUT)/android_tests/$$target"; \
 	   if [[ -x "$$run" ]]; then \
-	     echo "$$run"; \
-	     "$$run" $(EXTRA_ARGS); \
+	     echo "vpython3 -vpython-spec $$spec $$run"; \
+	     vpython3 -vpython-spec "$$spec" "$$run" $(EXTRA_ARGS); \
 	   elif [[ -x "$$bin" ]]; then \
 	     echo "$$bin"; \
 	     "$$bin" $(EXTRA_ARGS); \
