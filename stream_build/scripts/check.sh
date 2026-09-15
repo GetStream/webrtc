@@ -86,6 +86,35 @@ test_banner="$(make --no-print-directory announce VERB=test PLATFORM=macos CONFI
 printf '%s\n' "$test_banner" | grep -q '==> test macos'
 printf '%s\n' "$test_banner" | grep -q 'config:     debug (tests always debug)'
 
+android_build_banner="$(make --no-print-directory announce VERB=build PLATFORM=android)"
+printf '%s\n' "$android_build_banner" | grep 'slices:' | grep -q 'android-armeabi-v7a'
+printf '%s\n' "$android_build_banner" | grep 'slices:' | grep -q 'android-arm64-v8a'
+printf '%s\n' "$android_build_banner" | grep 'slices:' | grep -q 'android-x86_64'
+
+# ARCHS is build/package only; test stays on the ubuntu-latest host ABI.
+android_test_banner="$(
+  make --no-print-directory announce VERB=test PLATFORM=android CONFIG=release \
+    ARCHS='armeabi-v7a arm64-v8a x86 x86_64'
+)"
+printf '%s\n' "$android_test_banner" | grep -q '==> test android'
+printf '%s\n' "$android_test_banner" | grep -q 'config:     debug (tests always debug)'
+printf '%s\n' "$android_test_banner" | grep 'slices:' | grep -qx '    slices:     android-x86_64'
+! printf '%s\n' "$android_test_banner" | grep 'slices:' | grep -q 'android-armeabi-v7a'
+! printf '%s\n' "$android_test_banner" | grep 'slices:' | grep -q 'android-arm64-v8a'
+! printf '%s\n' "$android_test_banner" | grep 'slices:' | \
+  grep -qE '(^|[[:space:]])android-x86([[:space:]]|$)'
+printf '%s\n' "$android_test_banner" | grep -q 'tests:      android_sdk_junit_tests'
+
+android_test_gn="$(
+  "$ROOT/scripts/gn-gen.sh" --print --config debug \
+    --slice android-x86_64 --overlay android-test
+)"
+printf '%s\n' "$android_test_gn" | grep -q 'target_os = "android"'
+printf '%s\n' "$android_test_gn" | grep -q 'target_cpu = "x64"'
+printf '%s\n' "$android_test_gn" | grep -q 'rtc_include_tests = true'
+printf '%s\n' "$android_test_gn" | grep -q 'is_debug = true'
+printf '%s\n' "$android_test_gn" | grep -q 'android_static_analysis = "off"'
+
 empty="$(mktemp -d)"
 combine_none="$(
   make combine PRODUCTS="$empty" SKIP_LICENSES=1 \
@@ -463,7 +492,13 @@ grep -A5 'name: Build iOS' "$gha/workflows/_build.yml" | grep -q 'needs: \[plan\
 grep -A5 'name: Test iOS' "$gha/workflows/_test.yml" | grep -q 'needs: \[plan\]'
 ! grep -A8 'name: Test iOS' "$gha/workflows/_test.yml" | grep -q deps
 grep -A5 'name: Test Android' "$gha/workflows/_test.yml" | grep -q 'needs: \[plan\]'
+grep -A20 'name: Test Android' "$gha/workflows/_test.yml" | grep -q 'runs-on: ubuntu-latest'
 grep -q 'make test android' "$gha/workflows/_test.yml"
+! grep -A30 'name: Test Android' "$gha/workflows/_test.yml" | grep -q ARCHS
+! grep -q 'android-armeabi-v7a' "$gha/workflows/_test.yml"
+grep -A20 '^test-android:' "$ROOT/Makefile" | grep -q -- '--slice'
+grep -A20 '^test-android:' "$ROOT/Makefile" | grep -q 'android_tests'
+grep -q 'ANDROID_TEST_SLICES := android-x86_64' "$ROOT/Makefile"
 ! grep -q 'name: Build iOS' "$gha/workflows/_test.yml"
 ! grep -q 'github_release' "$gha/workflows/_test.yml"
 ! grep -q 'Trigger downstream' "$gha/workflows/_test.yml"

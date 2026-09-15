@@ -107,13 +107,20 @@ checkout `src`, extract git-cache to `GIT_CACHE_PATH`
 `rewrite_git_cache_alternates` so Linux-packed cache paths retarget
 to this runner. Always `make deps` after HIT (cheap from cache).
 Build `CONFIG` is dispatch (default release); `make test` always uses debug
-in `out/ios_tests` / `out/webrtc_tests` / `out/android_tests` /
-`out/windows_tests`, so those subdirs do not mix with slice dirs. Test
-v2 (`_test.yml`: `test_ios`, `test_macos`, `test_android`,
-`test_windows`) does not HIT or PUT Hetzner and does not use a
-git-cache artifact: checkout `webrtc_ref`, `setup-webrtc`, `make test`
-(cold gclient via maybe-deps). Independent of Build. Android tests
-are host Robolectric (`android_sdk_junit_tests`), not an emulator.
+in dedicated dirs that do not mix with Package/Build slice dirs:
+`out/ios_tests`, `out/webrtc_tests`, `out/android_tests`,
+`out/windows_tests`. Test v2 (`_test.yml`: `test_ios`, `test_macos`,
+`test_android`, `test_windows`) does not HIT or PUT Hetzner and does
+not use a git-cache artifact: checkout `webrtc_ref`, `setup-webrtc`,
+`make test` (cold gclient via maybe-deps). Independent of Build.
+`make test android` is host Robolectric (`android_sdk_junit_tests`)
+on the GHA runner ABI only: `_test.yml` `runs-on: ubuntu-latest` →
+slice `android-x86_64` (`target_cpu = "x64"`), overlay
+`gn/android-test.args`. It does not use `ARCHS` or the 4-ABI AAR list
+(`android-armeabi-v7a android-arm64-v8a android-x86 android-x86_64`).
+If this job moves to an ARM extra-capacity runner, change
+`ANDROID_TEST_SLICES` to that ABI. Ninja + `bin/run_android_sdk_junit_tests`
+(not an emulator).
 Windows Build still uploads `deps-windows` to GitHub. Build jobs
 always `make package` and upload `products-*`. Test jobs do not.
 Package v2 `uses` Build v2 then `_package.yml` combine only: download
@@ -134,7 +141,8 @@ requires Linux and `src/sdk/android/AndroidManifest.xml`.
 `package-windows.sh` requires Windows. Combine is one job (`macos-26`
 if any Apple, else `ubuntu-latest`), so it cannot run the host-gated
 package scripts. Test dirs `out/ios_tests` / `out/webrtc_tests` /
-`out/android_tests` are unused for package. `products/` after `make package` is the
+`out/android_tests` (`android-x86_64` only) are unused for package.
+`products/` after `make package` is the
 xcframework / AAR / libs (smallest licensed handoff). Hetzner pack
 stays git-cache + resources + cipd (never `out/`). `TARGET_OS` is the
 platform of that job (`ios`, `mac`, `android,unix`).
@@ -175,7 +183,7 @@ not use `${{ secrets.* }}`. `products-*` / `final-*` stay on
 | `WEBRTC_SRC` | this git checkout (`webrtc/src`; default: parent of `stream_build/`) |
 | `OUT` / `PRODUCTS` | ninja dirs / packaged output (default under `DEPS_ROOT`, sibling of `src`) |
 | `GIT_CACHE_PATH` | gclient object cache (default `DEPS_ROOT/.gclient-git-cache`) |
-| `ARCHS` | android ABI or windows cpu (`arm64-v8a`, `x64`, …) |
+| `ARCHS` | android ABI or windows cpu for **build/package** (`arm64-v8a`, `x64`, …). `make test android` ignores this and uses `ANDROID_TEST_SLICES` (`android-x86_64`). |
 | `JOBS` | ninja/gclient parallelism |
 | `SHALLOW` | `1` (default) `gclient sync --no-history --shallow`. `0` = full history. |
 | `ZIP` | `1` to zip Apple/Windows products |
@@ -192,6 +200,7 @@ make build ios
 make build ios SKIP_DEPS=1
 make build ios SKIP_MACCATALYST=1
 make build android ARCHS=arm64-v8a SKIP_DEPS=1
+make test android SKIP_DEPS=1
 make package ios SKIP_DEPS=1 SKIP_LICENSES=1
 make package macos SKIP_DEPS=1 SKIP_LICENSES=1
 make combine SKIP_LICENSES=1

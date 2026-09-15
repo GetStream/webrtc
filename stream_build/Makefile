@@ -62,6 +62,8 @@ CATALYST_SLICES  := catalyst-arm64 catalyst-x64
 IOS_SLICES       := ios-arm64-device ios-arm64-simulator ios-x64-simulator $(CATALYST_SLICES)
 MACOS_SLICES     := macos-arm64 macos-x64
 ANDROID_SLICES   := android-armeabi-v7a android-arm64-v8a android-x86 android-x86_64
+# ubuntu-latest host ABI. Not ARCHS / the 4-ABI AAR list.
+ANDROID_TEST_SLICES := android-x86_64
 WINDOWS_SLICES   := windows-x64 windows-arm64
 IOS_TEST_TARGETS   ?= sdk_unittests sdk_framework_unittests
 MACOS_TEST_TARGETS ?= rtc_unittests rtc_pc_unittests rtc_stats_unittests
@@ -207,7 +209,11 @@ announce:
 	   ios) echo "    slices:     $(ios_slices)" ;; \
 	   macos) echo "    slices:     $(MACOS_SLICES)" ;; \
 	   android) \
-	     if [[ "$(VERB)" != rename ]]; then echo "    slices:     $(android_slices)"; fi ;; \
+	     if [[ "$(VERB)" == test ]]; then \
+	       echo "    slices:     $(ANDROID_TEST_SLICES)"; \
+	     elif [[ "$(VERB)" != rename ]]; then \
+	       echo "    slices:     $(android_slices)"; \
+	     fi ;; \
 	   windows) echo "    slices:     $(windows_slices)" ;; \
 	 esac; \
 	 if [[ "$(VERB)" == test ]]; then \
@@ -363,6 +369,7 @@ test-android: require-linux maybe-deps require-src
 		--src "$(WEBRTC_SRC)" \
 		--out "$(OUT)/android_tests" \
 		--config debug \
+		--slice "$(ANDROID_TEST_SLICES)" \
 		--overlay android-test \
 		--extra "$(ALL_GN_ARGS)"
 	@ninja_bin="$$($(SCRIPTS)/common.sh ninja "$(WEBRTC_SRC)")"; \
