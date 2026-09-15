@@ -1,7 +1,10 @@
 # Package WebRTC artifacts (v2 Makefile DAG). Does not create a GitHub
-# release. _make.yml: Build (HIT + make deps + make build + make package,
-# upload products-*) → Package combine (final-*). No Linux Deps job. No
-# Test. No GH release.
+# release. Calls Build v2 (HIT build-ios/build-macos/build-android, make
+# deps, make build, make package, Hetzner PUT git-cache pack if
+# delta ≥1GiB, upload-artifact products-*). Combine downloads
+# products-* via download-artifact (never Hetzner), make combine,
+# uploads final-*. No second HIT/ninja. No Linux Deps job. No Test.
+# No GH release. No rename (Release only).
 
 name: Package v2
 
@@ -47,12 +50,11 @@ on:
         default: ""
 
 jobs:
-  package:
-    name: Package v2
-    uses: ./.github/workflows/_make.yml
+  build:
+    name: Build v2
+    uses: ./.github/workflows/build-v2.yml
     secrets: inherit
     with:
-      mode: package
       webrtc_ref: ${{ inputs.webrtc_ref }}
       ios: ${{ inputs.ios }}
       macos: ${{ inputs.macos }}
@@ -60,3 +62,99 @@ jobs:
       windows: ${{ inputs.windows }}
       config: ${{ inputs.config }}
       android_arch: ${{ inputs.android_arch }}
+
+  # Combine: products-* from Build v2 (nested _make.yml). Not git-cache,
+  # not out/. make combine / upload final-*. Do not HIT or ninja here.
+  package:
+    name: Package
+    needs: build
+    runs-on: ${{ (inputs.ios == 'true' || inputs.macos == 'true') && 'macos-26' || 'ubuntu-latest' }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: src
+
+      - name: Chromium webrtc/src layout
+        working-directory: src/stream_build
+        env:
+          CONFIRM: "1"
+        run: make bootstrap
+
+      - name: Download packaging handoff
+        uses: actions/download-artifact@v8
+        with:
+          pattern: products-*
+          path: combine-in
+
+      - name: Combine Apple xcframeworks
+        if: ${{ inputs.ios == 'true' || inputs.macos == 'true' }}
+        working-directory: src/stream_build
+        env:
+          PRODUCTS: ${{ github.workspace }}/combine-in
+          SKIP_LICENSES: "1"
+        run: make combine
+
+      - name: Attach LICENSE.md and zip Apple artifact
+        if: ${{ inputs.ios == 'true' || inputs.macos == 'true' }}
+        run: |
+          set -euo pipefail
+          dest="${GITHUB_WORKSPACE}/combine-in/WebRTC.xcframework"
+          test -d "${dest}"
+          if [[ ! -f "${dest}/LICENSE.md" ]]; then
+            license="$(find "${GITHUB_WORKSPACE}/combine-in" -path '*/WebRTC.xcframework/LICENSE.md' ! -path "${dest}/LICENSE.md" | head -n 1 || true)"
+            if [[ -n "${license}" ]]; then
+              cp "${license}" "${dest}/LICENSE.md"
+            fi
+          fi
+          ditto -c -k --sequesterRsrc --keepParent \
+            "${dest}" \
+            "${GITHUB_WORKSPACE}/WebRTC.xcframework.zip"
+
+      - name: Pass through Android AAR
+        if: ${{ inputs.android == 'true' }}
+        run: |
+          set -euo pipefail
+          src="$(find "${GITHUB_WORKSPACE}/combine-in" -name libwebrtc.aar -type f | head -n 1)"
+          test -n "${src}"
+          cp "${src}" "${GITHUB_WORKSPACE}/libwebrtc.aar"
+          mkdir -p "${GITHUB_WORKSPACE}/final-android"
+          cp "${src}" "${GITHUB_WORKSPACE}/final-android/libwebrtc.aar"
+          license="$(find "${GITHUB_WORKSPACE}/combine-in" -name LICENSE.md -type f | head -n 1 || true)"
+          if [[ -n "${license}" ]]; then
+            cp "${license}" "${GITHUB_WORKSPACE}/final-android/LICENSE.md"
+          fi
+
+      - name: Pass through Windows products
+        if: ${{ inputs.windows == 'true' }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${GITHUB_WORKSPACE}/windows-libs"
+          cp -R "${GITHUB_WORKSPACE}/combine-in/products-windows/." "${GITHUB_WORKSPACE}/windows-libs/"
+
+      - name: Upload WebRTC.xcframework.zip
+        if: ${{ inputs.ios == 'true' || inputs.macos == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-apple
+          path: WebRTC.xcframework.zip
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload libwebrtc.aar
+        if: ${{ inputs.android == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-android
+          path: final-android
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload Windows libs
+        if: ${{ inputs.windows == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-windows
+          path: windows-libs
+          if-no-files-found: error
+          retention-days: 7

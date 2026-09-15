@@ -1,15 +1,19 @@
-# Called by Build v2 / Test v2 / Package v2 / Release v2 dispatch workflows.
-# Not listed in the Actions dispatch UI (workflow_call only).
+# Called by Build v2 / Test v2 / Release v2 (and Build v2 when Package
+# chains it). Not listed in the Actions dispatch UI (workflow_call only).
 # Callers pass mode: build | test | package | release.
 #
-# I/O: iOS / macOS / Android jobs HIT Hetzner build-{ios,macos,android}.tar
-# (skip_deps_cache skips download), make deps, make build|test, then put
-# git-cache + src/resources + .cipd. No shared Linux Deps job. No GitHub
-# deps-key. Windows Deps stays deps-windows on GitHub. Build mode is
-# ninja only (no products). Package/Release Build jobs also make package
-# and upload products-* (GitHub). Package combine consumes products-*
-# (no third ninja) and uploads final-*. Release attaches final-*. Tests
-# HIT the same per-platform key (out/ios_tests vs slice dirs).
+# I/O: Build iOS / macOS / Android HIT Hetzner build-{ios,macos,android}.tar
+# (skip_deps_cache skips download), make deps, make build, make package,
+# put git-cache + src/resources + .cipd, upload products-* (xcframework/
+# AAR/libs — not git-cache, not out/). No shared Linux Deps job. No GitHub
+# deps-key. Windows Build Deps stays deps-windows on GitHub. Build jobs
+# always package + upload products whenever they compile (build, package,
+# and release). Combine stays mode==package || mode==release: downloads
+# products-*, make combine/rename, uploads final-*. Package v2 calls
+# Build v2 (mode=build) then combines in package-v2.yml. Release keeps
+# combine here. Tests are cold gclient + make test (no Hetzner, no
+# git-cache artifact, no products, no needs: Build). Android tests stay
+# unwired.
 
 name: WebRTC make v2
 
@@ -146,7 +150,7 @@ jobs:
   deps_windows:
     name: Deps Windows
     needs: plan
-    if: ${{ inputs.windows }}
+    if: ${{ (inputs.mode == 'build' || inputs.mode == 'package' || inputs.mode == 'release') && inputs.windows }}
     runs-on: windows-latest
     timeout-minutes: 360
     steps:
@@ -218,6 +222,17 @@ jobs:
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
         run: make build ios
+      # make package here: licenses need GN out + src; Darwin lipo.
+      # Handoff is products/ios (xcframework), not git-cache or out/
+      # (ios-arm64-device ~1.2GiB ninja; ios_tests unused).
+      - name: Package iOS
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          PRODUCTS: ${{ github.workspace }}/products
+          CONFIG: ${{ inputs.config }}
+          SKIP_DEPS: "1"
+        run: make package ios
       - name: Upload build-ios to Hetzner
         uses: ./src/.github/actions/artifact-put
         with:
@@ -226,17 +241,7 @@ jobs:
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
-      - name: Package iOS
-        if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
-        working-directory: src/stream_build
-        env:
-          DEPS_ROOT: ${{ github.workspace }}
-          PRODUCTS: ${{ github.workspace }}/products
-          CONFIG: ${{ inputs.config }}
-          SKIP_DEPS: "1"
-        run: make package ios
       - name: Upload products-ios
-        if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
         uses: actions/upload-artifact@v7
         with:
           name: products-ios
@@ -272,6 +277,16 @@ jobs:
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
         run: make build macos
+      # make package here: licenses need GN out + src; Darwin lipo.
+      # Handoff is products/macos, not git-cache or out/macos-*.
+      - name: Package macOS
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          PRODUCTS: ${{ github.workspace }}/products
+          CONFIG: ${{ inputs.config }}
+          SKIP_DEPS: "1"
+        run: make package macos
       - name: Upload build-macos to Hetzner
         uses: ./src/.github/actions/artifact-put
         with:
@@ -280,17 +295,7 @@ jobs:
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
-      - name: Package macOS
-        if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
-        working-directory: src/stream_build
-        env:
-          DEPS_ROOT: ${{ github.workspace }}
-          PRODUCTS: ${{ github.workspace }}/products
-          CONFIG: ${{ inputs.config }}
-          SKIP_DEPS: "1"
-        run: make package macos
       - name: Upload products-macos
-        if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
         uses: actions/upload-artifact@v7
         with:
           name: products-macos
@@ -334,16 +339,10 @@ jobs:
             extra+=(ARCHS="${ANDROID_ARCH}")
           fi
           make build android "${extra[@]}"
-      - name: Upload build-android to Hetzner
-        uses: ./src/.github/actions/artifact-put
-        with:
-          path: build-android
-          source: ${{ github.workspace }}
-          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+      # make package here: require-linux + AndroidManifest + licenses.
+      # Combine is macos-26 when Apple is selected, so it cannot pack
+      # the AAR. Handoff is products/ (AAR + LICENSE), not out/android-*.
       - name: Package Android
-        if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
         working-directory: src/stream_build
         env:
           DEPS_ROOT: ${{ github.workspace }}
@@ -358,8 +357,15 @@ jobs:
             extra+=(ARCHS="${ANDROID_ARCH}")
           fi
           make package android "${extra[@]}"
+      - name: Upload build-android to Hetzner
+        uses: ./src/.github/actions/artifact-put
+        with:
+          path: build-android
+          source: ${{ github.workspace }}
+          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
+          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
       - name: Upload products-android
-        if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
         uses: actions/upload-artifact@v7
         with:
           name: products-android
@@ -372,76 +378,56 @@ jobs:
     needs: [plan]
     if: ${{ (inputs.mode == 'test' || inputs.mode == 'release') && inputs.ios }}
     runs-on: macos-26
-    timeout-minutes: 180
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
         with:
           path: src
           ref: ${{ inputs.webrtc_ref }}
-      - uses: ./src/.github/actions/restore-tree
+      - name: Setup WebRTC checkout
+        uses: ./src/.github/actions/setup-webrtc
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
-          target_os: ios
-          cache_key: build-ios
-          skip_cache: ${{ inputs.skip_deps_cache }}
-          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
       - name: Test iOS
         working-directory: src/stream_build
         env:
           DEPS_ROOT: ${{ github.workspace }}
-          SKIP_DEPS: "1"
+          WEBRTC_SRC: ${{ github.workspace }}/src
+          GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
+          TARGET_OS: ios
+          JOBS: "8"
+          WEBRTC_REPO: https://github.com/GetStream/webrtc.git
         run: make test ios
-      - name: Upload build-ios to Hetzner
-        if: ${{ inputs.mode == 'test' }}
-        uses: ./src/.github/actions/artifact-put
-        with:
-          path: build-ios
-          source: ${{ github.workspace }}
-          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
 
   test_macos:
     name: Test macOS
     needs: [plan]
     if: ${{ (inputs.mode == 'test' || inputs.mode == 'release') && inputs.macos }}
     runs-on: macos-26
-    timeout-minutes: 180
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
         with:
           path: src
           ref: ${{ inputs.webrtc_ref }}
-      - uses: ./src/.github/actions/restore-tree
+      - name: Setup WebRTC checkout
+        uses: ./src/.github/actions/setup-webrtc
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
-          target_os: mac
-          cache_key: build-macos
-          skip_cache: ${{ inputs.skip_deps_cache }}
-          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
       - name: Test macOS
         working-directory: src/stream_build
         env:
           DEPS_ROOT: ${{ github.workspace }}
-          SKIP_DEPS: "1"
+          WEBRTC_SRC: ${{ github.workspace }}/src
+          GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
+          TARGET_OS: mac
+          JOBS: "8"
+          WEBRTC_REPO: https://github.com/GetStream/webrtc.git
         run: make test macos
-      - name: Upload build-macos to Hetzner
-        if: ${{ inputs.mode == 'test' }}
-        uses: ./src/.github/actions/artifact-put
-        with:
-          path: build-macos
-          source: ${{ github.workspace }}
-          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
 
   test_windows:
     name: Test Windows
-    needs: [plan, deps_windows]
+    needs: [plan]
     if: ${{ (inputs.mode == 'test' || inputs.mode == 'release') && inputs.windows }}
     runs-on: windows-latest
     timeout-minutes: 360
@@ -461,17 +447,20 @@ jobs:
             echo "::error::Windows WebRTC host is not ready on windows-latest (missing: ${missing[*]}). This job is wired for make test windows, but the runner image cannot run it yet."
             exit 1
           fi
-      - uses: ./src/.github/actions/restore-tree
+      - name: Setup WebRTC checkout
+        uses: ./src/.github/actions/setup-webrtc
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
-          target_os: ${{ needs.plan.outputs.windows_target_os }}
-          deps_artifact: deps-windows
       - name: Test Windows
         working-directory: src/stream_build
         shell: bash
         env:
           DEPS_ROOT: ${{ github.workspace }}
-          SKIP_DEPS: "1"
+          WEBRTC_SRC: ${{ github.workspace }}/src
+          GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
+          TARGET_OS: ${{ needs.plan.outputs.windows_target_os }}
+          JOBS: "8"
+          WEBRTC_REPO: https://github.com/GetStream/webrtc.git
         run: make test windows
 
   tests_passed:
@@ -545,8 +534,9 @@ jobs:
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
         run: make build windows
+      # make package here: require-windows. Combine is never Windows.
+      # Handoff is products/windows, not git-cache or out/windows-*.
       - name: Package Windows
-        if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
         working-directory: src/stream_build
         shell: bash
         env:
@@ -556,7 +546,6 @@ jobs:
           SKIP_DEPS: "1"
         run: make package windows
       - name: Upload products-windows
-        if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
         uses: actions/upload-artifact@v7
         with:
           name: products-windows
@@ -564,6 +553,9 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # Combine: products-* GH artifacts only (not git-cache, not out/).
+  # make combine / rename / upload final-*. mode=package leftover and
+  # mode=release. Package v2 combine is in package-v2.yml after Build v2.
   package:
     name: Package
     needs: [plan, build_ios, build_macos, build_android, build_windows]
@@ -581,7 +573,7 @@ jobs:
           CONFIRM: "1"
         run: make bootstrap
 
-      - name: Download product artifacts
+      - name: Download packaging handoff
         uses: actions/download-artifact@v8
         with:
           pattern: products-*

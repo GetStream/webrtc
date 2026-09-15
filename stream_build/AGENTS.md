@@ -79,17 +79,19 @@ the tree is `webrtc/src` (real directory, not a symlink). `deps` /
 
 CI checks out with `path: src` so `GITHUB_WORKSPACE` is the webrtc-named
 folder. `DEPS_ROOT=$GITHUB_WORKSPACE`. `OUT` is `$DEPS_ROOT/out`
-(sibling of `src`). There is no shared Linux Deps job. iOS, macOS,
+(sibling of `src`). There is no shared Linux Deps job. Build iOS, macOS,
 and Android jobs run in parallel after Plan:
 
 1. `actions/checkout` `src` at `webrtc_ref`
 2. HIT Hetzner `build-ios` / `build-macos` / `build-android` (`if_missing:
    skip`; Build dispatch `skip_deps_cache` skips the download)
 3. `make deps` (`RUN_HOOKS=1`, host GCS rust-toolchain on Apple)
-4. `make build` / `make test` (`SKIP_DEPS=1`)
-5. `artifact-put` `.gclient-git-cache` plus reusable `src/resources`
+4. `make build` (`SKIP_DEPS=1`)
+5. `make package` (`SKIP_DEPS=1`) on the build host (full tree + OS)
+6. `artifact-put` `.gclient-git-cache` plus reusable `src/resources`
    and `.cipd` if non-empty (always after miss / `skip_deps_cache`;
    skip PUT when HIT size delta is < 1GiB)
+7. `upload-artifact` `products-*` (xcframework / AAR / libs)
 
 Keys: `artifacts/<github.repository>/build-{ios,macos,android}.tar`.
 Same-OS only (Linux tree on Mac is forbidden). Members: required
@@ -105,11 +107,34 @@ checkout `src`, extract git-cache to `GIT_CACHE_PATH`
 to this runner. Always `make deps` after HIT (cheap from cache).
 Build `CONFIG` is dispatch (default release); `make test` always uses debug
 in `out/ios_tests` / `out/webrtc_tests`, so those subdirs do not mix
-with slice dirs. test-v2.yml HITs the same `build-ios` / `build-macos`
-keys. Windows Deps still uploads `deps-windows` to GitHub.
-Package/Release Build jobs also `make package` and upload `products-*`
-(GitHub). Package combine consumes `products-*` (no third ninja) and
-uploads `final-*`. Release attaches `final-*`. `TARGET_OS` is the
+with slice dirs. Test v2 / Release tests (`test_ios`, `test_macos`,
+`test_windows`) do not HIT or PUT Hetzner and do not use a git-cache
+artifact: checkout `webrtc_ref`, `setup-webrtc`, `make test` (cold
+gclient via maybe-deps). Independent of Build. Android tests stay
+unwired. Windows Build still uploads `deps-windows` to GitHub.
+Build jobs always `make package` and upload `products-*` whenever they
+compile (`mode` build, package, or release). Test jobs do not.
+Package v2 `uses` Build v2 (`workflow_call`, mode=build) then combine
+only: download `products-*`, `make combine`, upload `final-*`. No
+second HIT/ninja. Release keeps Test ∥ those same Build jobs inside
+`_make.yml` (`mode=release`) then combine there — do not nest Package
+v2 → Build v2 → `_make.yml`. Combine downloads `products-*` only —
+not `.gclient-git-cache` and not `out/` — then `make combine` / `make
+rename` and uploads `final-*`. Release attaches `final-*`.
+
+Do not hand combine `out/` slice dirs. Names are `ios-arm64-device`,
+`ios-arm64-simulator`, `ios-x64-simulator`, `catalyst-arm64`,
+`catalyst-x64`, `macos-arm64`, `macos-x64`, `android-*`, `windows-*`
+(~1.2–1.7GiB ninja trees each). `package-apple.sh` only needs
+`WebRTC.framework` (+ dSYM); licenses need those GN dirs plus
+`src/tools_webrtc/libs/generate_licenses.py`. `package-android.sh`
+requires Linux and `src/sdk/android/AndroidManifest.xml`.
+`package-windows.sh` requires Windows. Combine is one job (`macos-26`
+if any Apple, else `ubuntu-latest`), so it cannot run the host-gated
+package scripts. Test dirs `out/ios_tests` / `out/webrtc_tests` are
+unused for package. `products/` after `make package` is the
+xcframework / AAR / libs (smallest licensed handoff). Hetzner pack
+stays git-cache + resources + cipd (never `out/`). `TARGET_OS` is the
 platform of that job (`ios`, `mac`, `android,unix`).
 
 Hetzner: `artifact-download` Range-GETs with
@@ -186,7 +211,9 @@ the other.
 | Package v2 | `.github/workflows/package-v2.yml` |
 | Release v2 | `.github/workflows/release-v2.yml` |
 
-Reusable: `.github/workflows/_make.yml` (`name: WebRTC make`).
+Reusable: `.github/workflows/_make.yml` (`name: WebRTC make v2`).
+Build v2 is also `workflow_call` (mode=build, always `products-*`).
+Package v2 calls Build v2 then combine; it does not call `_make.yml`.
 Actions: `restore-tree`, `artifact-put`, `artifact-download`,
 `setup-webrtc`, `prepare-common-v2`.
 

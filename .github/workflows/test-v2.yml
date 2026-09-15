@@ -1,6 +1,6 @@
 # WebRTC tests (v2 Makefile DAG). Not dispatchable until this file exists
-# on the default branch. _make.yml: HIT build-ios / build-macos, make test
-# only (no extra framework-slice make build). No Linux Deps job.
+# on the default branch. Cold gclient + make test per platform (no Hetzner,
+# no git-cache artifact, no needs: Build). Android tests stay unwired.
 
 name: Test v2
 

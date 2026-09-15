@@ -467,6 +467,7 @@ grep -A12 'members=(.gclient-git-cache)' "$gha/actions/artifact-put/action.yml" 
   grep -q '.cipd'
 ! grep -A12 'members=(.gclient-git-cache)' "$gha/actions/artifact-put/action.yml" | \
   grep -q 'third_party'
+! grep -q 'products' "$gha/actions/artifact-put/action.yml"
 grep -q 'pack members:' "$gha/actions/artifact-put/action.yml"
 grep -q 'uses: ./src/.github/actions/artifact-put' "$gha/workflows/_make.yml"
 

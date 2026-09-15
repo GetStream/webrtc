@@ -1,8 +1,10 @@
 # Manual WebRTC build (v2 Makefile DAG). Implementation:
 # .github/workflows/_make.yml
 # Build iOS / macOS / Android in parallel: HIT build-{ios,macos,android},
-# make deps, make build, put that host's tree + out/. No Linux Deps job.
-# No package combine, no products.
+# make deps, make build, make package, Hetzner PUT git-cache pack
+# (not products), upload-artifact products-*. No Linux Deps job. No
+# Package combine (final-*).
+# Also workflow_call so Package v2 can chain this without a second ninja.
 
 name: Build v2
 
@@ -48,6 +50,35 @@ on:
         default: ""
       skip_deps_cache:
         description: Skip Hetzner deps cache (fresh gclient + ninja)
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      webrtc_ref:
+        required: true
+        type: string
+      ios:
+        required: true
+        type: boolean
+      macos:
+        required: true
+        type: boolean
+      android:
+        required: true
+        type: boolean
+      windows:
+        required: true
+        type: boolean
+      config:
+        required: true
+        type: string
+      android_arch:
+        required: false
+        type: string
+        default: ""
+      skip_deps_cache:
+        description: Skip Hetzner deps cache (fresh gclient + ninja)
+        required: false
         type: boolean
         default: false
 
