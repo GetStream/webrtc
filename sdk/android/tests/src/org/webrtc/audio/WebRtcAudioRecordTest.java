@@ -18,6 +18,7 @@ import static org.mockito.Mockito.when;
 
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.media.AudioDeviceInfo;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioRecord;
@@ -38,11 +39,12 @@ import org.robolectric.annotation.Config;
 /**
  * Tests for changing the capture audio source of a {@link WebRtcAudioRecord} after construction.
  *
- * <p>Runs at SDK 21 so that the error reporting path stays off the AudioDeviceInfo and
- * AudioRecordingConfiguration APIs, which cannot be exercised against mocked framework objects.
+ * <p>Runs at SDK 23 (minSdk). That is high enough for Robolectric after Chromium dropped API 21,
+ * and still below API 24 so error reporting stays off AudioRecordingConfiguration, which cannot
+ * be exercised against mocked framework objects. AudioManager.getDevices (API 23) is stubbed.
  */
 @RunWith(AndroidJUnit4.class)
-@Config(manifest = Config.NONE, sdk = Build.VERSION_CODES.LOLLIPOP)
+@Config(manifest = Config.NONE, sdk = Build.VERSION_CODES.M)
 public class WebRtcAudioRecordTest {
   private static final int SAMPLE_RATE = 48000;
   private static final int CHANNEL_COUNT = 1;
@@ -119,7 +121,9 @@ public class WebRtcAudioRecordTest {
   public void setUp() {
     Context context = mock(Context.class);
     when(context.getPackageManager()).thenReturn(mock(PackageManager.class));
-    webRtcAudioRecord = new TestWebRtcAudioRecord(context, mock(AudioManager.class));
+    AudioManager audioManager = mock(AudioManager.class);
+    when(audioManager.getDevices(AudioManager.GET_DEVICES_ALL)).thenReturn(new AudioDeviceInfo[0]);
+    webRtcAudioRecord = new TestWebRtcAudioRecord(context, audioManager);
   }
 
   @Test
