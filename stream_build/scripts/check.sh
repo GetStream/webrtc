@@ -131,6 +131,30 @@ make combine PRODUCTS="$one" SKIP_LICENSES=1 \
 [[ -f "$one/WebRTC.xcframework/Info.plist" ]]
 rm -rf "$one"
 
+# Flattened macOS-style framework (upload-artifact) → versioned symlinks.
+# shellcheck source=common.sh
+source "$ROOT/scripts/common.sh"
+flat_fw="$(mktemp -d)/WebRTC.framework"
+mkdir -p "$flat_fw/Versions/A/Headers" "$flat_fw/Versions/Current/Headers"
+mkdir -p "$flat_fw/Headers"
+printf 'bin-a\n' > "$flat_fw/Versions/A/WebRTC"
+printf 'bin-cur\n' > "$flat_fw/Versions/Current/WebRTC"
+printf 'bin-top\n' > "$flat_fw/WebRTC"
+printf 'hdr-a\n' > "$flat_fw/Versions/A/Headers/WebRTC.h"
+printf 'hdr-cur\n' > "$flat_fw/Versions/Current/Headers/WebRTC.h"
+printf 'hdr-top\n' > "$flat_fw/Headers/WebRTC.h"
+relink_versioned_framework "$flat_fw"
+[[ -L "$flat_fw/Versions/Current" ]]
+[[ "$(readlink "$flat_fw/Versions/Current")" == A ]]
+[[ -L "$flat_fw/WebRTC" ]]
+[[ "$(readlink "$flat_fw/WebRTC")" == Versions/Current/WebRTC ]]
+[[ -L "$flat_fw/Headers" ]]
+[[ "$(readlink "$flat_fw/Headers")" == Versions/Current/Headers ]]
+[[ "$(cat "$flat_fw/WebRTC")" == "bin-a" ]]
+[[ "$(cat "$flat_fw/Headers/WebRTC.h")" == "hdr-a" ]]
+[[ ! -d "$flat_fw/Versions/Current/Headers" || -L "$flat_fw/Versions/Current" ]]
+rm -rf "$(dirname "$flat_fw")"
+
 rename_root="$(mktemp -d)"
 rename_src="$rename_root/WebRTC.xcframework"
 mkdir -p "$rename_src/ios-arm64/WebRTC.framework/Headers"
@@ -476,6 +500,23 @@ grep -q 'uses: ./.github/workflows/_package.yml' \
   "$gha/workflows/release-v2.yml"
 grep -q 'uses: ./.github/workflows/_release.yml' \
   "$gha/workflows/release-v2.yml"
+if grep -q 'rename: true' "$gha/workflows/release-v2.yml"; then
+  echo "Release v2 must not set rename: true" >&2
+  exit 1
+fi
+if grep -qE 'rename:|StreamWebRTC.xcframework.zip|libwebrtc-renamed.aar|make rename' \
+  "$gha/workflows/_package.yml"; then
+  echo "_package.yml must not rename or emit wrapper SDK copies" >&2
+  exit 1
+fi
+grep -q 'skipping wrapper-renamed asset' "$gha/workflows/_release.yml"
+grep -q 'ditto -c -k --sequesterRsrc --keepParent' \
+  "$gha/workflows/_build.yml"
+grep -q 'WebRTC.xcframework.zip' "$gha/workflows/_build.yml"
+grep -q 'Unpack Apple xcframework zips' "$gha/workflows/_package.yml"
+grep -q 'CONFIG:-release' "$ROOT/scripts/combine-apple.sh"
+grep -q 'relink_xcframework' "$ROOT/scripts/combine-apple.sh"
+grep -q 'relink_xcframework' "$ROOT/scripts/package-apple.sh"
 grep -A2 'description: Run Android tests' "$gha/workflows/test-v2.yml" | \
   grep -q 'default: true'
 ! grep -qE 'name: Deps$' "$gha/workflows/_build.yml"

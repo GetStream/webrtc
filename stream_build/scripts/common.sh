@@ -39,6 +39,39 @@ require_webrtc_src() {
   [[ -f "$src/DEPS" ]] || die "No WebRTC checkout at $src (missing DEPS)"
 }
 
+# Restore macOS/Catalyst versioned-framework symlinks.
+# Canonical payload lives in Versions/A. Top-level names and
+# Versions/Current must be symlinks. upload-artifact and some copies
+# flatten those into duplicate regular files (~2x zip size).
+# No-op for iOS-style (flat) frameworks.
+relink_versioned_framework() {
+  local fw="$1"
+  local versions="$fw/Versions"
+  local canonical="$versions/A"
+  [[ -d "$fw" && -d "$canonical" ]] || return 0
+
+  rm -rf "$versions/Current"
+  ln -s A "$versions/Current"
+
+  local item base
+  for item in "$canonical"/*; do
+    [[ -e "$item" || -L "$item" ]] || continue
+    base="$(basename "$item")"
+    rm -rf "$fw/$base"
+    ln -s "Versions/Current/$base" "$fw/$base"
+  done
+}
+
+relink_xcframework() {
+  local xcf="$1"
+  local name="${2:-WebRTC}"
+  local fw
+  [[ -d "$xcf" ]] || return 0
+  while IFS= read -r fw; do
+    relink_versioned_framework "$fw"
+  done < <(find "$xcf" -name "${name}.framework" -type d)
+}
+
 quote_target_os() {
   local raw="$1"
   local os first=1

@@ -1,6 +1,7 @@
 # Called by Package v2 and Release v2. workflow_call only.
 # Download products-* (never Hetzner), make combine, upload final-*.
-# rename=true (Release) also writes wrapper SDK copies.
+# Keep original WebRTC.xcframework / libwebrtc.aar names.
+# Wrapper rebrand belongs in consuming-repo Actions, not this pipeline.
 
 name: WebRTC package v2
 
@@ -19,11 +20,6 @@ on:
       windows:
         required: true
         type: boolean
-      rename:
-        description: Copy+rebrand for wrapper SDKs (Release only)
-        required: false
-        type: boolean
-        default: false
 
 jobs:
   package:
@@ -46,6 +42,14 @@ jobs:
         with:
           pattern: products-*
           path: combine-in
+
+      - name: Unpack Apple xcframework zips
+        if: ${{ inputs.ios || inputs.macos }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r zip; do
+            ditto -x -k "$zip" "$(dirname "$zip")"
+          done < <(find "${GITHUB_WORKSPACE}/combine-in" -name 'WebRTC.xcframework.zip' -type f)
 
       - name: Combine Apple xcframeworks
         if: ${{ inputs.ios || inputs.macos }}
@@ -92,25 +96,6 @@ jobs:
           mkdir -p "${GITHUB_WORKSPACE}/windows-libs"
           cp -R "${GITHUB_WORKSPACE}/combine-in/products-windows/." "${GITHUB_WORKSPACE}/windows-libs/"
 
-      - name: Rename copies for wrapper SDKs
-        if: ${{ inputs.rename }}
-        working-directory: src/stream_build
-        env:
-          PRODUCTS: ${{ github.workspace }}/combine-in
-        run: |
-          set -euo pipefail
-          if [[ "${{ inputs.ios }}" == "true" || "${{ inputs.macos }}" == "true" ]]; then
-            make rename apple XCFRAMEWORK="${PRODUCTS}/WebRTC.xcframework"
-            ditto -c -k --sequesterRsrc --keepParent \
-              "${PRODUCTS}/renamed/StreamWebRTC.xcframework" \
-              "${GITHUB_WORKSPACE}/StreamWebRTC.xcframework.zip"
-          fi
-          if [[ "${{ inputs.android }}" == "true" ]]; then
-            make rename android AAR="${GITHUB_WORKSPACE}/libwebrtc.aar"
-            cp "${PRODUCTS}/renamed/libwebrtc.aar" \
-              "${GITHUB_WORKSPACE}/libwebrtc-renamed.aar"
-          fi
-
       - name: Upload WebRTC.xcframework.zip
         if: ${{ inputs.ios || inputs.macos }}
         uses: actions/upload-artifact@v7
@@ -138,20 +123,3 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Upload StreamWebRTC.xcframework.zip
-        if: ${{ inputs.rename && (inputs.ios || inputs.macos) }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: final-apple-renamed
-          path: StreamWebRTC.xcframework.zip
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Upload renamed Android AAR
-        if: ${{ inputs.rename && inputs.android }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: final-android-renamed
-          path: libwebrtc-renamed.aar
-          if-no-files-found: error
-          retention-days: 7

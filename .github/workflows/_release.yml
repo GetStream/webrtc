@@ -1,5 +1,6 @@
 # Called by Release v2 after Test + Package. workflow_call only.
-# Attach final-* to a GitHub release, then trigger wrapper publishes.
+# Attach original-named final-* to a GitHub release, then trigger
+# wrapper publishes. Do not attach StreamWebRTC or renamed.aar.
 
 name: WebRTC release v2
 
@@ -70,7 +71,18 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          assets=(release-assets/*)
+          assets=()
+          for f in release-assets/*; do
+            [[ -e "$f" ]] || continue
+            base="$(basename "$f")"
+            case "$base" in
+              StreamWebRTC*|libwebrtc-renamed.aar|*renamed*)
+                echo "skipping wrapper-renamed asset $base"
+                continue
+                ;;
+            esac
+            assets+=("$f")
+          done
           if [[ ${#assets[@]} -eq 0 ]]; then
             echo "::error::No finalised artifacts to attach."
             exit 1

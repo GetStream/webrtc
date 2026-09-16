@@ -47,6 +47,10 @@ done
 dest="${PRODUCTS}/${NAME}.xcframework"
 rm -rf "$dest"
 
+for xcf in "${found[@]}"; do
+  relink_xcframework "$xcf" "$NAME"
+done
+
 if [[ ${#found[@]} -eq 1 ]]; then
   echo "combine: one platform — copying ${found[0]} -> $dest"
   cp -R "${found[0]}" "$dest"
@@ -57,14 +61,17 @@ else
   while IFS= read -r fw; do
     [[ -d "$fw" ]] || continue
     xc_args+=(-framework "$fw")
-    dsym=""
-    if [[ -d "${fw}.dSYM" ]]; then
-      dsym="${fw}.dSYM"
-    elif [[ -d "$(dirname "$fw")/dSYMs/$(basename "$fw").dSYM" ]]; then
-      dsym="$(dirname "$fw")/dSYMs/$(basename "$fw").dSYM"
-    fi
-    if [[ -n "$dsym" ]]; then
-      xc_args+=(-debug-symbols "$dsym")
+    # Match package-apple.sh / legacy publish.yml: ship dSYMs only for CONFIG=debug.
+    if [[ "${CONFIG:-release}" == debug ]]; then
+      dsym=""
+      if [[ -d "${fw}.dSYM" ]]; then
+        dsym="${fw}.dSYM"
+      elif [[ -d "$(dirname "$fw")/dSYMs/$(basename "$fw").dSYM" ]]; then
+        dsym="$(dirname "$fw")/dSYMs/$(basename "$fw").dSYM"
+      fi
+      if [[ -n "$dsym" ]]; then
+        xc_args+=(-debug-symbols "$dsym")
+      fi
     fi
     added=1
   done < <(find "${found[@]}" -name '*.framework' -type d | sort)
@@ -73,6 +80,7 @@ else
   echo "xcodebuild ${xc_args[*]}"
   xcodebuild "${xc_args[@]}"
 fi
+relink_xcframework "$dest" "$NAME"
 
 if [[ "${SKIP_LICENSES:-0}" == 1 ]]; then
   echo "skipping license generation (SKIP_LICENSES=1)"

@@ -187,11 +187,22 @@ jobs:
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+      # upload-artifact follows symlinks and duplicates macOS/Catalyst
+      # payloads. Zip with ditto first (same as legacy publish.yml).
+      - name: Zip iOS xcframework (preserve symlinks)
+        run: |
+          set -euo pipefail
+          dest="${GITHUB_WORKSPACE}/products/ios/WebRTC.xcframework"
+          test -d "${dest}"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "${dest}" \
+            "${GITHUB_WORKSPACE}/products/ios/WebRTC.xcframework.zip"
+          rm -rf "${dest}"
       - name: Upload products-ios
         uses: actions/upload-artifact@v7
         with:
           name: products-ios
-          path: products/ios
+          path: products/ios/WebRTC.xcframework.zip
           if-no-files-found: error
           retention-days: 7
 
@@ -241,11 +252,20 @@ jobs:
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+      - name: Zip macOS xcframework (preserve symlinks)
+        run: |
+          set -euo pipefail
+          dest="${GITHUB_WORKSPACE}/products/macos/WebRTC.xcframework"
+          test -d "${dest}"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "${dest}" \
+            "${GITHUB_WORKSPACE}/products/macos/WebRTC.xcframework.zip"
+          rm -rf "${dest}"
       - name: Upload products-macos
         uses: actions/upload-artifact@v7
         with:
           name: products-macos
-          path: products/macos
+          path: products/macos/WebRTC.xcframework.zip
           if-no-files-found: error
           retention-days: 7
 

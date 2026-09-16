@@ -26,10 +26,15 @@ $(PRODUCTS)/renamed/libwebrtc.aar
 `make combine` globs `$(PRODUCTS)/*/WebRTC.xcframework` (ios, macos, and any
 future sibling such as visionos/tvos). One match is copied to the stable
 output path; two or more are merged with `xcodebuild -create-xcframework`.
+Combine and package restore macOS/Catalyst versioned-framework
+symlinks (`Versions/Current` → `A`) so zip size matches the legacy
+~44MB profile. dSYMs are passed to `-create-xcframework` only when
+`CONFIG=debug`.
 
-`make rename` copies the original artifact and rebrands the copy. The
-GetStream/webrtc release keeps `WebRTC.xcframework` / `libwebrtc.aar`.
-Renamed copies feed stream-video-swift-webrtc and stream-video-android-webrtc.
+`make rename` copies the original artifact and rebrands the copy for local
+use. GetStream/webrtc Package/Release v2 keep `WebRTC.xcframework` /
+`libwebrtc.aar`. StreamWebRTC / renamed.aar belong in
+stream-video-swift-webrtc and stream-video-android-webrtc Actions.
 
 ## Layout
 
@@ -41,9 +46,9 @@ Renamed copies feed stream-video-swift-webrtc and stream-video-android-webrtc.
 - `webrtc.mk` — catch-all parent `webrtc/Makefile` template (copied if missing)
 - `scripts/deps.sh` — `gclient sync` at `DEPS_ROOT`; uses this `src` (no second clone)
 - `scripts/gn-gen.sh` — args.gn + gn gen
-- `scripts/package-apple.sh` — lipo + create-xcframework (dSYMs only for `CONFIG=debug`)
-- `scripts/combine-apple.sh` — discover platform xcframeworks and merge
-- `scripts/rename-apple.sh` — copy WebRTC.xcframework → StreamWebRTC
+- `scripts/package-apple.sh` — lipo + create-xcframework (dSYMs only for `CONFIG=debug`; relink versioned frameworks)
+- `scripts/combine-apple.sh` — discover platform xcframeworks and merge (dSYMs only for `CONFIG=debug`; relink)
+- `scripts/rename-apple.sh` — copy WebRTC.xcframework → StreamWebRTC (local; not GHA Release)
 - `scripts/rename-android.sh` — copy libwebrtc.aar into PRODUCTS/renamed/
 - `scripts/package-android.sh` — zip libwebrtc.aar
 - `scripts/package-windows.sh` — copy Windows libs
@@ -124,12 +129,14 @@ If this job moves to an ARM extra-capacity runner, change
 Windows Build still uploads `deps-windows` to GitHub. Build jobs
 always `make package` and upload `products-*`. Test jobs do not.
 Package v2 `uses` Build v2 then `_package.yml` combine only: download
-`products-*`, `make combine`, upload `final-*`. No second HIT/ninja.
+`products-*` (Apple as ditto zips so upload-artifact does not flatten
+symlinks), `make combine`, upload `final-*`. No second HIT/ninja.
 Release v2 is four `uses:` jobs: `_test.yml` ∥ `build-v2.yml` →
-`_package.yml` (rename) → `_release.yml`. Combine downloads
+`_package.yml` → `_release.yml`. Combine downloads
 `products-*` only — not `.gclient-git-cache` and not `out/` — then
-`make combine` / `make rename` and uploads `final-*`. Release attaches
-`final-*`.
+`make combine` and uploads `final-*` with original names
+(`WebRTC.xcframework.zip`, `libwebrtc.aar`). Release attaches those;
+it does not emit StreamWebRTC or renamed.aar.
 
 Do not hand combine `out/` slice dirs. Names are `ios-arm64-device`,
 `ios-arm64-simulator`, `ios-x64-simulator`, `catalyst-arm64`,

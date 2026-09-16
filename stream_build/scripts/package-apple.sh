@@ -81,6 +81,7 @@ lipo_group() {
   out_bin="$(framework_binary "$dest")"
   rm -f "$out_bin"
   lipo -create "${binaries[@]}" -output "$out_bin"
+  relink_versioned_framework "$dest"
 
   local first_dsym="${OUT}/${present[0]}/${NAME}.dSYM"
   if [[ -d "$first_dsym" ]]; then
@@ -154,6 +155,7 @@ rm -rf "${PRODUCTS}/${NAME}.xcframework"
 xc_args+=(-output "${PRODUCTS}/${NAME}.xcframework")
 echo "xcodebuild ${xc_args[*]}"
 xcodebuild "${xc_args[@]}"
+relink_xcframework "${PRODUCTS}/${NAME}.xcframework" "$NAME"
 
 xcframework="${PRODUCTS}/${NAME}.xcframework"
 if [[ "${SKIP_LICENSES:-0}" == 1 ]]; then

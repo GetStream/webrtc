@@ -1,7 +1,8 @@
 # GitHub release of packaged WebRTC artifacts (v2 Makefile DAG), then
 # downstream wrapper publishes. Tests run parallel with Build. Test is
 # cold gclient + make test (no Hetzner, no products). Build is the same
-# build-v2.yml Package uses. Combine is _package.yml (rename on).
+# build-v2.yml Package uses. Combine is _package.yml. Original product
+# names only — StreamWebRTC / renamed.aar belong in wrapper repos.
 # Four uses: jobs — do not nest Package v2 → Build v2 → _build.yml from
 # this file beyond build-v2.yml itself. Publish waits on Test + Package.
 
@@ -98,7 +99,6 @@ jobs:
       macos: ${{ inputs.macos }}
       android: ${{ inputs.android }}
       windows: ${{ inputs.windows }}
-      rename: true
 
   release:
     name: Release

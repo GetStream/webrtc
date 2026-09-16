@@ -1,7 +1,7 @@
 # Package WebRTC artifacts (v2 Makefile DAG). Does not create a GitHub
 # release. Calls Build v2 (HIT, ninja, make package, products-*) then
-# _package.yml combine only. No Test. No GH release. No rename
-# (Release only).
+# _package.yml combine only. No Test. No GH release. Original names
+# only (WebRTC.xcframework / libwebrtc.aar).
 
 name: Package v2
 
@@ -74,4 +74,3 @@ jobs:
       macos: ${{ inputs.macos }}
       android: ${{ inputs.android }}
       windows: ${{ inputs.windows }}
-      rename: false
