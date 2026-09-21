@@ -1,0 +1,325 @@
+# Promote an existing WebRTC pre-release without rebuilding its artifacts.
+
+name: Promote Release v2
+
+run-name: Promote Release v2 ${{ inputs.version }}
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_release_url:
+        description: Existing GetStream/webrtc pre-release URL
+        required: true
+        type: string
+      version:
+        description: Version/tag for the new final release
+        required: true
+        type: string
+
+concurrency:
+  group: promote-release-v2-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Promote pre-release
+    runs-on: ubuntu-latest
+    outputs:
+      trigger_swift: ${{ steps.validate.outputs.trigger_swift }}
+      trigger_android: ${{ steps.validate.outputs.trigger_android }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      SOURCE_RELEASE_URL: ${{ inputs.source_release_url }}
+    steps:
+      - id: validate
+        name: Validate source and target releases
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REPOSITORY}" != "GetStream/webrtc" ]]; then
+            echo "::error::This workflow only supports GetStream/webrtc."
+            exit 1
+          fi
+
+          if [[ ! "${RELEASE_VERSION}" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$ ]] ||
+             ! git check-ref-format "refs/tags/${RELEASE_VERSION}" >/dev/null; then
+            echo "::error::version is not a valid release tag."
+            exit 1
+          fi
+
+          if [[ "${SOURCE_RELEASE_URL}" =~ ^https://github\.com/GetStream/webrtc/releases/tag/([^/?#]+)/?$ ]]; then
+            source_endpoint="repos/${GITHUB_REPOSITORY}/releases/tags/${BASH_REMATCH[1]}"
+          elif [[ "${SOURCE_RELEASE_URL}" =~ ^https://api\.github\.com/repos/GetStream/webrtc/releases/tags/([^/?#]+)/?$ ]]; then
+            source_endpoint="repos/${GITHUB_REPOSITORY}/releases/tags/${BASH_REMATCH[1]}"
+          elif [[ "${SOURCE_RELEASE_URL}" =~ ^https://api\.github\.com/repos/GetStream/webrtc/releases/([0-9]+)/?$ ]]; then
+            source_endpoint="repos/${GITHUB_REPOSITORY}/releases/${BASH_REMATCH[1]}"
+          else
+            echo "::error::source_release_url is not a GetStream/webrtc release URL."
+            exit 1
+          fi
+
+          mkdir -p promotion
+          gh api "${source_endpoint}" > promotion/source-release.json
+
+          source_api_url="$(jq -r '.url // empty' promotion/source-release.json)"
+          source_html_url="$(jq -r '.html_url // empty' promotion/source-release.json)"
+          if [[ "${source_api_url}" != "https://api.github.com/repos/GetStream/webrtc/releases/"* ]] ||
+             [[ "${source_html_url}" != "https://github.com/GetStream/webrtc/releases/tag/"* ]]; then
+            echo "::error::The source release does not belong to GetStream/webrtc."
+            exit 1
+          fi
+          if ! jq -e '.prerelease == true' promotion/source-release.json >/dev/null; then
+            echo "::error::The source release must be a pre-release."
+            exit 1
+          fi
+          if ! jq -e '.draft == false' promotion/source-release.json >/dev/null; then
+            echo "::error::The source release must be published, not a draft."
+            exit 1
+          fi
+          if ! jq -e '.assets | length > 0' promotion/source-release.json >/dev/null; then
+            echo "::error::The source release has no artifacts to promote."
+            exit 1
+          fi
+          jq -r \
+            '"trigger_swift=\(any(.assets[]; .name == "WebRTC.xcframework.zip"))",
+            "trigger_android=\(any(.assets[]; .name == "libwebrtc.aar"))"' \
+            promotion/source-release.json >> "${GITHUB_OUTPUT}"
+
+          source_tag="$(jq -r '.tag_name // empty' promotion/source-release.json)"
+          if [[ ! "${source_tag}" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$ ]] ||
+             ! git check-ref-format "refs/tags/${source_tag}" >/dev/null; then
+            echo "::error::The source release has an unsupported tag."
+            exit 1
+          fi
+
+          encoded_source_tag="$(jq -rn --arg value "${source_tag}" '$value | @uri')"
+          gh api "repos/${GITHUB_REPOSITORY}/commits/${encoded_source_tag}" \
+            --jq '.sha' > promotion/source-commit
+          jq -j '.body // ""' promotion/source-release.json \
+            > promotion/release-notes.md
+
+          gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            > promotion/target-releases.json
+          if jq -s -e --arg tag "${RELEASE_VERSION}" \
+            'add | any(.tag_name == $tag)' \
+            promotion/target-releases.json >/dev/null; then
+            echo "::error::A release already exists for version."
+            exit 1
+          fi
+
+          gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/git/matching-refs/tags/${RELEASE_VERSION}" \
+            > promotion/target-refs.json
+          if jq -s -e --arg ref "refs/tags/${RELEASE_VERSION}" \
+            'add | any(.ref == $ref)' \
+            promotion/target-refs.json >/dev/null; then
+            echo "::error::The target tag already exists."
+            exit 1
+          fi
+
+      - name: Download source release artifacts
+        run: |
+          set -euo pipefail
+
+          mkdir release-assets
+          : > promotion/downloaded-assets.jsonl
+          while IFS= read -r source_asset; do
+            asset_id="$(jq -er '.id | numbers' <<< "${source_asset}")"
+            name="$(jq -er '.name | strings' <<< "${source_asset}")"
+            if [[ -z "${name}" || "${name}" == */* ||
+                  "${name}" == "." || "${name}" == ".." ]]; then
+              echo "::error::The source release has an unsafe artifact name."
+              exit 1
+            fi
+            gh api \
+              --header "Accept: application/octet-stream" \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
+              > "release-assets/${name}"
+          done < <(jq -c '.assets[]' promotion/source-release.json)
+
+          shopt -s dotglob nullglob
+          downloaded=(release-assets/*)
+          expected_count="$(jq '.assets | length' promotion/source-release.json)"
+          if [[ "${#downloaded[@]}" -ne "${expected_count}" ]]; then
+            echo "::error::Downloaded artifact count does not match the source release."
+            exit 1
+          fi
+
+          for asset in "${downloaded[@]}"; do
+            name="${asset#release-assets/}"
+            expected_size="$(
+              jq -er --arg name "${name}" \
+                '.assets[] | select(.name == $name) | .size' \
+                promotion/source-release.json
+            )"
+            actual_size="$(wc -c < "${asset}" | tr -d '[:space:]')"
+            if [[ "${actual_size}" != "${expected_size}" ]]; then
+              echo "::error::Downloaded artifact size does not match its source."
+              exit 1
+            fi
+            actual_digest="sha256:$(sha256sum "${asset}" | cut -d' ' -f1)"
+            expected_digest="$(
+              jq -r --arg name "${name}" \
+                '.assets[] | select(.name == $name) | .digest // empty' \
+                promotion/source-release.json
+            )"
+            if [[ -n "${expected_digest}" ]]; then
+              if [[ ! "${expected_digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+                echo "::error::The source artifact has an unsupported digest."
+                exit 1
+              fi
+              if [[ "${actual_digest}" != "${expected_digest}" ]]; then
+                echo "::error::Downloaded artifact digest does not match its source."
+                exit 1
+              fi
+            fi
+            jq -n \
+              --arg name "${name}" \
+              --argjson size "${actual_size}" \
+              --arg digest "${actual_digest}" \
+              '{name: $name, size: $size, digest: $digest}' \
+              >> promotion/downloaded-assets.jsonl
+          done
+          jq -S -s 'sort_by(.name)' promotion/downloaded-assets.jsonl \
+            > promotion/downloaded-assets.json
+
+      - name: Create final GitHub release
+        run: |
+          set -euo pipefail
+
+          gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            > promotion/target-releases-before-create.json
+          if jq -s -e --arg tag "${RELEASE_VERSION}" \
+            'add | any(.tag_name == $tag)' \
+            promotion/target-releases-before-create.json >/dev/null; then
+            echo "::error::A release already exists for version."
+            exit 1
+          fi
+
+          gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/git/matching-refs/tags/${RELEASE_VERSION}" \
+            > promotion/target-refs-before-create.json
+          if jq -s -e --arg ref "refs/tags/${RELEASE_VERSION}" \
+            'add | any(.ref == $ref)' \
+            promotion/target-refs-before-create.json >/dev/null; then
+            echo "::error::The target tag already exists."
+            exit 1
+          fi
+
+          source_commit="$(cat promotion/source-commit)"
+          encoded_version="$(
+            jq -rn --arg value "${RELEASE_VERSION}" '$value | @uri'
+          )"
+          created_target_ref=false
+          cleanup_target_ref() {
+            status=$?
+            trap - EXIT
+            if [[ "${status}" -ne 0 && "${created_target_ref}" == "true" ]]; then
+              if gh api --paginate \
+                "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+                > promotion/releases-during-cleanup.json &&
+                ! jq -s -e --arg tag "${RELEASE_VERSION}" \
+                  'add | any(.tag_name == $tag)' \
+                  promotion/releases-during-cleanup.json >/dev/null; then
+                current_sha="$(
+                  gh api \
+                    "repos/${GITHUB_REPOSITORY}/git/ref/tags/${encoded_version}" \
+                    --jq '.object.sha' 2>/dev/null || true
+                )"
+                if [[ "${current_sha}" == "${source_commit}" ]]; then
+                  gh api --method DELETE \
+                    "repos/${GITHUB_REPOSITORY}/git/refs/tags/${encoded_version}" \
+                    >/dev/null 2>&1 || true
+                fi
+              fi
+            fi
+            exit "${status}"
+          }
+          trap cleanup_target_ref EXIT
+
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/git/refs" \
+            --raw-field "ref=refs/tags/${RELEASE_VERSION}" \
+            --raw-field "sha=${source_commit}" \
+            > promotion/created-ref.json
+          created_target_ref=true
+
+          shopt -s dotglob nullglob
+          assets=(release-assets/*)
+          gh release create "${RELEASE_VERSION}" "${assets[@]}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --verify-tag \
+            --title "${RELEASE_VERSION}" \
+            --notes-file promotion/release-notes.md \
+            --latest
+
+          created_target_ref=false
+          trap - EXIT
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/tags/${encoded_version}" \
+            > promotion/created-release.json
+
+          if ! jq -e '.draft == false and .prerelease == false' \
+            promotion/created-release.json >/dev/null; then
+            echo "::error::The created release is not a published final release."
+            exit 1
+          fi
+          if ! jq -e --slurpfile source promotion/source-release.json \
+            '.body == ($source[0].body // "")' \
+            promotion/created-release.json >/dev/null; then
+            echo "::error::The created release notes differ from the source."
+            exit 1
+          fi
+
+          jq -S '[.assets[] | {name, size, digest}] | sort_by(.name)' \
+            promotion/created-release.json > promotion/created-assets.json
+          if ! cmp -s \
+            promotion/downloaded-assets.json \
+            promotion/created-assets.json; then
+            echo "::error::The created artifact digests differ from the source."
+            exit 1
+          fi
+
+          release_url="$(jq -r '.html_url' promotion/created-release.json)"
+          printf 'Promoted release: %s\n' "${release_url}" \
+            >> "${GITHUB_STEP_SUMMARY}"
+
+  trigger_downstream_releases:
+    name: Trigger downstream WebRTC releases v2
+    needs: promote
+    if: ${{ always() && !cancelled() && needs.promote.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger stream-video-swift-webrtc release
+        if: ${{ needs.promote.outputs.trigger_swift == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          IS_PRERELEASE: "false"
+        run: |
+          set -euo pipefail
+          webrtc_release_url="https://github.com/${{ github.repository }}/releases/tag/${RELEASE_VERSION}"
+          gh workflow run publish-from-webrtc.yml \
+            --repo GetStream/stream-video-swift-webrtc \
+            --field "webrtc_release_url=${webrtc_release_url}" \
+            --field "pre_release=${IS_PRERELEASE}"
+
+      - name: Trigger stream-video-android-webrtc release
+        if: ${{ needs.promote.outputs.trigger_android == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          IS_PRERELEASE: "false"
+        run: |
+          set -euo pipefail
+          webrtc_release_url="https://github.com/${{ github.repository }}/releases/tag/${RELEASE_VERSION}"
+          gh workflow run publish-from-webrtc.yml \
+            --repo GetStream/stream-video-android-webrtc \
+            --field "webrtc_release_url=${webrtc_release_url}" \
+            --field "pre_release=${IS_PRERELEASE}"
