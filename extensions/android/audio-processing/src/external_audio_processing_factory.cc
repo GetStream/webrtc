@@ -83,6 +83,45 @@ static jlong JNI_ExternalAudioProcessingFactory_GetDefaultApm(JNIEnv* env) {
   return webrtc::jni::jlongFromPointer(default_processor->apm().get());
 }
 
+static void JNI_ExternalAudioProcessingFactory_SetCaptureCompressionGain(
+    JNIEnv* env,
+    jint compression_gain_db) {
+  if (!default_processor) {
+    return;
+  }
+  default_processor->apm().get()->SetRuntimeSetting(AudioProcessing::RuntimeSetting::CreateCompressionGainDb(compression_gain_db));
+}
+
+
+static void JNI_ExternalAudioProcessingFactory_EnableGainController1(
+    JNIEnv* env,
+    jint mode,
+    jint target_level_dbfs,
+    jint compression_gain_db,
+    jboolean enable_limiter
+  ) {
+  if (!default_processor) {
+    return;
+  }
+  if (!default_processor->apm()) {
+    return;
+  }
+  webrtc::AudioProcessing::Config config = default_processor->apm()->GetConfig();
+  config.gain_controller1.enabled = true;
+  config.gain_controller2.enabled = false;
+  if (mode == 0) {
+    config.gain_controller1.mode = webrtc::AudioProcessing::Config::GainController1::kAdaptiveAnalog;
+  } else if (mode == 1) {
+    config.gain_controller1.mode = webrtc::AudioProcessing::Config::GainController1::kAdaptiveDigital;
+  } else if (mode == 2) {
+    config.gain_controller1.mode = webrtc::AudioProcessing::Config::GainController1::kFixedDigital;
+  }
+  config.gain_controller1.target_level_dbfs = target_level_dbfs;
+  config.gain_controller1.compression_gain_db = compression_gain_db;
+  config.gain_controller1.enable_limiter = enable_limiter;
+  default_processor->apm()->ApplyConfig(config);
+}
+
 static jlong JNI_ExternalAudioProcessingFactory_SetCapturePostProcessing(
     JNIEnv* env,
     const JavaParamRef<jobject>& j_processing) {
