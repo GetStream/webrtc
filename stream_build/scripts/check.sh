@@ -43,6 +43,13 @@ printf '%s\n' "$help_text" | grep -q 'make package macos'
 layout="$(fake_layout)"
 layout_make=(make DEPS_ROOT="$layout" WEBRTC_SRC="$layout/src")
 
+for platform in ios macos; do
+  package_plan="$("${layout_make[@]}" -n "package-$platform")"
+  [[ "$package_plan" == *--zip* ]]
+  package_plan="$("${layout_make[@]}" -n "package-$platform" ZIP=0)"
+  [[ "$package_plan" != *--zip* ]]
+done
+
 usage="$("${layout_make[@]}" build 2>&1 || true)"
 printf '%s\n' "$usage" | grep -q 'usage: make build'
 ! printf '%s\n' "$usage" | grep -q '|apple'
@@ -469,5 +476,13 @@ grep -A12 'members=(.gclient-git-cache)' "$gha/actions/artifact-put/action.yml" 
   grep -q 'third_party'
 grep -q 'pack members:' "$gha/actions/artifact-put/action.yml"
 grep -q 'uses: ./src/.github/actions/artifact-put' "$gha/workflows/_make.yml"
+grep -q 'products/ios/WebRTC.xcframework.zip' "$gha/workflows/_make.yml"
+grep -q 'products/macos/WebRTC.xcframework.zip' "$gha/workflows/_make.yml"
+
+if grep -qE 'make rename |final-(apple|android)-renamed|StreamWebRTC\.xcframework|libwebrtc-renamed\.aar' \
+  "$gha/workflows/_make.yml"; then
+  echo "wrapper artifact creation belongs in the downstream repositories" >&2
+  exit 1
+fi
 
 echo "ok"

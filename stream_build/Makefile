@@ -116,6 +116,7 @@ help:
 	@echo "  SKIP_DEPS=1 skips gclient sync only; build/test/package still run"
 	@echo "  SKIP_LICENSES=1 skips license generation only; lipo/zip still run"
 	@echo "  SKIP_MACCATALYST=1 drops catalyst-arm64 catalyst-x64 from ios"
+	@echo "  Apple package commands create XCFramework ZIPs by default (ZIP=0 opts out)"
 	@echo
 	@echo "  make package ios"
 	@echo "  make package macos"
@@ -288,6 +289,8 @@ build-ios: require-darwin maybe-deps require-src $(addprefix build-slice-,$(ios_
 build-macos: require-darwin maybe-deps require-src $(addprefix build-slice-,$(MACOS_SLICES))
 build-android: require-linux maybe-deps require-src $(addprefix build-slice-,$(android_slices))
 build-windows: require-windows maybe-deps require-src $(addprefix build-slice-,$(windows_slices))
+
+package-ios package-macos: ZIP = 1
 
 package-ios: require-darwin require-src
 	@$(SCRIPTS)/package-apple.sh \

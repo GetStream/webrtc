@@ -132,7 +132,7 @@ add_framework() {
   mkdir -p "${symbols}/${group}"
   cp -R "${fw}.dSYM" "${symbols}/${group}/"
   xc_args+=(-framework "$fw")
-  if [[ -d "${fw}.dSYM" ]]; then
+  if [[ "${CONFIG:-release}" == debug ]]; then
     xc_args+=(-debug-symbols "${fw}.dSYM")
   fi
   added=1

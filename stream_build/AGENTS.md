@@ -17,24 +17,35 @@ Apple package writes per-platform trees so they do not overwrite:
 
 ```
 $(PRODUCTS)/ios/WebRTC.xcframework
+$(PRODUCTS)/ios/WebRTC.xcframework.zip
 $(PRODUCTS)/macos/WebRTC.xcframework
+$(PRODUCTS)/macos/WebRTC.xcframework.zip
 $(PRODUCTS)/WebRTC.xcframework              # make combine
-$(PRODUCTS)/renamed/StreamWebRTC.xcframework
-$(PRODUCTS)/renamed/libwebrtc.aar
 ```
 
 `make combine` globs `$(PRODUCTS)/*/WebRTC.xcframework` (ios, macos, and any
 future sibling such as visionos/tvos). One match is copied to the stable
 output path; two or more are merged with `xcodebuild -create-xcframework`.
+Apple package commands create XCFramework ZIPs by default. CI transfers
+these ZIPs and extracts them before combining, preserving the internal
+symlinks in versioned macOS and Catalyst frameworks.
 
 Apple packaging also requires the generated dSYMs and writes
 `WebRTC.dSYMs.zip` separately for every configuration, grouped by platform.
-Release v2 publishes this separate asset only for non-prereleases; the build
-handoff retains it alongside the xcframework.
+`CONFIG=debug` also embeds dSYMs in the XCFramework. `CONFIG=release` keeps
+them only in the separate symbol archive, outside the XCFramework.
+For `CONFIG=release`, Build v2 uploads per-slice symbols as `build-ios-dsyms`
+and `build-macos-dsyms`, without running packaging. Package/Release v2 upload
+the per-platform ZIPs as `products-ios-dsyms` and `products-macos-dsyms`, then
+combine them into `final-apple-dsyms`. Release v2 attaches `WebRTC.dSYMs.zip`
+to both stable releases and prereleases. These separate CI artifacts depend
+on the build configuration, not prerelease status; debug symbols stay embedded.
 
-`make rename` copies the original artifact and rebrands the copy. The
-GetStream/webrtc release keeps `WebRTC.xcframework` / `libwebrtc.aar`.
-Renamed copies feed stream-video-swift-webrtc and stream-video-android-webrtc.
+Package v2 and Release v2 produce only upstream artifacts: `WebRTC.xcframework`,
+`libwebrtc.aar`, and the applicable symbols and Windows products. Wrapper
+artifacts are prepared by stream-video-swift-webrtc and
+stream-video-android-webrtc after downloading the upstream release.
+`make rename` remains an optional local command; the v2 workflows do not call it.
 
 ## Layout
 
@@ -156,7 +167,7 @@ not use `${{ secrets.* }}`. `products-*` / `final-*` stay on
 | `ARCHS` | android ABI or windows cpu (`arm64-v8a`, `x64`, …) |
 | `JOBS` | ninja/gclient parallelism |
 | `SHALLOW` | `1` (default) `gclient sync --no-history --shallow`. `0` = full history. |
-| `ZIP` | `1` to zip Apple/Windows products |
+| `ZIP` | Defaults to `1` for Apple package commands (`0` opts out); `0` for combine/Windows (`1` opts in). |
 | `XCFRAMEWORK` | input for `make rename apple` (default `$(PRODUCTS)/WebRTC.xcframework`) |
 | `AAR` | input for `make rename android` (default `$(PRODUCTS)/libwebrtc.aar`) |
 | `RENAMED` | output dir for `make rename` (default `$(PRODUCTS)/renamed`) |

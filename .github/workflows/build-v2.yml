@@ -2,7 +2,8 @@
 # .github/workflows/_make.yml
 # Build iOS / macOS / Android in parallel: HIT build-{ios,macos,android},
 # make deps, make build, put that host's tree + out/. No Linux Deps job.
-# No package combine, no products.
+# No package combine or packaged products. Release configurations upload
+# the Apple build slices' dSYMs as separate artifacts.
 
 name: Build v2
 
