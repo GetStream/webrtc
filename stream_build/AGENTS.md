@@ -27,6 +27,11 @@ $(PRODUCTS)/renamed/libwebrtc.aar
 future sibling such as visionos/tvos). One match is copied to the stable
 output path; two or more are merged with `xcodebuild -create-xcframework`.
 
+Apple packaging also requires the generated dSYMs and writes
+`WebRTC.dSYMs.zip` separately for every configuration, grouped by platform.
+Release v2 publishes this separate asset only for non-prereleases; the build
+handoff retains it alongside the xcframework.
+
 `make rename` copies the original artifact and rebrands the copy. The
 GetStream/webrtc release keeps `WebRTC.xcframework` / `libwebrtc.aar`.
 Renamed copies feed stream-video-swift-webrtc and stream-video-android-webrtc.
@@ -40,7 +45,7 @@ Renamed copies feed stream-video-swift-webrtc and stream-video-android-webrtc.
 - `webrtc.mk` — catch-all parent `webrtc/Makefile` template (copied if missing)
 - `scripts/deps.sh` — `gclient sync` at `DEPS_ROOT`; uses this `src` (no second clone)
 - `scripts/gn-gen.sh` — args.gn + gn gen
-- `scripts/package-apple.sh` — lipo + create-xcframework
+- `scripts/package-apple.sh` — lipo + create-xcframework + separate dSYM archive
 - `scripts/combine-apple.sh` — discover platform xcframeworks and merge
 - `scripts/rename-apple.sh` — copy WebRTC.xcframework → StreamWebRTC
 - `scripts/rename-android.sh` — copy libwebrtc.aar into PRODUCTS/renamed/
