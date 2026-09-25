@@ -240,7 +240,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: products-ios
-          path: products/ios
+          path: |
+            products/ios/WebRTC.xcframework
+            products/ios/WebRTC.dSYMs.zip
           if-no-files-found: error
           retention-days: 7
 
@@ -294,7 +296,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: products-macos
-          path: products/macos
+          path: |
+            products/macos/WebRTC.xcframework
+            products/macos/WebRTC.dSYMs.zip
           if-no-files-found: error
           retention-days: 7
 
@@ -611,6 +615,25 @@ jobs:
             "${dest}" \
             "${GITHUB_WORKSPACE}/WebRTC.xcframework.zip"
 
+      - name: Combine Apple dSYMs
+        if: ${{ inputs.mode == 'release' && !inputs.prerelease && (inputs.ios || inputs.macos) }}
+        env:
+          INCLUDE_IOS: ${{ inputs.ios }}
+          INCLUDE_MACOS: ${{ inputs.macos }}
+        run: |
+          set -euo pipefail
+          symbols="${GITHUB_WORKSPACE}/apple-symbols"
+          mkdir -p "$symbols"
+          for platform in ios macos; do
+            [[ "$platform" != ios || "$INCLUDE_IOS" == true ]] || continue
+            [[ "$platform" != macos || "$INCLUDE_MACOS" == true ]] || continue
+            archive="${GITHUB_WORKSPACE}/combine-in/products-${platform}/WebRTC.dSYMs.zip"
+            test -f "$archive"
+            ditto -x -k "$archive" "$symbols"
+          done
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$symbols/WebRTC.dSYMs" "${GITHUB_WORKSPACE}/WebRTC.dSYMs.zip"
+
       - name: Pass through Android AAR
         if: ${{ inputs.android }}
         run: |
@@ -657,6 +680,15 @@ jobs:
         with:
           name: final-apple
           path: WebRTC.xcframework.zip
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload WebRTC.dSYMs.zip
+        if: ${{ inputs.mode == 'release' && !inputs.prerelease && (inputs.ios || inputs.macos) }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: final-apple-dsyms
+          path: WebRTC.dSYMs.zip
           if-no-files-found: error
           retention-days: 7
 

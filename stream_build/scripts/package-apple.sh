@@ -50,7 +50,7 @@ framework_binary() {
 }
 
 dsym_binary() {
-  printf '%s.dSYM/Contents/Resources/DWARF/%s\n' "$1" "$NAME"
+  printf '%s/Contents/Resources/DWARF/%s\n' "$1" "$NAME"
 }
 
 lipo_group() {
@@ -80,7 +80,7 @@ lipo_group() {
   local out_bin
   out_bin="$(framework_binary "$dest")"
   rm -f "$out_bin"
-  lipo -create "${binaries[@]}" -output "$out_bin"
+  lipo -create "${binaries[@]}" -output "$out_bin" || die "failed to merge $dest"
 
   local first_dsym="${OUT}/${present[0]}/${NAME}.dSYM"
   if [[ -d "$first_dsym" ]]; then
@@ -89,7 +89,7 @@ lipo_group() {
     local dsym_bins=()
     for slice in "${present[@]}"; do
       local dsym="${OUT}/${slice}/${NAME}.dSYM"
-      [[ -d "$dsym" ]] || continue
+      [[ -d "$dsym" ]] || die "missing dSYM for $slice: $dsym"
       dsym_bins+=("$(dsym_binary "$dsym")")
     done
     if [[ ${#dsym_bins[@]} -gt 0 ]]; then
@@ -97,7 +97,7 @@ lipo_group() {
       out_dsym="$(dsym_binary "${dest}.dSYM")"
       rm -f "$out_dsym"
       mkdir -p "$(dirname "$out_dsym")"
-      lipo -create "${dsym_bins[@]}" -output "$out_dsym"
+      lipo -create "${dsym_bins[@]}" -output "$out_dsym" || die "failed to merge ${dest}.dSYM"
     fi
   fi
   return 0
@@ -116,6 +116,9 @@ contains_slice() {
 work="${OUT}/_apple_universal"
 rm -rf "$work"
 mkdir -p "$work"
+symbols="${PRODUCTS}/${NAME}.dSYMs"
+rm -rf "$symbols"
+mkdir -p "$symbols"
 
 xc_args=(-create-xcframework)
 added=0
@@ -123,6 +126,11 @@ added=0
 add_framework() {
   local fw="$1"
   [[ -d "$fw" ]] || return 0
+  [[ -d "${fw}.dSYM" ]] || die "missing dSYM for $fw"
+  local group
+  group="$(basename "$(dirname "$fw")")"
+  mkdir -p "${symbols}/${group}"
+  cp -R "${fw}.dSYM" "${symbols}/${group}/"
   xc_args+=(-framework "$fw")
   if [[ -d "${fw}.dSYM" ]]; then
     xc_args+=(-debug-symbols "${fw}.dSYM")
@@ -153,6 +161,8 @@ rm -rf "${PRODUCTS}/${NAME}.xcframework"
 xc_args+=(-output "${PRODUCTS}/${NAME}.xcframework")
 echo "xcodebuild ${xc_args[*]}"
 xcodebuild "${xc_args[@]}"
+
+ditto -c -k --sequesterRsrc --keepParent "$symbols" "${symbols}.zip"
 
 xcframework="${PRODUCTS}/${NAME}.xcframework"
 if [[ "${SKIP_LICENSES:-0}" == 1 ]]; then
