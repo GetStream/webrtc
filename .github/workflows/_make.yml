@@ -6,7 +6,8 @@
 # (skip_deps_cache skips download), make deps, make build|test, then put
 # git-cache + src/resources + .cipd. No shared Linux Deps job. No GitHub
 # deps-key. Windows Deps stays deps-windows on GitHub. Build mode is
-# ninja only (no products). Package/Release Build jobs also make package
+# ninja plus release-config dSYM uploads (no packaged products).
+# Package/Release Build jobs also make package
 # and upload products-* (GitHub). Package combine consumes products-*
 # (no third ninja) and uploads final-*. Release attaches final-*. Tests
 # HIT the same per-platform key (out/ios_tests vs slice dirs).
@@ -218,6 +219,16 @@ jobs:
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
         run: make build ios
+      - name: Upload build iOS dSYMs
+        if: ${{ inputs.mode == 'build' && inputs.config == 'release' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-ios-dsyms
+          path: |
+            out/ios-*/WebRTC.dSYM
+            out/catalyst-*/WebRTC.dSYM
+          if-no-files-found: error
+          retention-days: 7
       - name: Upload build-ios to Hetzner
         uses: ./src/.github/actions/artifact-put
         with:
@@ -240,9 +251,15 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: products-ios
-          path: |
-            products/ios/WebRTC.xcframework
-            products/ios/WebRTC.dSYMs.zip
+          path: products/ios/WebRTC.xcframework.zip
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload packaged iOS dSYMs
+        if: ${{ inputs.config == 'release' && (inputs.mode == 'package' || inputs.mode == 'release') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: products-ios-dsyms
+          path: products/ios/WebRTC.dSYMs.zip
           if-no-files-found: error
           retention-days: 7
 
@@ -274,6 +291,14 @@ jobs:
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
         run: make build macos
+      - name: Upload build macOS dSYMs
+        if: ${{ inputs.mode == 'build' && inputs.config == 'release' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-macos-dsyms
+          path: out/macos-*/WebRTC.dSYM
+          if-no-files-found: error
+          retention-days: 7
       - name: Upload build-macos to Hetzner
         uses: ./src/.github/actions/artifact-put
         with:
@@ -296,9 +321,15 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: products-macos
-          path: |
-            products/macos/WebRTC.xcframework
-            products/macos/WebRTC.dSYMs.zip
+          path: products/macos/WebRTC.xcframework.zip
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload packaged macOS dSYMs
+        if: ${{ inputs.config == 'release' && (inputs.mode == 'package' || inputs.mode == 'release') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: products-macos-dsyms
+          path: products/macos/WebRTC.dSYMs.zip
           if-no-files-found: error
           retention-days: 7
 
@@ -591,6 +622,21 @@ jobs:
           pattern: products-*
           path: combine-in
 
+      - name: Extract Apple xcframeworks
+        if: ${{ inputs.ios || inputs.macos }}
+        env:
+          INCLUDE_IOS: ${{ inputs.ios }}
+          INCLUDE_MACOS: ${{ inputs.macos }}
+        run: |
+          set -euo pipefail
+          for platform in ios macos; do
+            [[ "$platform" != ios || "$INCLUDE_IOS" == true ]] || continue
+            [[ "$platform" != macos || "$INCLUDE_MACOS" == true ]] || continue
+            product_dir="${GITHUB_WORKSPACE}/combine-in/products-${platform}"
+            test -f "$product_dir/WebRTC.xcframework.zip"
+            ditto -x -k "$product_dir/WebRTC.xcframework.zip" "$product_dir"
+          done
+
       - name: Combine Apple xcframeworks
         if: ${{ inputs.ios || inputs.macos }}
         working-directory: src/stream_build
@@ -616,7 +662,7 @@ jobs:
             "${GITHUB_WORKSPACE}/WebRTC.xcframework.zip"
 
       - name: Combine Apple dSYMs
-        if: ${{ inputs.mode == 'release' && !inputs.prerelease && (inputs.ios || inputs.macos) }}
+        if: ${{ inputs.config == 'release' && (inputs.ios || inputs.macos) }}
         env:
           INCLUDE_IOS: ${{ inputs.ios }}
           INCLUDE_MACOS: ${{ inputs.macos }}
@@ -627,7 +673,7 @@ jobs:
           for platform in ios macos; do
             [[ "$platform" != ios || "$INCLUDE_IOS" == true ]] || continue
             [[ "$platform" != macos || "$INCLUDE_MACOS" == true ]] || continue
-            archive="${GITHUB_WORKSPACE}/combine-in/products-${platform}/WebRTC.dSYMs.zip"
+            archive="${GITHUB_WORKSPACE}/combine-in/products-${platform}-dsyms/WebRTC.dSYMs.zip"
             test -f "$archive"
             ditto -x -k "$archive" "$symbols"
           done
@@ -640,7 +686,6 @@ jobs:
           set -euo pipefail
           src="$(find "${GITHUB_WORKSPACE}/combine-in" -name libwebrtc.aar -type f | head -n 1)"
           test -n "${src}"
-          cp "${src}" "${GITHUB_WORKSPACE}/libwebrtc.aar"
           mkdir -p "${GITHUB_WORKSPACE}/final-android"
           cp "${src}" "${GITHUB_WORKSPACE}/final-android/libwebrtc.aar"
           license="$(find "${GITHUB_WORKSPACE}/combine-in" -name LICENSE.md -type f | head -n 1 || true)"
@@ -655,25 +700,6 @@ jobs:
           mkdir -p "${GITHUB_WORKSPACE}/windows-libs"
           cp -R "${GITHUB_WORKSPACE}/combine-in/products-windows/." "${GITHUB_WORKSPACE}/windows-libs/"
 
-      - name: Rename copies for wrapper SDKs
-        if: ${{ inputs.mode == 'release' }}
-        working-directory: src/stream_build
-        env:
-          PRODUCTS: ${{ github.workspace }}/combine-in
-        run: |
-          set -euo pipefail
-          if [[ "${{ inputs.ios }}" == "true" || "${{ inputs.macos }}" == "true" ]]; then
-            make rename apple XCFRAMEWORK="${PRODUCTS}/WebRTC.xcframework"
-            ditto -c -k --sequesterRsrc --keepParent \
-              "${PRODUCTS}/renamed/StreamWebRTC.xcframework" \
-              "${GITHUB_WORKSPACE}/StreamWebRTC.xcframework.zip"
-          fi
-          if [[ "${{ inputs.android }}" == "true" ]]; then
-            make rename android AAR="${GITHUB_WORKSPACE}/libwebrtc.aar"
-            cp "${PRODUCTS}/renamed/libwebrtc.aar" \
-              "${GITHUB_WORKSPACE}/libwebrtc-renamed.aar"
-          fi
-
       - name: Upload WebRTC.xcframework.zip
         if: ${{ inputs.ios || inputs.macos }}
         uses: actions/upload-artifact@v7
@@ -684,7 +710,7 @@ jobs:
           retention-days: 7
 
       - name: Upload WebRTC.dSYMs.zip
-        if: ${{ inputs.mode == 'release' && !inputs.prerelease && (inputs.ios || inputs.macos) }}
+        if: ${{ inputs.config == 'release' && (inputs.ios || inputs.macos) }}
         uses: actions/upload-artifact@v7
         with:
           name: final-apple-dsyms
@@ -707,24 +733,6 @@ jobs:
         with:
           name: final-windows
           path: windows-libs
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Upload StreamWebRTC.xcframework.zip
-        if: ${{ inputs.mode == 'release' && (inputs.ios || inputs.macos) }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: final-apple-renamed
-          path: StreamWebRTC.xcframework.zip
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Upload renamed Android AAR
-        if: ${{ inputs.mode == 'release' && inputs.android }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: final-android-renamed
-          path: libwebrtc-renamed.aar
           if-no-files-found: error
           retention-days: 7
 
