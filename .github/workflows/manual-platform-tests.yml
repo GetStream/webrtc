@@ -21,6 +21,13 @@ on:
         description: Build and package Android AAR artifact
         type: boolean
         default: true
+      namespace:
+        description: Android Java package. io.getstream.webrtc rewrites the tree before the Android build.
+        type: choice
+        options:
+          - org.webrtc
+          - io.getstream.webrtc
+        default: org.webrtc
       debug:
         description: Build WebRTC artifacts with GN is_debug=true and include Apple dSYMs when available
         type: boolean
@@ -67,6 +74,21 @@ jobs:
 
           if [[ -n "${ANDROID_ARCH}" && "${ANDROID_ARCH}" =~ [[:space:]] ]]; then
             echo "::error::android_arch accepts a single ABI, for example arm64-v8a."
+            exit 1
+          fi
+
+      - name: Validate Android namespace
+        env:
+          BUILD_ANDROID: ${{ inputs.android }}
+          NAMESPACE: ${{ inputs.namespace }}
+        run: |
+          set -euo pipefail
+          if [[ "${NAMESPACE}" != "org.webrtc" && "${NAMESPACE}" != "io.getstream.webrtc" ]]; then
+            echo "::error::namespace must be org.webrtc or io.getstream.webrtc."
+            exit 1
+          fi
+          if [[ "${NAMESPACE}" == "io.getstream.webrtc" && "${BUILD_ANDROID}" != "true" ]]; then
+            echo "::error::namespace io.getstream.webrtc requires android."
             exit 1
           fi
 
@@ -512,6 +534,24 @@ jobs:
           echo "PATH=${HOME}/depot_tools:${PATH}" >> "${GITHUB_ENV}"
           echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
 
+      # The prepared tree stays on org.webrtc so its cache can be reused. Rewrite
+      # only this job's copy, using the script from the workflow ref rather than
+      # the WebRTC ref under test.
+      - name: Check out Android package rename script
+        if: inputs.namespace == 'io.getstream.webrtc'
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: tools_webrtc/android/rename_webrtc_package.sh
+          sparse-checkout-cone-mode: false
+          path: workflow-tools
+
+      - name: Rewrite Android package to io.getstream.webrtc
+        if: inputs.namespace == 'io.getstream.webrtc'
+        working-directory: webrtc-tree/.output/src
+        run: |
+          set -euo pipefail
+          bash "${GITHUB_WORKSPACE}/workflow-tools/tools_webrtc/android/rename_webrtc_package.sh" --no-backup
+
       - name: Build Android SDK artifact
         working-directory: release-pipeline
         env:
@@ -534,9 +574,24 @@ jobs:
 
           bundle exec fastlane "${fastlane_args[@]}"
 
+      - name: Name Android artifact for the selected namespace
+        id: android_artifact
+        env:
+          NAMESPACE: ${{ inputs.namespace }}
+        run: |
+          set -euo pipefail
+          if [[ "${NAMESPACE}" == "io.getstream.webrtc" ]]; then
+            mv android-products/libwebrtc.aar android-products/libwebrtc-repackaged.aar
+            echo "file=android-products/libwebrtc-repackaged.aar" >> "${GITHUB_OUTPUT}"
+            echo "name=release-android-repackaged" >> "${GITHUB_OUTPUT}"
+          else
+            echo "file=android-products/libwebrtc.aar" >> "${GITHUB_OUTPUT}"
+            echo "name=release-android" >> "${GITHUB_OUTPUT}"
+          fi
+
       - name: Upload Android build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-android
-          path: android-products/libwebrtc.aar
+          name: ${{ steps.android_artifact.outputs.name }}
+          path: ${{ steps.android_artifact.outputs.file }}
           retention-days: 7

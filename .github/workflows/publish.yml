@@ -29,6 +29,13 @@ on:
         description: Build, validate, publish Android artifacts and trigger stream-video-android-webrtc
         type: boolean
         default: true
+      namespace:
+        description: Android Java package. io.getstream.webrtc rewrites the tree before the Android build and publishes stream-video-webrtc-android-repackaged.
+        type: choice
+        options:
+          - org.webrtc
+          - io.getstream.webrtc
+        default: org.webrtc
       changelog:
         description: Optional release notes markdown. Leave empty to use generated notes.
         required: false
@@ -52,6 +59,21 @@ jobs:
           set -euo pipefail
           if [[ "${BUILD_IOS}" != "true" && "${BUILD_ANDROID}" != "true" ]]; then
             echo "At least one of ios or android must be true."
+            exit 1
+          fi
+
+      - name: Validate Android namespace
+        env:
+          BUILD_ANDROID: ${{ inputs.android }}
+          NAMESPACE: ${{ inputs.namespace }}
+        run: |
+          set -euo pipefail
+          if [[ "${NAMESPACE}" != "org.webrtc" && "${NAMESPACE}" != "io.getstream.webrtc" ]]; then
+            echo "::error::namespace must be org.webrtc or io.getstream.webrtc."
+            exit 1
+          fi
+          if [[ "${NAMESPACE}" == "io.getstream.webrtc" && "${BUILD_ANDROID}" != "true" ]]; then
+            echo "::error::namespace io.getstream.webrtc requires android."
             exit 1
           fi
 
@@ -487,6 +509,24 @@ jobs:
           echo "PATH=${HOME}/depot_tools:${PATH}" >> "${GITHUB_ENV}"
           echo "DEPOT_TOOLS_UPDATE=0" >> "${GITHUB_ENV}"
 
+      # The prepared tree stays on org.webrtc so its cache can be reused. Rewrite
+      # only this job's copy, using the script from the workflow ref rather than
+      # the WebRTC ref being published.
+      - name: Check out Android package rename script
+        if: inputs.namespace == 'io.getstream.webrtc'
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: tools_webrtc/android/rename_webrtc_package.sh
+          sparse-checkout-cone-mode: false
+          path: workflow-tools
+
+      - name: Rewrite Android package to io.getstream.webrtc
+        if: inputs.namespace == 'io.getstream.webrtc'
+        working-directory: webrtc-tree/.output/src
+        run: |
+          set -euo pipefail
+          bash "${GITHUB_WORKSPACE}/workflow-tools/tools_webrtc/android/rename_webrtc_package.sh" --no-backup
+
       - name: Build Android SDK artifact
         working-directory: release-pipeline
         run: >-
@@ -495,11 +535,26 @@ jobs:
           "products_root:${{ github.workspace }}/android-products"
           "build_product_arg_is_debug:${{ inputs.debug }}"
 
+      - name: Name Android artifact for the selected namespace
+        id: android_artifact
+        env:
+          NAMESPACE: ${{ inputs.namespace }}
+        run: |
+          set -euo pipefail
+          if [[ "${NAMESPACE}" == "io.getstream.webrtc" ]]; then
+            mv android-products/libwebrtc.aar android-products/libwebrtc-repackaged.aar
+            echo "file=android-products/libwebrtc-repackaged.aar" >> "${GITHUB_OUTPUT}"
+            echo "name=release-android-repackaged" >> "${GITHUB_OUTPUT}"
+          else
+            echo "file=android-products/libwebrtc.aar" >> "${GITHUB_OUTPUT}"
+            echo "name=release-android" >> "${GITHUB_OUTPUT}"
+          fi
+
       - name: Upload Android SDK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-android
-          path: android-products/libwebrtc.aar
+          name: ${{ steps.android_artifact.outputs.name }}
+          path: ${{ steps.android_artifact.outputs.file }}
           retention-days: 2
 
   publish:
@@ -509,6 +564,8 @@ jobs:
     needs: [validate_ios, validate_macos, package_apple, build_android]
     if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.release.outputs.release_tag }}
     steps:
       - name: Check out release branch
         uses: actions/checkout@v4
@@ -523,31 +580,43 @@ jobs:
           path: release-assets
 
       - name: Create GitHub release
+        id: release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ inputs.version }}
           RELEASE_BRANCH: ${{ inputs.branch }}
           IS_ALPHA: ${{ inputs.alpha }}
           CHANGELOG: ${{ inputs.changelog }}
+          NAMESPACE: ${{ inputs.namespace }}
         run: |
           set -euo pipefail
+          # Keep the stock tag untouched. A repackaged release uses its own tag
+          # so it can carry libwebrtc-repackaged.aar without replacing libwebrtc.aar.
+          release_tag="${RELEASE_VERSION}"
+          if [[ "${NAMESPACE}" == "io.getstream.webrtc" && "${release_tag}" != *-repackaged ]]; then
+            release_tag="${release_tag}-repackaged"
+          fi
+          echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+
           notes_file="$(mktemp)"
           if [[ -n "${CHANGELOG}" ]]; then
             printf '%s\n' "${CHANGELOG}" > "${notes_file}"
           else
-            printf 'Automated WebRTC SDK release %s.\n' "${RELEASE_VERSION}" > "${notes_file}"
+            printf 'Automated WebRTC SDK release %s.\n' "${release_tag}" > "${notes_file}"
           fi
 
           release_args=(
-            "${RELEASE_VERSION}"
+            "${release_tag}"
             release-assets/*
             --repo "${{ github.repository }}"
             --target "${RELEASE_BRANCH}"
-            --title "${RELEASE_VERSION}"
+            --title "${release_tag}"
             --notes-file "${notes_file}"
           )
           if [[ "${IS_ALPHA}" == "true" ]]; then
             release_args+=(--prerelease)
+          elif [[ "${NAMESPACE}" == "io.getstream.webrtc" ]]; then
+            release_args+=(--latest=false)
           else
             release_args+=(--latest)
           fi
@@ -564,11 +633,11 @@ jobs:
         if: ${{ inputs.ios }}
         env:
           GH_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
-          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ needs.publish.outputs.release_tag }}
           IS_ALPHA: ${{ inputs.alpha }}
         run: |
           set -euo pipefail
-          webrtc_release_url="https://github.com/${{ github.repository }}/releases/tag/${RELEASE_VERSION}"
+          webrtc_release_url="https://github.com/${{ github.repository }}/releases/tag/${RELEASE_TAG}"
           gh workflow run publish-from-webrtc.yml \
             --repo GetStream/stream-video-swift-webrtc \
             --field "webrtc_release_url=${webrtc_release_url}" \
@@ -579,12 +648,22 @@ jobs:
         if: ${{ inputs.android }}
         env:
           GH_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
-          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ needs.publish.outputs.release_tag }}
           IS_ALPHA: ${{ inputs.alpha }}
+          NAMESPACE: ${{ inputs.namespace }}
         run: |
           set -euo pipefail
-          webrtc_release_url="https://github.com/${{ github.repository }}/releases/tag/${RELEASE_VERSION}"
-          gh workflow run publish-from-webrtc.yml \
-            --repo GetStream/stream-video-android-webrtc \
-            --field "webrtc_release_url=${webrtc_release_url}" \
+          webrtc_release_url="https://github.com/${{ github.repository }}/releases/tag/${RELEASE_TAG}"
+          # Stock publishes omit variant so they keep working before the Android
+          # repo learns the input. Repackaged publishes ask that repo to release
+          # io.getstream:stream-video-webrtc-android-repackaged.
+          trigger_args=(
+            workflow run publish-from-webrtc.yml
+            --repo GetStream/stream-video-android-webrtc
+            --field "webrtc_release_url=${webrtc_release_url}"
             --field "pre_release=${IS_ALPHA}"
+          )
+          if [[ "${NAMESPACE}" == "io.getstream.webrtc" ]]; then
+            trigger_args+=(--field "variant=repackaged")
+          fi
+          gh "${trigger_args[@]}"
