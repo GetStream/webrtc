@@ -36,6 +36,10 @@ on:
           - org.webrtc
           - io.getstream.webrtc
         default: org.webrtc
+      android_workflow_ref:
+        description: Branch, tag, or SHA in stream-video-android-webrtc to run publish-from-webrtc.yml from. Leave empty to use that repo's default branch.
+        required: false
+        default: ""
       changelog:
         description: Optional release notes markdown. Leave empty to use generated notes.
         required: false
@@ -74,6 +78,16 @@ jobs:
           fi
           if [[ "${NAMESPACE}" == "io.getstream.webrtc" && "${BUILD_ANDROID}" != "true" ]]; then
             echo "::error::namespace io.getstream.webrtc requires android."
+            exit 1
+          fi
+
+      - name: Validate downstream workflow ref
+        env:
+          ANDROID_WORKFLOW_REF: ${{ inputs.android_workflow_ref }}
+        run: |
+          set -euo pipefail
+          if [[ "${ANDROID_WORKFLOW_REF}" =~ [[:space:]] || "${ANDROID_WORKFLOW_REF}" == -* ]]; then
+            echo "::error::android_workflow_ref must be a single branch, tag, or SHA."
             exit 1
           fi
 
@@ -651,18 +665,24 @@ jobs:
           RELEASE_TAG: ${{ needs.publish.outputs.release_tag }}
           IS_ALPHA: ${{ inputs.alpha }}
           NAMESPACE: ${{ inputs.namespace }}
+          ANDROID_WORKFLOW_REF: ${{ inputs.android_workflow_ref }}
         run: |
           set -euo pipefail
           webrtc_release_url="https://github.com/${{ github.repository }}/releases/tag/${RELEASE_TAG}"
           # Stock publishes omit variant so they keep working before the Android
           # repo learns the input. Repackaged publishes ask that repo to release
           # io.getstream:stream-video-webrtc-android-repackaged.
+          # --ref selects which copy of publish-from-webrtc.yml runs. Leave it
+          # empty after the Android branch is merged so the default branch is used.
           trigger_args=(
             workflow run publish-from-webrtc.yml
             --repo GetStream/stream-video-android-webrtc
             --field "webrtc_release_url=${webrtc_release_url}"
             --field "pre_release=${IS_ALPHA}"
           )
+          if [[ -n "${ANDROID_WORKFLOW_REF}" ]]; then
+            trigger_args+=(--ref "${ANDROID_WORKFLOW_REF}")
+          fi
           if [[ "${NAMESPACE}" == "io.getstream.webrtc" ]]; then
             trigger_args+=(--field "variant=repackaged")
           fi
