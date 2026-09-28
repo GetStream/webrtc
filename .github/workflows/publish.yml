@@ -604,37 +604,51 @@ jobs:
           NAMESPACE: ${{ inputs.namespace }}
         run: |
           set -euo pipefail
-          # Keep the stock tag untouched. A repackaged release uses its own tag
-          # so it can carry libwebrtc-repackaged.aar without replacing libwebrtc.aar.
+          # Both namespaces share this tag. The asset name distinguishes them:
+          # libwebrtc.aar and libwebrtc-repackaged.aar.
           release_tag="${RELEASE_VERSION}"
-          if [[ "${NAMESPACE}" == "io.getstream.webrtc" && "${release_tag}" != *-repackaged ]]; then
-            release_tag="${release_tag}-repackaged"
-          fi
           echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+          repo="${{ github.repository }}"
 
-          notes_file="$(mktemp)"
-          if [[ -n "${CHANGELOG}" ]]; then
-            printf '%s\n' "${CHANGELOG}" > "${notes_file}"
+          if gh release view "${release_tag}" --repo "${repo}" >/dev/null 2>&1; then
+            echo "Release ${release_tag} already exists. Adding assets."
+            existing="$(gh release view "${release_tag}" --repo "${repo}" --json assets --jq '.assets[].name')"
+            for asset in release-assets/*; do
+              name="$(basename "${asset}")"
+              if printf '%s\n' "${existing}" | grep -Fxq "${name}"; then
+                echo "::error::${name} is already attached to ${release_tag}."
+                exit 1
+              fi
+            done
+            gh release upload "${release_tag}" release-assets/* --repo "${repo}"
+            if [[ "${IS_ALPHA}" != "true" && "${NAMESPACE}" != "io.getstream.webrtc" ]]; then
+              gh release edit "${release_tag}" --repo "${repo}" --latest
+            fi
           else
-            printf 'Automated WebRTC SDK release %s.\n' "${release_tag}" > "${notes_file}"
-          fi
+            notes_file="$(mktemp)"
+            if [[ -n "${CHANGELOG}" ]]; then
+              printf '%s\n' "${CHANGELOG}" > "${notes_file}"
+            else
+              printf 'Automated WebRTC SDK release %s.\n' "${release_tag}" > "${notes_file}"
+            fi
 
-          release_args=(
-            "${release_tag}"
-            release-assets/*
-            --repo "${{ github.repository }}"
-            --target "${RELEASE_BRANCH}"
-            --title "${release_tag}"
-            --notes-file "${notes_file}"
-          )
-          if [[ "${IS_ALPHA}" == "true" ]]; then
-            release_args+=(--prerelease)
-          elif [[ "${NAMESPACE}" == "io.getstream.webrtc" ]]; then
-            release_args+=(--latest=false)
-          else
-            release_args+=(--latest)
+            release_args=(
+              "${release_tag}"
+              release-assets/*
+              --repo "${repo}"
+              --target "${RELEASE_BRANCH}"
+              --title "${release_tag}"
+              --notes-file "${notes_file}"
+            )
+            if [[ "${IS_ALPHA}" == "true" ]]; then
+              release_args+=(--prerelease)
+            elif [[ "${NAMESPACE}" == "io.getstream.webrtc" ]]; then
+              release_args+=(--latest=false)
+            else
+              release_args+=(--latest)
+            fi
+            gh release create "${release_args[@]}"
           fi
-          gh release create "${release_args[@]}"
 
   trigger_downstream_releases:
     name: Trigger downstream WebRTC releases
