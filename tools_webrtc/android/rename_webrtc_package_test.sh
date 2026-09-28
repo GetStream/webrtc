@@ -49,6 +49,11 @@ cat > "$work_dir/sdk/objc/RTCDispatcher.m" <<'EOF'
 dispatch_queue_create("org.webrtc.RTCDispatcherAudioSession", DISPATCH_QUEUE_SERIAL);
 EOF
 
+mkdir -p "$work_dir/tools_webrtc/android/templates"
+cat > "$work_dir/tools_webrtc/android/templates/pom.jinja" <<'EOF'
+<groupId>org.webrtc</groupId>
+EOF
+
 (
   cd "$work_dir"
   bash "$rename_script" --no-backup
@@ -82,6 +87,10 @@ if ! grep -q 'package org.webrtc;' "$work_dir/third_party/org/webrtc/Leave.java"
 fi
 if ! grep -q 'org.webrtc.RTCDispatcherAudioSession' "$work_dir/sdk/objc/RTCDispatcher.m"; then
   echo "Apple source was rewritten"
+  exit 1
+fi
+if ! grep -q '<groupId>org.webrtc</groupId>' "$work_dir/tools_webrtc/android/templates/pom.jinja"; then
+  echo "pom template was rewritten"
   exit 1
 fi
 

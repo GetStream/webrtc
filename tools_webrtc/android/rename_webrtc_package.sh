@@ -154,21 +154,18 @@ replace_all_references() {
 collect_matches() {
   local pattern="$1"
   shift
-  local includes=()
+  # Find the files ourselves. GNU grep on the runners does not reliably apply
+  # --include, and a recursive search then fails the Android build on Apple
+  # sources the rewrite never touches.
+  local find_args=()
   local ext
   for ext in "$@"; do
-    includes+=(--include="$ext")
+    if [ "${#find_args[@]}" -gt 0 ]; then
+      find_args+=(-o)
+    fi
+    find_args+=(-name "$ext")
   done
-  # -F keeps package strings literal. "." in org.webrtc must not be a regex.
-  grep -R -I -n -F \
-    --exclude-dir=third_party \
-    --exclude-dir=out \
-    --exclude-dir=build \
-    --exclude-dir=.git \
-    --exclude-dir=.cipd \
-    --exclude='*rename_webrtc_package*' \
-    "${includes[@]}" \
-    -e "$pattern" . || true
+  find_pruned -type f \( "${find_args[@]}" \) -exec grep -I -n -H -F -e "$pattern" {} + || true
 }
 
 validate_changes() {
@@ -200,20 +197,14 @@ validate_changes() {
 
   # stream_jingle_peerconnection_so still contains the old bare token. Match
   # only occurrences that were not given the stream_ prefix.
-  local bare_includes=()
-  local ext
+  local bare_find_args=()
   for ext in "${exts[@]}"; do
-    bare_includes+=(--include="$ext")
+    if [ "${#bare_find_args[@]}" -gt 0 ]; then
+      bare_find_args+=(-o)
+    fi
+    bare_find_args+=(-name "$ext")
   done
-  matches=$(grep -R -I -n -E \
-    --exclude-dir=third_party \
-    --exclude-dir=out \
-    --exclude-dir=build \
-    --exclude-dir=.git \
-    --exclude-dir=.cipd \
-    --exclude='*rename_webrtc_package*' \
-    "${bare_includes[@]}" \
-    -e "(^|[^_])${BARE_OLD_LIB_NAME}" . || true)
+  matches="$(find_pruned -type f \( "${bare_find_args[@]}" \) -exec grep -I -n -H -E -e "(^|[^_])${BARE_OLD_LIB_NAME}" {} + || true)"
   if [ -n "$matches" ]; then
     print_warning "Found remaining bare library names"
     echo "$matches" | head -n 20
