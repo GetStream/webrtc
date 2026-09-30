@@ -1,13 +1,10 @@
-#!/bin/bash
-
+#!/usr/bin/env bash
 # Rewrite the Android WebRTC Java package from org.webrtc to io.getstream.webrtc.
 #
-# Run this from the WebRTC src root, after the tree is checked out and before
-# the Android build. Pass --no-backup in CI. A synced tree already contains
-# third_party and out; those directories are skipped because rewriting them is
-# slow and can change unrelated Chromium code.
+# Run this after the tree is checked out and before the Android build.
+# stream_build, third_party, out, and build are left unchanged.
 #
-# Usage: ./tools_webrtc/android/rename_webrtc_package.sh --no-backup
+# Usage: rewrite-android-namespace.sh --src /path/to/webrtc/src --no-backup
 
 set -euo pipefail
 
@@ -42,6 +39,9 @@ FILE_EXTENSIONS=(
   "*.properties"
 )
 
+SKIP_BACKUP=false
+SRC_DIR=""
+
 print_status() {
   echo "[INFO] $1"
 }
@@ -60,12 +60,12 @@ print_error() {
 
 should_skip_file() {
   local file="$1"
-  [[ "$file" == *"rename_webrtc_package"* || "$file" == *.bak ]]
+  [[ "$file" == *"rewrite-android-namespace"* || "$file" == *"rename_webrtc_package"* || "$file" == *.bak ]]
 }
 
 find_pruned() {
   find . \
-    \( -path './third_party' -o -path './out' -o -path './build' -o -path './.git' -o -path './.cipd' \) -prune \
+    \( -path './third_party' -o -path './out' -o -path './build' -o -path './.git' -o -path './.cipd' -o -path './stream_build' \) -prune \
     -o "$@"
 }
 
@@ -228,18 +228,13 @@ validate_changes() {
 }
 
 main() {
-  local skip_backup=false
-  if [ "${1:-}" = "--no-backup" ]; then
-    skip_backup=true
-  fi
-
   if [ ! -f "BUILD.gn" ] || [ ! -d "sdk" ]; then
     print_error "This script must be run from the WebRTC root directory"
     exit 1
   fi
 
   print_status "Renaming $OLD_PACKAGE to $NEW_PACKAGE"
-  if [ "$skip_backup" = true ]; then
+  if [ "$SKIP_BACKUP" = true ]; then
     print_warning "Skipping backup (--no-backup)"
   elif [ -d third_party ] || [ -d out ]; then
     print_warning "Synced tree detected. Skipping backup so third_party is not copied."
@@ -255,16 +250,31 @@ main() {
   print_success "Package renaming completed"
 }
 
-case "${1:-}" in
-  --help|-h)
-    echo "Usage: $0 [--no-backup]"
-    echo "Rename org.webrtc to io.getstream.webrtc in the WebRTC src tree."
-    ;;
-  --no-backup|"")
-    main "$@"
-    ;;
-  *)
-    print_error "Unknown argument: $1"
-    exit 1
-    ;;
-esac
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --src)
+      SRC_DIR="${2:-}"
+      shift 2
+      ;;
+    --no-backup)
+      SKIP_BACKUP=true
+      shift
+      ;;
+    --help|-h)
+      echo "Usage: $0 --src <webrtc-src> [--no-backup]"
+      echo "Rename org.webrtc to io.getstream.webrtc in the WebRTC src tree."
+      exit 0
+      ;;
+    *)
+      print_error "Unknown argument: $1"
+      exit 1
+      ;;
+  esac
+done
+
+if [[ -z "$SRC_DIR" ]]; then
+  print_error "Missing --src <webrtc-src>"
+  exit 1
+fi
+cd "$SRC_DIR"
+main

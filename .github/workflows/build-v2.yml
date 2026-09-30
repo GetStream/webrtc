@@ -8,7 +8,7 @@
 name: Build v2
 
 run-name: >-
-  Build v2 config:${{ inputs.config }}${{ inputs.ios == 'true' && ' iOS' || '' }}${{ inputs.macos == 'true' && (inputs.ios == 'true' && ', macOS' || ' macOS') || '' }}${{ inputs.android == 'true' && format('{0} Android{1}', (inputs.ios == 'true' || inputs.macos == 'true') && ',' || '', inputs.android_arch != '' && format(' ({0})', inputs.android_arch) || '') || '' }}${{ inputs.windows == 'true' && ((inputs.ios == 'true' || inputs.macos == 'true' || inputs.android == 'true') && ', Windows' || ' Windows') || '' }}
+  Build v2 config:${{ inputs.config }}${{ inputs.ios == 'true' && ' iOS' || '' }}${{ inputs.macos == 'true' && (inputs.ios == 'true' && ', macOS' || ' macOS') || '' }}${{ inputs.android == 'true' && format('{0} Android{1}', (inputs.ios == 'true' || inputs.macos == 'true') && ',' || '', inputs.android_arch != '' && format(' ({0})', inputs.android_arch) || '') || '' }}${{ inputs.windows == 'true' && ((inputs.ios == 'true' || inputs.macos == 'true' || inputs.android == 'true') && ', Windows' || ' Windows') || '' }}${{ inputs.android_namespace == 'io.getstream.webrtc' && ' repackaged' || '' }}
 
 permissions:
   contents: read
@@ -47,6 +47,13 @@ on:
         description: Optional Android ABI, for example arm64-v8a. Empty = default ABI set.
         required: false
         default: ""
+      android_namespace:
+        description: Android Java package. io.getstream.webrtc rewrites the tree before the Android build.
+        type: choice
+        options:
+          - org.webrtc
+          - io.getstream.webrtc
+        default: org.webrtc
       skip_deps_cache:
         description: Skip Hetzner deps cache (fresh gclient + ninja)
         type: boolean
@@ -66,4 +73,5 @@ jobs:
       windows: ${{ inputs.windows }}
       config: ${{ inputs.config }}
       android_arch: ${{ inputs.android_arch }}
+      android_namespace: ${{ inputs.android_namespace }}
       skip_deps_cache: ${{ inputs.skip_deps_cache }}

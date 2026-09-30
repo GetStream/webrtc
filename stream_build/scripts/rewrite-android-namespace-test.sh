@@ -1,13 +1,12 @@
-#!/bin/bash
-
-# Fixture test for rename_webrtc_package.sh. Builds a tiny WebRTC-shaped tree,
-# rewrites it, and checks the Android package moves without touching synced
-# dependency directories or Apple sources.
+#!/usr/bin/env bash
+# Fixture test for rewrite-android-namespace.sh. Builds a tiny WebRTC-shaped
+# tree, rewrites it, and checks the Android package moves without touching
+# synced dependency directories, stream_build, or Apple sources.
 
 set -euo pipefail
 
 script_dir=$(cd "$(dirname "$0")" && pwd)
-rename_script="$script_dir/rename_webrtc_package.sh"
+rename_script="$script_dir/rewrite-android-namespace.sh"
 work_dir=$(mktemp -d)
 trap 'rm -rf "$work_dir"' EXIT
 
@@ -15,6 +14,7 @@ mkdir -p \
   "$work_dir/sdk/android/api/org/webrtc" \
   "$work_dir/sdk/android/src/jni" \
   "$work_dir/third_party/org/webrtc" \
+  "$work_dir/stream_build" \
   "$work_dir/sdk/objc"
 
 cat > "$work_dir/BUILD.gn" <<'EOF'
@@ -45,6 +45,10 @@ cat > "$work_dir/third_party/org/webrtc/Leave.java" <<'EOF'
 package org.webrtc;
 EOF
 
+cat > "$work_dir/stream_build/kept.sh" <<'EOF'
+echo org.webrtc
+EOF
+
 cat > "$work_dir/sdk/objc/RTCDispatcher.m" <<'EOF'
 dispatch_queue_create("org.webrtc.RTCDispatcherAudioSession", DISPATCH_QUEUE_SERIAL);
 EOF
@@ -54,10 +58,7 @@ cat > "$work_dir/tools_webrtc/android/templates/pom.jinja" <<'EOF'
 <groupId>org.webrtc</groupId>
 EOF
 
-(
-  cd "$work_dir"
-  bash "$rename_script" --no-backup
-)
+bash "$rename_script" --src "$work_dir" --no-backup
 
 java_file="$work_dir/sdk/android/api/io/getstream/webrtc/PeerConnectionFactory.java"
 if [ ! -f "$java_file" ]; then
@@ -85,6 +86,10 @@ if ! grep -q 'package org.webrtc;' "$work_dir/third_party/org/webrtc/Leave.java"
   echo "third_party was rewritten"
   exit 1
 fi
+if ! grep -q 'echo org.webrtc' "$work_dir/stream_build/kept.sh"; then
+  echo "stream_build was rewritten"
+  exit 1
+fi
 if ! grep -q 'org.webrtc.RTCDispatcherAudioSession' "$work_dir/sdk/objc/RTCDispatcher.m"; then
   echo "Apple source was rewritten"
   exit 1
@@ -94,4 +99,4 @@ if ! grep -q '<groupId>org.webrtc</groupId>' "$work_dir/tools_webrtc/android/tem
   exit 1
 fi
 
-echo "rename_webrtc_package_test passed"
+echo "rewrite-android-namespace-test passed"

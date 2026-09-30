@@ -15,6 +15,7 @@
 # package ios/macos write PRODUCTS/ios and PRODUCTS/macos.
 # make combine merges whatever PRODUCTS/*/WebRTC.xcframework exist.
 # make rename copies WebRTC.xcframework / libwebrtc.aar to PRODUCTS/renamed/.
+# ANDROID_NAMESPACE=io.getstream.webrtc rewrites the Android package before build.
 
 SHELL := /bin/bash
 .SUFFIXES:
@@ -52,6 +53,7 @@ ZIP           ?= 0
 XCFRAMEWORK   ?= $(PRODUCTS)/WebRTC.xcframework
 AAR           ?= $(PRODUCTS)/libwebrtc.aar
 RENAMED       ?= $(PRODUCTS)/renamed
+ANDROID_NAMESPACE ?= org.webrtc
 SIMULATOR_PLATFORM ?=
 SIMULATOR_VERSION  ?=
 EXTRA_ARGS    ?=
@@ -84,7 +86,7 @@ export GN_ARGS EXTRA_GN_ARGS ALL_GN_ARGS GIT_CACHE_PATH CONFIRM BOOTSTRAP_SRC
 .PHONY: help check bootstrap deps runhooks gen ninja slice clean print-gn-args \
 	announce require-layout require-gclient require-src require-darwin \
 	require-linux require-windows maybe-deps \
-	combine apple rename rename-apple rename-android \
+	combine apple rename rename-apple rename-android rewrite-android-namespace \
 	$(PLATFORMS) $(VERBS) \
 	build-ios build-macos build-android build-windows \
 	test-ios test-macos test-android test-windows \
@@ -126,12 +128,13 @@ help:
 	@echo "  make rename android AAR=path/to/libwebrtc.aar"
 	@echo "  make build package ios     compile then pack"
 	@echo "  make build android ARCHS=arm64-v8a"
+	@echo "  ANDROID_NAMESPACE=org.webrtc (default) or io.getstream.webrtc"
 	@echo "  make build ios GN_ARGS='rtc_use_h264=false' CONFIG=debug"
 	@echo "  make bootstrap CONFIRM=1"
 	@echo "  make build ios SKIP_MACCATALYST=1"
 	@echo
 	@echo "Also: deps runhooks check clean print-gn-args TARGET=slice"
-	@echo "Vars: DEPS_ROOT WEBRTC_SRC OUT PRODUCTS GIT_CACHE_PATH CONFIG GN_ARGS JOBS SHALLOW ARCHS ZIP XCFRAMEWORK AAR RENAMED SKIP_DEPS SKIP_LICENSES SKIP_MACCATALYST CONFIRM"
+	@echo "Vars: DEPS_ROOT WEBRTC_SRC OUT PRODUCTS GIT_CACHE_PATH CONFIG GN_ARGS JOBS SHALLOW ARCHS ZIP XCFRAMEWORK AAR RENAMED ANDROID_NAMESPACE SKIP_DEPS SKIP_LICENSES SKIP_MACCATALYST CONFIRM"
 	@echo "OUT defaults to DEPS_ROOT/out (sibling of src)."
 
 check:
@@ -207,7 +210,10 @@ announce:
 	   ios) echo "    slices:     $(ios_slices)" ;; \
 	   macos) echo "    slices:     $(MACOS_SLICES)" ;; \
 	   android) \
-	     if [[ "$(VERB)" != rename ]]; then echo "    slices:     $(android_slices)"; fi ;; \
+	     if [[ "$(VERB)" != rename ]]; then \
+	       echo "    slices:     $(android_slices)"; \
+	       echo "    namespace:  $(ANDROID_NAMESPACE)"; \
+	     fi ;; \
 	   windows) echo "    slices:     $(windows_slices)" ;; \
 	 esac; \
 	 if [[ "$(VERB)" == test ]]; then \
@@ -261,6 +267,14 @@ rename-android:
 		--src "$(AAR)" \
 		--dest "$(RENAMED)"
 
+rewrite-android-namespace: require-src
+	@case "$(ANDROID_NAMESPACE)" in \
+	  org.webrtc) ;; \
+	  io.getstream.webrtc) \
+	    $(SCRIPTS)/rewrite-android-namespace.sh --src "$(WEBRTC_SRC)" --no-backup ;; \
+	  *) echo "ANDROID_NAMESPACE must be org.webrtc or io.getstream.webrtc (got '$(ANDROID_NAMESPACE)')"; exit 1 ;; \
+	esac
+
 gen: require-src
 	@test -n "$(TARGET)" || { echo "TARGET is required (slice name)"; exit 1; }
 	@$(SCRIPTS)/gn-gen.sh \
@@ -287,7 +301,8 @@ $(addprefix build-slice-,$(IOS_SLICES) $(MACOS_SLICES) $(ANDROID_SLICES) $(WINDO
 
 build-ios: require-darwin maybe-deps require-src $(addprefix build-slice-,$(ios_slices))
 build-macos: require-darwin maybe-deps require-src $(addprefix build-slice-,$(MACOS_SLICES))
-build-android: require-linux maybe-deps require-src $(addprefix build-slice-,$(android_slices))
+$(addprefix build-slice-,$(ANDROID_SLICES)): rewrite-android-namespace
+build-android: require-linux maybe-deps require-src rewrite-android-namespace $(addprefix build-slice-,$(android_slices))
 build-windows: require-windows maybe-deps require-src $(addprefix build-slice-,$(windows_slices))
 
 package-ios package-macos: ZIP = 1
@@ -313,7 +328,8 @@ package-android: require-linux require-src
 		--src "$(WEBRTC_SRC)" \
 		--out "$(OUT)" \
 		--products "$(PRODUCTS)" \
-		--slices "$(android_slices)"
+		--slices "$(android_slices)" \
+		--namespace "$(ANDROID_NAMESPACE)"
 
 package-windows: require-windows require-src
 	@$(SCRIPTS)/package-windows.sh \

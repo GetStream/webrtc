@@ -43,6 +43,16 @@ on:
         required: false
         type: string
         default: ""
+      android_namespace:
+        description: Android Java package. io.getstream.webrtc rewrites the tree before make build android.
+        required: false
+        type: string
+        default: "org.webrtc"
+      android_workflow_ref:
+        description: Branch, tag, or SHA of stream-video-android-webrtc whose publish workflow to run. Empty uses that repo's default branch.
+        required: false
+        type: string
+        default: ""
       version:
         required: false
         type: string
@@ -81,6 +91,8 @@ jobs:
           BUILD_ANDROID: ${{ inputs.android }}
           BUILD_WINDOWS: ${{ inputs.windows }}
           MODE: ${{ inputs.mode }}
+          ANDROID_NAMESPACE: ${{ inputs.android_namespace }}
+          ANDROID_WORKFLOW_REF: ${{ inputs.android_workflow_ref }}
         run: |
           set -euo pipefail
           case "${MODE}" in
@@ -102,6 +114,25 @@ jobs:
           if [[ "${MODE}" == "release" && -z "${{ inputs.version }}" ]]; then
             echo "Release requires a version."
             exit 1
+          fi
+          case "${ANDROID_NAMESPACE}" in
+            org.webrtc) ;;
+            io.getstream.webrtc)
+              if [[ "${BUILD_ANDROID}" != "true" ]]; then
+                echo "::error::android_namespace io.getstream.webrtc requires Android."
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error::android_namespace must be org.webrtc or io.getstream.webrtc."
+              exit 1
+              ;;
+          esac
+          if [[ -n "${ANDROID_WORKFLOW_REF}" ]]; then
+            if [[ "${ANDROID_WORKFLOW_REF}" =~ [[:space:]] || "${ANDROID_WORKFLOW_REF}" == -* ]]; then
+              echo "::error::android_workflow_ref must be a branch, tag, or SHA."
+              exit 1
+            fi
           fi
 
       - name: Validate Android build options
@@ -362,6 +393,7 @@ jobs:
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
           ANDROID_ARCH: ${{ inputs.android_arch }}
+          ANDROID_NAMESPACE: ${{ inputs.android_namespace }}
         run: |
           set -euo pipefail
           extra=()
@@ -386,6 +418,7 @@ jobs:
           CONFIG: ${{ inputs.config }}
           SKIP_DEPS: "1"
           ANDROID_ARCH: ${{ inputs.android_arch }}
+          ANDROID_NAMESPACE: ${{ inputs.android_namespace }}
         run: |
           set -euo pipefail
           extra=()
@@ -684,10 +717,14 @@ jobs:
         if: ${{ inputs.android }}
         run: |
           set -euo pipefail
-          src="$(find "${GITHUB_WORKSPACE}/combine-in" -name libwebrtc.aar -type f | head -n 1)"
-          test -n "${src}"
+          src="$(find "${GITHUB_WORKSPACE}/combine-in" \( -name libwebrtc.aar -o -name libwebrtc-repackaged.aar \) -type f)"
+          count="$(printf '%s\n' "${src}" | grep -c . || true)"
+          if [[ "${count}" -ne 1 ]]; then
+            echo "::error::Expected one Android AAR, found ${count}."
+            exit 1
+          fi
           mkdir -p "${GITHUB_WORKSPACE}/final-android"
-          cp "${src}" "${GITHUB_WORKSPACE}/final-android/libwebrtc.aar"
+          cp "${src}" "${GITHUB_WORKSPACE}/final-android/$(basename "${src}")"
           license="$(find "${GITHUB_WORKSPACE}/combine-in" -name LICENSE.md -type f | head -n 1 || true)"
           if [[ -n "${license}" ]]; then
             cp "${license}" "${GITHUB_WORKSPACE}/final-android/LICENSE.md"
@@ -761,6 +798,7 @@ jobs:
           RELEASE_REF: ${{ inputs.webrtc_ref }}
           IS_PRERELEASE: ${{ inputs.prerelease }}
           RELEASE_NOTES: ${{ inputs.release_notes }}
+          ANDROID_NAMESPACE: ${{ inputs.android_namespace }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -783,12 +821,41 @@ jobs:
             --title "${RELEASE_VERSION}"
             --notes-file "${notes_file}"
           )
-          if [[ "${IS_PRERELEASE}" == "true" ]]; then
-            release_args+=(--prerelease)
+          repo="${{ github.repository }}"
+          if gh release view "${RELEASE_VERSION}" --repo "${repo}" >/dev/null 2>&1; then
+            echo "Release ${RELEASE_VERSION} already exists. Adding assets."
+            existing="$(gh release view "${RELEASE_VERSION}" --repo "${repo}" --json assets --jq '.assets[].name')"
+            to_upload=()
+            for asset in "${assets[@]}"; do
+              name="$(basename "${asset}")"
+              if printf '%s\n' "${existing}" | grep -Fxq "${name}"; then
+                if [[ "${name}" == "LICENSE.md" ]]; then
+                  echo "skip ${name} (already attached)"
+                  continue
+                fi
+                echo "::error::${name} is already attached to ${RELEASE_VERSION}."
+                exit 1
+              fi
+              to_upload+=("${asset}")
+            done
+            if [[ ${#to_upload[@]} -eq 0 ]]; then
+              echo "::error::No new assets to add to ${RELEASE_VERSION}."
+              exit 1
+            fi
+            gh release upload "${RELEASE_VERSION}" "${to_upload[@]}" --repo "${repo}"
+            if [[ "${IS_PRERELEASE}" != "true" && "${ANDROID_NAMESPACE}" != "io.getstream.webrtc" ]]; then
+              gh release edit "${RELEASE_VERSION}" --repo "${repo}" --latest
+            fi
           else
-            release_args+=(--latest)
+            if [[ "${IS_PRERELEASE}" == "true" ]]; then
+              release_args+=(--prerelease)
+            elif [[ "${ANDROID_NAMESPACE}" == "io.getstream.webrtc" ]]; then
+              release_args+=(--latest=false)
+            else
+              release_args+=(--latest)
+            fi
+            gh release create "${release_args[@]}"
           fi
-          gh release create "${release_args[@]}"
 
   trigger_downstream_releases:
     name: Trigger downstream WebRTC releases v2
@@ -816,10 +883,21 @@ jobs:
           GH_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
           RELEASE_VERSION: ${{ inputs.version }}
           IS_PRERELEASE: ${{ inputs.prerelease }}
+          ANDROID_NAMESPACE: ${{ inputs.android_namespace }}
+          ANDROID_WORKFLOW_REF: ${{ inputs.android_workflow_ref }}
         run: |
           set -euo pipefail
           webrtc_release_url="https://github.com/${{ github.repository }}/releases/tag/${RELEASE_VERSION}"
-          gh workflow run publish-from-webrtc.yml \
-            --repo GetStream/stream-video-android-webrtc \
-            --field "webrtc_release_url=${webrtc_release_url}" \
+          trigger_args=(
+            workflow run publish-from-webrtc.yml
+            --repo GetStream/stream-video-android-webrtc
+            --field "webrtc_release_url=${webrtc_release_url}"
             --field "pre_release=${IS_PRERELEASE}"
+          )
+          if [[ "${ANDROID_NAMESPACE}" == "io.getstream.webrtc" ]]; then
+            trigger_args+=(--field "variant=repackaged")
+          fi
+          if [[ -n "${ANDROID_WORKFLOW_REF}" ]]; then
+            trigger_args+=(--ref "${ANDROID_WORKFLOW_REF}")
+          fi
+          gh "${trigger_args[@]}"
