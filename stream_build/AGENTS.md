@@ -41,11 +41,13 @@ combine them into `final-apple-dsyms`. Release v2 attaches `WebRTC.dSYMs.zip`
 to both stable releases and prereleases. These separate CI artifacts depend
 on the build configuration, not prerelease status; debug symbols stay embedded.
 
-Package v2 and Release v2 produce only upstream artifacts: `WebRTC.xcframework`,
-`libwebrtc.aar`, and the applicable symbols and Windows products. Wrapper
-artifacts are prepared by stream-video-swift-webrtc and
-stream-video-android-webrtc after downloading the upstream release.
-`make rename` remains an optional local command; the v2 workflows do not call it.
+Package v2 and Release v2 produce upstream artifacts: `WebRTC.xcframework`,
+`libwebrtc.aar`, and the applicable symbols and Windows products.
+`ANDROID_NAMESPACE=io.getstream.webrtc` rewrites the Android Java package,
+JNI symbols, and `libjingle_peerconnection_so` before `make build android`.
+`make package android` then writes `libwebrtc-repackaged.aar`. The default
+namespace is `org.webrtc`, and that build is unchanged. `make rename` remains
+an optional local command; the v2 workflows do not call it.
 
 ## Layout
 
@@ -60,7 +62,8 @@ stream-video-android-webrtc after downloading the upstream release.
 - `scripts/combine-apple.sh` — discover platform xcframeworks and merge
 - `scripts/rename-apple.sh` — copy WebRTC.xcframework → StreamWebRTC
 - `scripts/rename-android.sh` — copy libwebrtc.aar into PRODUCTS/renamed/
-- `scripts/package-android.sh` — zip libwebrtc.aar
+- `scripts/rewrite-android-namespace.sh` — rewrite org.webrtc to io.getstream.webrtc before the Android build
+- `scripts/package-android.sh` — zip libwebrtc.aar or libwebrtc-repackaged.aar
 - `scripts/package-windows.sh` — copy Windows libs
 - `scripts/run-ios-tests.sh`
 - `scripts/check.sh`
@@ -169,6 +172,7 @@ not use `${{ secrets.* }}`. `products-*` / `final-*` stay on
 | `SHALLOW` | `1` (default) `gclient sync --no-history --shallow`. `0` = full history. |
 | `ZIP` | Defaults to `1` for Apple package commands (`0` opts out); `0` for combine/Windows (`1` opts in). |
 | `XCFRAMEWORK` | input for `make rename apple` (default `$(PRODUCTS)/WebRTC.xcframework`) |
+| `ANDROID_NAMESPACE` | `org.webrtc` (default) or `io.getstream.webrtc`. The latter rewrites sources before `make build android` and packages `libwebrtc-repackaged.aar`. |
 | `AAR` | input for `make rename android` (default `$(PRODUCTS)/libwebrtc.aar`) |
 | `RENAMED` | output dir for `make rename` (default `$(PRODUCTS)/renamed`) |
 | `SKIP_DEPS` | `1` skips gclient sync only; build still runs. Default `0`. |
@@ -181,6 +185,7 @@ make build ios
 make build ios SKIP_DEPS=1
 make build ios SKIP_MACCATALYST=1
 make build android ARCHS=arm64-v8a SKIP_DEPS=1
+make build android ANDROID_NAMESPACE=io.getstream.webrtc
 make package ios SKIP_DEPS=1 SKIP_LICENSES=1
 make package macos SKIP_DEPS=1 SKIP_LICENSES=1
 make combine SKIP_LICENSES=1

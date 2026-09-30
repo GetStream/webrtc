@@ -6,7 +6,7 @@
 name: Release v2
 
 run-name: >-
-  Release v2 config:${{ inputs.config }}${{ inputs.prerelease == 'true' && ' Pre-Release' || '' }} ${{ inputs.version }}${{ inputs.ios == 'true' && ' iOS' || '' }}${{ inputs.macos == 'true' && (inputs.ios == 'true' && ', macOS' || ' macOS') || '' }}${{ inputs.android == 'true' && format('{0} Android{1}', (inputs.ios == 'true' || inputs.macos == 'true') && ',' || '', inputs.android_arch != '' && format(' ({0})', inputs.android_arch) || '') || '' }}${{ inputs.windows == 'true' && ((inputs.ios == 'true' || inputs.macos == 'true' || inputs.android == 'true') && ', Windows' || ' Windows') || '' }}
+  Release v2 config:${{ inputs.config }}${{ inputs.prerelease == 'true' && ' Pre-Release' || '' }} ${{ inputs.version }}${{ inputs.ios == 'true' && ' iOS' || '' }}${{ inputs.macos == 'true' && (inputs.ios == 'true' && ', macOS' || ' macOS') || '' }}${{ inputs.android == 'true' && format('{0} Android{1}', (inputs.ios == 'true' || inputs.macos == 'true') && ',' || '', inputs.android_arch != '' && format(' ({0})', inputs.android_arch) || '') || '' }}${{ inputs.windows == 'true' && ((inputs.ios == 'true' || inputs.macos == 'true' || inputs.android == 'true') && ', Windows' || ' Windows') || '' }}${{ inputs.android_namespace == 'io.getstream.webrtc' && ' repackaged' || '' }}
 
 permissions:
   contents: write
@@ -56,6 +56,17 @@ on:
         description: Optional Android ABI, for example arm64-v8a. Empty = default ABI set.
         required: false
         default: ""
+      android_namespace:
+        description: Android Java package. io.getstream.webrtc rewrites the tree before the Android build.
+        type: choice
+        options:
+          - org.webrtc
+          - io.getstream.webrtc
+        default: org.webrtc
+      android_workflow_ref:
+        description: Branch, tag, or SHA of stream-video-android-webrtc whose publish workflow to run. Empty uses that repo's default branch.
+        required: false
+        default: ""
 
 jobs:
   release:
@@ -71,6 +82,8 @@ jobs:
       windows: ${{ inputs.windows }}
       config: ${{ inputs.config }}
       android_arch: ${{ inputs.android_arch }}
+      android_namespace: ${{ inputs.android_namespace }}
+      android_workflow_ref: ${{ inputs.android_workflow_ref }}
       version: ${{ inputs.version }}
       prerelease: ${{ inputs.prerelease }}
       release_notes: ${{ inputs.release_notes }}
