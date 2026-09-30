@@ -48,6 +48,14 @@ public interface AudioDeviceModule {
   }
 
   /**
+   * Enable or disable the built in acoustic echo canceller. Returns true if the change was
+   * applied, otherwise false is returned.
+   */
+  default boolean setAcousticEchoCancelerEnabled(boolean enabled) {
+    return false;
+  }
+
+  /**
    * Sets the preferred field dimension for the built-in microphone. Returns
    * true if setting was successful, otherwise false is returned.
    * This functionality can be implemented with

@@ -1,0 +1,6 @@
+target_os = "win"
+rtc_include_tests = true
+is_debug = true
+use_siso = false
+use_remoteexec = false
+use_reclient = false

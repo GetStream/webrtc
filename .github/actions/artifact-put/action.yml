@@ -1,0 +1,146 @@
+# Hetzner-only. Callers pass org secrets via with:
+#   hetzner_access_key
+#   hetzner_secret_access_key
+#   hetzner_bucket
+name: Upload WebRTC build tarball to Hetzner
+description: Pack git-cache plus reusable src/resources and .cipd; multipart-put.
+
+inputs:
+  path:
+    description: Object stem. Uploads artifacts/<repo>/<path>.tar
+    required: true
+  source:
+    description: DEPS_ROOT with .gclient-git-cache; optional src/resources and .cipd.
+    required: true
+  hetzner_access_key:
+    description: Hetzner object storage access key.
+    required: true
+  hetzner_secret_access_key:
+    description: Hetzner object storage secret access key.
+    required: true
+  hetzner_bucket:
+    description: Hetzner object storage bucket name.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Ensure aws CLI
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v aws >/dev/null; then
+          exit 0
+        fi
+        if [[ "$(uname -s)" == Darwin ]]; then
+          brew install awscli
+        else
+          sudo apt-get update
+          sudo apt-get install -y awscli
+        fi
+
+    - name: Upload build tarball to Hetzner
+      shell: bash
+      env:
+        HETZNER_ACCESS_KEY_CI_ARTIFACTS: ${{ inputs.hetzner_access_key }}
+        HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS: ${{ inputs.hetzner_secret_access_key }}
+        HETZNER_BUCKET_CI_ARTIFACTS: ${{ inputs.hetzner_bucket }}
+        OBJECT_STEM: ${{ inputs.path }}
+        SOURCE: ${{ inputs.source }}
+      run: |
+        set -euo pipefail
+        export AWS_ACCESS_KEY_ID="${HETZNER_ACCESS_KEY_CI_ARTIFACTS:?}"
+        export AWS_SECRET_ACCESS_KEY="${HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS:?}"
+        export AWS_DEFAULT_REGION=hel1
+        export AWS_EC2_METADATA_DISABLED=true
+        export AWS_MAX_ATTEMPTS=10
+        export AWS_RETRY_MODE=adaptive
+        endpoint="--endpoint-url https://hel1.your-objectstorage.com"
+        aws_timeouts=(--cli-connect-timeout 60 --cli-read-timeout 0)
+        [[ -n "${OBJECT_STEM}" ]]
+        [[ -n "${SOURCE}" ]]
+        test -d "${SOURCE}"
+        cache="${SOURCE}/.gclient-git-cache"
+        if [[ ! -d "${cache}" ]] || [[ -z "$(ls -A "${cache}")" ]]; then
+          echo "::error::build cache missing .gclient-git-cache"
+          exit 1
+        fi
+        members=(.gclient-git-cache)
+        # Reusable only. Do not pack working trees or out/ (objects
+        # twice) or src/.git / Stream-tracked src files. setup-webrtc
+        # rewrites .gclient every job.
+        for p in src/resources .cipd; do
+          if [[ -d "${SOURCE}/${p}" ]] && \
+            [[ -n "$(ls -A "${SOURCE}/${p}")" ]]; then
+            members+=("${p}")
+          else
+            echo "skip ${p} (missing or empty)"
+          fi
+        done
+        echo "pack members: ${members[*]}"
+        for p in "${members[@]}"; do
+          du -sk "${SOURCE}/${p}"
+        done
+        BUCKET="${HETZNER_BUCKET_CI_ARTIFACTS:?}"
+        object="artifacts/${{ github.repository }}/${OBJECT_STEM}.tar"
+        tar_file="${RUNNER_TEMP:?}/${OBJECT_STEM}.tar"
+        trap 'rm -f "${tar_file}"' EXIT
+        echo "packing ${SOURCE}/{${members[*]}} -> ${tar_file}"
+        tar cf "${tar_file}" -C "${SOURCE}" "${members[@]}"
+        if [[ "$(uname -s)" == Darwin ]]; then
+          size="$(stat -f %z "${tar_file}")"
+        else
+          size="$(stat -c %s "${tar_file}")"
+        fi
+        if [[ ! -f "${tar_file}" ]]; then
+          echo "::error::new tar missing ${tar_file}"
+          exit 1
+        fi
+        hit_file="${GITHUB_WORKSPACE}/.hetzner-hit-bytes"
+        old=""
+        if [[ -f "${hit_file}" ]]; then
+          old="$(tr -d '[:space:]' < "${hit_file}")"
+        fi
+        threshold=1073741824
+        skip_put=0
+        if [[ "${old}" =~ ^[0-9]+$ ]]; then
+          if [[ "${size}" -ge "${old}" ]]; then
+            delta=$((size - old))
+          else
+            delta=$((old - size))
+          fi
+          if [[ "${delta}" -lt "${threshold}" ]]; then
+            echo "skip upload: old=${old} new=${size} delta=${delta} (< 1GiB)"
+            skip_put=1
+          else
+            echo "upload: old=${old} new=${size} delta=${delta}"
+          fi
+        else
+          echo "upload: old=none new=${size} delta=n/a"
+        fi
+        if [[ "${skip_put}" -eq 0 ]]; then
+          df -h "${SOURCE}" "${RUNNER_TEMP}" || true
+          attempts=3
+          upload_ok=0
+          for attempt in $(seq 1 "${attempts}"); do
+            echo "upload attempt ${attempt}/${attempts}"
+            set +e
+            aws ${endpoint} "${aws_timeouts[@]}" \
+              s3 cp "${tar_file}" "s3://${BUCKET}/${object}"
+            up_rc=$?
+            set -e
+            if [[ "${up_rc}" -eq 0 ]]; then
+              upload_ok=1
+              break
+            fi
+            echo "upload attempt ${attempt} failed (exit ${up_rc})"
+            if [[ "${attempt}" -lt "${attempts}" ]]; then
+              sleep 10
+            fi
+          done
+          if [[ "${upload_ok}" -ne 1 ]]; then
+            echo "::error::failed to upload s3://${BUCKET}/${object} after ${attempts} attempts (${size} bytes)"
+            exit 1
+          fi
+        fi
+        rm -f "${tar_file}"

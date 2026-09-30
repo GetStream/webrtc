@@ -486,6 +486,40 @@ public class JavaAudioDeviceModule implements AudioDeviceModule {
     audioInput.setUseAudioRecord(enable);
   }
 
+  /**
+   * Changes the audio source used for capture, by releasing the current AudioRecord and building a
+   * new one with the given source. The argument should be one of the values from
+   * android.media.MediaRecorder.AudioSource: VOICE_COMMUNICATION applies the platform's voice
+   * pre-processing, while MIC or UNPROCESSED bypass it, which is preferable for music.
+   *
+   * <p>Safe to call mid-call: nothing about the AudioDeviceModule, the PeerConnectionFactory or
+   * any PeerConnection is recreated. Expect a short gap in captured audio while the new
+   * AudioRecord is created and started, which is audible as a click and makes the echo canceller
+   * re-converge, so this is meant for deliberate mode changes rather than frequent tweaks.
+   *
+   * <p>Do not call this from the main thread. It takes the same lock that recording teardown holds
+   * while it joins the capture thread, and when recording is initialized but not yet started it
+   * builds the new AudioRecord inline, so it can block for as long as that join takes.
+   *
+   * <p>If the requested source cannot be opened -- a device may refuse a given source under the
+   * current routing, or accept it and then refuse to start -- the last source known to work is
+   * restored so that capture is never left dead. The source actually in effect is reported by
+   * {@link #getAudioSource}, and failures are reported to the {@link AudioRecordErrorCallback}.
+   *
+   * <p>Note that moving off VOICE_COMMUNICATION also gives up the platform's built-in echo control
+   * on many devices, so keep the hardware AEC enabled or enable the software AEC when playout is
+   * active.
+   */
+  public void setAudioSource(int audioSource) {
+    Logging.d(TAG, "setAudioSource: " + audioSource);
+    audioInput.setAudioSource(audioSource);
+  }
+
+  /** Returns the audio source currently in effect on the AudioRecord. */
+  public int getAudioSource() {
+    return audioInput.getAudioSource();
+  }
+
   public void prewarmRecording(){
     audioInput.initRecordingIfNeeded();
     audioInput.prewarmRecordingIfNeeded();
@@ -505,6 +539,29 @@ public class JavaAudioDeviceModule implements AudioDeviceModule {
   public boolean setNoiseSuppressorEnabled(boolean enabled) {
     Logging.d(TAG, "setNoiseSuppressorEnabled: " + enabled);
     return audioInput.setNoiseSuppressorEnabled(enabled);
+  }
+
+  /**
+   * Enables or disables the platform's hardware acoustic echo canceller on the live capture
+   * session, the counterpart of {@link #setNoiseSuppressorEnabled}. Turning it off is useful when
+   * capturing music, which the echo canceller otherwise attenuates and distorts.
+   *
+   * <p>Unlike {@link Builder#setUseHardwareAcousticEchoCanceler}, this takes effect immediately and
+   * recreates nothing. It requires the effect to be attached, which happens when recording is
+   * initialized, so a call made before then returns false; it also returns false if the device has
+   * no usable hardware AEC, which {@link #isBuiltInAcousticEchoCancelerSupported} reports.
+   *
+   * <p>The setting is remembered and reapplied if the AudioRecord is rebuilt, for instance by
+   * {@link #setAudioSource}, so a source change will not silently restore the built-in canceller.
+   *
+   * <p>Disabling this does not enable WebRtc's software echo canceller in its place; that is fixed
+   * when the AudioDeviceModule is built. Leaving both off while audio is playing out of the speaker
+   * will send the far end its own echo.
+   */
+  @Override
+  public boolean setAcousticEchoCancelerEnabled(boolean enabled) {
+    Logging.d(TAG, "setAcousticEchoCancelerEnabled: " + enabled);
+    return audioInput.setAcousticEchoCancelerEnabled(enabled);
   }
 
   /**
