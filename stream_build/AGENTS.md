@@ -43,11 +43,13 @@ on the build configuration, not prerelease status; debug symbols stay embedded.
 
 Package v2 and Release v2 produce upstream artifacts: `WebRTC.xcframework`,
 `libwebrtc.aar`, and the applicable symbols and Windows products.
-`ANDROID_NAMESPACE=io.getstream.webrtc` rewrites the Android Java package,
-JNI symbols, and `libjingle_peerconnection_so` before `make build android`.
-`make package android` then writes `libwebrtc-repackaged.aar`. The default
-namespace is `org.webrtc`, and that build is unchanged. `make rename` remains
-an optional local command; the v2 workflows do not call it.
+Every Android build runs two jobs. One packages `libwebrtc.aar`. The other
+sets `ANDROID_NAMESPACE=io.getstream.webrtc`, which rewrites the Java package,
+JNI symbols, and `libjingle_peerconnection_so` before `make build android`,
+then packages `libwebrtc-repackaged.aar`. The WebRTC GitHub release keeps
+`libwebrtc.aar`. Release v2 sends `libwebrtc-repackaged.aar` to
+stream-video-android-webrtc. `make rename` remains an optional local command;
+the v2 workflows do not call it.
 
 ## Layout
 

@@ -486,10 +486,14 @@ if grep -qE 'make rename |final-(apple|android)-renamed|StreamWebRTC\.xcframewor
   exit 1
 fi
 grep -q 'rewrite-android-namespace.sh' "$ROOT/Makefile"
-grep -q 'android_namespace:' "$gha/workflows/build-v2.yml"
-grep -q 'android_namespace:' "$gha/workflows/package-v2.yml"
-grep -q 'android_namespace:' "$gha/workflows/release-v2.yml"
-grep -q 'ANDROID_NAMESPACE: ${{ inputs.android_namespace }}' "$gha/workflows/_make.yml"
+grep -q 'io.getstream.webrtc' "$gha/workflows/_make.yml"
+grep -q 'products-android-repackaged' "$gha/workflows/_make.yml"
+grep -q 'final-android/libwebrtc.aar' "$gha/workflows/_make.yml"
+grep -q 'variant=repackaged' "$gha/workflows/promote-release-v2.yml"
+grep -q 'promote_from_upstream_tag' "$gha/workflows/promote-release-v2.yml"
+! grep -q 'android_namespace:' "$gha/workflows/build-v2.yml"
+! grep -q 'android_namespace:' "$gha/workflows/package-v2.yml"
+! grep -q 'android_namespace:' "$gha/workflows/release-v2.yml"
 ! grep -q 'rename_webrtc_package.sh' "$gha/workflows/manual-platform-tests.yml"
 ! grep -q 'rename_webrtc_package.sh' "$gha/workflows/publish.yml"
 
