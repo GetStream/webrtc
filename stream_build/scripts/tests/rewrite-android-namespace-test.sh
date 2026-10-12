@@ -6,7 +6,7 @@
 set -euo pipefail
 
 script_dir=$(cd "$(dirname "$0")" && pwd)
-rename_script="$script_dir/rewrite-android-namespace.sh"
+rename_script="$script_dir/../rewrite-android-namespace.sh"
 work_dir=$(mktemp -d)
 trap 'rm -rf "$work_dir"' EXIT
 

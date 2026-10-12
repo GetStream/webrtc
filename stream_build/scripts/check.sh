@@ -139,7 +139,7 @@ make rename android AAR="$aar_dir/libwebrtc.aar" RENAMED="$aar_dir/renamed" \
 [[ -f "$aar_dir/libwebrtc.aar" ]]
 [[ -f "$aar_dir/renamed/libwebrtc.aar" ]]
 cmp -s "$aar_dir/libwebrtc.aar" "$aar_dir/renamed/libwebrtc.aar"
-"$ROOT/scripts/rewrite-android-namespace-test.sh"
+"$ROOT/scripts/tests/rewrite-android-namespace-test.sh"
 rm -rf "$aar_dir" "$(dirname "$layout")"
 
 wrong="$(mktemp -d)/not-src"
