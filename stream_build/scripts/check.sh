@@ -139,6 +139,7 @@ make rename android AAR="$aar_dir/libwebrtc.aar" RENAMED="$aar_dir/renamed" \
 [[ -f "$aar_dir/libwebrtc.aar" ]]
 [[ -f "$aar_dir/renamed/libwebrtc.aar" ]]
 cmp -s "$aar_dir/libwebrtc.aar" "$aar_dir/renamed/libwebrtc.aar"
+"$ROOT/scripts/tests/rewrite-android-namespace-test.sh"
 rm -rf "$aar_dir" "$(dirname "$layout")"
 
 wrong="$(mktemp -d)/not-src"
@@ -484,5 +485,16 @@ if grep -qE 'make rename |final-(apple|android)-renamed|StreamWebRTC\.xcframewor
   echo "wrapper artifact creation belongs in the downstream repositories" >&2
   exit 1
 fi
+grep -q 'rewrite-android-namespace.sh' "$ROOT/Makefile"
+grep -q 'io.getstream.webrtc' "$gha/workflows/_make.yml"
+grep -q 'products-android-repackaged' "$gha/workflows/_make.yml"
+grep -q 'final-android/libwebrtc.aar' "$gha/workflows/_make.yml"
+grep -q 'variant=repackaged' "$gha/workflows/promote-release-v2.yml"
+grep -q 'promote_from_upstream_tag' "$gha/workflows/promote-release-v2.yml"
+! grep -q 'android_namespace:' "$gha/workflows/build-v2.yml"
+! grep -q 'android_namespace:' "$gha/workflows/package-v2.yml"
+! grep -q 'android_namespace:' "$gha/workflows/release-v2.yml"
+! grep -q 'rename_webrtc_package.sh' "$gha/workflows/manual-platform-tests.yml"
+! grep -q 'rename_webrtc_package.sh' "$gha/workflows/publish.yml"
 
 echo "ok"

@@ -56,6 +56,10 @@ on:
         description: Optional Android ABI, for example arm64-v8a. Empty = default ABI set.
         required: false
         default: ""
+      android_workflow_ref:
+        description: Branch, tag, or SHA of stream-video-android-webrtc whose publish workflow to run. Empty uses that repo's default branch.
+        required: false
+        default: ""
 
 jobs:
   release:
@@ -71,6 +75,7 @@ jobs:
       windows: ${{ inputs.windows }}
       config: ${{ inputs.config }}
       android_arch: ${{ inputs.android_arch }}
+      android_workflow_ref: ${{ inputs.android_workflow_ref }}
       version: ${{ inputs.version }}
       prerelease: ${{ inputs.prerelease }}
       release_notes: ${{ inputs.release_notes }}
