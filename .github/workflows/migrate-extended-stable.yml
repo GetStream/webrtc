@@ -1,20 +1,15 @@
 # Weekly extended-stable migration. Monday 06:00 UTC, plus manual dispatch.
 # Schedule runs only after this file is on the default branch.
 #
-# The gate skips when the fork is already on extended stable, or when a pull
-# request for that milestone is open or already merged. Codex then runs the
-# migrate skill. It does not push. This job checks the merge and opens the PR.
-#
-# The pull request is opened with the job's GITHUB_TOKEN. Test v2 is the
-# pull_request workflow on that PR. GitHub holds those runs until a writer
-# clicks Approve workflows to run.
-#
+# The commands live in stream_build:
+#   make migrate-plan
+#   make migrate-prepare
+#   make migrate-open
 # Secret: OPENAI_API_KEY.
 #
-# ponytail: the push is in this job, after Codex, with core.hooksPath pointed
-# at an empty directory. A git bundle of this history would be the whole repo.
-# Upgrade path: move the push to a later job if a process Codex started is
-# ever still alive when the push runs.
+# ponytail: Codex runs in this job, then migrate-open pushes. core.hooksPath
+# is an empty directory for that push. Upgrade path: a later job if a process
+# Codex started is still alive at the push.
 
 name: Migrate extended stable
 
@@ -40,222 +35,34 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  gate:
-    name: Decide
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    permissions:
-      contents: read
-      pull-requests: read
-    outputs:
-      should_run: ${{ steps.decide.outputs.should_run }}
-      reason: ${{ steps.decide.outputs.reason }}
-      milestone: ${{ steps.decide.outputs.milestone }}
-      ref: ${{ steps.decide.outputs.ref }}
-      upgrade_branch: ${{ steps.decide.outputs.upgrade_branch }}
-      baseline_branch: ${{ steps.decide.outputs.baseline_branch }}
-      fork_branch: ${{ steps.fork.outputs.fork_branch }}
-      fork_reason: ${{ steps.fork.outputs.fork_reason }}
-    env:
-      GH_TOKEN: ${{ github.token }}
-      FORCE: ${{ github.event_name == 'workflow_dispatch' && (inputs.force == true || inputs.force == 'true') && 'true' || 'false' }}
-    steps:
-      - name: Check out the workflow revision
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          fetch-tags: false
-          filter: blob:none
-
-      - name: Check the gate script
-        run: python3 agents/skills/migrate/scripts/migration_gate.py --selftest
-
-      - id: fork
-        name: Select the fork branch
-        run: |
-          set -euo pipefail
-          if [ "${GITHUB_REPOSITORY}" != "GetStream/webrtc" ]; then
-            echo "::error::This workflow only supports GetStream/webrtc."
-            exit 1
-          fi
-          git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
-          # Match refs/heads/develop exactly. A bare pattern also matches backup/develop.
-          if git ls-remote --exit-code origin refs/heads/develop >/dev/null; then
-            git fetch --no-tags origin "+refs/heads/develop:refs/remotes/origin/develop"
-            fork_branch="develop"
-            fork_reason="origin/develop exists"
-          else
-            git remote set-head origin --auto
-            fork_branch="$(git symbolic-ref --short refs/remotes/origin/HEAD)"
-            fork_branch="${fork_branch#origin/}"
-            fork_reason="origin/develop is absent"
-          fi
-          if [[ ! "${fork_branch}" =~ ^[A-Za-z0-9._/-]+$ ]]; then
-            echo "::error::Unexpected fork branch ${fork_branch}."
-            exit 1
-          fi
-          git fetch --no-tags origin "+refs/heads/${fork_branch}:refs/remotes/origin/${fork_branch}"
-          git fetch --no-tags origin "+refs/heads/webrtc/m*:refs/remotes/origin/webrtc/m*"
-          echo "fork_branch=${fork_branch}" >> "$GITHUB_OUTPUT"
-          echo "fork_reason=${fork_reason}" >> "$GITHUB_OUTPUT"
-
-      - id: decide
-        name: Compare extended stable with the fork
-        run: |
-          set -euo pipefail
-          fork_ref="refs/remotes/origin/${{ steps.fork.outputs.fork_branch }}"
-          : > "$RUNNER_TEMP/ancestors.txt"
-          while read -r ref; do
-            [ -n "${ref}" ] || continue
-            name="${ref##*/}"
-            case "${name}" in
-              m[0-9]*) ;;
-              *) continue ;;
-            esac
-            number="${name#m}"
-            case "${number}" in
-              *[!0-9]*) continue ;;
-            esac
-            if git merge-base --is-ancestor "${ref}" "${fork_ref}"; then
-              echo "${number}" >> "$RUNNER_TEMP/ancestors.txt"
-            else
-              compare_status="$?"
-              if [ "${compare_status}" -ne 1 ]; then
-                echo "::error::Could not compare ${ref} with ${fork_ref}."
-                exit "${compare_status}"
-              fi
-            fi
-          done < <(git for-each-ref --format='%(refname:short)' 'refs/remotes/origin/webrtc/m*')
-
-          {
-            git log "${fork_ref}" --format='%s' --grep='Upgrade to m'
-            git log "${fork_ref}" --merges --format='%s' --grep='Merge WebRTC M'
-            git log "${fork_ref}" --format='%s' --grep='Migrate to version M'
-          } > "$RUNNER_TEMP/subjects.txt"
-
-          current="$(python3 agents/skills/migrate/scripts/migration_gate.py current \
-            --ancestors-file "$RUNNER_TEMP/ancestors.txt" \
-            --subjects-file "$RUNNER_TEMP/subjects.txt")"
-          echo "Fork milestone is M${current}."
-          python3 agents/skills/migrate/scripts/discover_stable.py \
-            --current "${current}" > "$RUNNER_TEMP/discovery.json"
-
-          gh pr list --repo "${GITHUB_REPOSITORY}" --state open --limit 50 \
-            --search "head:merge-webrtc-m" --json headRefName \
-            --jq '.[].headRefName' > "$RUNNER_TEMP/open-heads.txt"
-          gh pr list --repo "${GITHUB_REPOSITORY}" --state merged --limit 50 \
-            --search "head:merge-webrtc-m" --json headRefName \
-            --jq '.[].headRefName' > "$RUNNER_TEMP/merged-heads.txt"
-
-          force_args=()
-          if [ "${FORCE}" = "true" ]; then
-            force_args+=(--force)
-          fi
-          python3 agents/skills/migrate/scripts/migration_gate.py decide \
-            --discovery "$RUNNER_TEMP/discovery.json" \
-            --open-heads "$RUNNER_TEMP/open-heads.txt" \
-            --merged-heads "$RUNNER_TEMP/merged-heads.txt" \
-            --github-output "$GITHUB_OUTPUT" \
-            "${force_args[@]}" | tee "$RUNNER_TEMP/decision.json"
-
-          {
-            echo "### Extended stable migration"
-            echo
-            python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print("Skip." if not d["should_run"] else "Run Codex."); print(d["reason"])' \
-              "$RUNNER_TEMP/decision.json"
-          } >> "$GITHUB_STEP_SUMMARY"
-
   migrate:
-    name: Migrate and open the pull request
-    needs: gate
-    if: needs.gate.outputs.should_run == 'true'
+    name: Migrate extended stable
     runs-on: ubuntu-latest
     timeout-minutes: 180
     permissions:
       contents: write
       pull-requests: write
-      actions: write
-    outputs:
-      official_sha: ${{ steps.verify.outputs.official_sha }}
+      issues: write
     steps:
       - name: Check out the fork
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.gate.outputs.fork_branch }}
           fetch-depth: 0
           fetch-tags: false
-          persist-credentials: true
+
+      - id: plan
+        name: Decide
+        env:
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && (inputs.force == true || inputs.force == 'true') && '1' || '0' }}
+        run: make -C stream_build migrate-plan
 
       - id: prepare
-        name: Fetch the official milestone and drop checkout credentials
-        env:
-          REF: ${{ needs.gate.outputs.ref }}
-          FORK_BRANCH: ${{ needs.gate.outputs.fork_branch }}
-          UPGRADE: ${{ needs.gate.outputs.upgrade_branch }}
-          BASELINE: ${{ needs.gate.outputs.baseline_branch }}
-        run: |
-          set -euo pipefail
-          if [ "${GITHUB_REPOSITORY}" != "GetStream/webrtc" ]; then
-            echo "::error::This workflow only supports GetStream/webrtc."
-            exit 1
-          fi
-          if [[ ! "${FORK_BRANCH}" =~ ^[A-Za-z0-9._/-]+$ ]]; then
-            echo "::error::Unexpected fork branch."
-            exit 1
-          fi
-          if [[ ! "${UPGRADE}" =~ ^merge-webrtc-m[0-9]+$ ]]; then
-            echo "::error::Unexpected upgrade branch."
-            exit 1
-          fi
-          if [[ ! "${BASELINE}" =~ ^webrtc/m[0-9]+$ ]]; then
-            echo "::error::Unexpected baseline branch."
-            exit 1
-          fi
-          if [[ ! "${REF}" =~ ^refs/branch-heads/[0-9]+$ ]]; then
-            echo "::error::Unexpected official ref."
-            exit 1
-          fi
-          if ! git remote get-url official >/dev/null 2>&1; then
-            git remote add official https://webrtc.googlesource.com/src
-          fi
-          git fetch --no-tags official "${REF}"
-          echo "Prefetched ${REF} at $(git rev-parse FETCH_HEAD)."
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git config --local --unset-all "http.https://github.com/.extraheader" || true
-          if grep -q "AUTHORIZATION" .git/config; then
-            echo "::error::Git config still contains an authorization header."
-            exit 1
-          fi
-          echo "fork_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-      - name: Write the Codex permission profile
-        run: |
-          set -euo pipefail
-          mkdir -p "${RUNNER_TEMP}/codex-home"
-          cat > "${RUNNER_TEMP}/codex-home/config.toml" <<'EOF'
-          approval_policy = "never"
-
-          [features]
-          network_proxy = true
-
-          [permissions.migrate]
-          extends = ":workspace"
-          description = "Merge extended stable. Git metadata is writable. Network reaches only the milestone feeds."
-
-          [permissions.migrate.filesystem.":workspace_roots"]
-          ".git" = "write"
-
-          [permissions.migrate.network]
-          enabled = true
-
-          [permissions.migrate.network.domains]
-          "chromiumdash.appspot.com" = "allow"
-          "webrtc.googlesource.com" = "allow"
-          "*.googlesource.com" = "allow"
-          EOF
+        name: Fetch the milestone
+        if: success() && steps.plan.outputs.should_run == 'true'
+        run: make -C stream_build migrate-prepare
 
       - name: Run the migrate skill
+        if: success() && steps.plan.outputs.should_run == 'true'
         uses: openai/codex-action@v1
         env:
           GITHUB_TOKEN: ""
@@ -265,211 +72,22 @@ jobs:
           permission-profile: migrate
           safety-strategy: drop-sudo
           allow-bots: true
-          codex-home: ${{ runner.temp }}/codex-home
-          output-file: ${{ runner.temp }}/codex-last-message.txt
-          prompt: |
-            Run the migrate skill at agents/skills/migrate/SKILL.md from this git root.
+          codex-home: ${{ github.workspace }}/.git/codex-home
+          prompt-file: .git/migrate-prompt.md
 
-            The fork branch is ${{ needs.gate.outputs.fork_branch }} because ${{ needs.gate.outputs.fork_reason }}.
-            The extended stable ref ${{ needs.gate.outputs.ref }} is already fetched on the official remote.
-            If a later fetch of that same ref fails, use the tip already fetched. Do not stop for that network failure.
-
-            This run is unattended. When the skill says to stop and ask, write the reason to migrate-stop.txt and exit non-zero.
-            If another upgrade branch is not contained in the fork, stop that way. Do not pick a different fork.
-
-            Do not push.
-            Do not run gh.
-            Do not run a build.
-            Do not run gclient.
-            Do not force-push.
-            Do not merge the pull request.
-
-            Follow discover-stable.md, merge-forward.md, and resolve-conflicts.md.
-            Write the pull request body to migrate-pr-body.md using the outline in agents/skills/migrate/pull-request.md.
-            Do not commit migrate-pr-body.md or migrate-stop.txt.
-
-            A clean merge still needs migrate-pr-body.md.
-            The workflow opens the pull request after you exit.
-
-      - id: verify
-        name: Check the merge commit
-        if: success()
+      - name: Open the pull request
+        if: success() && steps.plan.outputs.should_run == 'true'
         env:
           FORK_SHA: ${{ steps.prepare.outputs.fork_sha }}
-          FORK_BRANCH: ${{ needs.gate.outputs.fork_branch }}
-          REF: ${{ needs.gate.outputs.ref }}
-          UPGRADE: ${{ needs.gate.outputs.upgrade_branch }}
-          BASELINE: ${{ needs.gate.outputs.baseline_branch }}
-          MILESTONE: ${{ needs.gate.outputs.milestone }}
-        run: |
-          set -euo pipefail
-          if [ -s migrate-stop.txt ]; then
-            echo "::error::Codex stopped. See migrate-stop.txt."
-            exit 1
-          fi
-          if [ ! -s migrate-pr-body.md ]; then
-            echo "::error::Codex did not write migrate-pr-body.md."
-            exit 1
-          fi
-          if grep -E -q '<(full hash|milestone|milestone or same|name|reason|count|path)>' migrate-pr-body.md; then
-            echo "::error::The pull request body still has a placeholder."
-            exit 1
-          fi
-          if ! grep -q "M${MILESTONE}" migrate-pr-body.md; then
-            echo "::error::The pull request body does not name M${MILESTONE}."
-            exit 1
-          fi
-          cp migrate-pr-body.md "${RUNNER_TEMP}/migrate-pr-body.md"
-          if git rev-parse --verify --quiet MERGE_HEAD >/dev/null; then
-            echo "::error::A merge is still in progress."
-            exit 1
-          fi
-          if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
-            echo "::error::Unmerged files remain."
-            exit 1
-          fi
-          git rev-parse --verify "refs/heads/${UPGRADE}" >/dev/null
-          git rev-parse --verify "refs/heads/${BASELINE}" >/dev/null
-          for path in migrate-pr-body.md migrate-stop.txt; do
-            if git cat-file -e "${UPGRADE}:${path}" 2>/dev/null; then
-              echo "::error::${path} is in the upgrade commit."
-              exit 1
-            fi
-          done
-          git -c "http.extraheader=AUTHORIZATION: bearer ${GITHUB_TOKEN}" \
-            fetch --no-tags origin \
-            "+refs/heads/${FORK_BRANCH}:refs/remotes/origin/${FORK_BRANCH}" \
-            "+refs/heads/${GITHUB_REF_NAME}:refs/remotes/origin/migration-workflow-src"
-          if ! git merge-base --is-ancestor "${FORK_SHA}" "refs/remotes/origin/${FORK_BRANCH}"; then
-            echo "::error::The fork moved in a way that drops the recorded tip."
-            exit 1
-          fi
-          git fetch --no-tags official "${REF}"
-          official_sha="$(git rev-parse FETCH_HEAD)"
-          if [[ ! "${official_sha}" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::Official tip is not a full commit hash."
-            exit 1
-          fi
-          mapfile -t head_parents < <(git rev-parse "${UPGRADE}^@")
-          count="$(git rev-list --first-parent --count "${FORK_SHA}..${UPGRADE}")"
-          git show "refs/remotes/origin/migration-workflow-src:agents/skills/migrate/scripts/migration_gate.py" \
-            > "${RUNNER_TEMP}/migration_gate.py"
-          check_args=(
-            python3 "${RUNNER_TEMP}/migration_gate.py" check-merge
-            --fork-sha "${FORK_SHA}"
-            --official-sha "${official_sha}"
-            --baseline-sha "$(git rev-parse "refs/heads/${BASELINE}")"
-            --first-parent-count "${count}"
-          )
-          for parent in "${head_parents[@]}"; do
-            check_args+=(--head-parent "${parent}")
-          done
-          if [ "${count}" = "2" ]; then
-            mapfile -t repair_parents < <(git rev-parse "${head_parents[0]}^@")
-            for parent in "${repair_parents[@]}"; do
-              check_args+=(--repair-parent "${parent}")
-            done
-          fi
-          "${check_args[@]}"
-          echo "official_sha=${official_sha}" >> "$GITHUB_OUTPUT"
+          MILESTONE: ${{ steps.plan.outputs.milestone }}
+          OFFICIAL_REF: ${{ steps.plan.outputs.ref }}
+          FORK_BRANCH: ${{ steps.plan.outputs.fork_branch }}
+          UPGRADE_BRANCH: ${{ steps.plan.outputs.upgrade_branch }}
+          BASELINE_BRANCH: ${{ steps.plan.outputs.baseline_branch }}
+        run: make -C stream_build migrate-open
 
-      - name: Push the branches and open the pull request
-        if: success()
+      - name: Ask for a decision
+        if: failure() && steps.plan.outputs.should_run == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
-          OFFICIAL_SHA: ${{ steps.verify.outputs.official_sha }}
-          FORK_BRANCH: ${{ needs.gate.outputs.fork_branch }}
-          UPGRADE: ${{ needs.gate.outputs.upgrade_branch }}
-          BASELINE: ${{ needs.gate.outputs.baseline_branch }}
-          MILESTONE: ${{ needs.gate.outputs.milestone }}
-        run: |
-          set -euo pipefail
-          mkdir -p "${RUNNER_TEMP}/no-hooks"
-          title="[Automated]Migrate to version M${MILESTONE} ${OFFICIAL_SHA}"
-          cp "${RUNNER_TEMP}/migrate-pr-body.md" "${RUNNER_TEMP}/pr-body.md"
-          printf '\nWorkflow run: %s/%s/actions/runs/%s\n' \
-            "${GITHUB_SERVER_URL}" "${GITHUB_REPOSITORY}" "${GITHUB_RUN_ID}" \
-            >> "${RUNNER_TEMP}/pr-body.md"
-          git -c core.hooksPath="${RUNNER_TEMP}/no-hooks" \
-            -c "http.extraheader=AUTHORIZATION: bearer ${GH_TOKEN}" \
-            push origin "refs/heads/${BASELINE}:refs/heads/${BASELINE}"
-          git -c core.hooksPath="${RUNNER_TEMP}/no-hooks" \
-            -c "http.extraheader=AUTHORIZATION: bearer ${GH_TOKEN}" \
-            push origin "refs/heads/${UPGRADE}:refs/heads/${UPGRADE}"
-          if ! url="$(gh pr create \
-            --repo "${GITHUB_REPOSITORY}" \
-            --base "${FORK_BRANCH}" \
-            --head "${UPGRADE}" \
-            --title "${title}" \
-            --body-file "${RUNNER_TEMP}/pr-body.md")"; then
-            url="$(gh pr list --repo "${GITHUB_REPOSITORY}" --state open \
-              --head "${UPGRADE}" --json url --jq '.[0].url')"
-            if [ -z "${url}" ]; then
-              echo "::error::The pull request was not created."
-              exit 1
-            fi
-          fi
-          echo "${url}" >> "$GITHUB_STEP_SUMMARY"
-          echo "${url}"
-
-      - name: Upload the stop reason
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: migration-stop
-          path: migrate-stop.txt
-          if-no-files-found: ignore
-
-  report:
-    name: Ask for a decision
-    needs: [gate, migrate]
-    if: always() && needs.gate.result == 'success' && needs.gate.outputs.should_run == 'true' && needs.migrate.result == 'failure'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      actions: read
-      issues: write
-    steps:
-      - name: Download the stop reason
-        id: stop
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          name: migration-stop
-          path: stop
-
-      - name: Open or comment on the decision issue
-        if: steps.stop.outcome == 'success'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          MILESTONE: ${{ needs.gate.outputs.milestone }}
-        run: |
-          set -euo pipefail
-          if [ "${GITHUB_REPOSITORY}" != "GetStream/webrtc" ]; then
-            echo "::error::This workflow only supports GetStream/webrtc."
-            exit 1
-          fi
-          if [ ! -s stop/migrate-stop.txt ]; then
-            echo "Codex stopped without a reason. Leaving the failed run without an issue."
-            exit 0
-          fi
-          title="Migration to M${MILESTONE} needs a decision"
-          {
-            echo "The weekly migration to M${MILESTONE} stopped before it opened a pull request."
-            echo
-            head -c 6000 stop/migrate-stop.txt
-            echo
-            echo
-            printf 'Workflow run: %s/%s/actions/runs/%s\n' \
-              "${GITHUB_SERVER_URL}" "${GITHUB_REPOSITORY}" "${GITHUB_RUN_ID}"
-          } > "${RUNNER_TEMP}/issue.md"
-          number="$(gh issue list --repo "${GITHUB_REPOSITORY}" --state open --limit 20 \
-            --search "in:title ${title}" --json number,title \
-            --jq ".[] | select(.title == \"${title}\") | .number" | head -n 1)"
-          if [ -n "${number}" ]; then
-            gh issue comment --repo "${GITHUB_REPOSITORY}" "${number}" \
-              --body-file "${RUNNER_TEMP}/issue.md"
-          else
-            gh issue create --repo "${GITHUB_REPOSITORY}" --title "${title}" \
-              --body-file "${RUNNER_TEMP}/issue.md"
-          fi
+          MILESTONE: ${{ steps.plan.outputs.milestone }}
+        run: make -C stream_build migrate-issue

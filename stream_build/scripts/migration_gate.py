@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Decide whether a weekly run should migrate, and check the merge it produced.
+"""Decide whether to migrate, and check the merge before it is pushed.
 
-The milestone feed stays in discover_stable.py. This script only decides if
-that target is already used, and checks the upgrade commit before a push.
+`make migrate-plan` and `make migrate-open` call this. The milestone feed
+stays in agents/skills/migrate/scripts/discover_stable.py.
 """
 
 import argparse

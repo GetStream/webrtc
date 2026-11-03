@@ -8,7 +8,15 @@ make bootstrap            # once; CONFIRM=1 in CI
 make build|test|package ios|android|macos|windows [VAR=value ...]
 make combine
 make rename apple|android
+make migrate-plan
+make migrate-prepare
+make migrate-open
 ```
+
+`migrate-plan` prints whether Chromium extended stable is ahead of the fork.
+`migrate-prepare` fetches that milestone. `migrate-open` checks the merge and
+opens the pull request. These three do not require `make bootstrap`. `FORCE=1`
+on `migrate-plan` ignores an existing pull request for the same milestone.
 
 `build` is gn+ninja. `package` only copies/lipo/zips artifacts already in `OUT`, then writes `LICENSE.md` unless `SKIP_LICENSES=1`.
 Do not reintroduce Fastlane or wrap `tools_webrtc/ios/build_ios_libs.py`.
