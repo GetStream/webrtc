@@ -2,12 +2,10 @@
 # Schedule runs only after this file is on the default branch.
 #
 # The commands live in stream_build:
-#   make migrate-plan
-#   make migrate-prepare
-#   make migrate-open
+#   make migrate plan|prepare|open
 # Secret: OPENAI_API_KEY.
 #
-# ponytail: Codex runs in this job, then migrate-open pushes. core.hooksPath
+# ponytail: Codex runs in this job, then make migrate open pushes. core.hooksPath
 # is an empty directory for that push. Upgrade path: a later job if a process
 # Codex started is still alive at the push.
 
@@ -54,12 +52,12 @@ jobs:
         name: Decide
         env:
           FORCE: ${{ github.event_name == 'workflow_dispatch' && (inputs.force == true || inputs.force == 'true') && '1' || '0' }}
-        run: make -C stream_build migrate-plan
+        run: make -C stream_build migrate plan
 
       - id: prepare
         name: Fetch the milestone
         if: success() && steps.plan.outputs.should_run == 'true'
-        run: make -C stream_build migrate-prepare
+        run: make -C stream_build migrate prepare
 
       - name: Run the migrate skill
         if: success() && steps.plan.outputs.should_run == 'true'
@@ -84,10 +82,10 @@ jobs:
           FORK_BRANCH: ${{ steps.plan.outputs.fork_branch }}
           UPGRADE_BRANCH: ${{ steps.plan.outputs.upgrade_branch }}
           BASELINE_BRANCH: ${{ steps.plan.outputs.baseline_branch }}
-        run: make -C stream_build migrate-open
+        run: make -C stream_build migrate open
 
       - name: Ask for a decision
         if: failure() && steps.plan.outputs.should_run == 'true'
         env:
           MILESTONE: ${{ steps.plan.outputs.milestone }}
-        run: make -C stream_build migrate-issue
+        run: make -C stream_build migrate issue

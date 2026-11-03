@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Extended-stable migration, shared by laptops and GitHub Actions.
 #
-#   make migrate-plan      # print the decision; write it in the git directory
-#   make migrate-prepare   # fetch the milestone; requires HEAD on the fork
-#   make migrate-open      # check the merge, push, open the pull request
-#   make migrate-issue     # comment when migrate-stop.txt explains a stop
+#   make migrate plan      # print the decision; write it in the git directory
+#   make migrate prepare   # fetch the milestone; requires HEAD on the fork
+#   make migrate open      # check the merge, push, open the pull request
+#   make migrate issue     # comment when migrate-stop.txt explains a stop
 #
 # FORCE=1 skips the open/merged pull-request check. It does not run when
 # the fork is already on extended stable, and it does not force-push.
@@ -92,7 +92,7 @@ collect_milestone() {
 }
 
 read_plan() {
-  [ -f "$PLAN" ] || { echo "Run make migrate-plan first." >&2; exit 1; }
+  [ -f "$PLAN" ] || { echo "Run make migrate plan first." >&2; exit 1; }
   plan_get() {
     python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2], ""))' "$PLAN" "$1"
   }
