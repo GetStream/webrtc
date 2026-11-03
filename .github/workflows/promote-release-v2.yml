@@ -18,6 +18,11 @@ on:
         description: Version/tag for the new final release
         required: true
         type: string
+      android_workflow_ref:
+        description: Branch, tag, or SHA of stream-video-android-webrtc whose publish workflow to run. Empty uses that repo's default branch.
+        required: false
+        type: string
+        default: ""
 
 concurrency:
   group: promote-release-v2-${{ inputs.version }}
@@ -30,6 +35,7 @@ jobs:
     outputs:
       trigger_swift: ${{ steps.validate.outputs.trigger_swift }}
       trigger_android: ${{ steps.validate.outputs.trigger_android }}
+      source_tag: ${{ steps.validate.outputs.source_tag }}
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_VERSION: ${{ inputs.version }}
@@ -95,6 +101,7 @@ jobs:
             echo "::error::The source release has an unsupported tag."
             exit 1
           fi
+          echo "source_tag=${source_tag}" >> "${GITHUB_OUTPUT}"
 
           encoded_source_tag="$(jq -rn --arg value "${source_tag}" '$value | @uri')"
           gh api "repos/${GITHUB_REPOSITORY}/commits/${encoded_source_tag}" \
@@ -316,10 +323,42 @@ jobs:
           GH_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
           RELEASE_VERSION: ${{ inputs.version }}
           IS_PRERELEASE: "false"
+          ANDROID_WORKFLOW_REF: ${{ inputs.android_workflow_ref }}
         run: |
           set -euo pipefail
           webrtc_release_url="https://github.com/${{ github.repository }}/releases/tag/${RELEASE_VERSION}"
-          gh workflow run publish-from-webrtc.yml \
-            --repo GetStream/stream-video-android-webrtc \
-            --field "webrtc_release_url=${webrtc_release_url}" \
+          trigger_args=(
+            workflow run publish-from-webrtc.yml
+            --repo GetStream/stream-video-android-webrtc
+            --field "webrtc_release_url=${webrtc_release_url}"
             --field "pre_release=${IS_PRERELEASE}"
+            --field "variant=default"
+          )
+          if [[ -n "${ANDROID_WORKFLOW_REF}" ]]; then
+            trigger_args+=(--ref "${ANDROID_WORKFLOW_REF}")
+          fi
+          gh "${trigger_args[@]}"
+
+      - name: Trigger repackaged stream-video-android-webrtc release
+        if: ${{ needs.promote.outputs.trigger_android == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          SOURCE_TAG: ${{ needs.promote.outputs.source_tag }}
+          IS_PRERELEASE: "false"
+          ANDROID_WORKFLOW_REF: ${{ inputs.android_workflow_ref }}
+        run: |
+          set -euo pipefail
+          webrtc_release_url="https://github.com/${{ github.repository }}/releases/tag/${RELEASE_VERSION}"
+          trigger_args=(
+            workflow run publish-from-webrtc.yml
+            --repo GetStream/stream-video-android-webrtc
+            --field "webrtc_release_url=${webrtc_release_url}"
+            --field "pre_release=${IS_PRERELEASE}"
+            --field "variant=repackaged"
+            --field "promote_from_upstream_tag=${SOURCE_TAG}"
+          )
+          if [[ -n "${ANDROID_WORKFLOW_REF}" ]]; then
+            trigger_args+=(--ref "${ANDROID_WORKFLOW_REF}")
+          fi
+          gh "${trigger_args[@]}"
