@@ -16,14 +16,17 @@
 #include <string>
 #include <vector>
 
+#include "absl/functional/any_invocable.h"
 #include "api/crypto/frame_decryptor_interface.h"
 #include "api/dtls_transport_interface.h"
 #include "api/media_stream_interface.h"
 #include "api/media_types.h"
+#include "api/rtp_packet_infos.h"
 #include "api/rtp_parameters.h"
 #include "api/rtp_receiver_interface.h"
 #include "api/scoped_refptr.h"
 #include "api/transport/rtp/rtp_source.h"
+#include "api/units/timestamp.h"
 #include "media/base/media_channel.h"
 #include "pc/rtp_receiver.h"
 #include "test/gmock.h"
@@ -67,17 +70,29 @@ class MockRtpReceiverInternal : public RtpReceiverInternal {
 
   // RtpReceiverInternal methods.
   MOCK_METHOD(void, Stop, (), (override));
+  MOCK_METHOD(MediaReceiveChannelInterface*,
+              media_channel,
+              (),
+              (const, override));
   MOCK_METHOD(void,
               SetMediaChannel,
               (webrtc::MediaReceiveChannelInterface*),
               (override));
-  MOCK_METHOD(void, SetupMediaChannel, (uint32_t), (override));
-  MOCK_METHOD(void, SetupUnsignaledMediaChannel, (), (override));
+  MOCK_METHOD(absl::AnyInvocable<void() &&>,
+              GetSetupForMediaChannel,
+              (uint32_t),
+              (override));
+  MOCK_METHOD(absl::AnyInvocable<void() &&>,
+              GetSetupForUnsignaledMediaChannel,
+              (),
+              (override));
   MOCK_METHOD(std::optional<uint32_t>, ssrc, (), (const, override));
-  MOCK_METHOD(void, NotifyFirstPacketReceived, (), (override));
+  MOCK_METHOD(std::optional<uint32_t>, ssrc_s, (), (const, override));
+  MOCK_METHOD(void, SetSsrc_s, (uint32_t), (override));
+  MOCK_METHOD(void, NotifyFirstPacketReceived, (uint32_t), (override));
   MOCK_METHOD(void,
               NotifyFirstPacketReceivedAfterReceptiveChange,
-              (),
+              (uint32_t),
               (override));
   MOCK_METHOD(void, set_stream_ids, (std::vector<std::string>), (override));
   MOCK_METHOD(void,
@@ -87,6 +102,10 @@ class MockRtpReceiverInternal : public RtpReceiverInternal {
   MOCK_METHOD(void,
               SetStreams,
               (const std::vector<webrtc::scoped_refptr<MediaStreamInterface>>&),
+              (override));
+  MOCK_METHOD(void,
+              OnFrameDelivered,
+              (const RtpPacketInfos&, Timestamp),
               (override));
   MOCK_METHOD(int, AttachmentId, (), (const, override));
 };

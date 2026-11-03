@@ -15,6 +15,7 @@
 
 #include "absl/functional/any_invocable.h"
 #include "api/sequence_checker.h"
+#include "api/task_queue/task_queue_base.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/network/received_packet.h"
 #include "rtc_base/network_route.h"
@@ -22,7 +23,8 @@
 
 namespace webrtc {
 
-PacketTransportInternal::PacketTransportInternal() = default;
+PacketTransportInternal::PacketTransportInternal(TaskQueueBase* attached_queue)
+    : network_checker_(attached_queue) {}
 
 PacketTransportInternal::~PacketTransportInternal() = default;
 
@@ -102,15 +104,14 @@ void PacketTransportInternal::NotifyReadyToSend(
 }
 
 void PacketTransportInternal::SubscribeReceivingState(
-    absl::AnyInvocable<void(PacketTransportInternal*)> callback) {
-  RTC_DCHECK_RUN_ON(&network_checker_);
-  receiving_state_callbacks_.AddReceiver(std::move(callback));
-}
-void PacketTransportInternal::SubscribeReceivingState(
     void* tag,
     absl::AnyInvocable<void(PacketTransportInternal*)> callback) {
   RTC_DCHECK_RUN_ON(&network_checker_);
   receiving_state_callbacks_.AddReceiver(tag, std::move(callback));
+}
+void PacketTransportInternal::UnsubscribeReceivingState(void* tag) {
+  RTC_DCHECK_RUN_ON(&network_checker_);
+  receiving_state_callbacks_.RemoveReceivers(tag);
 }
 void PacketTransportInternal::NotifyReceivingState(
     PacketTransportInternal* packet_transport) {

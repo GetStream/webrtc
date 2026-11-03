@@ -27,7 +27,6 @@
 #include "api/video/encoded_image.h"
 #include "api/video/video_codec_type.h"
 #include "api/video/video_frame.h"
-#include "api/video/video_frame_type.h"
 #include "api/video_codecs/scalability_mode.h"
 #include "api/video_codecs/video_codec.h"
 #include "modules/include/module_common_types_public.h"
@@ -93,7 +92,7 @@ std::unique_ptr<FrameSelector> CreateFrameSelector(
     return nullptr;
   }
   return std::make_unique<FrameSelector>(
-      scalability_mode.value_or(ScalabilityMode::kL1T1),
+      *environment, scalability_mode.value_or(ScalabilityMode::kL1T1),
       FrameSelector::Timespan{
           .lower_bound = settings.low_overhead_lower_bound(),
           .upper_bound = settings.low_overhead_upper_bound()},
@@ -118,7 +117,7 @@ void FrameInstrumentationGeneratorImpl::OnCapturedFrame(VideoFrame frame) {
   while (captured_frames_.size() >= kMaxPendingFrames) {
     captured_frames_.pop();
   }
-  captured_frames_.push(frame);
+  captured_frames_.push(std::move(frame));
 }
 
 std::optional<FrameInstrumentationData>
@@ -136,18 +135,19 @@ FrameInstrumentationGeneratorImpl::OnEncodedImage(
                             captured_frames_.front().rtp_timestamp())) {
       captured_frames_.pop();
     }
-    if (captured_frames_.empty() || captured_frames_.front().rtp_timestamp() !=
-                                        rtp_timestamp_encoded_image) {
-      RTC_LOG(LS_VERBOSE) << "No captured frames for RTC timestamp "
-                          << rtp_timestamp_encoded_image << ".";
-      return std::nullopt;
+    const bool has_captured_frame =
+        !captured_frames_.empty() &&
+        captured_frames_.front().rtp_timestamp() == rtp_timestamp_encoded_image;
+    if (has_captured_frame) {
+      captured_frame = captured_frames_.front();
+      if (encoded_image.is_end_of_temporal_unit()) {
+        captured_frames_.pop();
+      }
     }
-    captured_frame = captured_frames_.front();
 
     layer_id = GetSpatialLayerId(encoded_image);
 
-    bool is_key_frame =
-        encoded_image.FrameType() == VideoFrameType::kVideoFrameKey;
+    bool is_key_frame = encoded_image.IsKey();
     if (!is_key_frame) {
       for (const auto& [unused, context] : contexts_) {
         if (context.rtp_timestamp_of_last_key_frame ==
@@ -193,31 +193,34 @@ FrameInstrumentationGeneratorImpl::OnEncodedImage(
 
     RTC_CHECK(data.SetSequenceIndex(sequence_index));
 
-    // TODO: bugs.webrtc.org/358039777 - Maybe allow other sample sizes as well
+    bool should_instrument = false;
     if (frame_selector_) {
-      if (frame_selector_->ShouldInstrumentFrame(*captured_frame,
-                                                 encoded_image)) {
-        sample_coordinates =
-            contexts_[layer_id].frame_sampler.GetSampleCoordinatesForFrame(
-                /*num_samples=*/13);
-      }
+      should_instrument =
+          frame_selector_->ShouldInstrumentFrame(captured_frame, encoded_image);
     } else {
-      sample_coordinates =
-          contexts_[layer_id]
-              .frame_sampler.GetSampleCoordinatesForFrameIfFrameShouldBeSampled(
-                  is_key_frame, captured_frame->rtp_timestamp(),
-                  /*num_samples=*/13);
+      should_instrument = contexts_[layer_id].frame_sampler.ShouldSampleFrame(
+          is_key_frame, encoded_image.RtpTimestamp());
     }
 
-    if (sample_coordinates.empty()) {
+    if (!should_instrument) {
       if (!is_key_frame) {
         return std::nullopt;
       }
       // Sync message only.
       return data;
     }
+
+    if (!captured_frame.has_value()) {
+      RTC_LOG(LS_VERBOSE) << "No captured frames for RTC timestamp "
+                          << rtp_timestamp_encoded_image << ".";
+      // Sync message only.
+      return data;
+    }
+
+    sample_coordinates =
+        contexts_[layer_id].frame_sampler.GetSampleCoordinatesForFrame(
+            /*num_samples=*/13);
   }
-  RTC_DCHECK(captured_frame.has_value());
   RTC_DCHECK(!sample_coordinates.empty());
 
   std::optional<CorruptionDetectionFilterSettings> filter_settings =
@@ -242,6 +245,18 @@ FrameInstrumentationGeneratorImpl::OnEncodedImage(
   RTC_CHECK(data.SetSampleValues(std::move(plain_values)));
 
   return data;
+}
+
+void FrameInstrumentationGeneratorImpl::OnFrameReleased(
+    uint32_t rtp_timestamp) {
+  MutexLock lock(&mutex_);
+  // Remove the frame and any preceding ones from the queue.
+  while (!captured_frames_.empty() &&
+         (IsNewerTimestamp(rtp_timestamp,
+                           captured_frames_.front().rtp_timestamp()) ||
+          rtp_timestamp == captured_frames_.front().rtp_timestamp())) {
+    captured_frames_.pop();
+  }
 }
 
 std::optional<int> FrameInstrumentationGeneratorImpl::GetHaltonSequenceIndex(

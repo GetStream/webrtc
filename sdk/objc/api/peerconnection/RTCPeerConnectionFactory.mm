@@ -77,7 +77,6 @@
 @implementation RTC_OBJC_TYPE (RTCPeerConnectionFactory) {
   std::optional<webrtc::Environment> _env;
   std::unique_ptr<webrtc::Thread> _networkThread;
-  std::unique_ptr<webrtc::Thread> _workerThread;
   std::unique_ptr<webrtc::Thread> _signalingThread;
   webrtc::scoped_refptr<webrtc::AudioDeviceModule> _nativeAudioDeviceModule;
   RTC_OBJC_TYPE(RTCDefaultAudioProcessingModule) *_defaultAudioProcessingModule;
@@ -181,11 +180,6 @@
     BOOL result = _networkThread->Start();
     RTC_DCHECK(result) << "Failed to start network thread.";
 
-    _workerThread = webrtc::Thread::Create();
-    _workerThread->SetName("worker_thread", _workerThread.get());
-    result = _workerThread->Start();
-    RTC_DCHECK(result) << "Failed to start worker thread.";
-
     _signalingThread = webrtc::Thread::Create();
     _signalingThread->SetName("signaling_thread", _signalingThread.get());
     result = _signalingThread->Start();
@@ -195,7 +189,6 @@
     // scenarios.
 
     dependencies.network_thread = _networkThread.get();
-    dependencies.worker_thread = _workerThread.get();
     dependencies.signaling_thread = _signalingThread.get();
     if (!dependencies.env.has_value()) {
       dependencies.env = webrtc::CreateEnvironment();
@@ -287,11 +280,6 @@
     BOOL result = _networkThread->Start();
     RTC_DCHECK(result) << "Failed to start network thread.";
 
-    _workerThread = webrtc::Thread::Create();
-    _workerThread->SetName("worker_thread", _workerThread.get());
-    result = _workerThread->Start();
-    RTC_DCHECK(result) << "Failed to start worker thread.";
-
     _signalingThread = webrtc::Thread::Create();
     _signalingThread->SetName("signaling_thread", _signalingThread.get());
     result = _signalingThread->Start();
@@ -305,7 +293,6 @@
   if (self) {
     webrtc::PeerConnectionFactoryDependencies dependencies;
     dependencies.network_thread = _networkThread.get();
-    dependencies.worker_thread = _workerThread.get();
     dependencies.signaling_thread = _signalingThread.get();
     dependencies.network_monitor_factory = webrtc::CreateNetworkMonitorFactory();
 
@@ -336,7 +323,6 @@
   if (self) {
     webrtc::PeerConnectionFactoryDependencies dependencies;
     dependencies.network_thread = _networkThread.get();
-    dependencies.worker_thread = _workerThread.get();
     dependencies.signaling_thread = _signalingThread.get();
     dependencies.network_monitor_factory = webrtc::CreateNetworkMonitorFactory();
     dependencies.env = webrtc::CreateEnvironment();
@@ -345,12 +331,12 @@
       _nativeAudioDeviceModule = audioDeviceModule;
 #if defined(WEBRTC_INCLUDE_INTERNAL_AUDIO_DEVICE)
     } else if (audioDeviceModuleType == RTC_OBJC_TYPE(RTCAudioDeviceModuleTypeAudioEngine)) {
-      _nativeAudioDeviceModule = _workerThread->BlockingCall([&bypassVoiceProcessing]() {
+      _nativeAudioDeviceModule = _networkThread->BlockingCall([&bypassVoiceProcessing]() {
         return webrtc::make_ref_counted<webrtc::AudioEngineDevice>(bypassVoiceProcessing == YES);
       });
     } else {
       _nativeAudioDeviceModule =
-          _workerThread->BlockingCall([&bypassVoiceProcessing, &dependencies]() {
+          _networkThread->BlockingCall([&bypassVoiceProcessing, &dependencies]() {
             return webrtc::AudioDeviceModule::Create(
                 webrtc::AudioDeviceModule::AudioLayer::kPlatformDefaultAudio,
                 &dependencies.env->task_queue_factory(),
@@ -364,7 +350,7 @@
 #endif
 
     _audioDeviceModule = [[RTC_OBJC_TYPE(RTCAudioDeviceModule) alloc] initWithNativeModule: _nativeAudioDeviceModule
-                                                       workerThread: _workerThread.get()];
+                                                       workerThread: _networkThread.get()];
     _env = dependencies.env;
     dependencies.adm = _nativeAudioDeviceModule;
     dependencies.audio_encoder_factory = std::move(audioEncoderFactory);
@@ -434,7 +420,7 @@
   return [[RTC_OBJC_TYPE(RTCVideoSource) alloc]
         initWithFactory:self
         signalingThread:_signalingThread.get()
-           workerThread:_workerThread.get()
+           workerThread:_networkThread.get()
       nativeVideoSource:webrtc::make_ref_counted<webrtc::ObjCVideoTrackSource>(
                             *_env, forScreenCast)];
 }
@@ -521,7 +507,9 @@
 }
 
 - (webrtc::Thread *)workerThread {
-  return _workerThread.get();
+  // The network thread also acts as the worker thread. See
+  // https://groups.google.com/g/discuss-webrtc/c/Fs_Hd5XNJh0
+  return _networkThread.get();
 }
 
 - (webrtc::Thread *)networkThread {

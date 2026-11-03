@@ -12,7 +12,9 @@
 #define VIDEO_CORRUPTION_DETECTION_FRAME_SELECTOR_H_
 
 #include <map>
+#include <optional>
 
+#include "api/environment/environment.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
 #include "api/video/encoded_image.h"
@@ -46,11 +48,14 @@ class FrameSelector {
     TimeDelta upper_bound;
   };
 
-  FrameSelector(ScalabilityMode scalability_mode,
+  FrameSelector(const Environment& env,
+                ScalabilityMode scalability_mode,
                 Timespan low_overhead_frame_span,
                 Timespan high_overhead_frame_span);
 
   bool ShouldInstrumentFrame(const VideoFrame& raw_frame,
+                             const EncodedImage& encoded_frame);
+  bool ShouldInstrumentFrame(const std::optional<VideoFrame>& raw_frame,
                              const EncodedImage& encoded_frame);
 
  private:

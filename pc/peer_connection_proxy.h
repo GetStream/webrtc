@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 
+#include "absl/functional/any_invocable.h"
 #include "api/adaptation/resource.h"
 #include "api/data_channel_event_observer_interface.h"
 #include "api/data_channel_interface.h"
@@ -40,6 +41,7 @@
 #include "api/transport/bandwidth_estimation_settings.h"
 #include "api/transport/bitrate_settings.h"
 #include "pc/proxy.h"
+#include "rtc_base/system/plan_b_only.h"
 #include "rtc_base/thread.h"
 
 namespace webrtc {
@@ -49,12 +51,17 @@ namespace webrtc {
 // and support for a secondary thread is provided via 'SECONDARY' macros.
 // TODO(deadbeef): Move this to .cc file. What threads methods are called on is
 // an implementation detail.
+
+// The use of multiple macros here means that clang-format does badly.
+// clang-format off
 BEGIN_PROXY_MAP(PeerConnection)
 PROXY_PRIMARY_THREAD_DESTRUCTOR()
-PROXY_METHOD0(scoped_refptr<StreamCollectionInterface>, local_streams)
-PROXY_METHOD0(scoped_refptr<StreamCollectionInterface>, remote_streams)
-PROXY_METHOD1(bool, AddStream, MediaStreamInterface*)
-PROXY_METHOD1(void, RemoveStream, MediaStreamInterface*)
+PLAN_B_ONLY PROXY_METHOD0(scoped_refptr<StreamCollectionInterface>,
+                          local_streams)
+PLAN_B_ONLY PROXY_METHOD0(scoped_refptr<StreamCollectionInterface>,
+                          remote_streams)
+PLAN_B_ONLY PROXY_METHOD1(bool, AddStream, MediaStreamInterface*)
+PLAN_B_ONLY PROXY_METHOD1(void, RemoveStream, MediaStreamInterface*)
 PROXY_METHOD2(RTCErrorOr<scoped_refptr<RtpSenderInterface>>,
               AddTrack,
               scoped_refptr<MediaStreamTrackInterface>,
@@ -79,20 +86,23 @@ PROXY_METHOD2(RTCErrorOr<scoped_refptr<RtpTransceiverInterface>>,
               AddTransceiver,
               webrtc::MediaType,
               const RtpTransceiverInit&)
-PROXY_METHOD2(scoped_refptr<RtpSenderInterface>,
-              CreateSender,
-              const std::string&,
-              const std::string&)
+PLAN_B_ONLY PROXY_METHOD2(scoped_refptr<RtpSenderInterface>,
+                          CreateSender,
+                          const std::string&,
+                          const std::string&)
 PROXY_CONSTMETHOD0(std::vector<scoped_refptr<RtpSenderInterface>>, GetSenders)
 PROXY_CONSTMETHOD0(std::vector<scoped_refptr<RtpReceiverInterface>>,
                    GetReceivers)
 PROXY_CONSTMETHOD0(std::vector<scoped_refptr<RtpTransceiverInterface>>,
                    GetTransceivers)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 PROXY_METHOD3(bool,
               GetStats,
               StatsObserver*,
               MediaStreamTrackInterface*,
               StatsOutputLevel)
+#pragma clang diagnostic pop
 PROXY_METHOD1(void, GetStats, RTCStatsCollectorCallback*)
 PROXY_METHOD2(void,
               GetStats,
@@ -157,6 +167,12 @@ PROXY_METHOD2(void,
               AddIceCandidate,
               std::unique_ptr<IceCandidate>,
               std::function<void(RTCError)>)
+PROXY_METHOD2(void,
+              AddIceCandidate,
+              std::unique_ptr<IceCandidate>,
+              absl::AnyInvocable<void(
+                  RTCError,
+                  absl::AnyInvocable<void() &&>) &&>)
 PROXY_METHOD1(bool, RemoveIceCandidate, const IceCandidate*)
 PROXY_METHOD1(RTCError, SetBitrate, const BitrateSettings&)
 PROXY_METHOD1(void,
@@ -193,6 +209,7 @@ PROXY_METHOD0(void, Close)
 
 BYPASS_PROXY_CONSTMETHOD0(Thread*, signaling_thread)
 END_PROXY_MAP(PeerConnection)
+// clang-format on
 
 }  // namespace webrtc
 

@@ -19,6 +19,7 @@
 
 #include "absl/memory/memory.h"
 #include "api/dtls_transport_interface.h"
+#include "api/environment/environment.h"
 #include "api/make_ref_counted.h"
 #include "api/priority.h"
 #include "api/rtc_error.h"
@@ -32,9 +33,10 @@
 #include "p2p/dtls/fake_dtls_transport.h"
 #include "pc/dtls_transport.h"
 #include "rtc_base/copy_on_write_buffer.h"
-#include "rtc_base/thread.h"
+#include "test/create_test_environment.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
+#include "test/run_loop.h"
 #include "test/wait_until.h"
 
 namespace webrtc {
@@ -74,6 +76,7 @@ class FakeSctpTransportInternal : public SctpTransportInternal {
   size_t buffered_amount(int sid) const override { return 0; }
   size_t buffered_amount_low_threshold(int sid) const override { return 0; }
   void SetBufferedAmountLowThreshold(int sid, size_t bytes) override {}
+  size_t EarlyReceivedPacketCountForTesting() const override { return 0; }
 
   void SendSignalAssociationChangeCommunicationUp() {
     ASSERT_TRUE(on_connected_callback_);
@@ -134,7 +137,7 @@ class SctpTransportTest : public ::testing::Test {
 
   void CreateTransport() {
     internal_transport_ = std::make_unique<FakeDtlsTransport>(
-        "audio", ICE_CANDIDATE_COMPONENT_RTP);
+        env_, "audio", ICE_CANDIDATE_COMPONENT_RTP);
     dtls_transport_ =
         make_ref_counted<DtlsTransport>(internal_transport_.get());
     internal_transport_->SubscribeDtlsTransportState(
@@ -161,7 +164,8 @@ class SctpTransportTest : public ::testing::Test {
     return static_cast<FakeSctpTransportInternal*>(transport_->internal());
   }
 
-  AutoThread main_thread_;
+  test::RunLoop main_thread_;
+  const Environment env_ = CreateTestEnvironment();
   scoped_refptr<SctpTransport> transport_;
   scoped_refptr<DtlsTransport> dtls_transport_;
   std::unique_ptr<FakeDtlsTransport> internal_transport_;
@@ -169,9 +173,10 @@ class SctpTransportTest : public ::testing::Test {
 };
 
 TEST(SctpTransportSimpleTest, CreateClearDelete) {
-  AutoThread main_thread;
+  test::RunLoop main_thread;
   std::unique_ptr<DtlsTransportInternal> internal_transport =
-      std::make_unique<FakeDtlsTransport>("audio", ICE_CANDIDATE_COMPONENT_RTP);
+      std::make_unique<FakeDtlsTransport>(CreateTestEnvironment(), "audio",
+                                          ICE_CANDIDATE_COMPONENT_RTP);
   scoped_refptr<DtlsTransport> dtls_transport =
       make_ref_counted<DtlsTransport>(internal_transport.get());
 

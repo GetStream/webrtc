@@ -13,26 +13,26 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <sstream>
 #include <string>
 
 #include "api/audio/audio_frame.h"
 #include "api/audio/audio_view.h"
 #include "api/audio_codecs/audio_format.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
-#include "api/environment/environment_factory.h"
 #include "api/neteq/default_neteq_factory.h"
 #include "api/neteq/neteq.h"
 #include "modules/audio_coding/codecs/opus/opus_interface.h"
 #include "modules/audio_coding/include/audio_coding_module_typedefs.h"
 #include "modules/audio_coding/test/TestStereo.h"
+#include "rtc_base/strings/string_builder.h"
+#include "test/create_test_environment.h"
 #include "test/gtest.h"
 #include "test/testsupport/file_utils.h"
 
 namespace webrtc {
 
 OpusTest::OpusTest()
-    : neteq_(DefaultNetEqFactory().Create(CreateEnvironment(),
+    : neteq_(DefaultNetEqFactory().Create(CreateTestEnvironment(),
                                           NetEq::Config(),
                                           CreateBuiltinAudioDecoderFactory())),
       channel_a2b_(nullptr),
@@ -393,17 +393,14 @@ void OpusTest::Run(TestPackStereo* channel,
 }
 
 void OpusTest::OpenOutFile(int test_number) {
-  std::string file_name;
-  std::stringstream file_stream;
-  file_stream << test::OutputPath() << "opustest_out_" << test_number << ".pcm";
-  file_name = file_stream.str();
-  out_file_.Open(file_name, 48000, "wb");
-  file_stream.str("");
-  file_name = file_stream.str();
-  file_stream << test::OutputPath() << "opusstandalone_out_" << test_number
-              << ".pcm";
-  file_name = file_stream.str();
-  out_file_standalone_.Open(file_name, 48000, "wb");
+  StringBuilder sb;
+  sb << test::OutputPath() << "opustest_out_" << test_number << ".pcm";
+  out_file_.Open(sb.Release(), 48000, "wb");
+
+  StringBuilder sb_standalone;
+  sb_standalone << test::OutputPath() << "opusstandalone_out_" << test_number
+                << ".pcm";
+  out_file_standalone_.Open(sb_standalone.Release(), 48000, "wb");
 }
 
 }  // namespace webrtc

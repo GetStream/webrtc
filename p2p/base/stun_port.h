@@ -17,6 +17,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 
 #include "absl/memory/memory.h"
 #include "absl/strings/string_view.h"
@@ -128,14 +129,11 @@ class RTC_EXPORT UDPPort : public Port {
           bool emit_local_for_anyaddress);
   bool Init();
 
-  int SendTo(const void* data,
-             size_t size,
+  int SendTo(std::span<const uint8_t> data,
              const SocketAddress& addr,
              const AsyncSocketPacketOptions& options,
              bool payload) override;
-
   void UpdateNetworkCost() override;
-
   DiffServCodePoint StunDscpValue() const override;
 
   void OnLocalAddressReady(AsyncPacketSocket* socket,
@@ -149,6 +147,8 @@ class RTC_EXPORT UDPPort : public Port {
                     const SentPacketInfo& sent_packet) override;
 
   void OnReadyToSend(AsyncPacketSocket* socket);
+
+  void OnSocketClose(AsyncPacketSocket* socket, int error);
 
   // This method will send STUN binding request if STUN server address is set.
   void MaybePrepareStunCandidate();
@@ -211,7 +211,7 @@ class RTC_EXPORT UDPPort : public Port {
       absl::string_view reason);
 
   // Sends STUN requests to the server.
-  void SendStunRequest(const void* data, size_t size, StunRequest* req);
+  void SendStunRequest(std::span<const uint8_t> data, StunRequest* req);
 
   // TODO(mallinaht): Move this up to Port when SignalAddressReady is
   // changed to SignalPortReady.

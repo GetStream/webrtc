@@ -15,23 +15,25 @@
 #include <optional>
 #include <utility>
 
-#include "absl/algorithm/container.h"
 #include "absl/base/nullability.h"
 #include "absl/container/flat_hash_map.h"
 #include "api/environment/environment.h"
 #include "api/sequence_checker.h"
 #include "api/units/data_size.h"
+#include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
 #include "api/video/encoded_frame.h"
 #include "logging/rtc_event_log/rtc_event_log_parser.h"
-#include "modules/rtp_rtcp/source/rtp_packet_received.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/numerics/sequence_number_unwrapper.h"
 #include "rtc_base/thread_annotations.h"
 #include "video/timing/simulator/assembler.h"
 #include "video/timing/simulator/decodability_tracker.h"
+#include "video/timing/simulator/frame_base.h"
+#include "video/timing/simulator/receiver.h"
 #include "video/timing/simulator/rtc_event_log_driver.h"
+#include "video/timing/simulator/rtp_packet_simulator.h"
 
 namespace webrtc::video_timing_simulator {
 
@@ -46,7 +48,7 @@ class DecodableFrameCollector : public AssemblerEvents,
       : env_(env), ssrc_(ssrc) {
     RTC_DCHECK_NE(ssrc_, 0);
   }
-  ~DecodableFrameCollector() override = default;
+  ~DecodableFrameCollector() override { RTC_DCHECK_RUN_ON(&sequence_checker_); }
 
   DecodableFrameCollector(const DecodableFrameCollector&) = delete;
   DecodableFrameCollector& operator=(const DecodableFrameCollector&) = delete;
@@ -103,7 +105,7 @@ class DecodableFrameCollector : public AssemblerEvents,
     for (const auto& [key, value] : frames_) {
       stream.frames.push_back(value);
     }
-    absl::c_sort(stream.frames);
+    SortByArrivalOrder(stream.frames);
     return stream;
   }
 
@@ -127,21 +129,31 @@ class DecodabilitySimulatorStream : public RtcEventLogDriver::StreamInterface {
  public:
   DecodabilitySimulatorStream(const Environment& env,
                               uint32_t ssrc,
+                              uint32_t rtx_ssrc,
                               DecodabilitySimulator::Results* absl_nonnull
                                   results)
       : collector_(env, ssrc),
         tracker_(env, DecodabilityTracker::Config{.ssrc = ssrc}, &collector_),
         assembler_(env, ssrc, &collector_, &tracker_),
+        receiver_(env, ssrc, rtx_ssrc, &assembler_),
         results_(*results) {
     RTC_DCHECK_RUN_ON(&sequence_checker_);
     tracker_.SetDecodedFrameIdCallback(&assembler_);
   }
-  ~DecodabilitySimulatorStream() override = default;
+  ~DecodabilitySimulatorStream() override {
+    RTC_DCHECK_RUN_ON(&sequence_checker_);
+  }
 
   // Implements `RtcEventLogDriver::StreamInterface`.
-  void InsertPacket(const RtpPacketReceived& rtp_packet) override {
+  void InsertSimulatedPacket(
+      const RtpPacketSimulator::SimulatedPacket& simulated_packet) override {
     RTC_DCHECK_RUN_ON(&sequence_checker_);
-    assembler_.InsertPacket(rtp_packet);
+    receiver_.InsertSimulatedPacket(simulated_packet);
+  }
+
+  void UpdateMaxRtt(TimeDelta max_rtt) override {
+    RTC_DCHECK_RUN_ON(&sequence_checker_);
+    assembler_.UpdateMaxRtt(max_rtt);
   }
 
   void Close() override {
@@ -158,10 +170,15 @@ class DecodabilitySimulatorStream : public RtcEventLogDriver::StreamInterface {
   DecodableFrameCollector collector_ RTC_GUARDED_BY(sequence_checker_);
   DecodabilityTracker tracker_ RTC_GUARDED_BY(sequence_checker_);
   Assembler assembler_ RTC_GUARDED_BY(sequence_checker_);
+  Receiver receiver_ RTC_GUARDED_BY(sequence_checker_);
   DecodabilitySimulator::Results& results_;
 };
 
 }  // namespace
+
+DecodabilitySimulator::DecodabilitySimulator(Config config) : config_(config) {}
+
+DecodabilitySimulator::~DecodabilitySimulator() = default;
 
 DecodabilitySimulator::Results DecodabilitySimulator::Simulate(
     const ParsedRtcEventLog& parsed_log) const {
@@ -169,19 +186,22 @@ DecodabilitySimulator::Results DecodabilitySimulator::Simulate(
   Results results;
 
   // Simulation.
-  auto stream_factory = [&results](const Environment& env, uint32_t ssrc) {
-    return std::make_unique<DecodabilitySimulatorStream>(env, ssrc, &results);
+  auto stream_factory = [&results](const Environment& env, uint32_t ssrc,
+                                   uint32_t rtx_ssrc) {
+    return std::make_unique<DecodabilitySimulatorStream>(env, ssrc, rtx_ssrc,
+                                                         &results);
   };
-  // In order to keep the decodability data clean, we do not reuse streams.
   // Decodability should not be a function of any field trials, so we pass the
   // empty string here.
   RtcEventLogDriver rtc_event_log_simulator(
-      {.reuse_streams = false}, &parsed_log,
+      {.reuse_streams = config_.reuse_streams,
+       .ssrc_filter = config_.ssrc_filter},
+      &parsed_log,
       /*field_trials_string=*/"", std::move(stream_factory));
   rtc_event_log_simulator.Simulate();
 
   // Return.
-  absl::c_sort(results.streams);
+  SortByStreamOrder(results.streams);
   return results;
 }
 

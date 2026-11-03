@@ -13,12 +13,13 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "api/media_types.h"
+#include "api/rtp_header_extension_id.h"
 #include "api/rtp_parameters.h"
 #include "media/base/codec.h"
 #include "media/base/media_constants.h"
-#include "pc/session_description.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 
@@ -148,11 +149,12 @@ TEST(RtpParametersConversionTest, ToRtpCapabilities) {
   Codec red2 = CreateVideoCodec(127, "red");
   Codec ulpfec = CreateVideoCodec(103, "ulpfec");
   Codec flexfec = CreateVideoCodec(102, "flexfec-03");
-  Codec rtx = CreateVideoRtxCodec(014, 101);
+  Codec rtx = CreateVideoRtxCodec(104, 101);
   Codec rtx2 = CreateVideoRtxCodec(105, 109);
 
-  RtpCapabilities capabilities =
-      ToRtpCapabilities({vp8, ulpfec, rtx, rtx2}, {{"uri", 1}, {"uri2", 3}});
+  RtpCapabilities capabilities = ToRtpCapabilities(
+      {{vp8, ulpfec, rtx, rtx2}},
+      {{{"uri", RtpHeaderExtensionId(1)}, {"uri2", RtpHeaderExtensionId(3)}}});
   ASSERT_EQ(3u, capabilities.codecs.size());
   EXPECT_EQ("VP8", capabilities.codecs[0].name);
   EXPECT_EQ("ulpfec", capabilities.codecs[1].name);
@@ -160,19 +162,20 @@ TEST(RtpParametersConversionTest, ToRtpCapabilities) {
   EXPECT_EQ(0u, capabilities.codecs[2].parameters.size());
   ASSERT_EQ(2u, capabilities.header_extensions.size());
   EXPECT_EQ("uri", capabilities.header_extensions[0].uri);
-  EXPECT_EQ(1, capabilities.header_extensions[0].preferred_id);
+  EXPECT_EQ(RtpHeaderExtensionId(1),
+            capabilities.header_extensions[0].preferred_id);
   EXPECT_EQ("uri2", capabilities.header_extensions[1].uri);
-  EXPECT_EQ(3, capabilities.header_extensions[1].preferred_id);
+  EXPECT_EQ(RtpHeaderExtensionId(3),
+            capabilities.header_extensions[1].preferred_id);
   EXPECT_EQ(0u, capabilities.fec.size());
 
-  capabilities =
-      ToRtpCapabilities({vp8, red, red2, ulpfec, rtx}, RtpHeaderExtensions());
+  capabilities = ToRtpCapabilities({{vp8, red, red2, ulpfec, rtx}}, {});
   EXPECT_EQ(4u, capabilities.codecs.size());
   EXPECT_THAT(
       capabilities.fec,
       UnorderedElementsAre(FecMechanism::RED, FecMechanism::RED_AND_ULPFEC));
 
-  capabilities = ToRtpCapabilities({vp8, red, flexfec}, RtpHeaderExtensions());
+  capabilities = ToRtpCapabilities({{vp8, red, flexfec}}, {});
   EXPECT_EQ(3u, capabilities.codecs.size());
   EXPECT_THAT(capabilities.fec,
               UnorderedElementsAre(FecMechanism::RED, FecMechanism::FLEXFEC));

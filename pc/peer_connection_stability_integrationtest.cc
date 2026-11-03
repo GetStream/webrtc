@@ -24,10 +24,10 @@
 #include "api/audio_codecs/audio_encoder_factory.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "api/audio_codecs/builtin_audio_encoder_factory.h"
+#include "api/field_trials_view.h"
 #include "api/jsep.h"
 #include "api/peer_connection_interface.h"
 #include "api/scoped_refptr.h"
-#include "api/test/rtc_error_matchers.h"
 #include "api/video_codecs/builtin_video_decoder_factory.h"
 #include "api/video_codecs/builtin_video_encoder_factory.h"
 #include "api/video_codecs/sdp_video_format.h"
@@ -48,6 +48,7 @@ namespace {
 using ::testing::ElementsAreArray;
 using ::testing::Eq;
 using ::testing::Not;
+using ::testing::UnorderedElementsAreArray;
 
 class FactorySignature {
  public:
@@ -57,14 +58,40 @@ class FactorySignature {
   enum class Id {
     kNotRecognized,
     kWebRtcTipOfTree,
+    kWebRtcTipOfTreeWithPayloadTypeRedesign,
     kWebRtcMoreConfigs1,
     kWebRtcAndroid,
     kGoogleInternal,
   };
+
+  template <typename Sink>
+  friend void AbslStringify(Sink& sink, Id id) {
+    switch (id) {
+      case Id::kNotRecognized:
+        sink.Append("kNotRecognized");
+        break;
+      case Id::kWebRtcTipOfTree:
+        sink.Append("kWebRtcTipOfTree");
+        break;
+      case Id::kWebRtcTipOfTreeWithPayloadTypeRedesign:
+        sink.Append("kWebRtcTipOfTreeWithPayloadTypeRedesign");
+        break;
+      case Id::kWebRtcMoreConfigs1:
+        sink.Append("kWebRtcMoreConfigs1");
+        break;
+      case Id::kWebRtcAndroid:
+        sink.Append("kWebRtcAndroid");
+        break;
+      case Id::kGoogleInternal:
+        sink.Append("kGoogleInternal");
+        break;
+    }
+  }
+
   Id id() { return id_; }
-  FactorySignature() {
+  explicit FactorySignature(const FieldTrialsView& trials) {
     ExtractSignatureStrings();
-    id_ = RecognizeSignature();
+    id_ = RecognizeSignature(trials);
   }
 
  private:
@@ -119,7 +146,7 @@ class FactorySignature {
       signature_.push_back(sb.Release());
     }
   }
-  Id RecognizeSignature() {
+  Id RecognizeSignature(const FieldTrialsView& trials) {
     std::vector<std::string> webrtc_tip_of_tree = {
         "Decode audio/opus/48000/2;minptime:10;useinbandfec:1",
         "Decode audio/G722/8000/1",
@@ -198,6 +225,9 @@ class FactorySignature {
         "Encode video/VP9;profile-id:2",
     };
     if (signature_ == webrtc_tip_of_tree) {
+      if (trials.IsEnabled("WebRTC-PayloadTypesInTransport")) {
+        return Id::kWebRtcTipOfTreeWithPayloadTypeRedesign;
+      }
       return Id::kWebRtcTipOfTree;
     }
     std::vector<std::string> linux_more_configs_1 = {
@@ -328,7 +358,7 @@ class FactorySignature {
       sb << "\"" << str << "\",\n";
     }
     sb << "}\n";
-    RTC_LOG(LS_ERROR) << "New factory signature: " << sb.str();
+    RTC_LOG(LS_ERROR) << "New factory signature: " << sb.Release();
     return Id::kNotRecognized;
   }
 
@@ -377,10 +407,7 @@ class PeerConnectionIntegrationTest : public PeerConnectionIntegrationBaseTest {
                                        std::vector<std::string> callee_local,
                                        std::vector<std::string> callee_remote) {
     StringBuilder sb;
-    // TODO: issues.webrtc.org/397895867 - change kChangeThis to the name of
-    // the value. Requires adding an AbslStringifier to the enum.
-    sb << "\n{" << ".factory_id = FactorySignature::Id::kChangeThis"
-       << static_cast<int>(id) << ",\n"
+    sb << "\n{" << ".factory_id = FactorySignature::Id::" << id << ",\n"
        << ".caller_local = {";
     for (const std::string& str : caller_local) {
       sb << "\"" << str << "\",\n";
@@ -402,8 +429,13 @@ class PeerConnectionIntegrationTest : public PeerConnectionIntegrationBaseTest {
   }
 };
 
+#if defined(WEBRTC_USE_H264)
 TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
-  FactorySignature factory_signature;
+#else
+TEST_F(PeerConnectionIntegrationTest,
+       DISABLED_BasicOfferAnswerPayloadTypesStable) {
+#endif
+  FactorySignature factory_signature(env_.field_trials());
   ASSERT_THAT(factory_signature.id(),
               Not(Eq(FactorySignature::Id::kNotRecognized)));
   ASSERT_TRUE(CreatePeerConnectionWrappers());
@@ -413,9 +445,7 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
   // Start offer/answer exchange and wait for it to complete.
   caller()->CreateAndSetAndSignalOffer();
 
-  ASSERT_THAT(
-      WaitUntil([&] { return SignalingStateStable(); }, ::testing::IsTrue()),
-      IsRtcOk());
+  ASSERT_TRUE(WaitUntil([&] { return SignalingStateStable(); }));
 
   // Extract PT and codec from all media sections, and check that they
   // are stable (what was expected).
@@ -423,6 +453,212 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
   // empty and run. Gmock will output a valid C++ array initializer for you.
 
   std::vector<ResultingCodecList> golden_answers = {
+      // This golden set is for the redesign path
+      // (WebRTC-PayloadTypesInTransport enabled).
+      // The redesign path changes the allocation order by processing primary
+      // codecs
+      // first, then RTX, then RED, then FEC. This results in different payload
+      // types for many video codecs compared to the legacy path.
+      {.factory_id =
+           FactorySignature::Id::kWebRtcTipOfTreeWithPayloadTypeRedesign,
+       .caller_local = {"1 [111:audio/opus/48000/2;minptime=10;useinbandfec=1]",
+                        "1 [63:audio/red/48000/2;=111/111]",
+                        "1 [9:audio/G722/8000/1]",
+                        "1 [0:audio/PCMU/8000/1]",
+                        "1 [8:audio/PCMA/8000/1]",
+                        "1 [13:audio/CN/8000/1]",
+                        "1 [110:audio/telephone-event/48000/1]",
+                        "1 [126:audio/telephone-event/8000/1]",
+                        "2 [96:video/VP8/90000/0]",
+                        "2 [97:video/rtx/90000/0;apt=96]",
+                        "2 "
+                        "[98:video/H264/90000/"
+                        "0;level-asymmetry-allowed=1;packetization-mode=1;"
+                        "profile-level-id=42001f]",
+                        "2 [99:video/rtx/90000/0;apt=98]",
+                        "2 "
+                        "[100:video/H264/90000/"
+                        "0;level-asymmetry-allowed=1;packetization-mode=0;"
+                        "profile-level-id=42001f]",
+                        "2 [101:video/rtx/90000/0;apt=100]",
+                        "2 "
+                        "[102:video/H264/90000/"
+                        "0;level-asymmetry-allowed=1;packetization-mode=1;"
+                        "profile-level-id=42e01f]",
+                        "2 [103:video/rtx/90000/0;apt=102]",
+                        "2 "
+                        "[104:video/H264/90000/"
+                        "0;level-asymmetry-allowed=1;packetization-mode=0;"
+                        "profile-level-id=42e01f]",
+                        "2 [107:video/rtx/90000/0;apt=104]",
+                        "2 "
+                        "[108:video/H264/90000/"
+                        "0;level-asymmetry-allowed=1;packetization-mode=1;"
+                        "profile-level-id=4d001f]",
+                        "2 [109:video/rtx/90000/0;apt=108]",
+                        "2 "
+                        "[35:video/H264/90000/"
+                        "0;level-asymmetry-allowed=1;packetization-mode=0;"
+                        "profile-level-id=4d001f]",
+                        "2 [36:video/rtx/90000/0;apt=35]",
+                        "2 [37:video/AV1/90000/0;level-idx=5;profile=0;tier=0]",
+                        "2 [38:video/rtx/90000/0;apt=37]",
+                        "2 [114:video/VP9/90000/0;profile-id=0]",
+                        "2 [115:video/rtx/90000/0;apt=114]",
+                        "2 [116:video/VP9/90000/0;profile-id=2]",
+                        "2 [117:video/rtx/90000/0;apt=116]",
+                        "2 [118:video/red/90000/0]",
+                        "2 [119:video/rtx/90000/0;apt=118]",
+                        "2 [120:video/ulpfec/90000/0]"},
+       .caller_remote =
+           {"1 [111:audio/opus/48000/2;minptime=10;useinbandfec=1]",
+            "1 [63:audio/red/48000/2;=111/111]",
+            "1 [9:audio/G722/8000/1]",
+            "1 [0:audio/PCMU/8000/1]",
+            "1 [8:audio/PCMA/8000/1]",
+            "1 [13:audio/CN/8000/1]",
+            "1 [110:audio/telephone-event/48000/1]",
+            "1 [126:audio/telephone-event/8000/1]",
+            "2 [96:video/VP8/90000/0]",
+            "2 [97:video/rtx/90000/0;apt=96]",
+            "2 "
+            "[98:video/H264/90000/"
+            "0;level-asymmetry-allowed=1;packetization-mode=1;profile-level-id="
+            "42001f]",
+            "2 [99:video/rtx/90000/0;apt=98]",
+            "2 "
+            "[100:video/H264/90000/"
+            "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-id="
+            "42001f]",
+            "2 [101:video/rtx/90000/0;apt=100]",
+            "2 "
+            "[102:video/H264/90000/"
+            "0;level-asymmetry-allowed=1;packetization-mode=1;profile-level-id="
+            "42e01f]",
+            "2 [103:video/rtx/90000/0;apt=102]",
+            "2 "
+            "[104:video/H264/90000/"
+            "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-id="
+            "42e01f]",
+            "2 [107:video/rtx/90000/0;apt=104]",
+            "2 "
+            "[108:video/H264/90000/"
+            "0;level-asymmetry-allowed=1;packetization-mode=1;profile-level-id="
+            "4d001f]",
+            "2 [109:video/rtx/90000/0;apt=108]",
+            "2 "
+            "[35:video/H264/90000/"
+            "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-id="
+            "4d001f]",
+            "2 [36:video/rtx/90000/0;apt=35]",
+            "2 [37:video/AV1/90000/0;level-idx=5;profile=0;tier=0]",
+            "2 [38:video/rtx/90000/0;apt=37]",
+            "2 [114:video/VP9/90000/0;profile-id=0]",
+            "2 [115:video/rtx/90000/0;apt=114]",
+            "2 [116:video/VP9/90000/0;profile-id=2]",
+            "2 [117:video/rtx/90000/0;apt=116]",
+            "2 [118:video/red/90000/0]",
+            "2 [119:video/rtx/90000/0;apt=118]",
+            "2 [120:video/ulpfec/90000/0]"},
+       .callee_local = {"1 [111:audio/opus/48000/2;minptime=10;useinbandfec=1]",
+                        "1 [63:audio/red/48000/2;=111/111]",
+                        "1 [9:audio/G722/8000/1]",
+                        "1 [0:audio/PCMU/8000/1]",
+                        "1 [8:audio/PCMA/8000/1]",
+                        "1 [13:audio/CN/8000/1]",
+                        "1 [110:audio/telephone-event/48000/1]",
+                        "1 [126:audio/telephone-event/8000/1]",
+                        "2 [96:video/VP8/90000/0]",
+                        "2 [97:video/rtx/90000/0;apt=96]",
+                        "2 "
+                        "[98:video/H264/90000/"
+                        "0;level-asymmetry-allowed=1;packetization-mode=1;"
+                        "profile-level-id=42001f]",
+                        "2 [99:video/rtx/90000/0;apt=98]",
+                        "2 "
+                        "[100:video/H264/90000/"
+                        "0;level-asymmetry-allowed=1;packetization-mode=0;"
+                        "profile-level-id=42001f]",
+                        "2 [101:video/rtx/90000/0;apt=100]",
+                        "2 "
+                        "[102:video/H264/90000/"
+                        "0;level-asymmetry-allowed=1;packetization-mode=1;"
+                        "profile-level-id=42e01f]",
+                        "2 [103:video/rtx/90000/0;apt=102]",
+                        "2 "
+                        "[104:video/H264/90000/"
+                        "0;level-asymmetry-allowed=1;packetization-mode=0;"
+                        "profile-level-id=42e01f]",
+                        "2 [107:video/rtx/90000/0;apt=104]",
+                        "2 "
+                        "[108:video/H264/90000/"
+                        "0;level-asymmetry-allowed=1;packetization-mode=1;"
+                        "profile-level-id=4d001f]",
+                        "2 [109:video/rtx/90000/0;apt=108]",
+                        "2 "
+                        "[35:video/H264/90000/"
+                        "0;level-asymmetry-allowed=1;packetization-mode=0;"
+                        "profile-level-id=4d001f]",
+                        "2 [36:video/rtx/90000/0;apt=35]",
+                        "2 [37:video/AV1/90000/0;level-idx=5;profile=0;tier=0]",
+                        "2 [38:video/rtx/90000/0;apt=37]",
+                        "2 [114:video/VP9/90000/0;profile-id=0]",
+                        "2 [115:video/rtx/90000/0;apt=114]",
+                        "2 [116:video/VP9/90000/0;profile-id=2]",
+                        "2 [117:video/rtx/90000/0;apt=116]",
+                        "2 [118:video/red/90000/0]",
+                        "2 [119:video/rtx/90000/0;apt=118]",
+                        "2 [120:video/ulpfec/90000/0]"},
+       .callee_remote =
+           {"1 [111:audio/opus/48000/2;minptime=10;useinbandfec=1]",
+            "1 [63:audio/red/48000/2;=111/111]",
+            "1 [9:audio/G722/8000/1]",
+            "1 [0:audio/PCMU/8000/1]",
+            "1 [8:audio/PCMA/8000/1]",
+            "1 [13:audio/CN/8000/1]",
+            "1 [110:audio/telephone-event/48000/1]",
+            "1 [126:audio/telephone-event/8000/1]",
+            "2 [96:video/VP8/90000/0]",
+            "2 [97:video/rtx/90000/0;apt=96]",
+            "2 "
+            "[98:video/H264/90000/"
+            "0;level-asymmetry-allowed=1;packetization-mode=1;profile-level-id="
+            "42001f]",
+            "2 [99:video/rtx/90000/0;apt=98]",
+            "2 "
+            "[100:video/H264/90000/"
+            "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-id="
+            "42001f]",
+            "2 [101:video/rtx/90000/0;apt=100]",
+            "2 "
+            "[102:video/H264/90000/"
+            "0;level-asymmetry-allowed=1;packetization-mode=1;profile-level-id="
+            "42e01f]",
+            "2 [103:video/rtx/90000/0;apt=102]",
+            "2 "
+            "[104:video/H264/90000/"
+            "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-id="
+            "42e01f]",
+            "2 [107:video/rtx/90000/0;apt=104]",
+            "2 "
+            "[108:video/H264/90000/"
+            "0;level-asymmetry-allowed=1;packetization-mode=1;profile-level-id="
+            "4d001f]",
+            "2 [109:video/rtx/90000/0;apt=108]",
+            "2 "
+            "[35:video/H264/90000/"
+            "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-id="
+            "4d001f]",
+            "2 [36:video/rtx/90000/0;apt=35]",
+            "2 [37:video/AV1/90000/0;level-idx=5;profile=0;tier=0]",
+            "2 [38:video/rtx/90000/0;apt=37]",
+            "2 [114:video/VP9/90000/0;profile-id=0]",
+            "2 [115:video/rtx/90000/0;apt=114]",
+            "2 [116:video/VP9/90000/0;profile-id=2]",
+            "2 [117:video/rtx/90000/0;apt=116]",
+            "2 [118:video/red/90000/0]",
+            "2 [119:video/rtx/90000/0;apt=118]",
+            "2 [120:video/ulpfec/90000/0]"}},
       {.factory_id = FactorySignature::Id::kWebRtcTipOfTree,
        .caller_local =
            {"1 [111:audio/opus/48000/2;minptime=10;useinbandfec=1]",
@@ -436,30 +672,30 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
             "2 [96:video/VP8/90000/0]",
             "2 [97:video/rtx/90000/0;apt=96]",
             "2 "
-            "[103:video/H264/90000/"
+            "[102:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=1;profile-level-id="
             "42001f]",
-            "2 [104:video/rtx/90000/0;apt=103]",
+            "2 [103:video/rtx/90000/0;apt=102]",
             "2 "
-            "[107:video/H264/90000/"
+            "[104:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-id="
             "42001f]",
-            "2 [108:video/rtx/90000/0;apt=107]",
+            "2 [107:video/rtx/90000/0;apt=104]",
             "2 "
-            "[109:video/H264/90000/"
+            "[108:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=1;profile-level-id="
             "42e01f]",
-            "2 [114:video/rtx/90000/0;apt=109]",
+            "2 [109:video/rtx/90000/0;apt=108]",
             "2 "
-            "[115:video/H264/90000/"
+            "[114:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-id="
             "42e01f]",
-            "2 [116:video/rtx/90000/0;apt=115]",
+            "2 [115:video/rtx/90000/0;apt=114]",
             "2 "
-            "[117:video/H264/90000/"
+            "[116:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=1;profile-level-id="
             "4d001f]",
-            "2 [118:video/rtx/90000/0;apt=117]",
+            "2 [117:video/rtx/90000/0;apt=116]",
             "2 "
             "[39:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-id="
@@ -471,9 +707,9 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
             "2 [99:video/rtx/90000/0;apt=98]",
             "2 [100:video/VP9/90000/0;profile-id=2]",
             "2 [101:video/rtx/90000/0;apt=100]",
-            "2 [119:video/red/90000/0]",
-            "2 [120:video/rtx/90000/0;apt=119]",
-            "2 [121:video/ulpfec/90000/0]"},
+            "2 [118:video/red/90000/0]",
+            "2 [119:video/rtx/90000/0;apt=118]",
+            "2 [120:video/ulpfec/90000/0]"},
        .caller_remote =
            {"1 [111:audio/opus/48000/2;minptime=10;useinbandfec=1]",
             "1 [63:audio/red/48000/2;=111/111]",
@@ -486,30 +722,30 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
             "2 [96:video/VP8/90000/0]",
             "2 [97:video/rtx/90000/0;apt=96]",
             "2 "
-            "[103:video/H264/90000/"
+            "[102:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=1;profile-level-id="
             "42001f]",
-            "2 [104:video/rtx/90000/0;apt=103]",
+            "2 [103:video/rtx/90000/0;apt=102]",
             "2 "
-            "[107:video/H264/90000/"
+            "[104:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-id="
             "42001f]",
-            "2 [108:video/rtx/90000/0;apt=107]",
+            "2 [107:video/rtx/90000/0;apt=104]",
             "2 "
-            "[109:video/H264/90000/"
+            "[108:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=1;profile-level-id="
             "42e01f]",
-            "2 [114:video/rtx/90000/0;apt=109]",
+            "2 [109:video/rtx/90000/0;apt=108]",
             "2 "
-            "[115:video/H264/90000/"
+            "[114:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-id="
             "42e01f]",
-            "2 [116:video/rtx/90000/0;apt=115]",
+            "2 [115:video/rtx/90000/0;apt=114]",
             "2 "
-            "[117:video/H264/90000/"
+            "[116:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=1;profile-level-id="
             "4d001f]",
-            "2 [118:video/rtx/90000/0;apt=117]",
+            "2 [117:video/rtx/90000/0;apt=116]",
             "2 "
             "[39:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-id="
@@ -521,9 +757,9 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
             "2 [99:video/rtx/90000/0;apt=98]",
             "2 [100:video/VP9/90000/0;profile-id=2]",
             "2 [101:video/rtx/90000/0;apt=100]",
-            "2 [119:video/red/90000/0]",
-            "2 [120:video/rtx/90000/0;apt=119]",
-            "2 [121:video/ulpfec/90000/0]"},
+            "2 [118:video/red/90000/0]",
+            "2 [119:video/rtx/90000/0;apt=118]",
+            "2 [120:video/ulpfec/90000/0]"},
        .callee_local =
            {"1 [111:audio/opus/48000/2;minptime=10;useinbandfec=1]",
             "1 [63:audio/red/48000/2;=111/111]",
@@ -536,30 +772,30 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
             "2 [96:video/VP8/90000/0]",
             "2 [97:video/rtx/90000/0;apt=96]",
             "2 "
-            "[103:video/H264/90000/"
+            "[102:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=1;profile-level-id="
             "42001f]",
-            "2 [104:video/rtx/90000/0;apt=103]",
+            "2 [103:video/rtx/90000/0;apt=102]",
             "2 "
-            "[107:video/H264/90000/"
+            "[104:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-id="
             "42001f]",
-            "2 [108:video/rtx/90000/0;apt=107]",
+            "2 [107:video/rtx/90000/0;apt=104]",
             "2 "
-            "[109:video/H264/90000/"
+            "[108:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=1;profile-level-id="
             "42e01f]",
-            "2 [114:video/rtx/90000/0;apt=109]",
+            "2 [109:video/rtx/90000/0;apt=108]",
             "2 "
-            "[115:video/H264/90000/"
+            "[114:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-id="
             "42e01f]",
-            "2 [116:video/rtx/90000/0;apt=115]",
+            "2 [115:video/rtx/90000/0;apt=114]",
             "2 "
-            "[117:video/H264/90000/"
+            "[116:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=1;profile-level-id="
             "4d001f]",
-            "2 [118:video/rtx/90000/0;apt=117]",
+            "2 [117:video/rtx/90000/0;apt=116]",
             "2 "
             "[39:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-id="
@@ -571,9 +807,9 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
             "2 [99:video/rtx/90000/0;apt=98]",
             "2 [100:video/VP9/90000/0;profile-id=2]",
             "2 [101:video/rtx/90000/0;apt=100]",
-            "2 [119:video/red/90000/0]",
-            "2 [120:video/rtx/90000/0;apt=119]",
-            "2 [121:video/ulpfec/90000/0]"},
+            "2 [118:video/red/90000/0]",
+            "2 [119:video/rtx/90000/0;apt=118]",
+            "2 [120:video/ulpfec/90000/0]"},
        .callee_remote =
            {"1 [111:audio/opus/48000/2;minptime=10;useinbandfec=1]",
             "1 [63:audio/red/48000/2;=111/111]",
@@ -586,30 +822,30 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
             "2 [96:video/VP8/90000/0]",
             "2 [97:video/rtx/90000/0;apt=96]",
             "2 "
-            "[103:video/H264/90000/"
+            "[102:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=1;profile-level-id="
             "42001f]",
-            "2 [104:video/rtx/90000/0;apt=103]",
+            "2 [103:video/rtx/90000/0;apt=102]",
             "2 "
-            "[107:video/H264/90000/"
+            "[104:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-id="
             "42001f]",
-            "2 [108:video/rtx/90000/0;apt=107]",
+            "2 [107:video/rtx/90000/0;apt=104]",
             "2 "
-            "[109:video/H264/90000/"
+            "[108:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=1;profile-level-id="
             "42e01f]",
-            "2 [114:video/rtx/90000/0;apt=109]",
+            "2 [109:video/rtx/90000/0;apt=108]",
             "2 "
-            "[115:video/H264/90000/"
+            "[114:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-id="
             "42e01f]",
-            "2 [116:video/rtx/90000/0;apt=115]",
+            "2 [115:video/rtx/90000/0;apt=114]",
             "2 "
-            "[117:video/H264/90000/"
+            "[116:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=1;profile-level-id="
             "4d001f]",
-            "2 [118:video/rtx/90000/0;apt=117]",
+            "2 [117:video/rtx/90000/0;apt=116]",
             "2 "
             "[39:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-id="
@@ -621,9 +857,9 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
             "2 [99:video/rtx/90000/0;apt=98]",
             "2 [100:video/VP9/90000/0;profile-id=2]",
             "2 [101:video/rtx/90000/0;apt=100]",
-            "2 [119:video/red/90000/0]",
-            "2 [120:video/rtx/90000/0;apt=119]",
-            "2 [121:video/ulpfec/90000/0]"}},
+            "2 [118:video/red/90000/0]",
+            "2 [119:video/rtx/90000/0;apt=118]",
+            "2 [120:video/ulpfec/90000/0]"}},
 
       {.factory_id = FactorySignature::Id::kWebRtcMoreConfigs1,
        .caller_local =
@@ -638,9 +874,9 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
             "2 [98:video/VP9/90000/0;profile-id=0]",
             "2 [99:video/rtx/90000/0;apt=98]",
             "2 [100:video/VP9/90000/0;profile-id=2]",
-            "2 [101:video/rtx/90000/0;apt=100]", "2 [103:video/red/90000/0]",
-            "2 [104:video/rtx/90000/0;apt=103]",
-            "2 [107:video/ulpfec/90000/0]"},
+            "2 [101:video/rtx/90000/0;apt=100]", "2 [102:video/red/90000/0]",
+            "2 [103:video/rtx/90000/0;apt=102]",
+            "2 [104:video/ulpfec/90000/0]"},
        .caller_remote =
            {"1 [111:audio/opus/48000/2;minptime=10;useinbandfec=1]",
             "1 [63:audio/red/48000/2;=111/111]", "1 [9:audio/G722/8000/1]",
@@ -653,9 +889,9 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
             "2 [98:video/VP9/90000/0;profile-id=0]",
             "2 [99:video/rtx/90000/0;apt=98]",
             "2 [100:video/VP9/90000/0;profile-id=2]",
-            "2 [101:video/rtx/90000/0;apt=100]", "2 [103:video/red/90000/0]",
-            "2 [104:video/rtx/90000/0;apt=103]",
-            "2 [107:video/ulpfec/90000/0]"},
+            "2 [101:video/rtx/90000/0;apt=100]", "2 [102:video/red/90000/0]",
+            "2 [103:video/rtx/90000/0;apt=102]",
+            "2 [104:video/ulpfec/90000/0]"},
        .callee_local =
            {"1 [111:audio/opus/48000/2;minptime=10;useinbandfec=1]",
             "1 [63:audio/red/48000/2;=111/111]", "1 [9:audio/G722/8000/1]",
@@ -668,9 +904,9 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
             "2 [98:video/VP9/90000/0;profile-id=0]",
             "2 [99:video/rtx/90000/0;apt=98]",
             "2 [100:video/VP9/90000/0;profile-id=2]",
-            "2 [101:video/rtx/90000/0;apt=100]", "2 [103:video/red/90000/0]",
-            "2 [104:video/rtx/90000/0;apt=103]",
-            "2 [107:video/ulpfec/90000/0]"},
+            "2 [101:video/rtx/90000/0;apt=100]", "2 [102:video/red/90000/0]",
+            "2 [103:video/rtx/90000/0;apt=102]",
+            "2 [104:video/ulpfec/90000/0]"},
        .callee_remote =
            {"1 [111:audio/opus/48000/2;minptime=10;useinbandfec=1]",
             "1 [63:audio/red/48000/2;=111/111]", "1 [9:audio/G722/8000/1]",
@@ -683,9 +919,9 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
             "2 [98:video/VP9/90000/0;profile-id=0]",
             "2 [99:video/rtx/90000/0;apt=98]",
             "2 [100:video/VP9/90000/0;profile-id=2]",
-            "2 [101:video/rtx/90000/0;apt=100]", "2 [103:video/red/90000/0]",
-            "2 [104:video/rtx/90000/0;apt=103]",
-            "2 [107:video/ulpfec/90000/0]"}},
+            "2 [101:video/rtx/90000/0;apt=100]", "2 [102:video/red/90000/0]",
+            "2 [103:video/rtx/90000/0;apt=102]",
+            "2 [104:video/ulpfec/90000/0]"}},
       {.factory_id = FactorySignature::Id::kWebRtcAndroid,
        .caller_local =
            {"1 [111:audio/opus/48000/2;minptime=10;useinbandfec=1]",
@@ -699,7 +935,7 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
             "2 [98:video/VP9/90000/0;profile-id=0]",
             "2 [99:video/rtx/90000/0;apt=98]", "2 [100:video/red/90000/0]",
             "2 [101:video/rtx/90000/0;apt=100]",
-            "2 [103:video/ulpfec/90000/0]"},
+            "2 [102:video/ulpfec/90000/0]"},
        .caller_remote =
            {"1 [111:audio/opus/48000/2;minptime=10;useinbandfec=1]",
             "1 [63:audio/red/48000/2;=111/111]", "1 [9:audio/G722/8000/1]",
@@ -712,7 +948,7 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
             "2 [98:video/VP9/90000/0;profile-id=0]",
             "2 [99:video/rtx/90000/0;apt=98]", "2 [100:video/red/90000/0]",
             "2 [101:video/rtx/90000/0;apt=100]",
-            "2 [103:video/ulpfec/90000/0]"},
+            "2 [102:video/ulpfec/90000/0]"},
        .callee_local =
            {"1 [111:audio/opus/48000/2;minptime=10;useinbandfec=1]",
             "1 [63:audio/red/48000/2;=111/111]", "1 [9:audio/G722/8000/1]",
@@ -725,7 +961,7 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
             "2 [98:video/VP9/90000/0;profile-id=0]",
             "2 [99:video/rtx/90000/0;apt=98]", "2 [100:video/red/90000/0]",
             "2 [101:video/rtx/90000/0;apt=100]",
-            "2 [103:video/ulpfec/90000/0]"},
+            "2 [102:video/ulpfec/90000/0]"},
        .callee_remote =
            {"1 [111:audio/opus/48000/2;minptime=10;useinbandfec=1]",
             "1 [63:audio/red/48000/2;=111/111]", "1 [9:audio/G722/8000/1]",
@@ -738,7 +974,7 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
             "2 [98:video/VP9/90000/0;profile-id=0]",
             "2 [99:video/rtx/90000/0;apt=98]", "2 [100:video/red/90000/0]",
             "2 [101:video/rtx/90000/0;apt=100]",
-            "2 [103:video/ulpfec/90000/0]"}},
+            "2 [102:video/ulpfec/90000/0]"}},
       {.factory_id = FactorySignature::Id::kGoogleInternal,
        .caller_local =
            {"1 [111:audio/opus/48000/2;minptime=10;useinbandfec=1]",
@@ -757,25 +993,25 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
             "id=42001f]",
             "2 [101:video/rtx/90000/0;apt=100]",
             "2 "
-            "[103:video/H264/90000/"
+            "[102:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-"
             "id=42001f]",
-            "2 [104:video/rtx/90000/0;apt=103]",
+            "2 [103:video/rtx/90000/0;apt=102]",
             "2 "
-            "[107:video/H264/90000/"
+            "[104:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=1;profile-level-"
             "id=42e01f]",
-            "2 [108:video/rtx/90000/0;apt=107]",
+            "2 [107:video/rtx/90000/0;apt=104]",
             "2 "
-            "[109:video/H264/90000/"
+            "[108:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-"
             "id=42e01f]",
-            "2 [114:video/rtx/90000/0;apt=109]",
+            "2 [109:video/rtx/90000/0;apt=108]",
             "2 "
-            "[115:video/H264/90000/"
+            "[114:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=1;profile-level-"
             "id=4d001f]",
-            "2 [116:video/rtx/90000/0;apt=115]",
+            "2 [115:video/rtx/90000/0;apt=114]",
             "2 "
             "[39:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-"
@@ -783,9 +1019,9 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
             "2 [40:video/rtx/90000/0;apt=39]",
             "2 [98:video/VP9/90000/0;profile-id=0]",
             "2 [99:video/rtx/90000/0;apt=98]",
-            "2 [117:video/red/90000/0]",
-            "2 [118:video/rtx/90000/0;apt=117]",
-            "2 [119:video/ulpfec/90000/0]"},
+            "2 [116:video/red/90000/0]",
+            "2 [117:video/rtx/90000/0;apt=116]",
+            "2 [118:video/ulpfec/90000/0]"},
        .caller_remote =
            {"1 [111:audio/opus/48000/2;minptime=10;useinbandfec=1]",
             "1 [63:audio/red/48000/2;=111/111]",
@@ -803,25 +1039,25 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
             "id=42001f]",
             "2 [101:video/rtx/90000/0;apt=100]",
             "2 "
-            "[103:video/H264/90000/"
+            "[102:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-"
             "id=42001f]",
-            "2 [104:video/rtx/90000/0;apt=103]",
+            "2 [103:video/rtx/90000/0;apt=102]",
             "2 "
-            "[107:video/H264/90000/"
+            "[104:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=1;profile-level-"
             "id=42e01f]",
-            "2 [108:video/rtx/90000/0;apt=107]",
+            "2 [107:video/rtx/90000/0;apt=104]",
             "2 "
-            "[109:video/H264/90000/"
+            "[108:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-"
             "id=42e01f]",
-            "2 [114:video/rtx/90000/0;apt=109]",
+            "2 [109:video/rtx/90000/0;apt=108]",
             "2 "
-            "[115:video/H264/90000/"
+            "[114:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=1;profile-level-"
             "id=4d001f]",
-            "2 [116:video/rtx/90000/0;apt=115]",
+            "2 [115:video/rtx/90000/0;apt=114]",
             "2 "
             "[39:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-"
@@ -829,9 +1065,9 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
             "2 [40:video/rtx/90000/0;apt=39]",
             "2 [98:video/VP9/90000/0;profile-id=0]",
             "2 [99:video/rtx/90000/0;apt=98]",
-            "2 [117:video/red/90000/0]",
-            "2 [118:video/rtx/90000/0;apt=117]",
-            "2 [119:video/ulpfec/90000/0]"},
+            "2 [116:video/red/90000/0]",
+            "2 [117:video/rtx/90000/0;apt=116]",
+            "2 [118:video/ulpfec/90000/0]"},
        .callee_local =
            {"1 [111:audio/opus/48000/2;minptime=10;useinbandfec=1]",
             "1 [63:audio/red/48000/2;=111/111]",
@@ -849,25 +1085,25 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
             "id=42001f]",
             "2 [101:video/rtx/90000/0;apt=100]",
             "2 "
-            "[103:video/H264/90000/"
+            "[102:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-"
             "id=42001f]",
-            "2 [104:video/rtx/90000/0;apt=103]",
+            "2 [103:video/rtx/90000/0;apt=102]",
             "2 "
-            "[107:video/H264/90000/"
+            "[104:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=1;profile-level-"
             "id=42e01f]",
-            "2 [108:video/rtx/90000/0;apt=107]",
+            "2 [107:video/rtx/90000/0;apt=104]",
             "2 "
-            "[109:video/H264/90000/"
+            "[108:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-"
             "id=42e01f]",
-            "2 [114:video/rtx/90000/0;apt=109]",
+            "2 [109:video/rtx/90000/0;apt=108]",
             "2 "
-            "[115:video/H264/90000/"
+            "[114:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=1;profile-level-"
             "id=4d001f]",
-            "2 [116:video/rtx/90000/0;apt=115]",
+            "2 [115:video/rtx/90000/0;apt=114]",
             "2 "
             "[39:video/H264/90000/"
             "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-"
@@ -875,9 +1111,9 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
             "2 [40:video/rtx/90000/0;apt=39]",
             "2 [98:video/VP9/90000/0;profile-id=0]",
             "2 [99:video/rtx/90000/0;apt=98]",
-            "2 [117:video/red/90000/0]",
-            "2 [118:video/rtx/90000/0;apt=117]",
-            "2 [119:video/ulpfec/90000/0]"},
+            "2 [116:video/red/90000/0]",
+            "2 [117:video/rtx/90000/0;apt=116]",
+            "2 [118:video/ulpfec/90000/0]"},
        .callee_remote = {
            "1 [111:audio/opus/48000/2;minptime=10;useinbandfec=1]",
            "1 [63:audio/red/48000/2;=111/111]",
@@ -895,25 +1131,25 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
            "42001f]",
            "2 [101:video/rtx/90000/0;apt=100]",
            "2 "
-           "[103:video/H264/90000/"
+           "[102:video/H264/90000/"
            "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-id="
            "42001f]",
-           "2 [104:video/rtx/90000/0;apt=103]",
+           "2 [103:video/rtx/90000/0;apt=102]",
            "2 "
-           "[107:video/H264/90000/"
+           "[104:video/H264/90000/"
            "0;level-asymmetry-allowed=1;packetization-mode=1;profile-level-id="
            "42e01f]",
-           "2 [108:video/rtx/90000/0;apt=107]",
+           "2 [107:video/rtx/90000/0;apt=104]",
            "2 "
-           "[109:video/H264/90000/"
+           "[108:video/H264/90000/"
            "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-id="
            "42e01f]",
-           "2 [114:video/rtx/90000/0;apt=109]",
+           "2 [109:video/rtx/90000/0;apt=108]",
            "2 "
-           "[115:video/H264/90000/"
+           "[114:video/H264/90000/"
            "0;level-asymmetry-allowed=1;packetization-mode=1;profile-level-id="
            "4d001f]",
-           "2 [116:video/rtx/90000/0;apt=115]",
+           "2 [115:video/rtx/90000/0;apt=114]",
            "2 "
            "[39:video/H264/90000/"
            "0;level-asymmetry-allowed=1;packetization-mode=0;profile-level-id="
@@ -921,9 +1157,9 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
            "2 [40:video/rtx/90000/0;apt=39]",
            "2 [98:video/VP9/90000/0;profile-id=0]",
            "2 [99:video/rtx/90000/0;apt=98]",
-           "2 [117:video/red/90000/0]",
-           "2 [118:video/rtx/90000/0;apt=117]",
-           "2 [119:video/ulpfec/90000/0]"}}};
+           "2 [116:video/red/90000/0]",
+           "2 [117:video/rtx/90000/0;apt=116]",
+           "2 [118:video/ulpfec/90000/0]"}}};
   auto this_golden_it =
       std::find_if(golden_answers.begin(), golden_answers.end(),
                    [&](const ResultingCodecList& candidate) {
@@ -940,13 +1176,54 @@ TEST_F(PeerConnectionIntegrationTest, BasicOfferAnswerPayloadTypesStable) {
 
   const ResultingCodecList& this_golden = *this_golden_it;
   EXPECT_THAT(CodecList(*caller()->pc()->local_description()),
-              ElementsAreArray(this_golden.caller_local));
+              UnorderedElementsAreArray(this_golden.caller_local))
+      << "Factory ID: " << factory_signature.id();
   EXPECT_THAT(CodecList(*caller()->pc()->remote_description()),
-              ElementsAreArray(this_golden.caller_remote));
+              UnorderedElementsAreArray(this_golden.caller_remote))
+      << "Factory ID: " << factory_signature.id();
   EXPECT_THAT(CodecList(*callee()->pc()->local_description()),
-              ElementsAreArray(this_golden.callee_local));
+              UnorderedElementsAreArray(this_golden.callee_local))
+      << "Factory ID: " << factory_signature.id();
   EXPECT_THAT(CodecList(*callee()->pc()->remote_description()),
-              ElementsAreArray(this_golden.callee_remote));
+              UnorderedElementsAreArray(this_golden.callee_remote))
+      << "Factory ID: " << factory_signature.id();
+
+  if (HasFailure()) {
+    return;
+  }
+
+  EXPECT_THAT(CodecList(*caller()->pc()->local_description()),
+              ElementsAreArray(this_golden.caller_local))
+      << "Factory ID: " << factory_signature.id();
+  EXPECT_THAT(CodecList(*caller()->pc()->remote_description()),
+              ElementsAreArray(this_golden.caller_remote))
+      << "Factory ID: " << factory_signature.id();
+  EXPECT_THAT(CodecList(*callee()->pc()->local_description()),
+              ElementsAreArray(this_golden.callee_local))
+      << "Factory ID: " << factory_signature.id();
+  EXPECT_THAT(CodecList(*callee()->pc()->remote_description()),
+              ElementsAreArray(this_golden.callee_remote))
+      << "Factory ID: " << factory_signature.id();
+}
+
+TEST_F(PeerConnectionIntegrationTest,
+       DumpAsResultingCodecListProducesExpectedOutput) {
+  std::vector<std::string> caller_local = {"cl1"};
+  std::vector<std::string> caller_remote = {"cr1"};
+  std::vector<std::string> callee_local = {"ce_l1"};
+  std::vector<std::string> callee_remote = {"ce_r1"};
+
+  std::string output = DumpAsResultingCodecList(
+      FactorySignature::Id::kWebRtcTipOfTree, caller_local, caller_remote,
+      callee_local, callee_remote);
+
+  EXPECT_THAT(output,
+              Eq("\n{.factory_id = FactorySignature::Id::kWebRtcTipOfTree,\n"
+                 ".caller_local = {\"cl1\",\n},\n"
+                 " .caller_remote = {\"cr1\",\n},\n"
+                 " .callee_local = {\"ce_l1\",\n},\n"
+                 " .callee_remote = {\"ce_r1\",\n"
+                 "}}\n"));
 }
 
 }  // namespace

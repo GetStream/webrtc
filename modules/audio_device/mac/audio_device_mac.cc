@@ -16,9 +16,10 @@
 
 #include <iterator>
 #include <memory>
+#include <span>
 #include <vector>
 
-#include "modules/third_party/portaudio/pa_ringbuffer.h"
+#include "modules/audio_device/mac/audio_ring_buffer_mac.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/platform_thread.h"
 #include "rtc_base/system/arch.h"
@@ -106,8 +107,6 @@ AudioDeviceMac::AudioDeviceMac()
       _outputDeviceIsSpecified(false),
       _recChannels(N_REC_CHANNELS),
       _playChannels(N_PLAY_CHANNELS),
-      _captureBufData(NULL),
-      _renderBufData(NULL),
       _initialized(false),
       _isShutDown(false),
       _recording(false),
@@ -124,13 +123,12 @@ AudioDeviceMac::AudioDeviceMac()
       _captureDelayUs(0),
       _renderDelayUs(0),
       _renderDelayOffsetSamples(0),
-      _paCaptureBuffer(NULL),
-      _paRenderBuffer(NULL),
-      _captureBufSizeSamples(0),
-      _renderBufSizeSamples(0),
+      _captureBuffer(REC_BUF_SIZE_IN_SAMPLES),
+      _renderBuffer(PLAY_BUF_SIZE_IN_SAMPLES),
       prev_key_state_() {
   RTC_DLOG(LS_INFO) << __FUNCTION__ << " created";
 
+  memset(_captureConvertData, 0, sizeof(_captureConvertData));
   memset(_renderConvertData, 0, sizeof(_renderConvertData));
   memset(&_outStreamFormat, 0, sizeof(AudioStreamBasicDescription));
   memset(&_outDesiredFormat, 0, sizeof(AudioStreamBasicDescription));
@@ -147,26 +145,6 @@ AudioDeviceMac::~AudioDeviceMac() {
 
   RTC_DCHECK(capture_worker_thread_.empty());
   RTC_DCHECK(render_worker_thread_.empty());
-
-  if (_paRenderBuffer) {
-    delete _paRenderBuffer;
-    _paRenderBuffer = NULL;
-  }
-
-  if (_paCaptureBuffer) {
-    delete _paCaptureBuffer;
-    _paCaptureBuffer = NULL;
-  }
-
-  if (_renderBufData) {
-    delete[] _renderBufData;
-    _renderBufData = NULL;
-  }
-
-  if (_captureBufData) {
-    delete[] _captureBufData;
-    _captureBufData = NULL;
-  }
 
   kern_return_t kernErr = KERN_SUCCESS;
   kernErr = semaphore_destroy(mach_task_self(), _renderSemaphore);
@@ -213,47 +191,8 @@ AudioDeviceGeneric::InitStatus AudioDeviceMac::Init() {
 
   _isShutDown = false;
 
-  // PortAudio ring buffers require an elementCount which is a power of two.
-  if (_renderBufData == NULL) {
-    UInt32 powerOfTwo = 1;
-    while (powerOfTwo < PLAY_BUF_SIZE_IN_SAMPLES) {
-      powerOfTwo <<= 1;
-    }
-    _renderBufSizeSamples = powerOfTwo;
-    _renderBufData = new SInt16[_renderBufSizeSamples];
-  }
-
-  if (_paRenderBuffer == NULL) {
-    _paRenderBuffer = new PaUtilRingBuffer;
-    ring_buffer_size_t bufSize = -1;
-    bufSize = PaUtil_InitializeRingBuffer(
-        _paRenderBuffer, sizeof(SInt16), _renderBufSizeSamples, _renderBufData);
-    if (bufSize == -1) {
-      RTC_LOG(LS_ERROR) << "PaUtil_InitializeRingBuffer() error";
-      return InitStatus::PLAYOUT_ERROR;
-    }
-  }
-
-  if (_captureBufData == NULL) {
-    UInt32 powerOfTwo = 1;
-    while (powerOfTwo < REC_BUF_SIZE_IN_SAMPLES) {
-      powerOfTwo <<= 1;
-    }
-    _captureBufSizeSamples = powerOfTwo;
-    _captureBufData = new Float32[_captureBufSizeSamples];
-  }
-
-  if (_paCaptureBuffer == NULL) {
-    _paCaptureBuffer = new PaUtilRingBuffer;
-    ring_buffer_size_t bufSize = -1;
-    bufSize =
-        PaUtil_InitializeRingBuffer(_paCaptureBuffer, sizeof(Float32),
-                                    _captureBufSizeSamples, _captureBufData);
-    if (bufSize == -1) {
-      RTC_LOG(LS_ERROR) << "PaUtil_InitializeRingBuffer() error";
-      return InitStatus::RECORDING_ERROR;
-    }
-  }
+  _renderBuffer.Clear();
+  _captureBuffer.Clear();
 
   kern_return_t kernErr = KERN_SUCCESS;
   kernErr = semaphore_create(mach_task_self(), &_renderSemaphore,
@@ -847,8 +786,8 @@ int32_t AudioDeviceMac::PlayoutDeviceName(uint16_t index,
   memset(guid, 0, kAdmMaxGuidSize);
 
   return GetDeviceName(kAudioDevicePropertyScopeOutput, index,
-                       webrtc::ArrayView<char>(name, kAdmMaxDeviceNameSize),
-                       webrtc::ArrayView<char>(guid, kAdmMaxGuidSize));
+                       std::span<char>(name, kAdmMaxDeviceNameSize),
+                       std::span<char>(guid, kAdmMaxGuidSize));
 }
 
 int32_t AudioDeviceMac::RecordingDeviceName(uint16_t index,
@@ -867,8 +806,8 @@ int32_t AudioDeviceMac::RecordingDeviceName(uint16_t index,
   }
 
   return GetDeviceName(kAudioDevicePropertyScopeInput, index,
-                       webrtc::ArrayView<char>(name, kAdmMaxDeviceNameSize),
-                       webrtc::ArrayView<char>(guid, kAdmMaxGuidSize));
+                       std::span<char>(name, kAdmMaxDeviceNameSize),
+                       std::span<char>(guid, kAdmMaxGuidSize));
 }
 
 int16_t AudioDeviceMac::RecordingDevices() {
@@ -990,7 +929,7 @@ int32_t AudioDeviceMac::InitPlayout() {
     }
   }
 
-  PaUtil_FlushRingBuffer(_paRenderBuffer);
+  _renderBuffer.Clear();
 
   OSStatus err = noErr;
   UInt32 size = 0;
@@ -1105,7 +1044,7 @@ int32_t AudioDeviceMac::InitRecording() {
   OSStatus err = noErr;
   UInt32 size = 0;
 
-  PaUtil_FlushRingBuffer(_paCaptureBuffer);
+  _captureBuffer.Clear();
 
   _captureDelayUs = 0;
   _captureLatencyUs = 0;
@@ -1136,10 +1075,12 @@ int32_t AudioDeviceMac::InitRecording() {
   const int io_block_size_samples = _inStreamFormat.mChannelsPerFrame *
                                     _inStreamFormat.mSampleRate / 100 *
                                     N_BLOCKS_IO;
-  if (io_block_size_samples > _captureBufSizeSamples) {
+  const int capture_buf_size_samples =
+      static_cast<int>(_captureBuffer.capacity());
+  if (io_block_size_samples > capture_buf_size_samples) {
     RTC_LOG(LS_ERROR) << "Input IO block size (" << io_block_size_samples
                       << ") is larger than ring buffer ("
-                      << _captureBufSizeSamples << ")";
+                      << capture_buf_size_samples << ")";
     return -1;
   }
 
@@ -1646,8 +1587,8 @@ int32_t AudioDeviceMac::GetNumberDevices(const AudioObjectPropertyScope scope,
 
 int32_t AudioDeviceMac::GetDeviceName(const AudioObjectPropertyScope scope,
                                       const uint16_t index,
-                                      webrtc::ArrayView<char> name,
-                                      webrtc::ArrayView<char> guid) {
+                                      std::span<char> name,
+                                      std::span<char> guid) {
   OSStatus err = noErr;
   AudioDeviceID deviceIds[MaxNumberDevices];
 
@@ -1686,7 +1627,11 @@ int32_t AudioDeviceMac::GetDeviceName(const AudioObjectPropertyScope scope,
   }
   AudioObjectPropertyAddress propertyAddress = {kAudioDevicePropertyDeviceName,
                                                 scope, 0};
-  webrtc::SimpleStringBuilder guid_ss(guid);
+  auto set_guid = [guid](const std::string& s) {
+    size_t chars_to_copy = std::min(s.size(), guid.size() - 1);
+    std::copy_n(s.data(), chars_to_copy, guid.data());
+    guid[chars_to_copy] = '\0';
+  };
   if (isDefaultDevice) {
     std::array<char, kAdmMaxDeviceNameSize> devName;
     UInt32 len = devName.size();
@@ -1694,9 +1639,13 @@ int32_t AudioDeviceMac::GetDeviceName(const AudioObjectPropertyScope scope,
     WEBRTC_CA_RETURN_ON_ERR(AudioObjectGetPropertyData(
         usedID, &propertyAddress, 0, NULL, &len, devName.data()));
 
-    webrtc::SimpleStringBuilder ss(name);
+    StringBuilder ss;
     ss.AppendFormat("default (%s)", devName.data());
-    guid_ss << "default";
+    const std::string& s = ss.str();
+    size_t chars_to_copy = std::min(s.size(), name.size() - 1);
+    std::copy_n(s.data(), chars_to_copy, name.data());
+    name[chars_to_copy] = '\0';
+    set_guid("default");
   } else {
     if (index < numberDevices) {
       usedID = deviceIds[index];
@@ -1704,7 +1653,7 @@ int32_t AudioDeviceMac::GetDeviceName(const AudioObjectPropertyScope scope,
       usedID = index;
     }
     UInt32 len = name.size();
-    guid_ss << std::to_string(deviceIds[index]);
+    set_guid(std::to_string(deviceIds[index]));
     WEBRTC_CA_RETURN_ON_ERR(AudioObjectGetPropertyData(
         usedID, &propertyAddress, 0, NULL, &len, name.data()));
   }
@@ -1800,8 +1749,10 @@ OSStatus AudioDeviceMac::SetDesiredPlayoutFormat() {
     _ptrAudioBuffer->SetPlayoutChannels((uint8_t)_playChannels);
   }
 
-  _renderDelayOffsetSamples =
-      _renderBufSizeSamples - N_BUFFERS_OUT * ENGINE_PLAY_BUF_SIZE_IN_SAMPLES *
+  const int render_buf_size_samples =
+      static_cast<int>(_renderBuffer.capacity());
+  _renderDelayOffsetSamples = render_buf_size_samples -
+                              N_BUFFERS_OUT * ENGINE_PLAY_BUF_SIZE_IN_SAMPLES *
                                   _outDesiredFormat.mChannelsPerFrame;
 
   _outDesiredFormat.mBytesPerPacket =
@@ -2121,10 +2072,12 @@ int32_t AudioDeviceMac::HandleStreamFormatChange(
     const int io_block_size_samples = streamFormat.mChannelsPerFrame *
                                       streamFormat.mSampleRate / 100 *
                                       N_BLOCKS_IO;
-    if (io_block_size_samples > _captureBufSizeSamples) {
+    const int capture_buf_size_samples =
+        static_cast<int>(_captureBuffer.capacity());
+    if (io_block_size_samples > capture_buf_size_samples) {
       RTC_LOG(LS_ERROR) << "Input IO block size (" << io_block_size_samples
                         << ") is larger than ring buffer ("
-                        << _captureBufSizeSamples << ")";
+                        << capture_buf_size_samples << ")";
       return -1;
     }
 
@@ -2305,8 +2258,7 @@ OSStatus AudioDeviceMac::implDeviceIOProc(const AudioBufferList* inputData,
     }
   }
 
-  ring_buffer_size_t bufSizeSamples =
-      PaUtil_GetRingBufferReadAvailable(_paRenderBuffer);
+  size_t bufSizeSamples = _renderBuffer.AvailableToRead();
 
   int32_t renderDelayUs =
       static_cast<int32_t>(1e-3 * (outputTimeNs - nowNs) + 0.5);
@@ -2323,8 +2275,7 @@ OSStatus AudioDeviceMac::implDeviceIOProc(const AudioBufferList* inputData,
 OSStatus AudioDeviceMac::implOutConverterProc(UInt32* numberDataPackets,
                                               AudioBufferList* data) {
   RTC_DCHECK(data->mNumberBuffers == 1);
-  ring_buffer_size_t numSamples =
-      *numberDataPackets * _outDesiredFormat.mChannelsPerFrame;
+  size_t numSamples = *numberDataPackets * _outDesiredFormat.mChannelsPerFrame;
 
   data->mBuffers->mNumberChannels = _outDesiredFormat.mChannelsPerFrame;
   // Always give the converter as much as it wants, zero padding as required.
@@ -2333,7 +2284,7 @@ OSStatus AudioDeviceMac::implOutConverterProc(UInt32* numberDataPackets,
   data->mBuffers->mData = _renderConvertData;
   memset(_renderConvertData, 0, sizeof(_renderConvertData));
 
-  PaUtil_ReadRingBuffer(_paRenderBuffer, _renderConvertData, numSamples);
+  _renderBuffer.Read(std::span<SInt16>(_renderConvertData, numSamples));
 
   kern_return_t kernErr = semaphore_signal_all(_renderSemaphore);
   if (kernErr != KERN_SUCCESS) {
@@ -2374,8 +2325,7 @@ OSStatus AudioDeviceMac::implInDeviceIOProc(const AudioBufferList* inputData,
     return 0;
   }
 
-  ring_buffer_size_t bufSizeSamples =
-      PaUtil_GetRingBufferReadAvailable(_paCaptureBuffer);
+  size_t bufSizeSamples = _captureBuffer.AvailableToRead();
 
   int32_t captureDelayUs =
       static_cast<int32_t>(1e-3 * (nowNs - inputTimeNs) + 0.5);
@@ -2387,11 +2337,11 @@ OSStatus AudioDeviceMac::implInDeviceIOProc(const AudioBufferList* inputData,
   _captureDelayUs = captureDelayUs;
 
   RTC_DCHECK(inputData->mNumberBuffers == 1);
-  ring_buffer_size_t numSamples = inputData->mBuffers->mDataByteSize *
-                                  _inStreamFormat.mChannelsPerFrame /
-                                  _inStreamFormat.mBytesPerPacket;
-  PaUtil_WriteRingBuffer(_paCaptureBuffer, inputData->mBuffers->mData,
-                         numSamples);
+  size_t numSamples = inputData->mBuffers->mDataByteSize *
+                      _inStreamFormat.mChannelsPerFrame /
+                      _inStreamFormat.mBytesPerPacket;
+  _captureBuffer.Write(std::span<const Float32>(
+      static_cast<const Float32*>(inputData->mBuffers->mData), numSamples));
 
   kern_return_t kernErr = semaphore_signal_all(_captureSemaphore);
   if (kernErr != KERN_SUCCESS) {
@@ -2404,10 +2354,9 @@ OSStatus AudioDeviceMac::implInDeviceIOProc(const AudioBufferList* inputData,
 OSStatus AudioDeviceMac::implInConverterProc(UInt32* numberDataPackets,
                                              AudioBufferList* data) {
   RTC_DCHECK(data->mNumberBuffers == 1);
-  ring_buffer_size_t numSamples =
-      *numberDataPackets * _inStreamFormat.mChannelsPerFrame;
+  size_t numSamples = *numberDataPackets * _inStreamFormat.mChannelsPerFrame;
 
-  while (PaUtil_GetRingBufferReadAvailable(_paCaptureBuffer) < numSamples) {
+  while (_captureBuffer.AvailableToRead() < numSamples) {
     mach_timespec_t timeout;
     timeout.tv_sec = 0;
     timeout.tv_nsec = TIMER_PERIOD_MS;
@@ -2425,13 +2374,8 @@ OSStatus AudioDeviceMac::implInConverterProc(UInt32* numberDataPackets,
     }
   }
 
-  // Pass the read pointer directly to the converter to avoid a memcpy.
-  void* dummyPtr;
-  ring_buffer_size_t dummySize;
-  PaUtil_GetRingBufferReadRegions(_paCaptureBuffer, numSamples,
-                                  &data->mBuffers->mData, &numSamples,
-                                  &dummyPtr, &dummySize);
-  PaUtil_AdvanceRingBufferReadIndex(_paCaptureBuffer, numSamples);
+  data->mBuffers->mData = _captureConvertData;
+  _captureBuffer.Read(std::span<Float32>(_captureConvertData, numSamples));
 
   data->mBuffers->mNumberChannels = _inStreamFormat.mChannelsPerFrame;
   *numberDataPackets = numSamples / _inStreamFormat.mChannelsPerFrame;
@@ -2442,11 +2386,11 @@ OSStatus AudioDeviceMac::implInConverterProc(UInt32* numberDataPackets,
 }
 
 bool AudioDeviceMac::RenderWorkerThread() {
-  ring_buffer_size_t numSamples =
+  size_t numSamples =
       ENGINE_PLAY_BUF_SIZE_IN_SAMPLES * _outDesiredFormat.mChannelsPerFrame;
-  while (PaUtil_GetRingBufferWriteAvailable(_paRenderBuffer) -
+  while (static_cast<int32_t>(_renderBuffer.AvailableToWrite()) -
              _renderDelayOffsetSamples <
-         numSamples) {
+         static_cast<int32_t>(numSamples)) {
     mach_timespec_t timeout;
     timeout.tv_sec = 0;
     timeout.tv_nsec = TIMER_PERIOD_MS;
@@ -2483,7 +2427,7 @@ bool AudioDeviceMac::RenderWorkerThread() {
 
   SInt16* pPlayBuffer = (SInt16*)&playBuffer;
 
-  PaUtil_WriteRingBuffer(_paRenderBuffer, pPlayBuffer, nOutSamples);
+  _renderBuffer.Write(std::span<const SInt16>(pPlayBuffer, nOutSamples));
 
   return true;
 }

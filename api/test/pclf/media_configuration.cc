@@ -16,12 +16,13 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/strings/string_view.h"
-#include "api/array_view.h"
+#include "api/rtp_parameters.h"
 #include "api/test/video/video_frame_writer.h"
 #include "api/units/time_delta.h"
 #include "rtc_base/checks.h"
@@ -223,13 +224,12 @@ VideoConfig::VideoConfig(absl::string_view stream_label,
 VideoCodecConfig::VideoCodecConfig(absl::string_view name)
     : name(name), required_params() {}
 
-VideoCodecConfig::VideoCodecConfig(
-    absl::string_view name,
-    std::map<std::string, std::string> required_params)
+VideoCodecConfig::VideoCodecConfig(absl::string_view name,
+                                   CodecParameterMap required_params)
     : name(name), required_params(std::move(required_params)) {}
 
 std::optional<VideoResolution> VideoSubscription::GetMaxResolution(
-    ArrayView<const VideoConfig> video_configs) {
+    std::span<const VideoConfig> video_configs) {
   std::vector<VideoResolution> resolutions;
   for (const auto& video_config : video_configs) {
     resolutions.push_back(video_config.GetResolution());
@@ -238,7 +238,7 @@ std::optional<VideoResolution> VideoSubscription::GetMaxResolution(
 }
 
 std::optional<VideoResolution> VideoSubscription::GetMaxResolution(
-    ArrayView<const VideoResolution> resolutions) {
+    std::span<const VideoResolution> resolutions) {
   if (resolutions.empty()) {
     return std::nullopt;
   }

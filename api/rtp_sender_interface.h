@@ -24,6 +24,8 @@
 #include "api/crypto/frame_encryptor_interface.h"
 #include "api/dtls_transport_interface.h"
 #include "api/dtmf_sender_interface.h"
+#include "api/encoded_audio_frame_injector_interface.h"
+#include "api/encoded_video_frame_injector_interface.h"
 #include "api/frame_transformer_interface.h"
 #include "api/media_stream_interface.h"
 #include "api/media_types.h"
@@ -31,7 +33,9 @@
 #include "api/rtc_error.h"
 #include "api/rtp_parameters.h"
 #include "api/scoped_refptr.h"
+#include "api/sframe/sframe_encryptor_interface.h"
 #include "api/video_codecs/video_encoder_factory.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/system/rtc_export.h"
 
 namespace webrtc {
@@ -126,18 +130,69 @@ class RTC_EXPORT RtpSenderInterface : public RefCountInterface,
 
   // Sets a user defined encoder selector.
   // Overrides selector that is (optionally) provided by VideoEncoderFactory.
+  [[deprecated(
+      "Use SetEncoderSelector with Ref Counted EncoderSelectorInterface")]]
   virtual void SetEncoderSelector(
       std::unique_ptr<VideoEncoderFactory::EncoderSelectorInterface>
-          encoder_selector) = 0;
+          encoder_selector) {
+    SetEncoderSelector(
+        scoped_refptr<VideoEncoderFactory::EncoderSelectorInterface>(
+            encoder_selector.release()));
+  }
+
+  virtual void SetEncoderSelector(
+      scoped_refptr<VideoEncoderFactory::EncoderSelectorInterface>
+          encoder_selector) {
+    RTC_DCHECK_NOTREACHED();
+  }
 
   // Default implementation of SetFrameTransformer.
   // TODO: bugs.webrtc.org/15929 - remove when all implementations are good
   void SetFrameTransformer(scoped_refptr<FrameTransformerInterface>
                            /* frame_transformer */) override {}
 
+  // Creates an internal Sframe encrypter and returns a handle for key
+  // management.
+  // Default implementation of CreateSframeEncryptorOrError.
+  // TODO: bugs.webrtc.org/479862368 - remove when all implementations are
+  // updated
+  virtual RTCErrorOr<scoped_refptr<SframeEncryptorInterface>>
+  CreateSframeEncryptorOrError(const SframeEncryptorInit& options) {
+    RTC_DCHECK_NOTREACHED();
+    return RTCError();
+  }
+
   // TODO(crbug.com/1354101): make pure virtual again after Chrome roll.
   virtual RTCError GenerateKeyFrame(const std::vector<std::string>& rids) {
     return RTCError::OK();
+  }
+
+  // Creates and returns an injector that allows encoded video frames to
+  // be sent on this sender.
+  //
+  // `keyframe_callback`: Callback invoked when a keyframe is requested.
+  // `bitrate_callback`: Callback invoked when the bitrate allocated is updated.
+  //
+  // Returns nullptr if creation fails (e.g. if the sender is stopped, has a
+  // track attached, is not a video sender, or if an injector is already
+  // active).
+  virtual scoped_refptr<EncodedVideoFrameInjectorInterface>
+  CreateEncodedVideoFrameInjector(KeyFrameCallback keyframe_callback,
+                                  BitrateInfoCallback bitrate_callback) {
+    return nullptr;
+  }
+
+  // Creates and returns an injector that allows encoded audio frames to
+  // be sent on this sender.
+  //
+  // `bitrate_callback`: Callback invoked when the target bitrate is updated.
+  //
+  // Returns nullptr if creation fails (e.g. if the sender is stopped, has a
+  // track attached, is not an audio sender, or if an injector is already
+  // active).
+  virtual scoped_refptr<EncodedAudioFrameInjectorInterface>
+  CreateEncodedAudioFrameInjector(TargetBitrateCallback bitrate_callback) {
+    return nullptr;
   }
 
  protected:

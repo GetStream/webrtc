@@ -20,6 +20,7 @@
 @synthesize minBitrateBps = _minBitrateBps;
 @synthesize maxFramerate = _maxFramerate;
 @synthesize numTemporalLayers = _numTemporalLayers;
+@synthesize scalabilityMode = _scalabilityMode;
 @synthesize scaleResolutionDownBy = _scaleResolutionDownBy;
 @synthesize ssrc = _ssrc;
 @synthesize bitratePriority = _bitratePriority;
@@ -54,6 +55,10 @@
     if (nativeParameters.num_temporal_layers) {
       _numTemporalLayers =
           [NSNumber numberWithInt:*nativeParameters.num_temporal_layers];
+    }
+    if (nativeParameters.scalability_mode) {
+      _scalabilityMode =
+          [NSString stringForStdString:*nativeParameters.scalability_mode];
     }
     if (nativeParameters.scale_resolution_down_by) {
       _scaleResolutionDownBy = [NSNumber
@@ -91,6 +96,10 @@
   if (_numTemporalLayers != nil) {
     parameters.num_temporal_layers =
         std::optional<int>(_numTemporalLayers.intValue);
+  }
+  if (_scalabilityMode != nil) {
+    parameters.scalability_mode = std::optional<std::string>(
+        [NSString stdStringForString:_scalabilityMode]);
   }
   if (_scaleResolutionDownBy != nil) {
     parameters.scale_resolution_down_by =

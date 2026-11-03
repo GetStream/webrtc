@@ -111,10 +111,9 @@ namespace {
 }
 
 std::string ToString(const EncodedImage& encoded_image) {
-  char buffer[1024];
-  SimpleStringBuilder ss(buffer);
+  StringBuilder ss;
 
-  ss << VideoFrameTypeToString(encoded_image._frameType)
+  ss << VideoFrameTypeToString(encoded_image.frame_type())
      << ", size=" << encoded_image.size() << ", qp=" << encoded_image.qp_
      << ", timestamp=" << encoded_image.RtpTimestamp();
 
@@ -130,13 +129,12 @@ std::string ToString(const EncodedImage& encoded_image) {
     ss << ", TemporalIndex=" << *encoded_image.TemporalIndex();
   }
 
-  return ss.str();
+  return ss.Release();
 }
 
 [[maybe_unused]] std::string ToString(
     const CodecSpecificInfo& codec_specific_info) {
-  char buffer[1024];
-  SimpleStringBuilder ss(buffer);
+  StringBuilder ss;
 
   ss << CodecTypeToPayloadString(codec_specific_info.codecType);
 
@@ -160,7 +158,7 @@ std::string ToString(const EncodedImage& encoded_image) {
        << ", num_chains=" << template_structure->num_chains;
   }
 
-  return ss.str();
+  return ss.Release();
 }
 
 // This follows
@@ -342,6 +340,10 @@ class BitstreamProcessor final : public EncodedImageCallback,
     return Result(Result::Error::OK);
   }
 
+  void OnFrameDropped(uint32_t /*rtp_timestamp*/,
+                      int /*spatial_id*/,
+                      bool /*is_end_of_temporal_unit*/) override {}
+
   VideoCodec video_codec_setting_;
   int32_t frames_ = 0;
 
@@ -390,7 +392,8 @@ class TestVideoEncoderFactoryWrapper final {
     // VP9 profile2 is not implemented at this moment.
     VideoEncoderFactory::CodecSupport support =
         builtin_video_encoder_factory_->QueryCodecSupport(
-            SdpVideoFormat(video_codec_string), scalability_mode_string);
+            SdpVideoFormat(video_codec_string), scalability_mode_string,
+            /*resolution=*/std::nullopt);
     return support.is_supported;
   }
 
@@ -563,13 +566,11 @@ int main(int argc, char* argv[]) {
       "--scalability_mode=L1T3\n");
   absl::ParseCommandLine(argc, argv);
 
-  if (absl::GetFlag(FLAGS_verbose)) {
-    webrtc::LogMessage::LogToDebug(webrtc::LS_VERBOSE);
-  } else {
-    webrtc::LogMessage::LogToDebug(webrtc::LS_INFO);
-  }
-
-  webrtc::LogMessage::SetLogToStderr(true);
+  webrtc::LoggingConfig config;
+  config.set_min_severity(absl::GetFlag(FLAGS_verbose) ? webrtc::LS_VERBOSE
+                                                       : webrtc::LS_INFO);
+  config.set_debug_severity(config.min_severity());
+  webrtc::InitializeLogging(std::move(config));
 
   const bool list_formats = absl::GetFlag(FLAGS_list_formats);
   const bool validate_psnr = absl::GetFlag(FLAGS_validate_psnr);

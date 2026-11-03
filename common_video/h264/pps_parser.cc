@@ -13,10 +13,10 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <span>
 #include <vector>
 
 #include "absl/numeric/bits.h"
-#include "api/array_view.h"
 #include "common_video/h264/h264_common.h"
 #include "rtc_base/bitstream_reader.h"
 #include "rtc_base/checks.h"
@@ -32,14 +32,14 @@ constexpr int kMinPicInitQpDeltaValue = -26;
 // http://www.itu.int/rec/T-REC-H.264
 
 std::optional<PpsParser::PpsState> PpsParser::ParsePps(
-    ArrayView<const uint8_t> data) {
+    std::span<const uint8_t> data) {
   // First, parse out rbsp, which is basically the source buffer minus emulation
   // bytes (the last byte of a 0x00 0x00 0x03 sequence). RBSP is defined in
   // section 7.3.1 of the H.264 standard.
   return ParseInternal(H264::ParseRbsp(data));
 }
 
-bool PpsParser::ParsePpsIds(ArrayView<const uint8_t> data,
+bool PpsParser::ParsePpsIds(std::span<const uint8_t> data,
                             uint32_t* pps_id,
                             uint32_t* sps_id) {
   RTC_DCHECK(pps_id);
@@ -49,13 +49,19 @@ bool PpsParser::ParsePpsIds(ArrayView<const uint8_t> data,
   // section 7.3.1 of the H.264 standard.
   std::vector<uint8_t> unpacked_buffer = H264::ParseRbsp(data);
   BitstreamReader reader(unpacked_buffer);
-  *pps_id = reader.ReadExponentialGolomb();
-  *sps_id = reader.ReadExponentialGolomb();
-  return reader.Ok();
+  uint32_t parsed_pps_id = reader.ReadExponentialGolomb();
+  uint32_t parsed_sps_id = reader.ReadExponentialGolomb();
+  if (!reader.Ok() || parsed_pps_id > H264::kMaxPpsId ||
+      parsed_sps_id > H264::kMaxSpsId) {
+    return false;
+  }
+  *pps_id = parsed_pps_id;
+  *sps_id = parsed_sps_id;
+  return true;
 }
 
 std::optional<PpsParser::SliceHeader> PpsParser::ParseSliceHeader(
-    ArrayView<const uint8_t> data) {
+    std::span<const uint8_t> data) {
   std::vector<uint8_t> unpacked_buffer = H264::ParseRbsp(data);
   BitstreamReader slice_reader(unpacked_buffer);
   PpsParser::SliceHeader slice_header;
@@ -69,18 +75,23 @@ std::optional<PpsParser::SliceHeader> PpsParser::ParseSliceHeader(
 
   // The rest of the slice header requires information from the SPS to parse.
 
-  if (!slice_reader.Ok()) {
+  if (!slice_reader.Ok() ||
+      slice_header.pic_parameter_set_id > H264::kMaxPpsId) {
     return std::nullopt;
   }
   return slice_header;
 }
 
 std::optional<PpsParser::PpsState> PpsParser::ParseInternal(
-    ArrayView<const uint8_t> buffer) {
+    std::span<const uint8_t> buffer) {
   BitstreamReader reader(buffer);
   PpsState pps;
   pps.id = reader.ReadExponentialGolomb();
   pps.sps_id = reader.ReadExponentialGolomb();
+  if (!reader.Ok() || pps.id > H264::kMaxPpsId ||
+      pps.sps_id > H264::kMaxSpsId) {
+    return std::nullopt;
+  }
 
   // entropy_coding_mode_flag: u(1)
   pps.entropy_coding_mode_flag = reader.Read<bool>();

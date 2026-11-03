@@ -15,10 +15,10 @@
 #include <cstring>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
-#include "api/array_view.h"
 #include "api/audio/audio_frame.h"
 #include "api/audio/audio_mixer.h"
 #include "api/rtp_packet_info.h"
@@ -36,7 +36,6 @@
 
 using ::testing::_;
 using ::testing::Exactly;
-using ::testing::Invoke;
 using ::testing::Return;
 using ::testing::UnorderedElementsAre;
 
@@ -79,8 +78,9 @@ class MockMixerAudioSource : public ::testing::NiceMock<AudioMixer::Source> {
   MockMixerAudioSource()
       : fake_audio_frame_info_(AudioMixer::Source::AudioFrameInfo::kNormal) {
     ON_CALL(*this, GetAudioFrameWithInfo(_, _))
-        .WillByDefault(
-            Invoke(this, &MockMixerAudioSource::FakeAudioFrameWithInfo));
+        .WillByDefault([this](int sample_rate_hz, AudioFrame* audio_frame) {
+          return FakeAudioFrameWithInfo(sample_rate_hz, audio_frame);
+        });
     ON_CALL(*this, PreferredSampleRate())
         .WillByDefault(Return(kDefaultSampleRateHz));
   }
@@ -122,7 +122,7 @@ class CustomRateCalculator : public OutputRateCalculator {
  public:
   explicit CustomRateCalculator(int rate) : rate_(rate) {}
   int CalculateOutputRateFromRange(
-      ArrayView<const int> /* preferred_rates */) override {
+      std::span<const int> /* preferred_rates */) override {
     return rate_;
   }
 
@@ -484,7 +484,7 @@ class HighOutputRateCalculator : public OutputRateCalculator {
  public:
   static const int kDefaultFrequency = 76000;
   int CalculateOutputRateFromRange(
-      ArrayView<const int> /* preferred_sample_rates */) override {
+      std::span<const int> /* preferred_sample_rates */) override {
     return kDefaultFrequency;
   }
   ~HighOutputRateCalculator() override {}

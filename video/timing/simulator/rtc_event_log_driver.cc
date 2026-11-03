@@ -13,12 +13,16 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <set>
 #include <utility>
 
 #include "absl/base/nullability.h"
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
 #include "api/environment/environment_factory.h"
+#include "api/environment/force_test_environment.h"
 #include "api/field_trials.h"
 #include "api/sequence_checker.h"
 #include "api/task_queue/task_queue_factory.h"
@@ -31,8 +35,19 @@
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "test/time_controller/simulated_time_task_queue_controller.h"
+#include "video/timing/simulator/rtp_packet_simulator.h"
+#include "video/timing/simulator/rtt_simulator.h"
 
 namespace webrtc::video_timing_simulator {
+namespace {
+// Creates FieldTrials that are acceptable both in unittests and in production.
+// Note: This will not capture the command line --force_fieldtrials flag,
+// as it bypasses the test environment check without merging the flag.
+std::unique_ptr<FieldTrials> CreateFieldTrials(absl::string_view s) {
+  AutoBypassTestEnvironmentCheck bypass;
+  return std::make_unique<FieldTrials>(s, /*is_test=*/true);
+}
+}  // namespace
 
 RtcEventLogDriver::RtcEventLogDriver(
     const Config& config,
@@ -41,38 +56,80 @@ RtcEventLogDriver::RtcEventLogDriver(
     RtcEventLogDriver::StreamInterfaceFactory stream_factory)
     : config_(config),
       time_controller_(Timestamp::Zero()),
-      env_(CreateEnvironment(
-          std::make_unique<webrtc::FieldTrials>(field_trials_string),
-          time_controller_.GetClock(),
-          time_controller_.GetTaskQueueFactory())),
+      env_(CreateEnvironment(CreateFieldTrials(field_trials_string),
+                             time_controller_.GetClock(),
+                             time_controller_.GetTaskQueueFactory())),
       parsed_log_(*parsed_log),
       stream_factory_(std::move(stream_factory)),
       prev_log_timestamp_(std::nullopt),
       simulator_queue_(time_controller_.GetTaskQueueFactory()->CreateTaskQueue(
           "simulator_queue",
-          TaskQueueFactory::Priority::NORMAL)),
-      packet_simulator_(env_) {
+          TaskQueueFactory::Priority::kNormal)),
+      packet_simulator_(env_),
+      rtt_callback_adapter_(this) {
   RTC_DCHECK(stream_factory_) << "stream_factory must be provided";
+
+  bool done = false;
+  simulator_queue_->PostTask([this, &done]() {
+    RTC_DCHECK_RUN_ON(simulator_queue_.get());
+    rtt_simulator_ = std::make_unique<RttSimulator>(
+        env_, simulator_queue_.get(), &rtt_callback_adapter_);
+    done = true;
+  });
+  time_controller_.AdvanceTime(TimeDelta::Zero());
+  RTC_DCHECK(done);
 
   // Config events.
   processor_.AddEvents(
       parsed_log_.video_recv_configs(),
-      [&](const auto& config) { OnLoggedVideoRecvConfig(config); });
+      [this](const auto& config) { OnLoggedVideoRecvConfig(config); });
 
-  // Video packet events.
+  // RTP video packet events (media + RTX).
   for (const auto& stream : parsed_log_.incoming_rtp_packets_by_ssrc()) {
     bool is_video = parsed_log_.GetMediaType(
                         stream.ssrc, PacketDirection::kIncomingPacket) ==
                     ParsedRtcEventLog::MediaType::VIDEO;
-    bool is_rtx = parsed_log_.incoming_rtx_ssrcs().contains(stream.ssrc);
-    // TODO: b/423646186 - Handle RTX.
-    if (!is_video || is_rtx) {
+    if (!is_video) {
       continue;
     }
-    processor_.AddEvents(stream.incoming_packets, [&](const auto& packet) {
+    processor_.AddEvents(stream.incoming_packets, [this](const auto& packet) {
       OnLoggedRtpPacketIncoming(packet);
     });
   }
+
+  // RTCP packet events (outgoing).
+  processor_.AddEvents(
+      parsed_log_.sender_reports(PacketDirection::kOutgoingPacket),
+      [this](const auto& packet) {
+        OnLoggedRtcpPacketSenderReportOutgoing(packet);
+      },
+      PacketDirection::kOutgoingPacket);
+  processor_.AddEvents(
+      parsed_log_.extended_reports(PacketDirection::kOutgoingPacket),
+      [this](const auto& packet) {
+        OnLoggedRtcpPacketExtendedReportsOutgoing(packet);
+      },
+      PacketDirection::kOutgoingPacket);
+
+  // RTCP packet events (incoming).
+  processor_.AddEvents(
+      parsed_log_.sender_reports(PacketDirection::kIncomingPacket),
+      [this](const auto& packet) {
+        OnLoggedRtcpPacketSenderReportIncoming(packet);
+      },
+      PacketDirection::kIncomingPacket);
+  processor_.AddEvents(
+      parsed_log_.receiver_reports(PacketDirection::kIncomingPacket),
+      [this](const auto& packet) {
+        OnLoggedRtcpPacketReceiverReportIncoming(packet);
+      },
+      PacketDirection::kIncomingPacket);
+  processor_.AddEvents(
+      parsed_log_.extended_reports(PacketDirection::kIncomingPacket),
+      [this](const auto& packet) {
+        OnLoggedRtcpPacketExtendedReportsIncoming(packet);
+      },
+      PacketDirection::kIncomingPacket);
 }
 
 RtcEventLogDriver::~RtcEventLogDriver() = default;
@@ -89,10 +146,7 @@ void RtcEventLogDriver::Simulate() {
   bool done = false;
   simulator_queue_->PostTask([this, &done]() {
     RTC_DCHECK_RUN_ON(simulator_queue_.get());
-    for (auto& stream : streams_) {
-      stream.second->Close();
-    }
-    streams_.clear();
+    TeardownOnQueue();
     done = true;
   });
   time_controller_.AdvanceTime(TimeDelta::Zero());
@@ -137,28 +191,49 @@ void RtcEventLogDriver::HandleEvent(Timestamp log_timestamp,
 void RtcEventLogDriver::OnLoggedVideoRecvConfig(
     const webrtc::LoggedVideoRecvConfig& config) {
   uint32_t ssrc = config.config.remote_ssrc;
-  HandleEvent(config.log_time(), [this, ssrc]() {
+  uint32_t rtx_ssrc = config.config.rtx_ssrc;
+  HandleEvent(config.log_time(), [this, ssrc, rtx_ssrc]() {
     RTC_DCHECK_RUN_ON(simulator_queue_.get());
-    RTC_LOG(LS_INFO) << "OnLoggedVideoRecvConfig for ssrc=" << ssrc
+
+    all_known_ssrcs_.insert(ssrc);
+    all_known_ssrcs_.insert(rtx_ssrc);
+
+    // Skip setting up stream if not included in the filter.
+    if (!config_.ssrc_filter.empty() && !config_.ssrc_filter.contains(ssrc)) {
+      RTC_LOG(LS_INFO) << "OnLoggedVideoRecvConfig being skipped for "
+                       << "ssrc=" << ssrc << ", rtx_ssrc=" << rtx_ssrc
+                       << " (simulated_ts=" << env_.clock().CurrentTime()
+                       << ")";
+      return;
+    }
+
+    RTC_LOG(LS_INFO) << "OnLoggedVideoRecvConfig for "
+                     << "ssrc=" << ssrc << ", rtx_ssrc=" << rtx_ssrc
                      << " (simulated_ts=" << env_.clock().CurrentTime() << ")";
     if (auto it = streams_.find(ssrc); it != streams_.end()) {
       if (config_.reuse_streams) {
+        // TODO(b/384950328): Support changing RTX SSRCs on the fly?
         RTC_LOG(LS_WARNING)
-            << "Video receive stream for ssrc=" << ssrc
-            << " already existed. Reusing it."
+            << "Stream for ssrc=" << ssrc << " already existed. Reusing it."
             << " (simulated_ts=" << env_.clock().CurrentTime() << ")";
         return;
       } else {
         RTC_LOG(LS_WARNING)
-            << "Video receive stream for ssrc=" << ssrc
-            << " already existed. Overwriting it."
+            << "Stream for ssrc=" << ssrc << " already existed. Overwriting it."
             << " (simulated_ts=" << env_.clock().CurrentTime() << ")";
         it->second->Close();
       }
     }
-    std::unique_ptr<StreamInterface> stream = stream_factory_(env_, ssrc);
+    std::unique_ptr<StreamInterface> stream =
+        stream_factory_(env_, ssrc, rtx_ssrc);
     RTC_DCHECK(stream);
+    // Keep track of the stream object for ownership purposes.
     streams_[ssrc] = std::move(stream);
+    // Also map it by the two SSRCs, for packet demuxing purposes.
+    receiving_streams_[ssrc] = streams_[ssrc].get();
+    if (rtx_ssrc != 0) {
+      receiving_streams_[rtx_ssrc] = streams_[ssrc].get();
+    }
   });
 }
 
@@ -166,19 +241,79 @@ void RtcEventLogDriver::OnLoggedRtpPacketIncoming(
     const webrtc::LoggedRtpPacketIncoming& packet) {
   HandleEvent(packet.log_time(), [this, packet]() {
     RTC_DCHECK_RUN_ON(simulator_queue_.get());
-    if (auto it = streams_.find(packet.rtp.header.ssrc); it != streams_.end()) {
-      RtpPacketReceived rtp_packet =
+    uint32_t ssrc = packet.rtp.header.ssrc;
+    if (auto it = receiving_streams_.find(ssrc);
+        it != receiving_streams_.end()) {
+      RtpPacketSimulator::SimulatedPacket simulated_packet =
           packet_simulator_.SimulateRtpPacketReceived(packet.rtp);
-      RTC_DCHECK_EQ(rtp_packet.arrival_time(), packet.log_time());
+      RTC_DCHECK_EQ(simulated_packet.rtp_packet.arrival_time(),
+                    packet.log_time());
       RTC_DCHECK_EQ(env_.clock().CurrentTime(), packet.log_time());
-      it->second->InsertPacket(rtp_packet);
-    } else {
-      RTC_LOG(LS_WARNING) << "Received packet for unknown ssrc="
-                          << packet.rtp.header.ssrc
+      it->second->InsertSimulatedPacket(simulated_packet);
+    } else if (!all_known_ssrcs_.contains(ssrc)) {
+      RTC_LOG(LS_WARNING) << "Received packet for unknown ssrc=" << ssrc
                           << " (simulated_ts=" << env_.clock().CurrentTime()
                           << ")";
     }
   });
+}
+
+void RtcEventLogDriver::OnLoggedRtcpPacketSenderReportOutgoing(
+    const LoggedRtcpPacketSenderReport& packet) {
+  HandleEvent(packet.log_time(), [this, packet]() {
+    RTC_DCHECK_RUN_ON(simulator_queue_.get());
+    rtt_simulator_->OnOutgoingSenderReport(packet);
+  });
+}
+
+void RtcEventLogDriver::OnLoggedRtcpPacketExtendedReportsOutgoing(
+    const LoggedRtcpPacketExtendedReports& packet) {
+  HandleEvent(packet.log_time(), [this, packet]() {
+    RTC_DCHECK_RUN_ON(simulator_queue_.get());
+    rtt_simulator_->OnOutgoingExtendedReports(packet);
+  });
+}
+
+void RtcEventLogDriver::OnLoggedRtcpPacketSenderReportIncoming(
+    const LoggedRtcpPacketSenderReport& packet) {
+  HandleEvent(packet.log_time(), [this, packet]() {
+    RTC_DCHECK_RUN_ON(simulator_queue_.get());
+    rtt_simulator_->OnIncomingSenderReport(packet);
+  });
+}
+
+void RtcEventLogDriver::OnLoggedRtcpPacketReceiverReportIncoming(
+    const LoggedRtcpPacketReceiverReport& packet) {
+  HandleEvent(packet.log_time(), [this, packet]() {
+    RTC_DCHECK_RUN_ON(simulator_queue_.get());
+    rtt_simulator_->OnIncomingReceiverReport(packet);
+  });
+}
+
+void RtcEventLogDriver::OnLoggedRtcpPacketExtendedReportsIncoming(
+    const LoggedRtcpPacketExtendedReports& packet) {
+  HandleEvent(packet.log_time(), [this, packet]() {
+    RTC_DCHECK_RUN_ON(simulator_queue_.get());
+    rtt_simulator_->OnIncomingExtendedReports(packet);
+  });
+}
+
+void RtcEventLogDriver::UpdateMaxRtt(TimeDelta max_rtt) {
+  RTC_DCHECK_RUN_ON(simulator_queue_.get());
+  for (auto& stream : streams_) {
+    stream.second->UpdateMaxRtt(max_rtt);
+  }
+}
+
+void RtcEventLogDriver::TeardownOnQueue() {
+  RTC_DCHECK_RUN_ON(simulator_queue_.get());
+  for (auto& stream : streams_) {
+    stream.second->Close();
+  }
+  all_known_ssrcs_.clear();
+  receiving_streams_.clear();
+  streams_.clear();
+  rtt_simulator_.reset();
 }
 
 }  // namespace webrtc::video_timing_simulator

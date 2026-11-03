@@ -60,3 +60,5 @@ static jboolean JNI_VideoTrack_GetShouldReceive(JNIEnv* jni,
 }
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(VideoTrack)

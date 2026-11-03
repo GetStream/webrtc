@@ -40,7 +40,6 @@
 #include "api/video_codecs/video_encoder_factory_template_libvpx_vp8_adapter.h"
 #include "api/video_codecs/video_encoder_factory_template_libvpx_vp9_adapter.h"
 #include "api/video_codecs/video_encoder_factory_template_open_h264_adapter.h"
-#include "p2p/base/port_interface.h"
 #include "p2p/test/test_turn_server.h"
 #include "pc/peer_connection.h"
 #include "pc/peer_connection_wrapper.h"
@@ -51,6 +50,7 @@
 #include "rtc_base/crypto_random.h"
 #include "rtc_base/fake_network.h"
 #include "rtc_base/firewall_socket_server.h"
+#include "rtc_base/net_helper.h"
 #include "rtc_base/socket_address.h"
 #include "rtc_base/socket_factory.h"
 #include "rtc_base/task_queue_for_test.h"
@@ -153,12 +153,9 @@ class PeerConnectionRampUpTest : public ::testing::Test {
   PeerConnectionRampUpTest()
       : env_(CreateTestEnvironment()),
         firewall_socket_server_(&virtual_socket_server_),
-        network_thread_(&firewall_socket_server_),
-        worker_thread_(Thread::Create()) {
+        network_thread_(&firewall_socket_server_) {
     network_thread_.SetName("PCNetworkThread", this);
-    worker_thread_->SetName("PCWorkerThread", this);
     RTC_CHECK(network_thread_.Start());
-    RTC_CHECK(worker_thread_->Start());
 
     virtual_socket_server_.set_bandwidth(kNetworkBandwidth / 8);
   }
@@ -179,7 +176,6 @@ class PeerConnectionRampUpTest : public ::testing::Test {
     PeerConnectionFactoryDependencies pcf_deps;
     pcf_deps.env = env_;
     pcf_deps.network_thread = network_thread();
-    pcf_deps.worker_thread = worker_thread_.get();
     pcf_deps.signaling_thread = Thread::Current();
     pcf_deps.socket_factory = &firewall_socket_server_;
     auto network_manager =
@@ -229,12 +225,8 @@ class PeerConnectionRampUpTest : public ::testing::Test {
     ASSERT_THAT(WaitUntil([&] { return caller_->signaling_state(); },
                           ::testing::Eq(PeerConnectionInterface::kStable)),
                 IsRtcOk());
-    ASSERT_THAT(WaitUntil([&] { return caller_->IsIceGatheringDone(); },
-                          ::testing::IsTrue()),
-                IsRtcOk());
-    ASSERT_THAT(WaitUntil([&] { return callee_->IsIceGatheringDone(); },
-                          ::testing::IsTrue()),
-                IsRtcOk());
+    ASSERT_TRUE(WaitUntil([&] { return caller_->IsIceGatheringDone(); }));
+    ASSERT_TRUE(WaitUntil([&] { return callee_->IsIceGatheringDone(); }));
 
     // Connect an ICE candidate pairs.
     ASSERT_TRUE(
@@ -242,12 +234,8 @@ class PeerConnectionRampUpTest : public ::testing::Test {
     ASSERT_TRUE(
         caller_->AddIceCandidates(callee_->observer()->GetAllCandidates()));
     // This means that ICE and DTLS are connected.
-    ASSERT_THAT(WaitUntil([&] { return callee_->IsIceConnected(); },
-                          ::testing::IsTrue()),
-                IsRtcOk());
-    ASSERT_THAT(WaitUntil([&] { return caller_->IsIceConnected(); },
-                          ::testing::IsTrue()),
-                IsRtcOk());
+    ASSERT_TRUE(WaitUntil([&] { return callee_->IsIceConnected(); }));
+    ASSERT_TRUE(WaitUntil([&] { return caller_->IsIceConnected(); }));
   }
 
   void CreateTurnServer(ProtocolType type,
@@ -349,7 +337,6 @@ class PeerConnectionRampUpTest : public ::testing::Test {
   FirewallSocketServer firewall_socket_server_;
 
   Thread network_thread_;
-  std::unique_ptr<Thread> worker_thread_;
 
   std::unique_ptr<PeerConnectionWrapperForRampUpTest> caller_;
   std::unique_ptr<PeerConnectionWrapperForRampUpTest> callee_;

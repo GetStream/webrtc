@@ -21,7 +21,7 @@
 #include <string>
 #include <vector>
 
-#include "api/field_trials_view.h"
+#include "api/environment/environment.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
 #include "api/video/video_adaptation_counters.h"
@@ -61,11 +61,11 @@ class SendStatisticsProxy : public VideoStreamEncoderObserver,
   // Number of required samples to be collected before a metric is added
   // to a rtc histogram.
   static const int kMinRequiredMetricsSamples = 200;
+  static const int kMinRequiredPsnrSamples = 5;
 
-  SendStatisticsProxy(Clock* clock,
+  SendStatisticsProxy(const Environment& env,
                       const VideoSendStream::Config& config,
-                      VideoEncoderConfig::ContentType content_type,
-                      const FieldTrialsView& field_trials);
+                      VideoEncoderConfig::ContentType content_type);
   ~SendStatisticsProxy() override;
 
   virtual VideoSendStream::Stats GetStats();
@@ -168,6 +168,17 @@ class SendStatisticsProxy : public VideoStreamEncoderObserver,
     int64_t sum;
     int64_t num_samples;
   };
+  class FloatSampleCounter {
+   public:
+    FloatSampleCounter() : sum_(0), num_samples_(0) {}
+    ~FloatSampleCounter() {}
+    void Add(float sample);
+    std::optional<float> Avg(int64_t min_required_samples) const;
+
+   private:
+    double sum_;
+    int64_t num_samples_;
+  };
   struct TargetRateUpdates {
     TargetRateUpdates()
         : pause_resume_events(0), last_paused_or_resumed(false), last_ms(-1) {}
@@ -199,10 +210,17 @@ class SendStatisticsProxy : public VideoStreamEncoderObserver,
     SampleCounter vp8;   // QP range: 0-127.
     SampleCounter vp9;   // QP range: 0-255.
     SampleCounter h264;  // QP range: 0-51.
+    SampleCounter av1;   // QP range: 0-255.
+    SampleCounter h265;  // QP range: 0-51 (up to 0-63 for 12bpp).
   };
   struct AdaptChanges {
     int down = 0;
     int up = 0;
+  };
+  struct PsnrCounters {
+    FloatSampleCounter psnr_y;
+    FloatSampleCounter psnr_u;
+    FloatSampleCounter psnr_v;
   };
 
   // Map holding encoded frames (mapped by timestamp).
@@ -302,7 +320,7 @@ class SendStatisticsProxy : public VideoStreamEncoderObserver,
                                    int simulcast_index)
       RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
-  Clock* const clock_;
+  const Environment env_;
   const std::string payload_name_;
   const RtpConfig rtp_config_;
   const std::optional<int> fallback_max_pixels_;
@@ -358,6 +376,9 @@ class SendStatisticsProxy : public VideoStreamEncoderObserver,
                             int simulcast_idx);
     void RemoveOld(int64_t now_ms);
 
+    void LogPsnrValues(const PsnrCounters& psnr_counters,
+                       std::optional<int> spatial_id);
+
     const std::string uma_prefix_;
     Clock* const clock_;
     SampleCounter input_width_counter_;
@@ -400,6 +421,8 @@ class SendStatisticsProxy : public VideoStreamEncoderObserver,
 
     std::map<int, QpCounters>
         qp_counters_;  // QP counters mapped by spatial idx.
+    std::map<int, PsnrCounters>
+        psnr_counters_;  // PSNR counters mapped by spatial idx.
   };
 
   std::unique_ptr<UmaSamplesContainer> uma_container_ RTC_GUARDED_BY(mutex_);

@@ -16,11 +16,11 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <utility>
 #include <vector>
 
 #include "absl/strings/string_view.h"
-#include "api/array_view.h"
 #include "api/audio_codecs/audio_encoder.h"
 #include "api/audio_codecs/audio_format.h"
 #include "api/audio_codecs/opus/audio_encoder_opus_config.h"
@@ -92,8 +92,6 @@ class AudioEncoderOpusImpl final : public AudioEncoder {
   void OnReceivedUplinkPacketLossFraction(
       float uplink_packet_loss_fraction) override;
   void OnReceivedTargetAudioBitrate(int target_audio_bitrate_bps) override;
-  void OnReceivedUplinkBandwidth(int target_audio_bitrate_bps,
-                                 std::optional<int64_t> bwe_period_ms) override;
   void OnReceivedUplinkAllocation(BitrateAllocationUpdate update) override;
   void OnReceivedRtt(int rtt_ms) override;
   void OnReceivedOverhead(size_t overhead_bytes_per_packet) override;
@@ -102,7 +100,7 @@ class AudioEncoderOpusImpl final : public AudioEncoder {
   ANAStats GetANAStats() const override;
   std::optional<std::pair<TimeDelta, TimeDelta> > GetFrameLengthRange()
       const override;
-  ArrayView<const int> supported_frame_lengths_ms() const {
+  std::span<const int> supported_frame_lengths_ms() const {
     return config_.supported_frame_lengths_ms;
   }
 
@@ -117,7 +115,7 @@ class AudioEncoderOpusImpl final : public AudioEncoder {
 
  protected:
   EncodedInfo EncodeImpl(uint32_t rtp_timestamp,
-                         ArrayView<const int16_t> audio,
+                         std::span<const int16_t> audio,
                          Buffer* encoded) override;
 
  private:
@@ -143,8 +141,6 @@ class AudioEncoderOpusImpl final : public AudioEncoder {
   void SetFrameLength(int frame_length_ms);
   void SetNumChannelsToEncode(size_t num_channels_to_encode);
   void SetProjectedPacketLossRate(float fraction);
-  void OnReceivedUplinkBandwidthImpl(int target_audio_bitrate_bps,
-                                     std::optional<int64_t> bwe_period_ms);
 
   // TODO(minyue): remove "override" when we can deprecate
   // `AudioEncoder::SetTargetBitrate`.

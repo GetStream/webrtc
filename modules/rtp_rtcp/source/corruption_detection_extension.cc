@@ -13,10 +13,14 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 #include "absl/container/inlined_vector.h"
-#include "api/array_view.h"
 #include "api/transport/rtp/corruption_detection_message.h"
+
+#ifndef WEBRTC_WITHOUT_RUST
+#include "modules/rtp_rtcp/corruption_detection_extension_cxx.rs.h"
+#endif
 
 namespace webrtc {
 namespace {
@@ -30,11 +34,12 @@ constexpr double kMaxValueForStdDev = 40.0;
 // A description of the extension can be found at
 // http://www.webrtc.org/experiments/rtp-hdrext/corruption-detection
 
-bool CorruptionDetectionExtension::Parse(ArrayView<const uint8_t> data,
+bool CorruptionDetectionExtension::Parse(std::span<const uint8_t> data,
                                          CorruptionDetectionMessage* message) {
   if (message == nullptr) {
     return false;
   }
+#ifdef WEBRTC_WITHOUT_RUST
   if ((data.size() != kMandatoryPayloadBytes &&
        data.size() <= kConfigurationBytes) ||
       data.size() > kMaxValueSizeBytes) {
@@ -49,13 +54,29 @@ bool CorruptionDetectionExtension::Parse(ArrayView<const uint8_t> data,
   uint8_t channel_error_thresholds = data[2];
   message->luma_error_threshold_ = channel_error_thresholds >> 4;
   message->chroma_error_threshold_ = channel_error_thresholds & 0xF;
-  message->sample_values_.assign(data.cbegin() + kConfigurationBytes,
-                                 data.cend());
+  message->sample_values_.assign(data.begin() + kConfigurationBytes,
+                                 data.end());
   return true;
+#else
+  rust::Box<RustCorruptionDetectionExtension> parsed =
+      create_corruption_detection_message();
+  if (!parsed->parse(rust::Slice(data))) {
+    return false;
+  }
+  message->interpret_sequence_index_as_most_significant_bits_ =
+      parsed->interpret_sequence_index_as_most_significant_bits();
+  message->sequence_index_ = parsed->sequence_index();
+  message->std_dev_ = parsed->std_dev();
+  message->luma_error_threshold_ = parsed->luma_error_threshold();
+  message->chroma_error_threshold_ = parsed->chroma_error_threshold();
+  std::span samples = parsed->sample_values();
+  message->sample_values_.assign(samples.begin(), samples.end());
+  return true;
+#endif
 }
 
 bool CorruptionDetectionExtension::Write(
-    ArrayView<uint8_t> data,
+    std::span<uint8_t> data,
     const CorruptionDetectionMessage& message) {
   if (data.size() != ValueSize(message) || data.size() > kMaxValueSizeBytes) {
     return false;
@@ -72,7 +93,7 @@ bool CorruptionDetectionExtension::Write(
       std::round(message.std_dev() / kMaxValueForStdDev * 255.0));
   data[2] = (message.luma_error_threshold() << 4) |
             (message.chroma_error_threshold() & 0xF);
-  ArrayView<uint8_t> sample_values = data.subview(kConfigurationBytes);
+  std::span<uint8_t> sample_values = data.subspan(kConfigurationBytes);
   for (size_t i = 0; i < message.sample_values().size(); ++i) {
     sample_values[i] = std::floor(message.sample_values()[i]);
   }

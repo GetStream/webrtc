@@ -15,6 +15,8 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <ranges>
+#include <span>
 #include <utility>
 
 #include "modules/desktop_capture/desktop_capture_types.h"
@@ -25,13 +27,22 @@
 
 namespace webrtc {
 
+namespace {
+
+constexpr uint8_t kBlackPixelValue = 0x00;
+constexpr uint8_t kColorUvBlack = 0x80;
+
+}  // namespace
+
 DesktopFrame::DesktopFrame(DesktopSize size,
                            int stride,
                            FourCC pixel_format,
                            uint8_t* data,
-                           SharedMemory* shared_memory)
+                           SharedMemory* shared_memory,
+                           FrameTexture* texture)
     : data_(data),
       shared_memory_(shared_memory),
+      texture_(texture),
       size_(size),
       stride_(stride),
       pixel_format_(pixel_format),
@@ -134,6 +145,7 @@ float DesktopFrame::scale_factor() const {
 }
 
 uint8_t* DesktopFrame::GetFrameDataAtPos(const DesktopVector& pos) const {
+  RTC_DCHECK(data());
   return data() + stride() * pos.y() + DesktopFrame::kBytesPerPixel * pos.x();
 }
 
@@ -160,8 +172,28 @@ void DesktopFrame::MoveFrameInfoFrom(DesktopFrame* other) {
 }
 
 bool DesktopFrame::FrameDataIsBlack() const {
+  RTC_DCHECK(data());
   if (size().is_empty())
     return false;
+
+  if (pixel_format() == FOURCC_I420 || pixel_format() == FOURCC_YV12 ||
+      pixel_format() == FOURCC_YU12 || pixel_format() == FOURCC_IYUV) {
+    const int width = size().width();
+    const int height = size().height();
+    const int half_width = (width + 1) / 2;
+    const int half_height = (height + 1) / 2;
+    const int y_size = width * height;
+    const int uv_size = half_width * half_height * 2;
+
+    std::span<const uint8_t> y_plane(data(), y_size);
+    std::span<const uint8_t> uv_plane(data() + y_size, uv_size);
+
+    return std::ranges::all_of(
+               y_plane,
+               [](const uint8_t y) { return y == kBlackPixelValue; }) &&
+           std::ranges::all_of(
+               uv_plane, [](const uint8_t uv) { return uv == kColorUvBlack; });
+  }
 
   uint32_t* pixel = reinterpret_cast<uint32_t*>(data());
   for (int i = 0; i < size().width() * size().height(); ++i) {
@@ -172,8 +204,28 @@ bool DesktopFrame::FrameDataIsBlack() const {
 }
 
 void DesktopFrame::SetFrameDataToBlack() {
-  const uint8_t kBlackPixelValue = 0x00;
-  memset(data(), kBlackPixelValue, stride() * size().height());
+  RTC_DCHECK(data());
+  if (pixel_format() == FOURCC_I420 || pixel_format() == FOURCC_YV12 ||
+      pixel_format() == FOURCC_YU12 || pixel_format() == FOURCC_IYUV) {
+    const int width = size().width();
+    const int height = size().height();
+    const int half_width = (width + 1) / 2;
+    const int half_height = (height + 1) / 2;
+    const int y_size = width * height;
+    const int uv_size = half_width * half_height * 2;
+
+    std::span<uint8_t> y_plane(data(), y_size);
+    std::span<uint8_t> uv_plane(data() + y_size, uv_size);
+
+    // For YUV formats, the Y plane is black at 0x00, and U/V planes are
+    // black at 128 (0x80). We can combine the U and V fills since they are
+    // contiguous and both use 0x80.
+    std::ranges::fill(y_plane, kBlackPixelValue);
+    std::ranges::fill(uv_plane, kColorUvBlack);
+  } else {
+    std::span<uint8_t> frame_data(data(), stride() * size().height());
+    std::ranges::fill(frame_data, kBlackPixelValue);
+  }
 }
 
 BasicDesktopFrame::BasicDesktopFrame(DesktopSize size)

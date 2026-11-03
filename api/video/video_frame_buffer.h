@@ -13,9 +13,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 
-#include "api/array_view.h"
 #include "api/ref_count.h"
 #include "api/scoped_refptr.h"
 #include "rtc_base/system/rtc_export.h"
@@ -86,6 +86,20 @@ class RTC_EXPORT VideoFrameBuffer : public RefCountInterface {
   // fails. If the conversion fails, nullptr is returned.
   virtual scoped_refptr<I420BufferInterface> ToI420() = 0;
 
+  // Same as ToI420(), but signals that the conversion is for occasional,
+  // out-of-band inspection of the frame contents (e.g. corruption detection
+  // sampling) rather than for encoding or scaling of the frame.
+  //
+  // kNative implementations backed by GPU memory may use this distinction to
+  // avoid concluding that all subsequent frames should be delivered in CPU
+  // memory. The returned buffer must be identical in content to ToI420().
+  //
+  // The default implementation simply calls ToI420().
+  //
+  // TODO(crbug.com/555719593): figure out a way to avoid this synchronous call
+  // for kNative buffers.
+  virtual scoped_refptr<I420BufferInterface> ToI420ForInspection();
+
   // GetI420() methods should return I420 buffer if conversion is trivial, i.e
   // no change for binary data is needed. Otherwise these methods should return
   // nullptr. One example of buffer with that property is
@@ -129,7 +143,7 @@ class RTC_EXPORT VideoFrameBuffer : public RefCountInterface {
   // frame type is not supported, mapping is not possible, or if the kNative
   // frame has not implemented this method. Only callable if type() is kNative.
   virtual scoped_refptr<VideoFrameBuffer> GetMappedFrameBuffer(
-      ArrayView<Type> types);
+      std::span<Type> types);
 
   // For logging: returns a textual representation of the storage.
   virtual std::string storage_representation() const;

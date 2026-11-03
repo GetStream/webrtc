@@ -22,12 +22,12 @@
 #include "api/audio_codecs/audio_encoder.h"
 #include "api/audio_codecs/audio_format.h"
 #include "api/audio_codecs/builtin_audio_encoder_factory.h"
-#include "api/environment/environment_factory.h"
 #include "modules/audio_coding/include/audio_coding_module.h"
 #include "modules/audio_coding/include/audio_coding_module_typedefs.h"
 #include "modules/audio_coding/neteq/tools/input_audio_file.h"
 #include "modules/rtp_rtcp/source/rtp_packet_received.h"
 #include "rtc_base/checks.h"
+#include "test/create_test_environment.h"
 
 namespace webrtc {
 namespace test {
@@ -36,7 +36,7 @@ AcmSendTestOldApi::AcmSendTestOldApi(InputAudioFile* audio_source,
                                      int source_rate_hz,
                                      int test_duration_ms)
     : clock_(0),
-      env_(CreateEnvironment(&clock_)),
+      env_(CreateTestEnvironment({.time = &clock_})),
       acm_(AudioCodingModule::Create()),
       audio_source_(audio_source),
       source_rate_hz_(source_rate_hz),
@@ -65,7 +65,7 @@ bool AcmSendTestOldApi::RegisterCodec(absl::string_view payload_name,
                                       int frame_size_samples) {
   SdpAudioFormat format(payload_name, clockrate_hz, num_channels);
   if (absl::EqualsIgnoreCase(payload_name, "g722")) {
-    RTC_CHECK_EQ(16000, clockrate_hz);
+    RTC_CHECK_EQ(clockrate_hz, 16000);
     format.clockrate_hz = 8000;
   } else if (absl::EqualsIgnoreCase(payload_name, "opus")) {
     RTC_CHECK(num_channels == 1 || num_channels == 2);

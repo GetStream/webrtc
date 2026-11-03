@@ -19,6 +19,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -29,7 +30,6 @@
 #include "absl/memory/memory.h"
 #include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
-#include "api/array_view.h"
 #include "api/async_dns_resolver.h"
 #include "api/candidate.h"
 #include "api/environment/environment.h"
@@ -96,8 +96,7 @@ RouteEndpoint CreateRouteEndpointFromCandidate(bool local,
                                                bool uses_turn) {
   auto adapter_type = candidate.network_type();
   if (!local && adapter_type == ADAPTER_TYPE_UNKNOWN) {
-    bool vpn;
-    std::tie(adapter_type, vpn) =
+    std::tie(adapter_type, std::ignore, std::ignore) =
         Network::GuessAdapterFromNetworkCost(candidate.network_cost());
   }
 
@@ -334,7 +333,7 @@ void P2PTransportChannel::AddConnection(Connection* connection) {
 }
 
 void P2PTransportChannel::ForgetLearnedStateForConnections(
-    ArrayView<const Connection* const> connections) {
+    std::span<const Connection* const> connections) {
   for (const Connection* con : connections) {
     FromIceController(con)->ForgetLearnedState();
   }
@@ -916,7 +915,6 @@ void P2PTransportChannel::OnPortReady(PortAllocatorSession* /* session */,
   // if one is pending.
 
   port->SetIceRole(ice_role_);
-  port->SetIceTiebreaker(allocator_->ice_tiebreaker());
   ports_.push_back(port);
   port->SubscribeUnknownAddress(
       this, [this](PortInterface* port, const SocketAddress& address,
@@ -1476,12 +1474,16 @@ bool P2PTransportChannel::CreateConnection(PortInterface* port,
     }
   }
 
-  // Look for an existing connection with this remote address.  If one is not
-  // found or it is found but the existing remote candidate has an older
-  // generation, then we can create a new connection for this address.
+  // Look for an existing connection with this remote address. If one is not
+  // found or a connection exists with an older generation remote candidate and
+  // is not selected, then we can create a new connection for this address.
+  // Any selected connection is kept so that it can be used to send data during
+  // ICE restart per RFC 8445. The skipped connection would be pruned later when
+  // a new generation connection is selected at the end of ICE restart.
   Connection* connection = port->GetConnection(remote_candidate.address());
-  if (connection == nullptr || connection->remote_candidate().generation() <
-                                   remote_candidate.generation()) {
+  if (connection == nullptr ||
+      (!connection->selected() && connection->remote_candidate().generation() <
+                                      remote_candidate.generation())) {
     // Don't create a connection if this is a candidate we received in a
     // message and we are not allowed to make outgoing connections.
     PortInterface::CandidateOrigin origin = GetOrigin(port, origin_port);
@@ -1500,7 +1502,15 @@ bool P2PTransportChannel::CreateConnection(PortInterface* port,
     return true;
   }
 
-  // No new connection was created.
+  // No new connection was created. Log the cases.
+  if (connection->selected()) {
+    RTC_LOG(LS_INFO) << port->ToString()
+                     << ": A selected connection exists. Skip creating "
+                     << "connection for remote candidate: "
+                     << remote_candidate.ToSensitiveString();
+    return false;
+  }
+
   // It is not legal to try to change any of the parameters of an existing
   // connection; however, the other side can send a duplicate candidate.
   if (!remote_candidate.IsEquivalent(connection->remote_candidate())) {
@@ -1646,7 +1656,8 @@ int P2PTransportChannel::SendPacket(const char* data,
   last_sent_packet_id_ = options.packet_id;
   AsyncSocketPacketOptions modified_options(options);
   modified_options.info_signaled_after_sent.packet_type = PacketType::kData;
-  int sent = selected_connection_->Send(data, len, modified_options);
+  int sent = selected_connection_->Send(
+      std::span(reinterpret_cast<const uint8_t*>(data), len), modified_options);
   if (sent <= 0) {
     RTC_DCHECK(sent < 0);
     error_ = selected_connection_->GetError();
@@ -1706,9 +1717,9 @@ DiffServCodePoint P2PTransportChannel::DefaultDscpValue() const {
   return static_cast<DiffServCodePoint>(it->second);
 }
 
-ArrayView<Connection* const> P2PTransportChannel::connections() const {
+std::span<Connection* const> P2PTransportChannel::connections() const {
   RTC_DCHECK_RUN_ON(&network_thread_);
-  return ArrayView<Connection* const>(connections_.data(), connections_.size());
+  return std::span<Connection* const>(connections_.data(), connections_.size());
 }
 
 void P2PTransportChannel::RemoveConnectionForTest(Connection* connection) {
@@ -1807,7 +1818,7 @@ bool P2PTransportChannel::AllowedToPruneConnections() const {
 }
 
 bool P2PTransportChannel::PruneConnections(
-    ArrayView<const Connection* const> connections) {
+    std::span<const Connection* const> connections) {
   RTC_DCHECK_RUN_ON(&network_thread_);
   if (!AllowedToPruneConnections()) {
     RTC_LOG(LS_WARNING) << "Not allowed to prune connections";

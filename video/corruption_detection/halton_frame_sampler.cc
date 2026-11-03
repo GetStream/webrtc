@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <vector>
 
 #include "api/scoped_refptr.h"
@@ -49,14 +50,8 @@ uint32_t EnoughTimeHasPassed(uint32_t from, uint32_t to) {
 HaltonFrameSampler::HaltonFrameSampler()
     : coordinate_sampler_prng_(HaltonSequence(2)) {}
 
-std::vector<HaltonFrameSampler::Coordinates>
-HaltonFrameSampler::GetSampleCoordinatesForFrameIfFrameShouldBeSampled(
-    bool is_key_frame,
-    uint32_t rtp_timestamp,
-    int num_samples) {
-  if (num_samples < 1) {
-    return {};
-  }
+bool HaltonFrameSampler::ShouldSampleFrame(bool is_key_frame,
+                                           uint32_t rtp_timestamp) {
   if (rtp_timestamp_last_frame_sampled_.has_value()) {
     RTC_CHECK_NE(*rtp_timestamp_last_frame_sampled_, rtp_timestamp);
   }
@@ -67,9 +62,23 @@ HaltonFrameSampler::GetSampleCoordinatesForFrameIfFrameShouldBeSampled(
         (kMaxFramesBetweenSamples - 1) - (frames_sampled_ % 8);
     ++frames_sampled_;
     rtp_timestamp_last_frame_sampled_ = rtp_timestamp;
-    return GetSampleCoordinatesForFrame(num_samples);
+    return true;
   }
   --frames_until_next_sample_;
+  return false;
+}
+
+std::vector<HaltonFrameSampler::Coordinates>
+HaltonFrameSampler::GetSampleCoordinatesForFrameIfFrameShouldBeSampled(
+    bool is_key_frame,
+    uint32_t rtp_timestamp,
+    int num_samples) {
+  if (num_samples < 1) {
+    return {};
+  }
+  if (ShouldSampleFrame(is_key_frame, rtp_timestamp)) {
+    return GetSampleCoordinatesForFrame(num_samples);
+  }
   return {};
 }
 
@@ -153,7 +162,7 @@ double GetFilteredElement(const VideoFrameSampler& frame_sampler,
 
 std::vector<FilteredSample> GetSampleValuesForFrame(
     const VideoFrame& frame,
-    std::vector<HaltonFrameSampler::Coordinates> sample_coordinates,
+    std::span<const HaltonFrameSampler::Coordinates> sample_coordinates,
     int scaled_width,
     int scaled_height,
     double std_dev_gaussian_blur) {
@@ -216,7 +225,7 @@ std::vector<FilteredSample> GetSampleValuesForFrame(
       scoped_refptr<I420Buffer> scaled_buffer =
           I420Buffer::Create(scaled_width, scaled_height);
       scoped_refptr<I420BufferInterface> buffer =
-          frame.video_frame_buffer()->ToI420();
+          frame.video_frame_buffer()->ToI420ForInspection();
       if (buffer == nullptr) {
         RTC_LOG(LS_WARNING) << "Unable to convert frame to I420 format.";
         return {};
@@ -294,7 +303,7 @@ std::vector<FilteredSample> GetSampleValuesForFrame(
 
 [[deprecated]] std::vector<FilteredSample> GetSampleValuesForFrame(
     scoped_refptr<I420BufferInterface> i420_frame_buffer,
-    std::vector<HaltonFrameSampler::Coordinates> sample_coordinates,
+    std::span<const HaltonFrameSampler::Coordinates> sample_coordinates,
     int scaled_width,
     int scaled_height,
     double std_dev_gaussian_blur) {

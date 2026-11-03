@@ -26,7 +26,6 @@
 #include "api/video/video_content_type.h"
 #include "api/video/video_frame.h"
 #include "api/video/video_sink_interface.h"
-#include "api/video/video_timing.h"
 #include "modules/video_coding/timing/timing.h"
 #include "rtc_base/thread_annotations.h"
 #include "video/timing/simulator/assembler.h"
@@ -62,7 +61,7 @@ class RenderingTracker : public AssembledFrameCallback,
   struct Config {
     uint32_t ssrc = 0;
     // Fixed render delay term added to the render timestamps.
-    TimeDelta render_delay = TimeDelta::MinusInfinity();
+    TimeDelta render_delay = TimeDelta::PlusInfinity();
   };
 
   RenderingTracker(const Environment& env,
@@ -80,6 +79,8 @@ class RenderingTracker : public AssembledFrameCallback,
   // Inserts `assembled_frame` into the `VideoStreamBufferController` and logs
   // any rendered frames to the `observer_`.
   void OnAssembledFrame(std::unique_ptr<EncodedFrame> assembled_frame) override;
+
+  void UpdateMaxRtt(TimeDelta max_rtt);
 
  private:
   struct VideoStreamBufferControllerObserverDecodableStats {
@@ -99,7 +100,6 @@ class RenderingTracker : public AssembledFrameCallback,
                         TimeDelta jitter_buffer_target_delay,
                         TimeDelta jitter_buffer_minimum_delay) override;
   void OnFrameBufferTimingsUpdated(int, int, int, int, int, int) override {}
-  void OnTimingFrameInfoUpdated(const TimingFrameInfo&) override {}
 
   // Implements `VideoSinkInterface<VideoFrame>`.
   void OnFrame(const VideoFrame& decoded_frame) override;
@@ -122,9 +122,9 @@ class RenderingTracker : public AssembledFrameCallback,
   // Stats state. This is needed since the stats and the decodable frame are
   // provided by the VSBC on different callbacks, but we want to log the
   // the corresponding information simultaneously to our callback.
-  std::optional<int> vsbc_frames_dropped_;
+  std::optional<int> vsbc_frames_dropped_ RTC_GUARDED_BY(sequence_checker_);
   std::optional<VideoStreamBufferControllerObserverDecodableStats>
-      vsbc_decodable_stats_;
+      vsbc_decodable_stats_ RTC_GUARDED_BY(sequence_checker_);
 
   // Outputs.
   RenderingTrackerEvents& observer_;

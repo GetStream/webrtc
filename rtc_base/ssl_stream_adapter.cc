@@ -15,13 +15,14 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
-#include "api/array_view.h"
+#include "api/environment/environment.h"
 #include "api/field_trials_view.h"
 #include "rtc_base/openssl_stream_adapter.h"
 #include "rtc_base/ssl_identity.h"
@@ -30,21 +31,23 @@
 namespace webrtc {
 
 // Deprecated, prefer SrtpCryptoSuiteToName.
+// https://www.iana.org/assignments/sdp-security-descriptions/sdp-security-descriptions.xhtml
 const char kCsAesCm128HmacSha1_80[] = "AES_CM_128_HMAC_SHA1_80";
 const char kCsAesCm128HmacSha1_32[] = "AES_CM_128_HMAC_SHA1_32";
 const char kCsAeadAes128Gcm[] = "AEAD_AES_128_GCM";
 const char kCsAeadAes256Gcm[] = "AEAD_AES_256_GCM";
 
+// https://www.iana.org/assignments/srtp-protection/srtp-protection.xhtml
 std::string SrtpCryptoSuiteToName(int crypto_suite) {
   switch (crypto_suite) {
     case kSrtpAes128CmSha1_80:
-      return "AES_CM_128_HMAC_SHA1_80";
+      return "SRTP_AES128_CM_HMAC_SHA1_80";
     case kSrtpAes128CmSha1_32:
-      return "AES_CM_128_HMAC_SHA1_32";
+      return "SRTP_AES128_CM_HMAC_SHA1_32";
     case kSrtpAeadAes128Gcm:
-      return "AEAD_AES_128_GCM";
+      return "SRTP_AEAD_AES_128_GCM";
     case kSrtpAeadAes256Gcm:
-      return "AEAD_AES_256_GCM";
+      return "SRTP_AEAD_AES_256_GCM";
     default:
       return std::string();
   }
@@ -86,10 +89,17 @@ bool IsGcmCryptoSuite(int crypto_suite) {
 
 std::unique_ptr<SSLStreamAdapter> SSLStreamAdapter::Create(
     std::unique_ptr<StreamInterface> stream,
-    absl::AnyInvocable<void(SSLHandshakeError)> handshake_error,
-    const FieldTrialsView* field_trials) {
-  return std::make_unique<OpenSSLStreamAdapter>(
-      std::move(stream), std::move(handshake_error), field_trials);
+    absl::AnyInvocable<void(SSLHandshakeError)> handshake_error) {
+  return std::make_unique<OpenSSLStreamAdapter>(std::nullopt, std::move(stream),
+                                                std::move(handshake_error));
+}
+
+std::unique_ptr<SSLStreamAdapter> SSLStreamAdapter::Create(
+    const Environment& env,
+    std::unique_ptr<StreamInterface> stream,
+    absl::AnyInvocable<void(SSLHandshakeError)> handshake_error) {
+  return std::make_unique<OpenSSLStreamAdapter>(env, std::move(stream),
+                                                std::move(handshake_error));
 }
 
 bool SSLStreamAdapter::IsBoringSsl() {
@@ -181,7 +191,7 @@ bool SSLStreamAdapter::SetPeerCertificateDigest(
     SSLPeerCertificateDigestError* error) {
   unsigned char* nonconst_val = const_cast<unsigned char*>(digest_val);
   SSLPeerCertificateDigestError ret = SetPeerCertificateDigest(
-      digest_alg, ArrayView<uint8_t>(nonconst_val, digest_len));
+      digest_alg, std::span<uint8_t>(nonconst_val, digest_len));
   if (error)
     *error = ret;
   return ret == SSLPeerCertificateDigestError::NONE;

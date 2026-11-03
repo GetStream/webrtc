@@ -17,14 +17,13 @@
 #include <list>
 #include <memory>
 #include <ostream>
+#include <span>
 #include <string>
 
-#include "api/array_view.h"
 #include "api/audio/audio_frame.h"
 #include "api/audio_codecs/audio_format.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "api/environment/environment.h"
-#include "api/environment/environment_factory.h"
 #include "api/neteq/default_neteq_factory.h"
 #include "api/neteq/neteq.h"
 #include "api/rtp_headers.h"
@@ -35,6 +34,7 @@
 #include "rtc_base/checks.h"
 #include "rtc_base/strings/string_builder.h"
 #include "system_wrappers/include/clock.h"
+#include "test/create_test_environment.h"
 #include "test/gtest.h"
 #include "test/testsupport/file_utils.h"
 
@@ -71,7 +71,7 @@ class NetEqStereoTest : public ::testing::TestWithParam<TestParameters> {
             static_cast<size_t>(frame_size_ms_ * samples_per_ms_)),
         output_size_samples_(10 * samples_per_ms_),
         clock_(0),
-        env_(CreateEnvironment(&clock_)),
+        env_(CreateTestEnvironment({.time = &clock_})),
         rtp_generator_mono_(samples_per_ms_),
         rtp_generator_(samples_per_ms_),
         payload_size_bytes_(0),
@@ -178,13 +178,13 @@ class NetEqStereoTest : public ::testing::TestWithParam<TestParameters> {
         ASSERT_EQ(NetEq::kOK,
                   neteq_mono_->InsertPacket(
                       rtp_header_mono_,
-                      ArrayView<const uint8_t>(encoded_, payload_size_bytes_),
+                      std::span<const uint8_t>(encoded_, payload_size_bytes_),
                       Timestamp::Millis(time_now_ms)));
         // Insert packet in multi-channel instance.
         ASSERT_EQ(NetEq::kOK,
                   neteq_->InsertPacket(
                       rtp_header_,
-                      ArrayView<const uint8_t>(encoded_multi_channel_,
+                      std::span<const uint8_t>(encoded_multi_channel_,
                                                multi_payload_size_bytes_),
                       Timestamp::Millis(time_now_ms)));
         // Get next input packets (mono and multi-channel).

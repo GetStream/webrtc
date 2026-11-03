@@ -15,12 +15,12 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <utility>
 
-#include "api/array_view.h"
 #include "api/call/transport.h"
 #include "api/environment/environment.h"
-#include "api/environment/environment_factory.h"
+#include "api/rtp_header_extension_id.h"
 #include "api/transport/network_types.h"
 #include "api/units/data_size.h"
 #include "api/units/time_delta.h"
@@ -36,6 +36,7 @@
 #include "modules/rtp_rtcp/source/rtp_packet_to_send.h"
 #include "modules/rtp_rtcp/source/rtp_rtcp_interface.h"
 #include "rtc_base/checks.h"
+#include "test/create_test_environment.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 #include "test/time_controller/simulated_time_controller.h"
@@ -57,12 +58,10 @@ constexpr uint16_t kStartSequenceNumber = 33;
 constexpr uint32_t kSsrc = 725242;
 constexpr uint32_t kRtxSsrc = 12345;
 constexpr uint32_t kFlexFecSsrc = 23456;
-enum : int {
-  kTransportSequenceNumberExtensionId = 1,
-  kAbsoluteSendTimeExtensionId,
-  kTransmissionOffsetExtensionId,
-  kVideoTimingExtensionId,
-};
+constexpr RtpHeaderExtensionId kTransportSequenceNumberExtensionId(1);
+constexpr RtpHeaderExtensionId kAbsoluteSendTimeExtensionId(2);
+constexpr RtpHeaderExtensionId kTransmissionOffsetExtensionId(3);
+constexpr RtpHeaderExtensionId kVideoTimingExtensionId(4);
 
 class MockSendPacketObserver : public SendPacketObserver {
  public:
@@ -92,7 +91,7 @@ class MockStreamDataCountersCallback : public StreamDataCountersCallback {
 };
 
 struct TransmittedPacket {
-  TransmittedPacket(ArrayView<const uint8_t> data,
+  TransmittedPacket(std::span<const uint8_t> data,
                     const PacketOptions& packet_options,
                     RtpHeaderExtensionMap* extensions)
       : packet(extensions), options(packet_options) {
@@ -107,7 +106,7 @@ class TestTransport : public Transport {
   explicit TestTransport(RtpHeaderExtensionMap* extensions)
       : total_data_sent_(DataSize::Zero()), extensions_(extensions) {}
   MOCK_METHOD(void, SentRtp, (const PacketOptions& options), ());
-  bool SendRtp(ArrayView<const uint8_t> packet,
+  bool SendRtp(std::span<const uint8_t> packet,
                const PacketOptions& options) override {
     total_data_sent_ += DataSize::Bytes(packet.size());
     last_packet_.emplace(packet, options, extensions_);
@@ -115,7 +114,7 @@ class TestTransport : public Transport {
     return true;
   }
 
-  bool SendRtcp(ArrayView<const uint8_t> /* packet */,
+  bool SendRtcp(std::span<const uint8_t> /* packet */,
                 const PacketOptions& /* options */) override {
     RTC_CHECK_NOTREACHED();
   }
@@ -134,7 +133,7 @@ class RtpSenderEgressTest : public ::testing::Test {
  protected:
   RtpSenderEgressTest()
       : time_controller_(kStartTime),
-        env_(CreateEnvironment(time_controller_.GetClock())),
+        env_(CreateTestEnvironment({.time = &time_controller_})),
         transport_(&header_extensions_),
         packet_history_(env_,
                         RtpPacketHistory::PaddingMode::kRecentLargePacket),
@@ -852,7 +851,7 @@ TEST_F(RtpSenderEgressTest,
 TEST_F(RtpSenderEgressTest, SendPacketUpdatesStats) {
   const size_t kPayloadSize = 1000;
 
-  const ArrayView<const RtpExtensionSize> kNoRtpHeaderExtensionSizes;
+  const std::span<const RtpExtensionSize> kNoRtpHeaderExtensionSizes;
   FlexfecSender flexfec(env_, kFlexfectPayloadType, kFlexFecSsrc, kSsrc,
                         /*mid=*/"",
                         /*rtp_header_extensions=*/{},

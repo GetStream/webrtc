@@ -18,7 +18,6 @@
 
 #include "api/video/encoded_frame.h"
 #include "api/video/video_codec_constants.h"
-#include "api/video/video_frame_type.h"
 #include "modules/rtp_rtcp/source/frame_object.h"
 #include "modules/video_coding/codecs/interface/common_constants.h"
 #include "modules/video_coding/codecs/vp9/include/vp9_globals.h"
@@ -34,7 +33,7 @@ RtpFrameReferenceFinder::ReturnVector RtpVp9RefFinder::ManageFrame(
   const RTPVideoHeaderVP9& codec_header =
       std::get<RTPVideoHeaderVP9>(frame->GetRtpVideoHeader().video_type_header);
 
-  if (codec_header.temporal_idx >= kMaxTemporalLayers ||
+  if (codec_header.temporal_idx >= kMaxTemporalStreams ||
       codec_header.spatial_idx >= kMaxSpatialLayers) {
     return {};
   }
@@ -86,7 +85,7 @@ RtpFrameReferenceFinder::ReturnVector RtpVp9RefFinder::ManageFrame(
 RtpVp9RefFinder::FrameDecision RtpVp9RefFinder::ManageFrameFlexible(
     RtpFrameObject* frame,
     const RTPVideoHeaderVP9& codec_header) {
-  if (codec_header.num_ref_pics > EncodedFrame::kMaxFrameReferences) {
+  if (codec_header.num_ref_pics > kMaxVp9RefPics) {
     return kDrop;
   }
 
@@ -141,14 +140,14 @@ RtpVp9RefFinder::FrameDecision RtpVp9RefFinder::ManageFrameGof(
 
     info = &gof_info_it->second;
 
-    if (frame->frame_type() == VideoFrameType::kVideoFrameKey) {
+    if (frame->IsKey()) {
       frame->num_references = 0;
       FrameReceivedVp9(frame->Id(), info);
       FlattenFrameIdAndRefs(frame, codec_header.inter_layer_predicted);
       return kHandOff;
     }
   } else {
-    if (frame->frame_type() == VideoFrameType::kVideoFrameKey) {
+    if (frame->IsKey()) {
       RTC_LOG(LS_WARNING) << "Received keyframe without scalability structure";
       return kDrop;
     }
@@ -201,23 +200,25 @@ RtpVp9RefFinder::FrameDecision RtpVp9RefFinder::ManageFrameGof(
                                                         frame->Id());
     size_t gof_idx = diff % info->gof->num_frames_in_gof;
 
-    if (info->gof->num_ref_pics[gof_idx] > EncodedFrame::kMaxFrameReferences) {
+    if (info->gof->num_ref_pics[gof_idx] > kMaxVp9RefPics) {
       return kDrop;
     }
 
     // Populate references according to the scalability structure.
-    frame->num_references = info->gof->num_ref_pics[gof_idx];
-    for (size_t i = 0; i < frame->num_references; ++i) {
-      frame->references[i] = Subtract<kFrameIdLength>(
+    size_t num_references = 0;
+    for (size_t i = 0; i < info->gof->num_ref_pics[gof_idx]; ++i) {
+      int64_t reference = Subtract<kFrameIdLength>(
           frame->Id(), info->gof->pid_diff[gof_idx][i]);
 
       // If this is a reference to a frame earlier than the last up switch
       // point, then ignore this reference.
       if (UpSwitchInIntervalVp9(frame->Id(), codec_header.temporal_idx,
-                                frame->references[i])) {
-        --frame->num_references;
+                                reference)) {
+        continue;
       }
+      frame->references[num_references++] = reference;
     }
+    frame->num_references = num_references;
   } else {
     frame->num_references = 0;
   }
@@ -233,8 +234,8 @@ bool RtpVp9RefFinder::MissingRequiredFrameVp9(uint16_t picture_id,
   size_t gof_idx = diff % info.gof->num_frames_in_gof;
   size_t temporal_idx = info.gof->temporal_idx[gof_idx];
 
-  if (temporal_idx >= kMaxTemporalLayers) {
-    RTC_LOG(LS_WARNING) << "At most " << kMaxTemporalLayers
+  if (temporal_idx >= kMaxTemporalStreams) {
+    RTC_LOG(LS_WARNING) << "At most " << kMaxTemporalStreams
                         << " temporal "
                            "layers are supported.";
     return true;
@@ -276,8 +277,8 @@ void RtpVp9RefFinder::FrameReceivedVp9(uint16_t picture_id, GofInfo* info) {
       RTC_CHECK(gof_idx < kMaxVp9FramesInGof);
 
       size_t temporal_idx = info->gof->temporal_idx[gof_idx];
-      if (temporal_idx >= kMaxTemporalLayers) {
-        RTC_LOG(LS_WARNING) << "At most " << kMaxTemporalLayers
+      if (temporal_idx >= kMaxTemporalStreams) {
+        RTC_LOG(LS_WARNING) << "At most " << kMaxTemporalStreams
                             << " temporal "
                                "layers are supported.";
         return;
@@ -295,8 +296,8 @@ void RtpVp9RefFinder::FrameReceivedVp9(uint16_t picture_id, GofInfo* info) {
     RTC_CHECK(gof_idx < kMaxVp9FramesInGof);
 
     size_t temporal_idx = info->gof->temporal_idx[gof_idx];
-    if (temporal_idx >= kMaxTemporalLayers) {
-      RTC_LOG(LS_WARNING) << "At most " << kMaxTemporalLayers
+    if (temporal_idx >= kMaxTemporalStreams) {
+      RTC_LOG(LS_WARNING) << "At most " << kMaxTemporalStreams
                           << " temporal "
                              "layers are supported.";
       return;

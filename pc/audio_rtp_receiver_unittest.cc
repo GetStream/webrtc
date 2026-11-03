@@ -11,17 +11,28 @@
 #include "pc/audio_rtp_receiver.h"
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "api/frame_transformer_interface.h"
+#include "api/call/audio_sink.h"
 #include "api/make_ref_counted.h"
+#include "api/media_stream_interface.h"
+#include "api/media_types.h"
+#include "api/rtp_packet_info.h"
+#include "api/rtp_packet_infos.h"
+#include "api/rtp_receiver_interface.h"
 #include "api/scoped_refptr.h"
 #include "api/test/mock_frame_transformer.h"
 #include "api/test/rtc_error_matchers.h"
 #include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
+#include "media/base/media_channel.h"
 #include "pc/test/mock_voice_media_receive_channel_interface.h"
 #include "rtc_base/thread.h"
 #include "test/gmock.h"
@@ -32,7 +43,6 @@
 using ::testing::_;
 using ::testing::AnyNumber;
 using ::testing::Eq;
-using ::testing::InvokeWithoutArgs;
 using ::testing::NiceMock;
 using ::testing::Return;
 
@@ -46,11 +56,13 @@ namespace webrtc {
 class AudioRtpReceiverTest : public ::testing::Test {
  protected:
   AudioRtpReceiverTest()
-      : worker_(Thread::Current()),
-        receiver_(
-            make_ref_counted<AudioRtpReceiver>(worker_,
-                                               std::string(),
-                                               std::vector<std::string>())) {
+      : worker_thread_(Thread::Create()),
+        receiver_(make_ref_counted<AudioRtpReceiver>(
+            worker_thread_.get(),
+            std::string(),
+            std::vector<std::string>(),
+            /*enable_sframe_at_owner=*/nullptr)) {
+    worker_thread_->Start();
     EXPECT_CALL(receive_channel_, SetRawAudioSink(kSsrc, _));
     EXPECT_CALL(receive_channel_, SetBaseMinimumPlayoutDelayMs(kSsrc, _));
     ON_CALL(receive_channel_, GetUnsignaledSsrc())
@@ -59,11 +71,16 @@ class AudioRtpReceiverTest : public ::testing::Test {
 
   ~AudioRtpReceiverTest() override {
     EXPECT_CALL(receive_channel_, SetOutputVolume(kSsrc, kVolumeMuted));
-    receiver_->SetMediaChannel(nullptr);
+    SetMediaChannel(nullptr);
   }
 
-  AutoThread main_thread_;
-  Thread* worker_;
+  void SetMediaChannel(MediaReceiveChannelInterface* media_channel) {
+    worker_thread_->BlockingCall(
+        [&]() { receiver_->SetMediaChannel(media_channel); });
+  }
+
+  test::RunLoop loop_;
+  std::unique_ptr<Thread> worker_thread_;
   scoped_refptr<AudioRtpReceiver> receiver_;
   NiceMock<MockVoiceMediaReceiveChannelInterface> receive_channel_;
 };
@@ -72,22 +89,22 @@ TEST_F(AudioRtpReceiverTest, SetOutputVolumeIsCalled) {
   std::atomic_int set_volume_calls(0);
 
   EXPECT_CALL(receive_channel_, SetOutputVolume(kSsrc, kDefaultVolume))
-      .WillOnce(InvokeWithoutArgs([&] {
+      .WillOnce([&] {
         set_volume_calls++;
         return true;
-      }));
+      });
 
   receiver_->track();
   receiver_->track()->set_enabled(true);
-  receiver_->SetMediaChannel(&receive_channel_);
+  SetMediaChannel(&receive_channel_);
   EXPECT_CALL(receive_channel_, SetDefaultRawAudioSink(_)).Times(0);
-  receiver_->SetupMediaChannel(kSsrc);
+  auto setup_task = receiver_->GetSetupForMediaChannel(kSsrc);
+  worker_thread_->BlockingCall([&]() { std::move(setup_task)(); });
 
-  EXPECT_CALL(receive_channel_, SetOutputVolume(kSsrc, kVolume))
-      .WillOnce(InvokeWithoutArgs([&] {
-        set_volume_calls++;
-        return true;
-      }));
+  EXPECT_CALL(receive_channel_, SetOutputVolume(kSsrc, kVolume)).WillOnce([&] {
+    set_volume_calls++;
+    return true;
+  });
 
   receiver_->OnSetVolume(kVolume);
   EXPECT_THAT(WaitUntil([&] { return set_volume_calls.load(); }, Eq(2),
@@ -101,13 +118,82 @@ TEST_F(AudioRtpReceiverTest, VolumesSetBeforeStartingAreRespected) {
   receiver_->OnSetVolume(kVolume);
 
   receiver_->track()->set_enabled(true);
-  receiver_->SetMediaChannel(&receive_channel_);
+  SetMediaChannel(&receive_channel_);
 
   // The previosly set initial volume should be propagated to the provided
-  // media_channel_ as soon as SetupMediaChannel is called.
+  // media_channel_ as soon as GetSetupForMediaChannel is called.
   EXPECT_CALL(receive_channel_, SetOutputVolume(kSsrc, kVolume));
 
-  receiver_->SetupMediaChannel(kSsrc);
+  auto setup_task = receiver_->GetSetupForMediaChannel(kSsrc);
+  worker_thread_->BlockingCall([&]() { std::move(setup_task)(); });
+}
+
+TEST(AudioRtpReceiver, PropagatesPacketInfosToTrackSink) {
+  test::RunLoop loop;
+
+  std::unique_ptr<Thread> worker_thread = Thread::Create();
+  worker_thread->Start();
+  MockVoiceMediaReceiveChannelInterface receive_channel;
+  auto receiver = make_ref_counted<AudioRtpReceiver>(
+      worker_thread.get(), std::string(), std::vector<std::string>(),
+      /*enable_sframe_at_owner=*/nullptr);
+
+  std::unique_ptr<AudioSinkInterface> audio_sink;
+  EXPECT_CALL(receive_channel, SetRawAudioSink(kSsrc, _))
+      .WillOnce(
+          [&](uint32_t /* ssrc */, std::unique_ptr<AudioSinkInterface> sink) {
+            audio_sink = std::move(sink);
+          });
+  EXPECT_CALL(receive_channel, SetBaseMinimumPlayoutDelayMs(kSsrc, _));
+
+  class TestTrackSink : public AudioTrackSinkInterface {
+   public:
+    using AudioTrackSinkInterface::OnData;
+    void OnData(const void* /* audio_data */,
+                int /* bits_per_sample */,
+                int /* sample_rate */,
+                size_t /* number_of_channels */,
+                size_t /* number_of_frames */,
+                std::optional<int64_t> /* absolute_capture_timestamp_ms */,
+                const RtpPacketInfos& packet_infos) override {
+      called_ = true;
+      received_packet_infos_ = packet_infos;
+    }
+    bool called_ = false;
+    RtpPacketInfos received_packet_infos_;
+  };
+
+  TestTrackSink sink;
+  receiver->audio_track()->AddSink(&sink);
+  receiver->track()->set_enabled(true);
+  worker_thread->BlockingCall(
+      [&]() { receiver->SetMediaChannel(&receive_channel); });
+  auto setup_task = receiver->GetSetupForMediaChannel(kSsrc);
+  worker_thread->BlockingCall([&]() { std::move(setup_task)(); });
+
+  ASSERT_TRUE(audio_sink != nullptr);
+
+  RtpPacketInfos::vector_type infos_vec;
+  infos_vec.emplace_back(
+      RtpPacketInfo(/*ssrc=*/kSsrc, /*csrcs=*/{5678},
+                    /*rtp_timestamp=*/9999,
+                    /*receive_time=*/Timestamp::Millis(100)));
+  RtpPacketInfos packet_infos(std::move(infos_vec));
+
+  int16_t dummy_data[160] = {0};
+  AudioSinkInterface::Data audio_data(dummy_data, 160, 16000, 1, 9999,
+                                      &packet_infos);
+  audio_sink->OnData(audio_data);
+
+  EXPECT_TRUE(sink.called_);
+  ASSERT_EQ(sink.received_packet_infos_.size(), 1u);
+  EXPECT_EQ(sink.received_packet_infos_[0].ssrc(), kSsrc);
+  EXPECT_THAT(sink.received_packet_infos_[0].csrcs(),
+              ::testing::ElementsAre(5678));
+
+  receiver->audio_track()->RemoveSink(&sink);
+  EXPECT_CALL(receive_channel, SetOutputVolume(kSsrc, kVolumeMuted));
+  worker_thread->BlockingCall([&]() { receiver->SetMediaChannel(nullptr); });
 }
 
 // Tests that OnChanged notifications are processed correctly on the worker
@@ -115,28 +201,140 @@ TEST_F(AudioRtpReceiverTest, VolumesSetBeforeStartingAreRespected) {
 // constructor.
 TEST(AudioRtpReceiver, OnChangedNotificationsAfterConstruction) {
   test::RunLoop loop;
-  auto* thread = Thread::Current();  // Points to loop's thread.
+
+  std::unique_ptr<Thread> worker_thread = Thread::Create();
+  worker_thread->Start();
   NiceMock<MockVoiceMediaReceiveChannelInterface> receive_channel;
   auto receiver = make_ref_counted<AudioRtpReceiver>(
-      thread, std::string(), std::vector<std::string>(), &receive_channel);
+      worker_thread.get(), std::string(), std::vector<std::string>(),
+      /*enable_sframe_at_owner=*/nullptr, &receive_channel);
 
   EXPECT_CALL(receive_channel, SetDefaultRawAudioSink(_)).Times(1);
   EXPECT_CALL(receive_channel, SetDefaultOutputVolume(kDefaultVolume)).Times(1);
-  receiver->SetupUnsignaledMediaChannel();
-  loop.Flush();
+  auto setup_task = receiver->GetSetupForUnsignaledMediaChannel();
+  worker_thread->BlockingCall([&]() { std::move(setup_task)(); });
+
+  // When the track is marked as disabled, an async notification is queued
+  // for the worker thread. This notification should trigger the volume
+  // of the media channel to be set to kVolumeMuted.
+  // Set the expectation first for the call, before changing the track state.
+  EXPECT_CALL(receive_channel, SetDefaultOutputVolume(kVolumeMuted)).Times(1);
 
   // Mark the track as disabled.
   receiver->track()->set_enabled(false);
 
-  // When the track was marked as disabled, an async notification was queued
-  // for the worker thread. This notification should trigger the volume
-  // of the media channel to be set to kVolumeMuted.
-  // Flush the worker thread, but set the expectation first for the call.
-  EXPECT_CALL(receive_channel, SetDefaultOutputVolume(kVolumeMuted)).Times(1);
-  loop.Flush();
+  // Flush the worker thread.
+  worker_thread->BlockingCall([] {});
 
   EXPECT_CALL(receive_channel, SetDefaultOutputVolume(kVolumeMuted)).Times(1);
-  receiver->SetMediaChannel(nullptr);
+  worker_thread->BlockingCall([&]() { receiver->SetMediaChannel(nullptr); });
+}
+
+class FakeRtpReceiverObserver : public RtpReceiverObserverInterface {
+ public:
+  void OnFirstPacketReceived(MediaType media_type) override {}
+  void OnSourceChanged(bool ssrc_changed, bool csrc_changed) override {
+    source_changed_count_++;
+    last_ssrc_changed_ = ssrc_changed;
+    last_csrc_changed_ = csrc_changed;
+  }
+
+  int source_changed_count() const { return source_changed_count_; }
+  bool last_ssrc_changed() const { return last_ssrc_changed_; }
+  bool last_csrc_changed() const { return last_csrc_changed_; }
+
+ private:
+  int source_changed_count_ = 0;
+  bool last_ssrc_changed_ = false;
+  bool last_csrc_changed_ = false;
+};
+
+class AudioRtpReceiverSourceTrackerTest : public ::testing::Test {
+ protected:
+  AudioRtpReceiverSourceTrackerTest()
+      : worker_thread_(Thread::Create()),
+        receiver_(make_ref_counted<AudioRtpReceiver>(
+            worker_thread_.get(),
+            std::string(),
+            std::vector<std::string>(),
+            /*enable_sframe_at_owner=*/nullptr)) {
+    worker_thread_->Start();
+  }
+
+  test::RunLoop loop_;
+  std::unique_ptr<Thread> worker_thread_;
+  scoped_refptr<AudioRtpReceiver> receiver_;
+};
+
+TEST_F(AudioRtpReceiverSourceTrackerTest, SourceChangeNotification) {
+  FakeRtpReceiverObserver observer;
+  receiver_->SetObserver(&observer);
+
+  // Deliver initial packet info.
+  receiver_->OnFrameDelivered(
+      RtpPacketInfos({RtpPacketInfo(kSsrc, {}, 100, Timestamp::Millis(100))}),
+      Timestamp::Millis(100));
+
+  EXPECT_EQ(observer.source_changed_count(), 1);
+  EXPECT_TRUE(observer.last_ssrc_changed());
+  EXPECT_FALSE(observer.last_csrc_changed());
+
+  // Subsequent frame with same SSRC should not fire callback.
+  receiver_->OnFrameDelivered(
+      RtpPacketInfos({RtpPacketInfo(kSsrc, {}, 101, Timestamp::Millis(120))}),
+      Timestamp::Millis(120));
+
+  EXPECT_EQ(observer.source_changed_count(), 1);
+
+  // Frame with CSRC change should fire callback.
+  receiver_->OnFrameDelivered(RtpPacketInfos({RtpPacketInfo(
+                                  kSsrc, {1234}, 102, Timestamp::Millis(140))}),
+                              Timestamp::Millis(140));
+
+  EXPECT_EQ(observer.source_changed_count(), 2);
+  EXPECT_FALSE(observer.last_ssrc_changed());
+  EXPECT_TRUE(observer.last_csrc_changed());
+
+  receiver_->SetObserver(nullptr);
+}
+
+TEST_F(AudioRtpReceiverSourceTrackerTest, LateObserverRegistration) {
+  FakeRtpReceiverObserver observer;
+
+  // Frame delivered before observer is registered.
+  receiver_->OnFrameDelivered(
+      RtpPacketInfos({RtpPacketInfo(kSsrc, {}, 100, Timestamp::Millis(100))}),
+      Timestamp::Millis(100));
+
+  EXPECT_EQ(observer.source_changed_count(), 0);
+
+  // Setting observer should trigger callback for existing source.
+  receiver_->SetObserver(&observer);
+
+  EXPECT_EQ(observer.source_changed_count(), 1);
+  EXPECT_TRUE(observer.last_ssrc_changed());
+  EXPECT_FALSE(observer.last_csrc_changed());
+
+  receiver_->SetObserver(nullptr);
+}
+
+TEST_F(AudioRtpReceiverSourceTrackerTest, ObserverTeardownStopsNotifications) {
+  FakeRtpReceiverObserver observer;
+  receiver_->SetObserver(&observer);
+
+  receiver_->OnFrameDelivered(
+      RtpPacketInfos({RtpPacketInfo(kSsrc, {}, 100, Timestamp::Millis(100))}),
+      Timestamp::Millis(100));
+  EXPECT_EQ(observer.source_changed_count(), 1);
+
+  receiver_->SetObserver(nullptr);
+
+  // New SSRC after observer is cleared should not reach observer.
+  receiver_->OnFrameDelivered(RtpPacketInfos({RtpPacketInfo(
+                                  kSsrc + 1, {}, 101, Timestamp::Millis(120))}),
+                              Timestamp::Millis(120));
+
+  EXPECT_EQ(observer.source_changed_count(), 1);
 }
 
 TEST_F(AudioRtpReceiverTest, SetFrameTransformerUsesSignaledSsrc) {
@@ -144,13 +342,15 @@ TEST_F(AudioRtpReceiverTest, SetFrameTransformerUsesSignaledSsrc) {
 
   EXPECT_CALL(receive_channel_, SetOutputVolume(kSsrc, kDefaultVolume));
   receiver_->track()->set_enabled(true);
-  receiver_->SetMediaChannel(&receive_channel_);
+  SetMediaChannel(&receive_channel_);
   EXPECT_CALL(receive_channel_, SetDefaultRawAudioSink(_)).Times(0);
-  receiver_->SetupMediaChannel(kSsrc);
+  auto setup_task = receiver_->GetSetupForMediaChannel(kSsrc);
+  worker_thread_->BlockingCall([&]() { std::move(setup_task)(); });
 
   EXPECT_CALL(receive_channel_,
               SetDepacketizerToDecoderFrameTransformer(kSsrc, _));
-  receiver_->SetFrameTransformer(transformer);
+  worker_thread_->BlockingCall(
+      [&]() { receiver_->SetFrameTransformer(transformer); });
 }
 
 TEST_F(AudioRtpReceiverTest, SetFrameTransformerNullClearsChannel) {
@@ -158,26 +358,31 @@ TEST_F(AudioRtpReceiverTest, SetFrameTransformerNullClearsChannel) {
 
   EXPECT_CALL(receive_channel_, SetOutputVolume(kSsrc, kDefaultVolume));
   receiver_->track()->set_enabled(true);
-  receiver_->SetMediaChannel(&receive_channel_);
+  SetMediaChannel(&receive_channel_);
   EXPECT_CALL(receive_channel_, SetDefaultRawAudioSink(_)).Times(0);
-  receiver_->SetupMediaChannel(kSsrc);
+  auto setup_task = receiver_->GetSetupForMediaChannel(kSsrc);
+  worker_thread_->BlockingCall([&]() { std::move(setup_task)(); });
 
   EXPECT_CALL(receive_channel_,
               SetDepacketizerToDecoderFrameTransformer(kSsrc, _));
-  receiver_->SetFrameTransformer(transformer);
+  worker_thread_->BlockingCall(
+      [&]() { receiver_->SetFrameTransformer(transformer); });
 
   EXPECT_CALL(receive_channel_,
               SetDepacketizerToDecoderFrameTransformer(
                   kSsrc, scoped_refptr<FrameTransformerInterface>()));
-  receiver_->SetFrameTransformer(nullptr);
+  worker_thread_->BlockingCall(
+      [&]() { receiver_->SetFrameTransformer(nullptr); });
 }
 
 TEST(AudioRtpReceiver, SetFrameTransformerStashesUnsignaledWithZero) {
-  AutoThread main_thread;
-  Thread* worker = Thread::Current();
+  test::RunLoop loop;
+  std::unique_ptr<Thread> worker_thread = Thread::Create();
+  worker_thread->Start();
   NiceMock<MockVoiceMediaReceiveChannelInterface> receive_channel;
   auto receiver = make_ref_counted<AudioRtpReceiver>(
-      worker, std::string(), std::vector<std::string>());
+      worker_thread.get(), std::string(), std::vector<std::string>(),
+      /*enable_sframe_at_owner=*/nullptr);
   auto transformer = make_ref_counted<MockFrameTransformer>();
 
   EXPECT_CALL(receive_channel, SetDefaultRawAudioSink(_)).Times(1);
@@ -185,20 +390,24 @@ TEST(AudioRtpReceiver, SetFrameTransformerStashesUnsignaledWithZero) {
   EXPECT_CALL(receive_channel, GetUnsignaledSsrc())
       .WillRepeatedly(Return(std::optional<uint32_t>(kSsrc)));
 
-  receiver->SetMediaChannel(&receive_channel);
-  receiver->SetupUnsignaledMediaChannel();
+  worker_thread->BlockingCall(
+      [&]() { receiver->SetMediaChannel(&receive_channel); });
+  auto setup_task = receiver->GetSetupForUnsignaledMediaChannel();
+  worker_thread->BlockingCall([&]() { std::move(setup_task)(); });
 
   EXPECT_CALL(receive_channel,
               SetDepacketizerToDecoderFrameTransformer(0, _));
-  receiver->SetFrameTransformer(transformer);
+  worker_thread->BlockingCall(
+      [&]() { receiver->SetFrameTransformer(transformer); });
 
   EXPECT_CALL(receive_channel, SetDefaultOutputVolume(kVolumeMuted)).Times(1);
-  receiver->SetMediaChannel(nullptr);
+  worker_thread->BlockingCall([&]() { receiver->SetMediaChannel(nullptr); });
 }
 
 TEST_F(AudioRtpReceiverTest, SetMediaChannelReappliesFrameTransformer) {
   auto transformer = make_ref_counted<MockFrameTransformer>();
-  receiver_->SetFrameTransformer(transformer);
+  worker_thread_->BlockingCall(
+      [&]() { receiver_->SetFrameTransformer(transformer); });
 
   EXPECT_CALL(receive_channel_, GetUnsignaledSsrc())
       .Times(AnyNumber())
@@ -206,13 +415,14 @@ TEST_F(AudioRtpReceiverTest, SetMediaChannelReappliesFrameTransformer) {
   EXPECT_CALL(receive_channel_,
               SetDepacketizerToDecoderFrameTransformer(0, _));
   receiver_->track()->set_enabled(true);
-  receiver_->SetMediaChannel(&receive_channel_);
+  SetMediaChannel(&receive_channel_);
 
   EXPECT_CALL(receive_channel_, SetOutputVolume(kSsrc, kDefaultVolume));
   EXPECT_CALL(receive_channel_,
               SetDepacketizerToDecoderFrameTransformer(kSsrc, _));
   EXPECT_CALL(receive_channel_, SetDefaultRawAudioSink(_)).Times(0);
-  receiver_->SetupMediaChannel(kSsrc);
+  auto setup_task = receiver_->GetSetupForMediaChannel(kSsrc);
+  worker_thread_->BlockingCall([&]() { std::move(setup_task)(); });
 }
 
 }  // namespace webrtc

@@ -24,11 +24,12 @@
 #include "api/audio/audio_device.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "api/audio_codecs/builtin_audio_encoder_factory.h"
-#include "api/create_peerconnection_factory.h"
+#include "api/create_modular_peer_connection_factory.h"
 #include "api/crypto/crypto_options.h"
 #include "api/data_channel_interface.h"
+#include "api/enable_media.h"
 #include "api/enable_media_with_defaults.h"
-#include "api/environment/environment_factory.h"
+#include "api/environment/environment.h"
 #include "api/jsep.h"
 #include "api/make_ref_counted.h"
 #include "api/media_stream_interface.h"
@@ -86,11 +87,15 @@
 #include "rtc_base/rtc_certificate_generator.h"
 #include "rtc_base/socket_address.h"
 #include "rtc_base/socket_server.h"
+#include "rtc_base/system/plan_b_only.h"
 #include "rtc_base/thread.h"
 #include "rtc_base/virtual_socket_server.h"
 #include "rtc_base/weak_ptr.h"
+#include "test/create_test_environment.h"
+#include "test/create_test_field_trials.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
+#include "test/run_loop.h"
 #include "test/wait_until.h"
 
 #ifdef WEBRTC_ANDROID
@@ -611,15 +616,14 @@ class MockTrackObserver : public ObserverInterface {
 class PeerConnectionFactoryForTest : public PeerConnectionFactory {
  public:
   static scoped_refptr<PeerConnectionFactoryForTest>
-  CreatePeerConnectionFactoryForTest(Thread* network_thread,
-                                     Thread* worker_thread) {
+  CreatePeerConnectionFactoryForTest(Thread* network_thread) {
     PeerConnectionFactoryDependencies dependencies;
-    dependencies.worker_thread = worker_thread;
     dependencies.network_thread = network_thread;
     dependencies.signaling_thread = Thread::Current();
     // Use fake audio device module since we're only testing the interface
     // level, and using a real one could make tests flaky when run in parallel.
     dependencies.adm = FakeAudioCaptureModule::Create();
+    dependencies.env = CreateTestEnvironment();
     EnableMediaWithDefaults(dependencies);
     dependencies.event_log_factory = std::make_unique<RtcEventLogFactory>();
 
@@ -637,7 +641,8 @@ class PeerConnectionFactoryForTest : public PeerConnectionFactory {
 class PeerConnectionInterfaceBaseTest : public ::testing::Test {
  protected:
   explicit PeerConnectionInterfaceBaseTest(SdpSemantics sdp_semantics)
-      : vss_(new VirtualSocketServer()),
+      : env_(CreateTestEnvironment()),
+        vss_(new VirtualSocketServer()),
         main_(vss_.get()),
         sdp_semantics_(sdp_semantics) {
 #ifdef WEBRTC_ANDROID
@@ -656,17 +661,26 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
     worker_thread_->SetName("WorkerThread", nullptr);
     ASSERT_TRUE(worker_thread_->Start());
 
-    pc_factory_ = CreatePeerConnectionFactory(
-        network_thread_.get(), worker_thread_.get(), Thread::Current(),
-        scoped_refptr<AudioDeviceModule>(fake_audio_capture_module_),
-        CreateBuiltinAudioEncoderFactory(), CreateBuiltinAudioDecoderFactory(),
+    PeerConnectionFactoryDependencies dependencies;
+    dependencies.network_thread = network_thread_.get();
+    dependencies.signaling_thread = Thread::Current();
+    dependencies.socket_factory = network_thread_->socketserver();
+    dependencies.adm =
+        scoped_refptr<AudioDeviceModule>(fake_audio_capture_module_);
+    dependencies.audio_encoder_factory = CreateBuiltinAudioEncoderFactory();
+    dependencies.audio_decoder_factory = CreateBuiltinAudioDecoderFactory();
+    dependencies.video_encoder_factory =
         std::make_unique<VideoEncoderFactoryTemplate<
             LibvpxVp8EncoderTemplateAdapter, LibvpxVp9EncoderTemplateAdapter,
-            OpenH264EncoderTemplateAdapter, LibaomAv1EncoderTemplateAdapter>>(),
+            OpenH264EncoderTemplateAdapter, LibaomAv1EncoderTemplateAdapter>>();
+    dependencies.video_decoder_factory =
         std::make_unique<VideoDecoderFactoryTemplate<
             LibvpxVp8DecoderTemplateAdapter, LibvpxVp9DecoderTemplateAdapter,
-            OpenH264DecoderTemplateAdapter, Dav1dDecoderTemplateAdapter>>(),
-        nullptr /* audio_mixer */, nullptr /* audio_processing */);
+            OpenH264DecoderTemplateAdapter, Dav1dDecoderTemplateAdapter>>();
+    dependencies.event_log_factory = std::make_unique<RtcEventLogFactory>();
+    dependencies.env = env_;
+    EnableMedia(dependencies);
+    pc_factory_ = CreateModularPeerConnectionFactory(std::move(dependencies));
     ASSERT_TRUE(pc_factory_);
   }
 
@@ -687,11 +701,15 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
   // DTLS does not work in a loopback call, so is disabled for many
   // tests in this file.
   void CreatePeerConnectionWithoutDtls() {
+    CreatePeerConnectionWithoutDtls("");
+  }
+
+  void CreatePeerConnectionWithoutDtls(absl::string_view field_trials) {
     RTCConfiguration config;
     PeerConnectionFactoryInterface::Options options;
     options.disable_encryption = true;
     pc_factory_->SetOptions(options);
-    CreatePeerConnection(config);
+    CreatePeerConnection(config, field_trials);
     options.disable_encryption = false;
     pc_factory_->SetOptions(options);
   }
@@ -716,6 +734,15 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
   }
 
   void CreatePeerConnection(const RTCConfiguration& config) {
+    CreatePeerConnection(config, "");
+  }
+
+  void CreatePeerConnection(absl::string_view field_trials) {
+    CreatePeerConnection(RTCConfiguration(), field_trials);
+  }
+
+  void CreatePeerConnection(const RTCConfiguration& config,
+                            absl::string_view field_trials) {
     if (pc_) {
       pc_->Close();
       ReleasePeerConnection();
@@ -726,7 +753,7 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
     std::unique_ptr<FakePortAllocator> port_allocator =
         network_thread_->BlockingCall([&] {
           auto allocator = std::make_unique<FakePortAllocator>(
-              CreateEnvironment(), network_thread_->socketserver());
+              CreateTestEnvironment(), network_thread_->socketserver());
           port_allocator_ = allocator->NewWeakPtr();
           return allocator;
         });
@@ -744,6 +771,9 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
     PeerConnectionDependencies pc_dependencies(&observer_);
     pc_dependencies.cert_generator = std::move(cert_generator);
     pc_dependencies.allocator = std::move(port_allocator);
+    if (!field_trials.empty()) {
+      pc_dependencies.trials = CreateTestFieldTrialsPtr(field_trials);
+    }
     auto result = pc_factory_->CreatePeerConnectionOrError(
         modified_config, std::move(pc_dependencies));
     ASSERT_TRUE(result.ok());
@@ -826,7 +856,9 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
     scoped_refptr<MediaStreamInterface> stream(
         pc_factory_->CreateLocalMediaStream(label));
     stream->AddTrack(CreateVideoTrack(label + "v0"));
+    RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN();
     ASSERT_TRUE(pc_->AddStream(stream.get()));
+    RTC_ALLOW_PLAN_B_DEPRECATION_END();
   }
 
   scoped_refptr<AudioTrackInterface> CreateAudioTrack(
@@ -845,7 +877,9 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
     scoped_refptr<MediaStreamInterface> stream(
         pc_factory_->CreateLocalMediaStream(label));
     stream->AddTrack(CreateAudioTrack(label + "a0"));
+    RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN();
     ASSERT_TRUE(pc_->AddStream(stream.get()));
+    RTC_ALLOW_PLAN_B_DEPRECATION_END();
   }
 
   void AddAudioVideoStream(const std::string& stream_id,
@@ -856,7 +890,9 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
         pc_factory_->CreateLocalMediaStream(stream_id));
     stream->AddTrack(CreateAudioTrack(audio_track_label));
     stream->AddTrack(CreateVideoTrack(video_track_label));
+    RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN();
     ASSERT_TRUE(pc_->AddStream(stream.get()));
+    RTC_ALLOW_PLAN_B_DEPRECATION_END();
   }
 
   scoped_refptr<RtpReceiverInterface> GetFirstReceiverOfType(
@@ -880,9 +916,8 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
       pc_->CreateAnswer(observer.get(),
                         options ? *options : RTCOfferAnswerOptions());
     }
-    EXPECT_THAT(WaitUntil([&] { return observer->called(); }, IsTrue(),
-                          {.timeout = TimeDelta::Millis(kTimeout)}),
-                IsRtcOk());
+    EXPECT_TRUE(WaitUntil([&] { return observer->called(); },
+                          {.timeout = TimeDelta::Millis(kTimeout)}));
     *desc = observer->MoveDescription();
     return observer->result();
   }
@@ -907,9 +942,8 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
       pc_->SetRemoteDescription(observer.get(), desc.release());
     }
     if (pc_->signaling_state() != PeerConnectionInterface::kClosed) {
-      EXPECT_THAT(WaitUntil([&] { return observer->called(); }, IsTrue(),
-                            {.timeout = TimeDelta::Millis(kTimeout)}),
-                  IsRtcOk());
+      EXPECT_TRUE(WaitUntil([&] { return observer->called(); },
+                            {.timeout = TimeDelta::Millis(kTimeout)}));
     }
     return observer->result();
   }
@@ -929,12 +963,15 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
   // be required.
   bool DoGetStats(MediaStreamTrackInterface* track) {
     auto observer = make_ref_counted<MockStatsObserver>();
-    if (!pc_->GetStats(observer.get(), track,
-                       PeerConnectionInterface::kStatsOutputLevelStandard))
+    RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN();
+    bool result =
+        pc_->GetStats(observer.get(), track,
+                      PeerConnectionInterface::kStatsOutputLevelStandard);
+    RTC_ALLOW_PLAN_B_DEPRECATION_END();
+    if (!result)
       return false;
-    EXPECT_THAT(WaitUntil([&] { return observer->called(); }, IsTrue(),
-                          {.timeout = TimeDelta::Millis(kTimeout)}),
-                IsRtcOk());
+    EXPECT_TRUE(WaitUntil([&] { return observer->called(); },
+                          {.timeout = TimeDelta::Millis(kTimeout)}));
     return observer->called();
   }
 
@@ -942,9 +979,8 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
   bool DoGetRTCStats() {
     auto callback = make_ref_counted<MockRTCStatsCollectorCallback>();
     pc_->GetStats(callback.get());
-    EXPECT_THAT(WaitUntil([&] { return callback->called(); }, IsTrue(),
-                          {.timeout = TimeDelta::Millis(kTimeout)}),
-                IsRtcOk());
+    EXPECT_TRUE(WaitUntil([&] { return callback->called(); },
+                          {.timeout = TimeDelta::Millis(kTimeout)}));
     return callback->called();
   }
 
@@ -1059,9 +1095,8 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
     EXPECT_TRUE(DoSetLocalDescription(std::move(new_offer)));
     EXPECT_EQ(PeerConnectionInterface::kHaveLocalOffer, observer_.state_);
     // Wait for the ice_complete message, so that SDP will have candidates.
-    EXPECT_THAT(WaitUntil([&] { return observer_.ice_gathering_complete_; },
-                          IsTrue(), {.timeout = TimeDelta::Millis(kTimeout)}),
-                IsRtcOk());
+    EXPECT_TRUE(WaitUntil([&] { return observer_.ice_gathering_complete_; },
+                          {.timeout = TimeDelta::Millis(kTimeout)}));
   }
 
   void CreateAnswerAsRemoteDescription(const std::string& sdp) {
@@ -1088,6 +1123,7 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
   // Waits until a remote stream with the given id is signaled. This helper
   // function will verify both OnAddTrack and OnAddStream (Plan B only) are
   // called with the given stream id and expected number of tracks.
+  RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN()
   void WaitAndVerifyOnAddStream(const std::string& stream_id,
                                 int expected_num_tracks) {
     // Verify that both OnAddStream and OnAddTrack are called.
@@ -1101,6 +1137,7 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
             Eq(expected_num_tracks), {.timeout = TimeDelta::Millis(kTimeout)}),
         IsRtcOk());
   }
+  RTC_ALLOW_PLAN_B_DEPRECATION_END()
 
   // Creates an offer and applies it as a local session description.
   // Creates an answer with the same SDP an the offer but removes all lines
@@ -1214,9 +1251,8 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
     RTC_DCHECK(pc_);
     auto observer = make_ref_counted<MockCreateSessionDescriptionObserver>();
     pc_->CreateOffer(observer.get(), offer_answer_options);
-    EXPECT_THAT(WaitUntil([&] { return observer->called(); }, IsTrue(),
-                          {.timeout = TimeDelta::Millis(kTimeout)}),
-                IsRtcOk());
+    EXPECT_TRUE(WaitUntil([&] { return observer->called(); },
+                          {.timeout = TimeDelta::Millis(kTimeout)}));
     return observer->MoveDescription();
   }
 
@@ -1276,8 +1312,9 @@ class PeerConnectionInterfaceBaseTest : public ::testing::Test {
 
   SocketServer* socket_server() const { return vss_.get(); }
 
+  const Environment env_;
   std::unique_ptr<VirtualSocketServer> vss_;
-  AutoSocketServerThread main_;
+  test::RunLoop main_;
   std::unique_ptr<Thread> network_thread_;
   std::unique_ptr<Thread> worker_thread_;
   scoped_refptr<FakeAudioCaptureModule> fake_audio_capture_module_;
@@ -1297,12 +1334,17 @@ class PeerConnectionInterfaceTest
   PeerConnectionInterfaceTest() : PeerConnectionInterfaceBaseTest(GetParam()) {}
 };
 
-class PeerConnectionInterfaceTestPlanB
+RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN()
+// Plan B specific tests.
+// Note - since the class is PLAN_B_ONLY, instances must be bracketed by
+// RTC_ALLOW_PLAN_B_DEPRECATION macros.
+class PLAN_B_ONLY PeerConnectionInterfaceTestPlanB
     : public PeerConnectionInterfaceBaseTest {
  protected:
   PeerConnectionInterfaceTestPlanB()
       : PeerConnectionInterfaceBaseTest(SdpSemantics::kPlanB_DEPRECATED) {}
 };
+RTC_ALLOW_PLAN_B_DEPRECATION_END()
 
 // Generate different CNAMEs when PeerConnections are created.
 // The CNAMEs are expected to be generated randomly. It is possible
@@ -1392,7 +1434,7 @@ TEST_P(PeerConnectionInterfaceTest,
   std::unique_ptr<FakePortAllocator> port_allocator;
   network_thread_->BlockingCall([&] {
     port_allocator = std::make_unique<FakePortAllocator>(
-        CreateEnvironment(), network_thread_->socketserver());
+        CreateTestEnvironment(), network_thread_->socketserver());
   });
   // We need to keep a raw pointer to check flags later, but we need to
   // accessing it on the network thread or be careful. FakePortAllocator methods
@@ -1473,6 +1515,7 @@ TEST_P(PeerConnectionInterfaceTest, SetConfigurationFailsAfterClose) {
       pc_->SetConfiguration(PeerConnectionInterface::RTCConfiguration()).ok());
 }
 
+RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN()
 TEST_F(PeerConnectionInterfaceTestPlanB, AddStreams) {
   CreatePeerConnectionWithoutDtls();
   AddVideoStream(kStreamId1);
@@ -1648,6 +1691,7 @@ TEST_F(PeerConnectionInterfaceTestPlanB, AddTrackWithSendEncodings) {
   EXPECT_TRUE(pc_->RemoveTrackOrError(audio_sender).ok());
   EXPECT_TRUE(pc_->RemoveTrackOrError(video_sender).ok());
 }
+RTC_ALLOW_PLAN_B_DEPRECATION_END()
 
 // Test creating senders without a stream specified,
 // expecting a random stream ID to be generated.
@@ -1687,7 +1731,7 @@ TEST_P(PeerConnectionInterfaceTest, AddTrackBeforeConnecting) {
       CreateVideoTrack("video_track"));
   auto audio_sender = pc_->AddTrack(audio_track, std::vector<std::string>());
   auto video_sender = pc_->AddTrack(video_track, std::vector<std::string>());
-  EXPECT_TRUE(DoGetStats(nullptr));
+  EXPECT_TRUE(DoGetRTCStats());
 }
 
 TEST_P(PeerConnectionInterfaceTest, AttachmentIdIsSetOnAddTrack) {
@@ -1711,6 +1755,7 @@ TEST_P(PeerConnectionInterfaceTest, AttachmentIdIsSetOnAddTrack) {
   EXPECT_NE(0, video_sender_proxy->internal()->AttachmentId());
 }
 
+RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN()
 // Don't run under Unified Plan since the stream API is not available.
 TEST_F(PeerConnectionInterfaceTestPlanB, AttachmentIdIsSetOnAddStream) {
   CreatePeerConnection();
@@ -1722,6 +1767,7 @@ TEST_F(PeerConnectionInterfaceTestPlanB, AttachmentIdIsSetOnAddStream) {
           senders[0].get());
   EXPECT_NE(0, sender_proxy->internal()->AttachmentId());
 }
+RTC_ALLOW_PLAN_B_DEPRECATION_END()
 
 TEST_P(PeerConnectionInterfaceTest, CreateOfferReceiveAnswer) {
   InitiateCall();
@@ -1760,6 +1806,7 @@ TEST_P(PeerConnectionInterfaceTest, ReceiveOfferCreatePrAnswerAndAnswer) {
   WaitAndVerifyOnAddStream(kStreamId1, 1);
 }
 
+RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN()
 // Don't run under Unified Plan since the stream API is not available.
 TEST_F(PeerConnectionInterfaceTestPlanB, Renegotiate) {
   InitiateCall();
@@ -1784,6 +1831,7 @@ TEST_F(PeerConnectionInterfaceTestPlanB, RenegotiateAudioOnly) {
   CreateOfferReceiveAnswer();
   EXPECT_EQ(0u, pc_->remote_streams()->count());
 }
+RTC_ALLOW_PLAN_B_DEPRECATION_END()
 
 // Test that candidates are generated and that we can parse our own candidates.
 TEST_P(PeerConnectionInterfaceTest, IceCandidates) {
@@ -1805,13 +1853,13 @@ TEST_P(PeerConnectionInterfaceTest, IceCandidates) {
                         ::testing::Ne(nullptr),
                         {.timeout = TimeDelta::Millis(kTimeout)}),
               IsRtcOk());
-  EXPECT_THAT(WaitUntil([&] { return observer_.ice_gathering_complete_; },
-                        IsTrue(), {.timeout = TimeDelta::Millis(kTimeout)}),
-              IsRtcOk());
+  EXPECT_TRUE(WaitUntil([&] { return observer_.ice_gathering_complete_; },
+                        {.timeout = TimeDelta::Millis(kTimeout)}));
 
   EXPECT_TRUE(pc_->AddIceCandidate(observer_.last_candidate()));
 }
 
+RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN()
 // Test that CreateOffer and CreateAnswer will fail if the track labels are
 // not unique.
 TEST_F(PeerConnectionInterfaceTestPlanB, CreateOfferAnswerWithInvalidStream) {
@@ -1833,6 +1881,7 @@ TEST_F(PeerConnectionInterfaceTestPlanB, CreateOfferAnswerWithInvalidStream) {
   std::unique_ptr<SessionDescriptionInterface> answer;
   EXPECT_FALSE(DoCreateAnswer(&answer, nullptr));
 }
+RTC_ALLOW_PLAN_B_DEPRECATION_END()
 
 // Test that we will get different SSRCs for each tracks in the offer and answer
 // we created.
@@ -1866,6 +1915,7 @@ TEST_P(PeerConnectionInterfaceTest, SsrcInOfferAnswer) {
   EXPECT_NE(audio_ssrc, video_ssrc);
 }
 
+RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN()
 // Test that it's possible to call AddTrack on a MediaStream after adding
 // the stream to a PeerConnection.
 // TODO(deadbeef): Remove this test once this behavior is no longer supported.
@@ -1926,6 +1976,7 @@ TEST_F(PeerConnectionInterfaceTestPlanB, CreateSenderWithStream) {
   ASSERT_EQ(1u, video_desc->streams().size());
   EXPECT_EQ(kStreamId1, video_desc->streams()[0].first_stream_id());
 }
+RTC_ALLOW_PLAN_B_DEPRECATION_END()
 
 // Test that we can specify a certain track that we want statistics about.
 TEST_P(PeerConnectionInterfaceTest, GetStatsForSpecificTrack) {
@@ -1934,7 +1985,7 @@ TEST_P(PeerConnectionInterfaceTest, GetStatsForSpecificTrack) {
   ASSERT_LT(0u, pc_->GetReceivers().size());
   scoped_refptr<MediaStreamTrackInterface> remote_audio =
       pc_->GetReceivers()[0]->track();
-  EXPECT_TRUE(DoGetStats(remote_audio.get()));
+  EXPECT_TRUE(DoGetRTCStats());
 
   // Remove the stream. Since we are sending to our selves the local
   // and the remote stream is the same.
@@ -1944,7 +1995,7 @@ TEST_P(PeerConnectionInterfaceTest, GetStatsForSpecificTrack) {
 
   // Test that we still can get statistics for the old track. Even if it is not
   // sent any longer.
-  EXPECT_TRUE(DoGetStats(remote_audio.get()));
+  EXPECT_TRUE(DoGetRTCStats());
 }
 
 // Test that we can get stats on a video track.
@@ -1952,7 +2003,7 @@ TEST_P(PeerConnectionInterfaceTest, GetStatsForVideoTrack) {
   InitiateCall();
   auto video_receiver = GetFirstReceiverOfType(MediaType::VIDEO);
   ASSERT_TRUE(video_receiver);
-  EXPECT_TRUE(DoGetStats(video_receiver->track().get()));
+  EXPECT_TRUE(DoGetRTCStats());
 }
 
 // Test that we don't get statistics for an invalid track.
@@ -2154,7 +2205,9 @@ TEST_P(PeerConnectionInterfaceTest, ReceiveFireFoxOffer) {
 // limited set of audio codecs and receive an updated offer with more audio
 // codecs, where the added codecs are not supported.
 TEST_P(PeerConnectionInterfaceTest, ReceiveUpdatedAudioOfferWithBadCodecs) {
-  CreatePeerConnectionWithoutDtls();
+  // Munging allowed: kMsidStream (36)
+  CreatePeerConnectionWithoutDtls(
+      "WebRTC-NoSdpMangleAllowForTesting/Enabled,36/");
   AddAudioTrack("audio_label");
   CreateOfferAsLocalDescription();
 
@@ -2576,6 +2629,26 @@ TEST_P(PeerConnectionInterfaceTest,
     RTCError error = pc_->SetConfiguration(config);
     EXPECT_EQ(RTCErrorType::INVALID_MODIFICATION, error.type());
   }
+  {
+    RTCConfiguration config;
+    config.sdp_semantics = sdp_semantics_;
+    CryptoOptions options;
+    options.srtp.cryptex_policy =
+        CryptoOptions::Srtp::CryptexPolicy::kNegotiate;
+    config.crypto_options = options;
+
+    CreatePeerConnection(config);
+
+    std::unique_ptr<SessionDescriptionInterface> offer;
+    ASSERT_TRUE(DoCreateOffer(&offer, nullptr));
+    EXPECT_TRUE(DoSetLocalDescription(std::move(offer)));
+
+    options.srtp.cryptex_policy = CryptoOptions::Srtp::CryptexPolicy::kRequire;
+    config.crypto_options = options;
+
+    RTCError error = pc_->SetConfiguration(config);
+    EXPECT_EQ(RTCErrorType::INVALID_MODIFICATION, error.type());
+  }
 }
 
 // Test that PeerConnection::Close changes the states to closed and all remote
@@ -2588,8 +2661,10 @@ TEST_P(PeerConnectionInterfaceTest, CloseAndTestStreamsAndStates) {
   // With Plan B, verify the stream count. The analog with Unified Plan is the
   // RtpTransceiver count.
   if (sdp_semantics_ == SdpSemantics::kPlanB_DEPRECATED) {
+    RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN();
     ASSERT_EQ(1u, pc_->local_streams()->count());
     ASSERT_EQ(1u, pc_->remote_streams()->count());
+    RTC_ALLOW_PLAN_B_DEPRECATION_END();
   } else {
     ASSERT_EQ(2u, pc_->GetTransceivers().size());
   }
@@ -2603,8 +2678,10 @@ TEST_P(PeerConnectionInterfaceTest, CloseAndTestStreamsAndStates) {
             pc_->ice_gathering_state());
 
   if (sdp_semantics_ == SdpSemantics::kPlanB_DEPRECATED) {
+    RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN();
     EXPECT_EQ(1u, pc_->local_streams()->count());
     EXPECT_EQ(1u, pc_->remote_streams()->count());
+    RTC_ALLOW_PLAN_B_DEPRECATION_END();
   } else {
     // Verify that the RtpTransceivers are still returned.
     EXPECT_EQ(2u, pc_->GetTransceivers().size());
@@ -2630,6 +2707,7 @@ TEST_P(PeerConnectionInterfaceTest, CloseAndTestStreamsAndStates) {
   }
 }
 
+RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN()
 // Test that PeerConnection methods fails gracefully after
 // PeerConnection::Close has been called.
 // Don't run under Unified Plan since the stream API is not available.
@@ -2668,12 +2746,13 @@ TEST_F(PeerConnectionInterfaceTestPlanB, CloseAndTestMethods) {
       CreateSessionDescription(SdpType::kOffer, sdp));
   EXPECT_FALSE(DoSetLocalDescription(std::move(local_offer)));
 }
+RTC_ALLOW_PLAN_B_DEPRECATION_END()
 
 // Test that GetStats can still be called after PeerConnection::Close.
 TEST_P(PeerConnectionInterfaceTest, CloseAndGetStats) {
   InitiateCall();
   pc_->Close();
-  DoGetStats(nullptr);
+  DoGetRTCStats();
 }
 
 // NOTE: The series of tests below come from what used to be
@@ -2690,9 +2769,11 @@ TEST_P(PeerConnectionInterfaceTest, UpdateRemoteStreams) {
 
   scoped_refptr<StreamCollection> reference(
       CreateStreamCollection(1, 1, worker_thread_.get()));
+  RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN()
   EXPECT_TRUE(
       CompareStreamCollections(observer_.remote_streams(), reference.get()));
   MediaStreamInterface* remote_stream = observer_.remote_streams()->at(0);
+  RTC_ALLOW_PLAN_B_DEPRECATION_END();
   EXPECT_TRUE(remote_stream->GetVideoTracks()[0]->GetSource() != nullptr);
 
   // Create a session description based on another SDP with another
@@ -2701,10 +2782,13 @@ TEST_P(PeerConnectionInterfaceTest, UpdateRemoteStreams) {
 
   scoped_refptr<StreamCollection> reference2(
       CreateStreamCollection(2, 1, worker_thread_.get()));
+  RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN();
   EXPECT_TRUE(
       CompareStreamCollections(observer_.remote_streams(), reference2.get()));
+  RTC_ALLOW_PLAN_B_DEPRECATION_END();
 }
 
+RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN()
 // This test verifies that when remote tracks are added/removed from SDP, the
 // created remote streams are updated appropriately.
 // Don't run under Unified Plan since this test uses Plan B SDP to test Plan B
@@ -2753,12 +2837,19 @@ TEST_F(PeerConnectionInterfaceTestPlanB,
                         {.timeout = TimeDelta::Millis(kTimeout)}),
               IsRtcOk());
 }
+RTC_ALLOW_PLAN_B_DEPRECATION_END()
 
 // This tests that remote tracks are ended if a local session description is set
 // that rejects the media content type.
 TEST_P(PeerConnectionInterfaceTest, RejectMediaContent) {
+  // Munging allowed: kRejected (section rejection)
+  // TODO: bugs.webrtc.org/41480906 - This test rejects m= sections by
+  // munging content->rejected because it also runs under Plan B, where the
+  // transceiver API is unavailable. Once Plan B is removed, reject sections via
+  // transceiver->StopStandard() instead of munging and drop the
+  // WebRTC-NoSdpMangleAllowForTesting exception below.
   RTCConfiguration config;
-  CreatePeerConnection(config);
+  CreatePeerConnection(config, "WebRTC-NoSdpMangleAllowForTesting/Enabled,39/");
   // First create and set a remote offer, then reject its video content in our
   // answer.
   CreateAndSetRemoteOffer(kSdpStringWithStream1PlanB);
@@ -2805,12 +2896,13 @@ TEST_P(PeerConnectionInterfaceTest, RejectMediaContent) {
               IsRtcOk());
 }
 
+RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN()
 // This tests that we won't crash if the remote track has been removed outside
 // of PeerConnection and then PeerConnection tries to reject the track.
 // Don't run under Unified Plan since the stream API is not available.
 TEST_F(PeerConnectionInterfaceTestPlanB, RemoveTrackThenRejectMediaContent) {
-  RTCConfiguration config;
-  CreatePeerConnection(config);
+  // Munging allowed: kWithoutCreateAnswer (2) (manually created local answer)
+  CreatePeerConnection("WebRTC-NoSdpMangleAllowForTesting/Enabled,2/");
   CreateAndSetRemoteOffer(GetSdpStringWithStream1());
   MediaStreamInterface* remote_stream = observer_.remote_streams()->at(0);
   remote_stream->RemoveTrack(remote_stream->GetVideoTracks()[0]);
@@ -2829,6 +2921,7 @@ TEST_F(PeerConnectionInterfaceTestPlanB, RemoveTrackThenRejectMediaContent) {
 
   // No crash is a pass.
 }
+RTC_ALLOW_PLAN_B_DEPRECATION_END()
 
 // This tests that if a recvonly remote description is set, no remote streams
 // will be created, even if the description contains SSRCs/MSIDs.
@@ -2841,9 +2934,12 @@ TEST_P(PeerConnectionInterfaceTest, RecvonlyDescriptionDoesntCreateStream) {
   absl::StrReplaceAll({{kSendrecv, kRecvonly}}, &recvonly_offer);
   CreateAndSetRemoteOffer(recvonly_offer);
 
+  RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN();
   EXPECT_EQ(0u, observer_.remote_streams()->count());
+  RTC_ALLOW_PLAN_B_DEPRECATION_END();
 }
 
+RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN()
 // This tests that a default MediaStream is created if a remote session
 // description doesn't contain any streams and no MSID support.
 // It also tests that the default stream is updated if a video m-line is added
@@ -3094,13 +3190,16 @@ TEST_F(PeerConnectionInterfaceTestPlanB,
   EXPECT_TRUE(ContainsSender(senders, kAudioTracks[1]));
   EXPECT_TRUE(ContainsSender(senders, kVideoTracks[1]));
 }
+RTC_ALLOW_PLAN_B_DEPRECATION_END()
 
 // This tests that the expected behavior occurs if the SSRC on a local track is
 // changed when SetLocalDescription is called.
 TEST_P(PeerConnectionInterfaceTest,
        ChangeSsrcOnTrackInLocalSessionDescription) {
+  // Munging allowed: kWithoutCreateOffer (3), kSsrcs (27)
   RTCConfiguration config;
-  CreatePeerConnection(config);
+  CreatePeerConnection(config,
+                       "WebRTC-NoSdpMangleAllowForTesting/Enabled,3,27/");
 
   AddAudioTrack(kAudioTracks[0]);
   AddVideoTrack(kVideoTracks[0]);
@@ -3145,6 +3244,7 @@ TEST_P(PeerConnectionInterfaceTest,
   // changed.
 }
 
+RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN()
 // This tests that the expected behavior occurs if a new session description is
 // set with the same tracks, but on a different MediaStream.
 // Don't run under Unified Plan since the stream API is not available.
@@ -3183,6 +3283,7 @@ TEST_F(PeerConnectionInterfaceTestPlanB,
   EXPECT_TRUE(ContainsSender(new_senders, kAudioTracks[0], kStreams[1]));
   EXPECT_TRUE(ContainsSender(new_senders, kVideoTracks[0], kStreams[1]));
 }
+RTC_ALLOW_PLAN_B_DEPRECATION_END()
 
 // This tests that PeerConnectionObserver::OnAddTrack is correctly called.
 TEST_P(PeerConnectionInterfaceTest, OnAddTrackCallback) {
@@ -3323,7 +3424,8 @@ TEST_P(PeerConnectionInterfaceTest,
 // one offer/answer exchange as the offerer, then another as the answerer.
 TEST_P(PeerConnectionInterfaceTest, CurrentAndPendingDescriptions) {
   // This disables DTLS so we can apply an answer to ourselves.
-  CreatePeerConnection();
+  // Munging allowed: kWithoutCreateAnswer (2)
+  CreatePeerConnection("WebRTC-NoSdpMangleAllowForTesting/Enabled,2/");
 
   // Create initial local offer and get SDP (which will also be used as
   // answer/pranswer);
@@ -3499,6 +3601,7 @@ TEST_P(PeerConnectionInterfaceTest, CreateOfferWithOfferToReceiveConstraints) {
   EXPECT_FALSE(video->rejected);
 }
 
+RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN()
 // Test that if CreateAnswer is called with the deprecated "offer to receive
 // audio/video" constraints, they're processed and can be used to reject an
 // offered m= section just as can be done with RTCOfferAnswerOptions;
@@ -3530,6 +3633,7 @@ TEST_F(PeerConnectionInterfaceTestPlanB,
   EXPECT_TRUE(audio->rejected);
   EXPECT_TRUE(video->rejected);
 }
+RTC_ALLOW_PLAN_B_DEPRECATION_END()
 
 // Test that negotiation can succeed with a data channel only, and with the max
 // bundle policy. Previously there was a bug that prevented this.
@@ -3782,6 +3886,7 @@ TEST_P(PeerConnectionInterfaceTest, CreateOfferWithRtpMux) {
   EXPECT_FALSE(offer->description()->HasGroup(GROUP_TYPE_BUNDLE));
 }
 
+RTC_ALLOW_PLAN_B_DEPRECATION_BEGIN()
 // This test ensures OnRenegotiationNeeded is called when we add track with
 // MediaStream -> AddTrack in the same way it is called when we add track with
 // PeerConnection -> AddTrack.
@@ -3799,32 +3904,29 @@ TEST_F(PeerConnectionInterfaceTestPlanB,
   scoped_refptr<VideoTrackInterface> video_track(
       CreateVideoTrack("video_track"));
   stream->AddTrack(audio_track);
-  EXPECT_THAT(WaitUntil([&] { return observer_.renegotiation_needed_; },
-                        IsTrue(), {.timeout = TimeDelta::Millis(kTimeout)}),
-              IsRtcOk());
+  EXPECT_TRUE(WaitUntil([&] { return observer_.renegotiation_needed_; },
+                        {.timeout = TimeDelta::Millis(kTimeout)}));
   observer_.renegotiation_needed_ = false;
 
   CreateOfferReceiveAnswer();
   stream->AddTrack(video_track);
-  EXPECT_THAT(WaitUntil([&] { return observer_.renegotiation_needed_; },
-                        IsTrue(), {.timeout = TimeDelta::Millis(kTimeout)}),
-              IsRtcOk());
+  EXPECT_TRUE(WaitUntil([&] { return observer_.renegotiation_needed_; },
+                        {.timeout = TimeDelta::Millis(kTimeout)}));
   observer_.renegotiation_needed_ = false;
 
   CreateOfferReceiveAnswer();
   stream->RemoveTrack(audio_track);
-  EXPECT_THAT(WaitUntil([&] { return observer_.renegotiation_needed_; },
-                        IsTrue(), {.timeout = TimeDelta::Millis(kTimeout)}),
-              IsRtcOk());
+  EXPECT_TRUE(WaitUntil([&] { return observer_.renegotiation_needed_; },
+                        {.timeout = TimeDelta::Millis(kTimeout)}));
   observer_.renegotiation_needed_ = false;
 
   CreateOfferReceiveAnswer();
   stream->RemoveTrack(video_track);
-  EXPECT_THAT(WaitUntil([&] { return observer_.renegotiation_needed_; },
-                        IsTrue(), {.timeout = TimeDelta::Millis(kTimeout)}),
-              IsRtcOk());
+  EXPECT_TRUE(WaitUntil([&] { return observer_.renegotiation_needed_; },
+                        {.timeout = TimeDelta::Millis(kTimeout)}));
   observer_.renegotiation_needed_ = false;
 }
+RTC_ALLOW_PLAN_B_DEPRECATION_END()
 
 // Tests that an error is returned if a description is applied that has fewer
 // media sections than the existing description.
@@ -3909,11 +4011,8 @@ class PeerConnectionMediaConfigTest : public ::testing::Test {
     network_thread_ = Thread::CreateWithSocketServer();
     network_thread_->SetName("NetworkThread", nullptr);
     ASSERT_TRUE(network_thread_->Start());
-    worker_thread_ = Thread::Create();
-    worker_thread_->SetName("WorkerThread", nullptr);
-    ASSERT_TRUE(worker_thread_->Start());
     pcf_ = PeerConnectionFactoryForTest::CreatePeerConnectionFactoryForTest(
-        network_thread_.get(), worker_thread_.get());
+        network_thread_.get());
   }
   MediaConfig TestCreatePeerConnection(const RTCConfiguration& config) {
     PeerConnectionDependencies pc_dependencies(&observer_);
@@ -3925,7 +4024,7 @@ class PeerConnectionMediaConfigTest : public ::testing::Test {
   }
 
   std::unique_ptr<Thread> network_thread_;
-  std::unique_ptr<Thread> worker_thread_;
+  test::RunLoop signaling_thread_;
   scoped_refptr<PeerConnectionFactoryForTest> pcf_;
   MockPeerConnectionObserver observer_;
 };

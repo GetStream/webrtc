@@ -14,10 +14,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
-#include "api/array_view.h"
 #include "api/frame_transformer_interface.h"
 #include "api/scoped_refptr.h"
 #include "api/sequence_checker.h"
@@ -39,16 +39,25 @@ namespace webrtc {
 // have been applied.
 class RTPVideoFrameSenderInterface {
  public:
+  [[deprecated("Use SendVideoFrame instead.")]]
   virtual bool SendVideo(int payload_type,
                          VideoCodecType codec_type,
                          uint32_t rtp_timestamp,
                          Timestamp capture_time,
-                         ArrayView<const uint8_t> payload,
+                         std::span<const uint8_t> payload,
                          size_t encoder_output_size,
                          RTPVideoHeader video_header,
                          TimeDelta expected_retransmission_time,
                          std::vector<uint32_t> csrcs) = 0;
-
+  virtual bool SendVideoFrame(int payload_type,
+                              VideoCodecType codec_type,
+                              RtpTimestampInfo rtp_timestamp_info,
+                              Timestamp capture_time,
+                              std::span<const uint8_t> payload,
+                              size_t encoder_output_size,
+                              RTPVideoHeader video_header,
+                              TimeDelta expected_retransmission_time,
+                              std::vector<uint32_t> csrcs) = 0;
   virtual void SetVideoStructureAfterTransformation(
       const FrameDependencyStructure* video_structure) = 0;
   virtual void SetVideoLayersAllocationAfterTransformation(
@@ -68,7 +77,9 @@ class RTPSenderVideoFrameTransformerDelegate : public TransformedFrameCallback {
       scoped_refptr<FrameTransformerInterface> frame_transformer,
       uint32_t ssrc,
       std::string rid,
-      TaskQueueFactory* send_transport_queue);
+      TaskQueueFactory* send_transport_queue,
+      TaskQueueFactory::Priority transformation_queue_priority =
+          TaskQueueFactory::Priority::kNormal);
 
   void Init();
 
@@ -127,6 +138,14 @@ class RTPSenderVideoFrameTransformerDelegate : public TransformedFrameCallback {
 // Method to support cloning a Sender frame from another frame
 std::unique_ptr<TransformableVideoFrameInterface> CloneSenderVideoFrame(
     TransformableVideoFrameInterface* original);
+
+std::unique_ptr<TransformableVideoFrameInterface> CreateSenderVideoFrame(
+    const EncodedImage& encoded_image,
+    const RTPVideoHeader& video_header,
+    uint8_t payload_type,
+    VideoCodecType codec_type,
+    RtpTimestampInfo rtp_timestamp_info,
+    const std::vector<uint32_t>& csrcs);
 
 }  // namespace webrtc
 

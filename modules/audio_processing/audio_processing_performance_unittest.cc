@@ -19,7 +19,6 @@
 #include "absl/strings/string_view.h"
 #include "api/audio/audio_processing.h"
 #include "api/audio/builtin_audio_processing_builder.h"
-#include "api/environment/environment_factory.h"
 #include "api/numerics/samples_stats_counter.h"
 #include "api/scoped_refptr.h"
 #include "api/test/metrics/global_metrics_logger_and_exporter.h"
@@ -30,6 +29,7 @@
 #include "rtc_base/platform_thread.h"
 #include "rtc_base/random.h"
 #include "system_wrappers/include/clock.h"
+#include "test/create_test_environment.h"
 #include "test/gtest.h"
 
 namespace webrtc {
@@ -48,7 +48,6 @@ enum class ProcessorType { kRender, kCapture };
 // Variant of APM processing settings to use in the test.
 enum class SettingsType {
   kDefaultApmDesktop,
-  kDefaultApmMobile,
   kAllSubmodulesTurnedOff,
   kDefaultApmDesktopWithoutDelayAgnostic,
   kDefaultApmDesktopWithoutExtendedFilter
@@ -99,26 +98,12 @@ struct SimulationConfig {
       }
     }
 #endif
-
-    const SettingsType mobile_settings[] = {SettingsType::kDefaultApmMobile};
-
-    const int mobile_sample_rates[] = {8000, 16000};
-
-    for (auto sample_rate : mobile_sample_rates) {
-      for (auto settings : mobile_settings) {
-        simulation_configs.push_back(SimulationConfig(sample_rate, settings));
-      }
-    }
-
     return simulation_configs;
   }
 
   std::string SettingsDescription() const {
     std::string description;
     switch (simulation_settings) {
-      case SettingsType::kDefaultApmMobile:
-        description = "DefaultApmMobile";
-        break;
       case SettingsType::kDefaultApmDesktop:
         description = "DefaultApmDesktop";
         break;
@@ -420,20 +405,8 @@ class CallSimulator : public ::testing::TestWithParam<SimulationConfig> {
     auto set_default_desktop_apm_runtime_settings = [](AudioProcessing* apm) {
       AudioProcessing::Config apm_config = apm->GetConfig();
       apm_config.echo_canceller.enabled = true;
-      apm_config.echo_canceller.mobile_mode = false;
       apm_config.noise_suppression.enabled = true;
       apm_config.gain_controller1.enabled = true;
-      apm_config.gain_controller1.mode =
-          AudioProcessing::Config::GainController1::kAdaptiveDigital;
-      apm->ApplyConfig(apm_config);
-    };
-
-    // Lambda function for setting the default APM runtime settings for mobile.
-    auto set_default_mobile_apm_runtime_settings = [](AudioProcessing* apm) {
-      AudioProcessing::Config apm_config = apm->GetConfig();
-      apm_config.echo_canceller.enabled = true;
-      apm_config.echo_canceller.mobile_mode = true;
-      apm_config.noise_suppression.enabled = true;
       apm_config.gain_controller1.mode =
           AudioProcessing::Config::GainController1::kAdaptiveDigital;
       apm->ApplyConfig(apm_config);
@@ -451,32 +424,26 @@ class CallSimulator : public ::testing::TestWithParam<SimulationConfig> {
 
     int num_capture_channels = 1;
     switch (simulation_config_.simulation_settings) {
-      case SettingsType::kDefaultApmMobile: {
-        apm_ = BuiltinAudioProcessingBuilder().Build(CreateEnvironment());
-        ASSERT_TRUE(!!apm_);
-        set_default_mobile_apm_runtime_settings(apm_.get());
-        break;
-      }
       case SettingsType::kDefaultApmDesktop: {
-        apm_ = BuiltinAudioProcessingBuilder().Build(CreateEnvironment());
+        apm_ = BuiltinAudioProcessingBuilder().Build(CreateTestEnvironment());
         ASSERT_TRUE(!!apm_);
         set_default_desktop_apm_runtime_settings(apm_.get());
         break;
       }
       case SettingsType::kAllSubmodulesTurnedOff: {
-        apm_ = BuiltinAudioProcessingBuilder().Build(CreateEnvironment());
+        apm_ = BuiltinAudioProcessingBuilder().Build(CreateTestEnvironment());
         ASSERT_TRUE(!!apm_);
         turn_off_default_apm_runtime_settings(apm_.get());
         break;
       }
       case SettingsType::kDefaultApmDesktopWithoutDelayAgnostic: {
-        apm_ = BuiltinAudioProcessingBuilder().Build(CreateEnvironment());
+        apm_ = BuiltinAudioProcessingBuilder().Build(CreateTestEnvironment());
         ASSERT_TRUE(!!apm_);
         set_default_desktop_apm_runtime_settings(apm_.get());
         break;
       }
       case SettingsType::kDefaultApmDesktopWithoutExtendedFilter: {
-        apm_ = BuiltinAudioProcessingBuilder().Build(CreateEnvironment());
+        apm_ = BuiltinAudioProcessingBuilder().Build(CreateTestEnvironment());
         ASSERT_TRUE(!!apm_);
         set_default_desktop_apm_runtime_settings(apm_.get());
         break;
@@ -558,6 +525,8 @@ const float CallSimulator::kRenderInputFloatLevel = 0.5f;
 const float CallSimulator::kCaptureInputFloatLevel = 0.03125f;
 }  // anonymous namespace
 
+#ifndef WEBRTC_ANDROID
+
 TEST_P(CallSimulator, ApiCallDurationTest) {
   // Run test and verify that it did not time out.
   EXPECT_TRUE(Run());
@@ -567,5 +536,6 @@ INSTANTIATE_TEST_SUITE_P(
     AudioProcessingPerformanceTest,
     CallSimulator,
     ::testing::ValuesIn(SimulationConfig::GenerateSimulationConfigs()));
+#endif
 
 }  // namespace webrtc

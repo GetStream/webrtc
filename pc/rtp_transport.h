@@ -17,8 +17,13 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
+#include "absl/strings/string_view.h"
 #include "api/field_trials_view.h"
+#include "api/rtc_error.h"
+#include "api/sequence_checker.h"
 #include "api/task_queue/pending_task_safety_flag.h"
 #include "api/transport/ecn_marking.h"
 #include "api/units/timestamp.h"
@@ -35,6 +40,8 @@
 #include "rtc_base/network/sent_packet.h"
 #include "rtc_base/network_route.h"
 #include "rtc_base/socket.h"
+#include "rtc_base/system/no_unique_address.h"
+#include "rtc_base/thread_annotations.h"
 
 namespace webrtc {
 
@@ -47,7 +54,9 @@ class RtpTransport : public RtpTransportInternal {
   RtpTransport& operator=(const RtpTransport&) = delete;
 
   RtpTransport(bool rtcp_mux_enabled, const FieldTrialsView& field_trials)
-      : rtcp_mux_enabled_(rtcp_mux_enabled) {}
+      : update_network_route_on_srtp_activation_(field_trials.IsEnabled(
+            "WebRTC-UpdateNetworkRouteOnSrtpActivation")),
+        rtcp_mux_enabled_(rtcp_mux_enabled) {}
 
   virtual DtlsSrtpTransport* AsDtlsSrtpTransport() { return nullptr; }
 
@@ -86,13 +95,26 @@ class RtpTransport : public RtpTransportInternal {
 
   bool IsSrtpActive() const override { return false; }
 
-  void UpdateRtpHeaderExtensionMap(
-      const RtpHeaderExtensions& header_extensions) override;
+  RTCError VerifyRtpHeaderExtensionMap(
+      const RtpHeaderExtensions& extensions) const override;
+
+  RTCError RegisterRtpHeaderExtensionMap(
+      absl::string_view mid,
+      const RtpHeaderExtensions& extensions) override;
+
+  // Currently only used for testing. In production, unregistration isn't needed
+  // because leaving the registered extensions in `RtpTransport` is harmless
+  // when a channel/transceiver is stopped or disconnected. The negotiated
+  // extension IDs are typically stable for the lifetime of the transport, and
+  // the transport itself will be destroyed when the PeerConnection is closed.
+  void UnregisterRtpHeaderExtensionMap(absl::string_view mid) override;
 
   bool RegisterRtpDemuxerSink(const RtpDemuxerCriteria& criteria,
                               RtpPacketSinkInterface* sink) override;
 
   bool UnregisterRtpDemuxerSink(RtpPacketSinkInterface* sink) override;
+
+  void SetActivePayloadTypeDemuxing(bool enabled) override;
 
  protected:
   // These methods will be used in the subclasses.
@@ -109,6 +131,9 @@ class RtpTransport : public RtpTransportInternal {
   // Overridden by SrtpTransport and DtlsSrtpTransport.
   virtual void OnWritableState(PacketTransportInternal* packet_transport);
 
+  // TODO(bugs.webrtc.org/461532446): Remove once the experiment is evaluated.
+  const bool update_network_route_on_srtp_activation_;
+
  private:
   bool SendPacket(bool rtcp,
                   CopyOnWriteBuffer* packet,
@@ -117,6 +142,7 @@ class RtpTransport : public RtpTransportInternal {
   // Helper function for SetRt(c)pPacketTransport
   void ChangePacketTransport(PacketTransportInternal* new_transport,
                              PacketTransportInternal*& transport_to_change);
+  void NotifyNetworkRouteChanged(std::optional<NetworkRoute> network_route);
   void OnReadyToSend(PacketTransportInternal* transport);
   void OnSentPacket(PacketTransportInternal* packet_transport,
                     const SentPacketInfo& sent_packet);
@@ -130,6 +156,8 @@ class RtpTransport : public RtpTransportInternal {
   void MaybeSignalReadyToSend();
 
   bool IsTransportWritable();
+
+  void RebuildMergedMap() RTC_RUN_ON(network_thread_checker_);
 
   bool rtcp_mux_enabled_;
 
@@ -146,9 +174,22 @@ class RtpTransport : public RtpTransportInternal {
   RtpDemuxer rtp_demuxer_;
 
   // Used for identifying the MID for RtpDemuxer.
-  RtpHeaderExtensionMap header_extension_map_;
+  RtpHeaderExtensionMap header_extension_map_
+      RTC_GUARDED_BY(network_thread_checker_);
+  // Stores the registered RTP header extensions by MID.
+  // We use a std::vector to preserve the chronological registration order.
+  // In BUNDLE scenarios, RFC 8843 requires consistent extension IDs across
+  // all MIDs. If different MIDs request the same ID for different URIs,
+  // we resolve the conflict by giving precedence to the most recently
+  // registered MID. Preserving the insertion order allows
+  // UnregisterRtpHeaderExtensionMap to correctly fall back to the newest
+  // remaining registration when rebuilding the map.
+  std::vector<std::pair<std::string, RtpHeaderExtensions>>
+      header_extensions_by_mid_ RTC_GUARDED_BY(network_thread_checker_);
+
   // Guard against recursive "ready to send" signals
   bool processing_ready_to_send_ = false;
+  RTC_NO_UNIQUE_ADDRESS SequenceChecker network_thread_checker_;
   ScopedTaskSafety safety_;
 };
 

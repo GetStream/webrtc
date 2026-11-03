@@ -18,6 +18,7 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+
 #ifdef WEBRTC_WIN
 #include <conio.h>
 #endif
@@ -33,6 +34,7 @@
 #include "api/make_ref_counted.h"
 #include "api/rtc_event_log/rtc_event_log.h"
 #include "api/rtc_event_log_output_file.h"
+#include "api/rtp_header_extension_id.h"
 #include "api/rtp_parameters.h"
 #include "api/scoped_refptr.h"
 #include "api/task_queue/task_queue_base.h"
@@ -42,6 +44,7 @@
 #include "api/units/time_delta.h"
 #include "api/video/builtin_video_bitrate_allocator_factory.h"
 #include "api/video/encoded_image.h"
+#include "api/video/resolution.h"
 #include "api/video/video_bitrate_allocation.h"
 #include "api/video/video_codec_constants.h"
 #include "api/video/video_codec_type.h"
@@ -68,13 +71,12 @@
 #include "media/engine/webrtc_video_engine.h"
 #include "modules/audio_device/include/test_audio_device.h"
 #include "modules/audio_mixer/audio_mixer_impl.h"
-#include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/video_coding/utility/ivf_file_writer.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/numerics/safe_conversions.h"
+#include "rtc_base/string_encode.h"
 #include "rtc_base/strings/string_builder.h"
-#include "rtc_base/system/file_wrapper.h"
 #include "rtc_base/task_queue_for_test.h"
 #include "test/call_test.h"
 #include "test/create_test_field_trials.h"
@@ -86,6 +88,8 @@
 #include "test/platform_video_capturer.h"
 #include "test/test_flags.h"
 #include "test/testsupport/file_utils.h"
+#include "test/testsupport/pendulum_frame_generator.h"
+#include "test/testsupport/switching_frame_reader.h"
 #include "test/testsupport/y4m_frame_generator.h"
 #include "test/video_renderer.h"
 #include "test/video_test_constants.h"
@@ -100,14 +104,12 @@
 namespace webrtc {
 
 namespace {
-enum : int {  // The first valid value is 1.
-  kAbsSendTimeExtensionId = 1,
-  kGenericFrameDescriptorExtensionId00,
-  kGenericFrameDescriptorExtensionId01,
-  kTransportSequenceNumberExtensionId,
-  kVideoContentTypeExtensionId,
-  kVideoTimingExtensionId,
-};
+constexpr RtpHeaderExtensionId kAbsSendTimeExtensionId(1);
+constexpr RtpHeaderExtensionId kGenericFrameDescriptorExtensionId00(2);
+constexpr RtpHeaderExtensionId kDependencyDescriptorExtensionId(3);
+constexpr RtpHeaderExtensionId kTransportSequenceNumberExtensionId(4);
+constexpr RtpHeaderExtensionId kVideoContentTypeExtensionId(5);
+constexpr RtpHeaderExtensionId kVideoTimingExtensionId(6);
 
 constexpr char kSyncGroup[] = "av_sync";
 constexpr int kOpusMinBitrateBps = 6000;
@@ -171,14 +173,14 @@ class QualityTestVideoEncoder : public VideoEncoder,
  public:
   QualityTestVideoEncoder(std::unique_ptr<VideoEncoder> encoder,
                           VideoAnalyzer* analyzer,
-                          std::vector<FileWrapper> files,
+                          std::vector<std::string> file_names,
                           double overshoot_factor)
       : encoder_(std::move(encoder)),
         overshoot_factor_(overshoot_factor),
         analyzer_(analyzer) {
-    for (FileWrapper& file : files) {
+    for (const std::string& file_name : file_names) {
       writers_.push_back(
-          IvfFileWriter::Wrap(std::move(file), /* byte_limit= */ 100000000));
+          IvfFileWriter::Wrap(file_name, /* byte_limit= */ 100000000));
     }
   }
 
@@ -296,8 +298,11 @@ class QualityTestVideoEncoder : public VideoEncoder,
     return callback_->OnEncodedImage(encoded_image, codec_specific_info);
   }
 
-  void OnDroppedFrame(DropReason reason) override {
-    callback_->OnDroppedFrame(reason);
+  void OnFrameDropped(uint32_t rtp_timestamp,
+                      int spatial_id,
+                      bool is_end_of_temporal_unit) override {
+    callback_->OnFrameDropped(rtp_timestamp, spatial_id,
+                              is_end_of_temporal_unit);
   }
 
   const std::unique_ptr<VideoEncoder> encoder_;
@@ -347,8 +352,7 @@ std::unique_ptr<VideoDecoder> VideoQualityTest::CreateVideoDecoder(
     str << receive_logs_++;
     std::string path =
         params_.logging.encoded_frame_base_path + "." + str.str() + ".recv.ivf";
-    decoder = CreateFrameDumpingDecoderWrapper(
-        std::move(decoder), FileWrapper::OpenWriteOnly(path));
+    decoder = CreateFrameDumpingDecoderWrapper(std::move(decoder), path);
   }
   return decoder;
 }
@@ -365,19 +369,15 @@ std::unique_ptr<VideoEncoder> VideoQualityTest::CreateVideoEncoder(
         env, encoder_factory_.get(), nullptr, format);
   }
 
-  std::vector<FileWrapper> encoded_frame_dump_files;
+  std::vector<std::string> encoded_frame_dump_files;
   if (!params_.logging.encoded_frame_base_path.empty()) {
-    char ss_buf[100];
-    SimpleStringBuilder sb(ss_buf);
+    StringBuilder sb;
     sb << send_logs_++;
     std::string prefix =
         params_.logging.encoded_frame_base_path + "." + sb.str() + ".send.";
-    encoded_frame_dump_files.push_back(
-        FileWrapper::OpenWriteOnly(prefix + "1.ivf"));
-    encoded_frame_dump_files.push_back(
-        FileWrapper::OpenWriteOnly(prefix + "2.ivf"));
-    encoded_frame_dump_files.push_back(
-        FileWrapper::OpenWriteOnly(prefix + "3.ivf"));
+    encoded_frame_dump_files.push_back(prefix + "1.ivf");
+    encoded_frame_dump_files.push_back(prefix + "2.ivf");
+    encoded_frame_dump_files.push_back(prefix + "3.ivf");
   }
 
   double overshoot_factor = 1.0;
@@ -454,7 +454,7 @@ VideoQualityTest::VideoQualityTest(InjectionComponents injection_components)
   RegisterRtpExtension(RtpExtension(RtpExtension::kGenericFrameDescriptorUri00,
                                     kGenericFrameDescriptorExtensionId00));
   RegisterRtpExtension(RtpExtension(RtpExtension::kDependencyDescriptorUri,
-                                    kRtpExtensionDependencyDescriptor));
+                                    kDependencyDescriptorExtensionId));
   RegisterRtpExtension(RtpExtension(RtpExtension::kVideoContentTypeUri,
                                     kVideoContentTypeExtensionId));
   RegisterRtpExtension(
@@ -793,7 +793,7 @@ void VideoQualityTest::SetupVideo(Transport* send_transport,
     if (params_.call.dependency_descriptor) {
       video_send_configs_[video_idx].rtp.extensions.emplace_back(
           RtpExtension::kDependencyDescriptorUri,
-          kRtpExtensionDependencyDescriptor);
+          kDependencyDescriptorExtensionId);
     }
 
     video_send_configs_[video_idx].rtp.extensions.emplace_back(
@@ -1022,8 +1022,9 @@ void VideoQualityTest::SetupThumbnails(Transport* send_transport,
   }
   for (size_t i = 0; i < thumbnail_receive_configs_.size(); ++i) {
     thumbnail_receive_streams_.push_back(sender_call_->CreateVideoReceiveStream(
-        thumbnail_receive_configs_[i].Copy()));
+        std::move(thumbnail_receive_configs_[i])));
   }
+  thumbnail_receive_configs_.clear();
 }
 
 void VideoQualityTest::DestroyThumbnailStreams() {
@@ -1064,11 +1065,47 @@ VideoQualityTest::CreateFrameGenerator(size_t video_idx) {
   const size_t kWidth = 1850;
   const size_t kHeight = 1110;
   std::unique_ptr<test::FrameGeneratorInterface> frame_generator;
-  if (params_.screenshare[video_idx].generate_slides) {
+  if (params_.video[video_idx].pendulum.has_value()) {
+    const auto& pendulum = *params_.video[video_idx].pendulum;
+    test::PendulumFrameGenerator::Config config;
+    config.target_resolution = {.width = params_.video[video_idx].width,
+                                .height = params_.video[video_idx].height};
+    config.fps = params_.video[video_idx].fps;
+    config.source_image_path = pendulum.image_path;
+    config.source_resolution = {
+        .width = static_cast<size_t>(pendulum.image_width),
+        .height = static_cast<size_t>(pendulum.image_height)};
+    config.min_zoom = pendulum.min_zoom;
+    config.max_zoom = pendulum.max_zoom;
+    config.zoom_speed = pendulum.zoom_speed;
+    config.noise_level = pendulum.noise_level;
+    return test::CreatePendulumFrameGenerator(config);
+  } else if (params_.screenshare[video_idx].generate_slides) {
     frame_generator = test::CreateSlideFrameGenerator(
         kWidth, kHeight,
         params_.screenshare[video_idx].slide_change_interval *
             params_.video[video_idx].fps);
+  } else if (!params_.video[video_idx].clip_paths.empty() ||
+             params_.video[video_idx].camera_switching_interval >
+                 TimeDelta::Zero() ||
+             (!params_.video[video_idx].clip_path.empty() &&
+              params_.video[video_idx].clip_path.find(',') !=
+                  std::string::npos)) {
+    std::vector<std::string> paths = params_.video[video_idx].clip_paths;
+    if (paths.empty() && !params_.video[video_idx].clip_path.empty()) {
+      tokenize(params_.video[video_idx].clip_path, ',', &paths);
+    }
+    if (!paths.empty()) {
+      TimeDelta interval =
+          params_.video[video_idx].camera_switching_interval > TimeDelta::Zero()
+              ? params_.video[video_idx].camera_switching_interval
+              : TimeDelta::Seconds(2);
+      Resolution res = {
+          .width = static_cast<int>(params_.video[video_idx].width),
+          .height = static_cast<int>(params_.video[video_idx].height)};
+      frame_generator = test::CreateSwitchingFrameGenerator(
+          paths, res, params_.video[video_idx].fps, interval);
+    }
   } else if (!params_.video[video_idx].clip_path.empty()) {
     RTC_CHECK_GE(params_.video[video_idx].clip_path.size(), 4)
         << "Clip path must have a three letter file ending.";
@@ -1147,6 +1184,43 @@ void VideoQualityTest::CreateCapturers() {
           static_cast<int>(params_.video[video_idx].width),
           static_cast<int>(params_.video[video_idx].height),
           test::FrameGeneratorInterface::OutputType::kNV12, std::nullopt);
+    } else if (params_.video[video_idx].pendulum.has_value()) {
+      const auto& pendulum = *params_.video[video_idx].pendulum;
+      test::PendulumFrameGenerator::Config config;
+      config.target_resolution = {.width = params_.video[video_idx].width,
+                                  .height = params_.video[video_idx].height};
+      config.fps = params_.video[video_idx].fps;
+      config.source_image_path = pendulum.image_path;
+      config.source_resolution = {
+          .width = static_cast<size_t>(pendulum.image_width),
+          .height = static_cast<size_t>(pendulum.image_height)};
+      config.min_zoom = pendulum.min_zoom;
+      config.max_zoom = pendulum.max_zoom;
+      config.zoom_speed = pendulum.zoom_speed;
+      config.noise_level = pendulum.noise_level;
+      frame_generator = test::CreatePendulumFrameGenerator(config);
+    } else if (!params_.video[video_idx].clip_paths.empty() ||
+               params_.video[video_idx].camera_switching_interval >
+                   TimeDelta::Zero() ||
+               (!params_.video[video_idx].clip_path.empty() &&
+                params_.video[video_idx].clip_path.find(',') !=
+                    std::string::npos)) {
+      std::vector<std::string> paths = params_.video[video_idx].clip_paths;
+      if (paths.empty() && !params_.video[video_idx].clip_path.empty()) {
+        tokenize(params_.video[video_idx].clip_path, ',', &paths);
+      }
+      if (!paths.empty()) {
+        TimeDelta interval =
+            params_.video[video_idx].camera_switching_interval >
+                    TimeDelta::Zero()
+                ? params_.video[video_idx].camera_switching_interval
+                : TimeDelta::Seconds(2);
+        Resolution res = {
+            .width = static_cast<int>(params_.video[video_idx].width),
+            .height = static_cast<int>(params_.video[video_idx].height)};
+        frame_generator = test::CreateSwitchingFrameGenerator(
+            paths, res, params_.video[video_idx].fps, interval);
+      }
     } else if (params_.video[video_idx].clip_path.empty()) {
       video_sources_[video_idx] = test::CreateVideoCapturer(
           params_.video[video_idx].width, params_.video[video_idx].height,
@@ -1217,7 +1291,7 @@ VideoQualityTest::CreateSendTransport() {
     network_behavior = std::move(injection_components_.sender_network);
   }
   return std::make_unique<test::LayerFilteringTransport>(
-      task_queue(),
+      env_, network_thread(),
       std::make_unique<FakeNetworkPipe>(&env_.clock(),
                                         std::move(network_behavior)),
       sender_call_.get(), test::VideoTestConstants::kPayloadTypeVP8,
@@ -1238,7 +1312,7 @@ VideoQualityTest::CreateReceiveTransport() {
     network_behavior = std::move(injection_components_.receiver_network);
   }
   return std::make_unique<test::DirectTransport>(
-      task_queue(),
+      env_, network_thread(),
       std::make_unique<FakeNetworkPipe>(&env_.clock(),
                                         std::move(network_behavior)),
       receiver_call_.get(), payload_type_map_, GetRegisteredExtensions(),

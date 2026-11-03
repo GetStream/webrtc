@@ -17,14 +17,17 @@
 #include <optional>
 #include <utility>
 
+#include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
 #include "api/dtls_transport_interface.h"
 #include "api/rtc_error.h"
 #include "api/scoped_refptr.h"
+#include "api/task_queue/task_queue_base.h"
 #include "p2p/base/ice_transport_internal.h"
 #include "p2p/base/packet_transport_internal.h"
 #include "rtc_base/buffer.h"
 #include "rtc_base/callback_list.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/rtc_certificate.h"
 #include "rtc_base/ssl_certificate.h"
 #include "rtc_base/ssl_stream_adapter.h"
@@ -87,8 +90,15 @@ class DtlsTransportInternal : public PacketTransportInternal {
   virtual std::unique_ptr<SSLCertChain> GetRemoteSSLCertChain() const = 0;
 
   // Allows key material to be extracted for external encryption.
-  virtual bool ExportSrtpKeyingMaterial(
+  virtual bool AppendSrtpKeyingMaterial(
       ZeroOnFreeBuffer<uint8_t>& keying_material) = 0;
+
+  // Older API. If not overridden in subclasses, will fail.
+  [[deprecated]] virtual bool ExportSrtpKeyingMaterial(
+      ZeroOnFreeBuffer<uint8_t>& keying_material) {
+    RTC_DCHECK_NOTREACHED() << "Superseded by AppendSrtpKeyingMaterial";
+    return false;
+  }
 
   // Set DTLS remote fingerprint and role. Must be after local identity set.
   virtual RTCError SetRemoteParameters(absl::string_view digest_alg,
@@ -120,12 +130,20 @@ class DtlsTransportInternal : public PacketTransportInternal {
     dtls_transport_state_callback_list_.Send(transport, state);
   }
 
+  void SubscribeDtlsRoleChange(
+      absl::AnyInvocable<void(DtlsTransportInternal*, SSLRole)> callback) {
+    RTC_CHECK(!dtls_role_change_callback_);
+    dtls_role_change_callback_ = std::move(callback);
+  }
+  void SendDtlsRoleChange(DtlsTransportInternal* transport, SSLRole role) {
+    if (dtls_role_change_callback_) {
+      dtls_role_change_callback_(transport, role);
+    }
+  }
+
   // Emitted whenever the Dtls handshake failed on some transport channel.
   // F: void(SSLHandshakeError)
-  template <typename F>
-  [[deprecated]] void SubscribeDtlsHandshakeError(F&& callback) {
-    dtls_handshake_error_callback_list_.AddReceiver(std::forward<F>(callback));
-  }
+
   template <typename F>
   void SubscribeDtlsHandshakeError(void* tag, F&& callback) {
     dtls_handshake_error_callback_list_.AddReceiver(tag,
@@ -137,12 +155,14 @@ class DtlsTransportInternal : public PacketTransportInternal {
   }
 
  protected:
-  DtlsTransportInternal();
+  explicit DtlsTransportInternal(TaskQueueBase* attached_queue = nullptr);
 
  private:
   CallbackList<const SSLHandshakeError> dtls_handshake_error_callback_list_;
   CallbackList<DtlsTransportInternal*, const DtlsTransportState>
       dtls_transport_state_callback_list_;
+  absl::AnyInvocable<void(DtlsTransportInternal*, SSLRole)>
+      dtls_role_change_callback_;
 };
 
 }  //  namespace webrtc

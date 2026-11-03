@@ -28,8 +28,8 @@ import org.jni_zero.JniType;
 import org.jni_zero.NativeMethods;
 
 import org.webrtc.native_test.StrictModeContext;
+import org.webrtc.native_test.TestStatusReporter;
 import org.chromium.build.gtest_apk.NativeTestIntent;
-import org.chromium.test.reporter.TestStatusReporter;
 
 import java.io.File;
 
@@ -203,9 +203,9 @@ public class NativeTestWebrtc {
     @NativeMethods
     interface Natives {
         void runTests(
-                @JniType("std::string") String commandLineFlags,
-                @JniType("std::string") String commandLineFilePath,
-                @JniType("std::string") String stdoutFilePath,
-                @JniType("std::string") String testDataDir);
+                String commandLineFlags,
+                String commandLineFilePath,
+                String stdoutFilePath,
+                String testDataDir);
     }
 }

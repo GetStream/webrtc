@@ -17,12 +17,12 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/strings/string_view.h"
-#include "api/array_view.h"
 #include "api/data_channel_interface.h"
 #include "api/dtls_transport_interface.h"
 #include "api/environment/environment.h"
@@ -44,6 +44,7 @@
 #include "p2p/base/packet_transport_internal.h"
 #include "p2p/dtls/dtls_transport_internal.h"
 #include "rtc_base/async_packet_socket.h"
+#include "rtc_base/buffer.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/copy_on_write_buffer.h"
 #include "rtc_base/logging.h"
@@ -206,7 +207,7 @@ bool DcSctpTransport::Start(const SctpOptions& options) {
                     << (options.remote_init.has_value() ? "(set)" : "(not set)")
                     << ")";
 
-  if (!socket_) {
+  if (socket_ == nullptr) {
     dcsctp::DcSctpOptions dcsctp_options =
         CreateDcSctpOptions(options, env_.field_trials());
     if (options.local_init.has_value()) {
@@ -232,8 +233,10 @@ bool DcSctpTransport::Start(const SctpOptions& options) {
           << "): Can't change ports on already started transport.";
       return false;
     }
-    if (options.local_init != local_init_ ||
-        options.remote_init != remote_init_) {
+    bool negotiating_snap =
+        options.local_init.has_value() && options.remote_init.has_value();
+    if (negotiating_snap && (options.local_init != local_init_ ||
+                             options.remote_init != remote_init_)) {
       RTC_LOG(LS_ERROR)
           << debug_name_ << "->Start("
           << "local_init="
@@ -250,6 +253,9 @@ bool DcSctpTransport::Start(const SctpOptions& options) {
 
   for (const auto& [sid, stream_state] : stream_states_) {
     socket_->SetStreamPriority(sid, stream_state.priority);
+  }
+  if (data_channel_sink_ != nullptr) {
+    data_channel_sink_->OnMaxMessageSize(options.max_message_size);
   }
 
   return true;
@@ -440,7 +446,7 @@ void DcSctpTransport::SetBufferedAmountLowThreshold(int sid, size_t bytes) {
 }
 
 SendPacketStatus DcSctpTransport::SendPacketWithStatus(
-    ArrayView<const uint8_t> data) {
+    std::span<const uint8_t> data) {
   RTC_DCHECK_RUN_ON(network_thread_);
   RTC_DCHECK(socket_);
 
@@ -591,7 +597,7 @@ void DcSctpTransport::OnConnectionRestarted() {
 }
 
 void DcSctpTransport::OnStreamsResetFailed(
-    ArrayView<const dcsctp::StreamID> outgoing_streams,
+    std::span<const dcsctp::StreamID> outgoing_streams,
     absl::string_view reason) {
   // TODO(orphis): Need a test to check for correct behavior
   for (auto& stream_id : outgoing_streams) {
@@ -603,7 +609,7 @@ void DcSctpTransport::OnStreamsResetFailed(
 }
 
 void DcSctpTransport::OnStreamsResetPerformed(
-    ArrayView<const dcsctp::StreamID> outgoing_streams) {
+    std::span<const dcsctp::StreamID> outgoing_streams) {
   RTC_DCHECK_RUN_ON(network_thread_);
   for (auto& stream_id : outgoing_streams) {
     RTC_LOG(LS_INFO) << debug_name_
@@ -631,7 +637,7 @@ void DcSctpTransport::OnStreamsResetPerformed(
 }
 
 void DcSctpTransport::OnIncomingStreamsReset(
-    ArrayView<const dcsctp::StreamID> incoming_streams) {
+    std::span<const dcsctp::StreamID> incoming_streams) {
   RTC_DCHECK_RUN_ON(network_thread_);
   for (auto& stream_id : incoming_streams) {
     RTC_LOG(LS_INFO) << debug_name_
@@ -739,19 +745,36 @@ void DcSctpTransport::OnTransportReadPacket(
     PacketTransportInternal* /* transport */,
     const ReceivedIpPacket& packet) {
   RTC_DCHECK_RUN_ON(network_thread_);
+  // TODO: bugs.webrtc.org/517079993 - follow RFC 7983 design.
   if (packet.decryption_info() != ReceivedIpPacket::kDtlsDecrypted) {
     // We are only interested in SCTP packets.
     return;
   }
 
   RTC_DLOG(LS_VERBOSE) << debug_name_ << "->OnTransportReadPacket(), length="
-                       << packet.payload().size();
-  if (socket_) {
+                       << packet.payload().size() << " socket=" << !!socket_;
+  // With SNAP the socket is created (in Start()) before it is connected (in
+  // MaybeConnectSocket(), once the transport is writable). Buffer packets that
+  // arrive in that window; delivering them to the still-closed socket would
+  // have it reject them as having an invalid verification tag.
+  bool snap_pending_connect = socket_ != nullptr && local_init_.has_value() &&
+                              remote_init_.has_value() &&
+                              socket_->state() == dcsctp::SocketState::kClosed;
+  if (socket_ && !snap_pending_connect) {
     socket_->ReceivePacket(packet.payload());
+    return;
   }
+
+  // Buffering decrypted packets is only required in an edge case of SNAP.
+  if (early_received_packets_.size() >= kMaxEarlyReceivedPackets) {
+    early_received_packets_.erase(early_received_packets_.begin());
+  }
+  early_received_packets_.emplace_back(packet.payload().data(),
+                                       packet.payload().size());
 }
 
 void DcSctpTransport::MaybeConnectSocket() {
+  RTC_DCHECK_RUN_ON(network_thread_);
   RTC_DLOG(LS_VERBOSE)
       << debug_name_ << "->MaybeConnectSocket(), writable="
       << (transport_ ? std::to_string(transport_->writable()) : "UNSET")
@@ -761,9 +784,17 @@ void DcSctpTransport::MaybeConnectSocket() {
   if (transport_ && transport_->writable() && socket_ &&
       socket_->state() == dcsctp::SocketState::kClosed) {
     if (!(local_init_.has_value() && remote_init_.has_value())) {
-      return socket_->Connect();
+      socket_->Connect();
+      return;
     }
     socket_->ConnectWithConnectionToken(*local_init_, *remote_init_);
+    // Replay any datachannel packets that arrived before the socket existed.
+    std::vector<webrtc::Buffer> packets = std::move(early_received_packets_);
+    early_received_packets_.clear();
+    for (const webrtc::Buffer& packet : packets) {
+      socket_->ReceivePacket(
+          std::span<const uint8_t>(packet.data(), packet.size()));
+    }
   }
 }
 
@@ -791,8 +822,6 @@ dcsctp::DcSctpOptions DcSctpTransport::CreateDcSctpOptions(
 
 std::vector<uint8_t> DcSctpTransport::GenerateConnectionToken(
     const Environment& env) {
-  RTC_DCHECK(env.field_trials().IsEnabled("WebRTC-Sctp-Snap"))
-      << "Only implemented under field trial.";
   Random random(env.clock().TimeInMicroseconds());
   auto temp_factory = std::make_unique<dcsctp::DcSctpSocketFactory>();
   return temp_factory->GenerateConnectionToken(
@@ -800,6 +829,11 @@ std::vector<uint8_t> DcSctpTransport::GenerateConnectionToken(
       [&random](uint32_t low, uint32_t high) {
         return random.Rand(low, high);
       });
+}
+
+size_t DcSctpTransport::EarlyReceivedPacketCountForTesting() const {
+  RTC_DCHECK_RUN_ON(network_thread_);
+  return early_received_packets_.size();
 }
 
 }  // namespace webrtc

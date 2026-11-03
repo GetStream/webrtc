@@ -32,6 +32,7 @@ class FrameDecodeTiming {
   // Any frame that has decode delay more than this in the past can be
   // fast-forwarded.
   static constexpr TimeDelta kMaxAllowedFrameDelay = TimeDelta::Millis(5);
+  static constexpr TimeDelta kZeroPlayoutDelayMinPacing = TimeDelta::Millis(8);
 
   struct FrameSchedule {
     Timestamp latest_decode_time;
@@ -44,9 +45,27 @@ class FrameDecodeTiming {
       TimeDelta max_wait_for_frame,
       bool too_many_frames_queued);
 
+  // Updates the last time a frame was scheduled for decoding.
+  void SetLastDecodeScheduledTimestamp(Timestamp last_decode_scheduled);
+
+  // Returns the maximum time that we can wait for a frame to become complete
+  // before it must be passed to the decoder. render_time==0 indicates that the
+  // frames should be processed as quickly as possible, with possibly only a
+  // small delay added to make sure that the decoder is not overloaded.
+  // The parameter too_many_frames_queued is used to signal that the decode
+  // queue is full and that the frame should be decoded as soon as possible.
+  TimeDelta MaxWaitingTime(Timestamp render_time,
+                           Timestamp now,
+                           bool too_many_frames_queued) const;
+
  private:
   Clock* const clock_;
   VCMTiming const* const timing_;
+
+  // Timestamp at which the last frame was scheduled to be sent to the decoder.
+  // Used only when the RTP header extension playout delay is set to min=0 ms
+  // which is indicated by a render time set to 0.
+  Timestamp last_decode_scheduled_ = Timestamp::Zero();
 };
 
 }  // namespace webrtc
