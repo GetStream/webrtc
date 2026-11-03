@@ -176,7 +176,7 @@ void AudioState::SetStereoChannelSwapping(bool enable) {
 }
 
 void AudioState::OnMuteStreamChanged() {
-  RTC_DCHECK_RUN_ON(&thread_checker_);
+  RTC_DCHECK_RUN_ON(&worker_thread_checker_);
   auto* adm = config_.audio_device_module.get();
   if (recording_enabled_ && ShouldRecord()) {
     if (!adm->Recording() && adm->InitRecording() == 0) {
