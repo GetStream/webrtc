@@ -38,7 +38,10 @@ printf '%s\n' "$help_text" | grep -q 'make rename apple'
 printf '%s\n' "$help_text" | grep -q 'SKIP_MACCATALYST=1'
 printf '%s\n' "$help_text" | grep -q 'make package ios'
 printf '%s\n' "$help_text" | grep -q 'make package macos'
+printf '%s\n' "$help_text" | grep -q 'make migrate plan'
 ! printf '%s\n' "$help_text" | grep -q 'package apple'
+python3 "$ROOT/scripts/migration_gate.py" --selftest
+"$ROOT/scripts/migrate.sh" selftest
 
 layout="$(fake_layout)"
 layout_make=(make DEPS_ROOT="$layout" WEBRTC_SRC="$layout/src")

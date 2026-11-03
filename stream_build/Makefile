@@ -16,6 +16,8 @@
 # make combine merges whatever PRODUCTS/*/WebRTC.xcframework exist.
 # make rename copies WebRTC.xcframework / libwebrtc.aar to PRODUCTS/renamed/.
 # ANDROID_NAMESPACE=io.getstream.webrtc rewrites the Android package before build.
+# make migrate plan|prepare|open
+#   Extended-stable migration. No bootstrap. FORCE=1 retries an existing PR.
 
 SHELL := /bin/bash
 .SUFFIXES:
@@ -93,6 +95,7 @@ export GN_ARGS EXTRA_GN_ARGS ALL_GN_ARGS GIT_CACHE_PATH CONFIRM BOOTSTRAP_SRC
 	announce require-layout require-gclient require-src require-darwin \
 	require-linux require-windows maybe-deps \
 	combine apple rename rename-apple rename-android rewrite-android-namespace \
+	migrate plan prepare open issue \
 	$(PLATFORMS) $(VERBS) \
 	build-ios build-macos build-android build-windows \
 	test-ios test-macos test-android test-windows \
@@ -110,6 +113,7 @@ help:
 	@echo "make build|test|package ios|android|macos|windows [VAR=value ...]"
 	@echo "make combine"
 	@echo "make rename apple|android"
+	@echo "make migrate plan|prepare|open"
 	@echo
 	@echo "  bootstrap  wrap this checkout as webrtc/src (CONFIRM=1 in CI)"
 	@echo "  build    gn gen + ninja"
@@ -117,6 +121,10 @@ help:
 	@echo "  package  assemble artifacts (xcframework, aar, zip)"
 	@echo "  combine  merge PRODUCTS/*/WebRTC.xcframework into one xcframework"
 	@echo "  rename   copy+rebrand for wrapper SDKs (original untouched)"
+	@echo "  migrate plan      print whether extended stable is ahead of the fork"
+	@echo "  migrate prepare   fetch that milestone; then run the migrate skill"
+	@echo "  migrate open      check the merge and open the pull request"
+	@echo "  FORCE=1           plan again when a pull request for this milestone exists"
 	@echo
 	@echo "  CONFIG=release (default, is_debug=false) or CONFIG=debug"
 	@echo "  tests always gn-gen with debug, ignoring CONFIG"
@@ -145,6 +153,14 @@ help:
 
 check:
 	@$(SCRIPTS)/check.sh
+
+migrate:
+	@action="$(firstword $(filter plan prepare open issue,$(MAKECMDGOALS)))"; \
+	 test -n "$$action" || { echo "usage: make migrate plan|prepare|open|issue"; exit 1; }; \
+	 FORCE='$(FORCE)' FORK_SHA='$(FORK_SHA)' $(SCRIPTS)/migrate.sh $$action
+
+plan prepare open issue:
+	@:
 
 bootstrap:
 	@$(SCRIPTS)/bootstrap.sh

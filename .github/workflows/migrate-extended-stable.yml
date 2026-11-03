@@ -1,0 +1,91 @@
+# Weekly extended-stable migration. Monday 06:00 UTC, plus manual dispatch.
+# Schedule runs only after this file is on the default branch.
+#
+# The commands live in stream_build:
+#   make migrate plan|prepare|open
+# Secret: OPENAI_API_KEY.
+#
+# ponytail: Codex runs in this job, then make migrate open pushes. core.hooksPath
+# is an empty directory for that push. Upgrade path: a later job if a process
+# Codex started is still alive at the push.
+
+name: Migrate extended stable
+
+run-name: Migrate extended stable
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: >-
+          Ignore an existing open or merged pull request for this milestone.
+          Does not force-push and does not run when the fork is already current.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: migrate-extended-stable
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: Migrate extended stable
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Check out the fork
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: false
+
+      - id: plan
+        name: Decide
+        env:
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && (inputs.force == true || inputs.force == 'true') && '1' || '0' }}
+        run: make -C stream_build migrate plan
+
+      - id: prepare
+        name: Fetch the milestone
+        if: success() && steps.plan.outputs.should_run == 'true'
+        run: make -C stream_build migrate prepare
+
+      - name: Run the migrate skill
+        if: success() && steps.plan.outputs.should_run == 'true'
+        uses: openai/codex-action@v1
+        env:
+          GITHUB_TOKEN: ""
+          GH_TOKEN: ""
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          permission-profile: migrate
+          safety-strategy: drop-sudo
+          allow-bots: true
+          codex-home: ${{ github.workspace }}/.git/codex-home
+          prompt-file: .git/migrate-prompt.md
+
+      - name: Open the pull request
+        if: success() && steps.plan.outputs.should_run == 'true'
+        env:
+          FORK_SHA: ${{ steps.prepare.outputs.fork_sha }}
+          MILESTONE: ${{ steps.plan.outputs.milestone }}
+          OFFICIAL_REF: ${{ steps.plan.outputs.ref }}
+          FORK_BRANCH: ${{ steps.plan.outputs.fork_branch }}
+          UPGRADE_BRANCH: ${{ steps.plan.outputs.upgrade_branch }}
+          BASELINE_BRANCH: ${{ steps.plan.outputs.baseline_branch }}
+        run: make -C stream_build migrate open
+
+      - name: Ask for a decision
+        if: failure() && steps.plan.outputs.should_run == 'true'
+        env:
+          MILESTONE: ${{ steps.plan.outputs.milestone }}
+        run: make -C stream_build migrate issue
