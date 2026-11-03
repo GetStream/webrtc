@@ -1,18 +1,18 @@
-# WebRTC tests (v2 Makefile DAG). Pull requests run iOS, macOS, and
+# WebRTC tests (Makefile DAG). Pull requests run iOS, macOS, and
 # Android. Manual dispatch still picks platforms (Android defaults off).
 # _make.yml: HIT build-{ios,macos,android}, make test only (no extra
 # framework-slice make build). No Linux Deps job.
 
-name: Test v2
+name: Test
 
 run-name: >-
-  ${{ github.event_name == 'pull_request' && format('Test v2 PR #{0} iOS, macOS, Android', github.event.pull_request.number) || format('Test v2 config:debug{0}{1}{2}{3}', inputs.ios == 'true' && ' iOS' || '', inputs.macos == 'true' && (inputs.ios == 'true' && ', macOS' || ' macOS') || '', inputs.android == 'true' && ((inputs.ios == 'true' || inputs.macos == 'true') && ', Android' || ' Android') || '', inputs.windows == 'true' && ((inputs.ios == 'true' || inputs.macos == 'true' || inputs.android == 'true') && ', Windows' || ' Windows') || '') }}
+  ${{ github.event_name == 'pull_request' && format('Test PR #{0} iOS, macOS, Android', github.event.pull_request.number) || format('Test config:debug{0}{1}{2}{3}', inputs.ios == 'true' && ' iOS' || '', inputs.macos == 'true' && (inputs.ios == 'true' && ', macOS' || ' macOS') || '', inputs.android == 'true' && ((inputs.ios == 'true' || inputs.macos == 'true') && ', Android' || ' Android') || '', inputs.windows == 'true' && ((inputs.ios == 'true' || inputs.macos == 'true' || inputs.android == 'true') && ', Windows' || ' Windows') || '') }}
 
 permissions:
   contents: read
 
 concurrency:
-  group: test-v2-${{ github.event.pull_request.number || github.ref }}
+  group: test-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 on:
@@ -42,7 +42,7 @@ on:
 
 jobs:
   test:
-    name: Test v2
+    name: Test
     uses: ./.github/workflows/_make.yml
     secrets: inherit
     with:

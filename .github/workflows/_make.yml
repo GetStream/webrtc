@@ -1,4 +1,4 @@
-# Called by Build v2 / Test v2 / Package v2 / Release v2 dispatch workflows.
+# Called by Build / Test / Package / Release dispatch workflows.
 # Not listed in the Actions dispatch UI (workflow_call only).
 # Callers pass mode: build | test | package | release.
 #
@@ -14,7 +14,7 @@
 # HIT the same per-platform key (out/ios_tests, out/webrtc_tests,
 # src/out/android_tests vs slice dirs). Android tests run only in test mode.
 
-name: WebRTC make v2
+name: WebRTC make
 
 on:
   workflow_call:
@@ -147,7 +147,7 @@ jobs:
           path: src
       - id: plan
         name: Plan target_os
-        uses: ./src/.github/actions/prepare-common-v2
+        uses: ./src/.github/actions/prepare-common
         with:
           platform_ios: ${{ inputs.ios }}
           platform_macos: ${{ inputs.macos }}
@@ -202,7 +202,7 @@ jobs:
           compression-level: 0
 
   build_ios:
-    name: Build iOS v2
+    name: Build iOS
     needs: [plan]
     if: ${{ (inputs.mode == 'build' || inputs.mode == 'package' || inputs.mode == 'release') && inputs.ios }}
     runs-on: macos-26
@@ -274,7 +274,7 @@ jobs:
           retention-days: 7
 
   build_macos:
-    name: Build macOS v2
+    name: Build macOS
     needs: [plan]
     if: ${{ (inputs.mode == 'build' || inputs.mode == 'package' || inputs.mode == 'release') && inputs.macos }}
     runs-on: macos-26
@@ -344,7 +344,7 @@ jobs:
           retention-days: 7
 
   build_android:
-    name: Build Android v2
+    name: Build Android
     needs: [plan]
     if: ${{ (inputs.mode == 'build' || inputs.mode == 'package' || inputs.mode == 'release') && inputs.android }}
     runs-on: ubuntu-latest
@@ -572,7 +572,7 @@ jobs:
           echo "Selected-platform tests passed (Android tests are unwired and skipped)."
 
   build_windows:
-    name: Build Windows v2
+    name: Build Windows
     needs: [plan, deps_windows]
     if: ${{ (inputs.mode == 'build' || inputs.mode == 'package' || inputs.mode == 'release') && inputs.windows }}
     runs-on: windows-latest
@@ -849,7 +849,7 @@ jobs:
           fi
 
   trigger_downstream_releases:
-    name: Trigger downstream WebRTC releases v2
+    name: Trigger downstream WebRTC releases
     needs: [plan, github_release]
     if: ${{ always() && !cancelled() && inputs.mode == 'release' && needs.github_release.result == 'success' }}
     runs-on: ubuntu-latest
