@@ -13,7 +13,6 @@
 #include <climits>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 
 #include "api/scoped_refptr.h"
 #include "api/video/i420_buffer.h"
@@ -451,7 +450,7 @@ int ConvertToI420(const uint8_t* sample,
                              tmp_u_stride, tmp_v, tmp_v_stride, dst_width,
                              abs_dst_height, (libyuv::RotationMode)rotation);
     }
-    free(rotate_buffer);
+    delete[] rotate_buffer;
   }
 
   return r;
