@@ -496,5 +496,42 @@ grep -q 'promote_from_upstream_tag' "$gha/workflows/promote-release-v2.yml"
 ! grep -q 'android_namespace:' "$gha/workflows/release-v2.yml"
 ! grep -q 'rename_webrtc_package.sh' "$gha/workflows/manual-platform-tests.yml"
 ! grep -q 'rename_webrtc_package.sh' "$gha/workflows/publish.yml"
+grep -q 'pull_request:' "$gha/workflows/test-v2.yml"
+grep -q "github.event.pull_request.head.sha" "$gha/workflows/test-v2.yml"
+grep -q 'name: Build Android v2$' "$gha/workflows/_make.yml"
+! grep -q 'name: Build Android v2 (${{' "$gha/workflows/_make.yml"
+grep -q 'name: Test Android' "$gha/workflows/_make.yml"
+grep -q 'make test android' "$gha/workflows/_make.yml"
+test_jobs="$(awk '/name: Test iOS$/,/name: Tests passed$/' "$gha/workflows/_make.yml")"
+! grep -q 'artifact-put' <<<"$test_jobs"
+! grep -q 'make test android is not wired' "$gha/workflows/_make.yml"
+grep -q 'run-android-tests.sh' "$ROOT/Makefile"
+grep -q -- '--overlay android-test' "$ROOT/Makefile"
+grep -q 'ANDROID_TEST_OUT := $(WEBRTC_SRC)/out/android_tests' "$ROOT/Makefile"
+! grep -q -- '--out "$(OUT)/android_tests"' "$ROOT/Makefile"
+! grep -q 'no device runner' "$ROOT/Makefile"
+grep -q 'target_os = "android"' "$ROOT/gn/android-test.args"
+grep -q 'target_cpu = "x64"' "$ROOT/gn/android-test.args"
+grep -q 'rtc_include_tests = true' "$ROOT/gn/android-test.args"
+grep -q 'android-gtest-filter.txt' "$ROOT/scripts/run-android-tests.sh"
+grep -q '^-AudioDeviceTest.RunPlayoutWithFileAsSource$' "$ROOT/scripts/android-gtest-filter.txt"
+grep -q '^-AudioDeviceTest.VerifyAudioParameters$' "$ROOT/scripts/android-gtest-filter.txt"
+bash -n "$ROOT/scripts/run-android-tests.sh"
+python3 - <<'PY'
+import os
+def device_rel(host, output):
+    rel = os.path.relpath(host, output)
+    parts = []
+    while rel:
+        rel, name = os.path.split(rel)
+        if name and name != os.pardir:
+            parts.insert(0, name)
+    return "/".join(parts)
+host = "/webrtc/src/resources/reference_video_640x360_30fps.y4m"
+sibling = device_rel(host, "/webrtc/out/android_tests")
+inside = device_rel(host, "/webrtc/src/out/android_tests")
+assert sibling == "src/resources/reference_video_640x360_30fps.y4m", sibling
+assert inside == "resources/reference_video_640x360_30fps.y4m", inside
+PY
 
 echo "ok"

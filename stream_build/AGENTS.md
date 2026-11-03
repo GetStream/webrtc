@@ -108,9 +108,10 @@ and Android jobs run in parallel after Plan:
    skip`; Build dispatch `skip_deps_cache` skips the download)
 3. `make deps` (`RUN_HOOKS=1`, host GCS rust-toolchain on Apple)
 4. `make build` / `make test` (`SKIP_DEPS=1`)
-5. `artifact-put` `.gclient-git-cache` plus reusable `src/resources`
-   and `.cipd` if non-empty (always after miss / `skip_deps_cache`;
-   skip PUT when HIT size delta is < 1GiB)
+5. Build jobs `artifact-put` `.gclient-git-cache` plus reusable
+   `src/resources` and `.cipd` if non-empty (always after miss /
+   `skip_deps_cache`; skip PUT when HIT size delta is < 1GiB).
+   Test jobs HIT only and do not put.
 
 Keys: `artifacts/<github.repository>/build-{ios,macos,android}.tar`.
 Same-OS only (Linux tree on Mac is forbidden). Members: required
@@ -125,9 +126,14 @@ checkout `src`, extract git-cache to `GIT_CACHE_PATH`
 `rewrite_git_cache_alternates` so Linux-packed cache paths retarget
 to this runner. Always `make deps` after HIT (cheap from cache).
 Build `CONFIG` is dispatch (default release); `make test` always uses debug
-in `out/ios_tests` / `out/webrtc_tests`, so those subdirs do not mix
-with slice dirs. test-v2.yml HITs the same `build-ios` / `build-macos`
-keys. Windows Deps still uploads `deps-windows` to GitHub.
+in `out/ios_tests` / `out/webrtc_tests` / `src/out/android_tests`, so those
+subdirs do not mix with slice dirs. Android tests stay inside `src/` because
+Chromium maps data dependencies by stripping `..` from the output directory,
+and that only reaches `resources/` from an out dir under `src`. test-v2.yml HITs the same
+`build-ios` / `build-macos` / `build-android` keys. Pull requests run
+Test v2 for iOS, macOS, and Android (`rtc_unittests` on an x64 emulator).
+Manual Test v2 still picks platforms; Android defaults off there.
+Windows Deps still uploads `deps-windows` to GitHub.
 Package/Release Build jobs also `make package` and upload `products-*`
 (GitHub). Package combine consumes `products-*` (no third ninja) and
 uploads `final-*`. Release attaches `final-*`. `TARGET_OS` is the
@@ -155,7 +161,7 @@ not use `${{ secrets.* }}`. `products-*` / `final-*` stay on
 
 - bootstrap: any host (writes layout + `.gclient`; no depot_tools)
 - ios / macos / combine / rename apple: Darwin
-- android / rename android: Linux for build/package; rename android is a file copy on any host
+- android / rename android: Linux for build/package/test; rename android is a file copy on any host
 - windows: Windows
 - deps / runhooks: any host with depot_tools
 

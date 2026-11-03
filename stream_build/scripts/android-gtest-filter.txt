@@ -1,0 +1,6 @@
+# Emulator exclusions. WebRtcAudioManager forces 8 kHz on emulators, so
+# RunPlayoutWithFileAsSource (44.1/48 kHz PCM only) cannot pass.
+# VerifyAudioParameters requires matching OpenSL input and output buffer
+# sizes; the API 34 x64 emulator reports 256 vs 740.
+-AudioDeviceTest.RunPlayoutWithFileAsSource
+-AudioDeviceTest.VerifyAudioParameters

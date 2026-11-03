@@ -106,7 +106,7 @@ for runtime in payload.get("runtimes") or []:
         print(f"{want_name}\t{version}")
         raise SystemExit(0)
     if types:
-        # ponytail: Apple lists newest iPhones first on Xcode 26.x.
+        # Apple lists newest iPhones first on Xcode 26.x.
         # If that order flips, first-iPhone still matches the SDK.
         print(f"{types[0]}\t{version}")
         raise SystemExit(0)

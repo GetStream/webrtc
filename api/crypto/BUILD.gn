@@ -230,7 +230,7 @@ if (rtc_include_tests) {
     }
   }
 
-  # ponytail: standalone binary so we can land without ninja of full rtc_unittests.
+  # Standalone binary so we can land without ninja of full rtc_unittests.
   rtc_test("frame_crypto_transformer_unittests") {
     testonly = true
     deps = [ ":frame_crypto_transformer_unittest" ]
