@@ -344,7 +344,7 @@ jobs:
           retention-days: 7
 
   build_android:
-    name: Build Android v2 (${{ matrix.android_namespace == 'io.getstream.webrtc' && 'repackaged' || 'stock' }})
+    name: Build Android v2
     needs: [plan]
     if: ${{ (inputs.mode == 'build' || inputs.mode == 'package' || inputs.mode == 'release') && inputs.android }}
     runs-on: ubuntu-latest
