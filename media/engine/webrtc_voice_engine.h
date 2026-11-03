@@ -76,6 +76,9 @@ class AudioFrameProcessor;
 // WebRtcVoiceEngine is a class to be used with CompositeMediaEngine.
 // It uses the WebRtc VoiceEngine library for audio handling.
 class WebRtcVoiceEngine final : public VoiceEngineInterface {
+  // MuteStream still calls audio_state(), which M156 made private.
+  friend class WebRtcVoiceSendChannel;
+
  public:
   WebRtcVoiceEngine(const Environment& env,
                     scoped_refptr<AudioDeviceModule> adm,
