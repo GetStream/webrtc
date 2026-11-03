@@ -1,16 +1,22 @@
-# WebRTC tests (v2 Makefile DAG). Not dispatchable until this file exists
-# on the default branch. _make.yml: HIT build-ios / build-macos, make test
-# only (no extra framework-slice make build). No Linux Deps job.
+# WebRTC tests (v2 Makefile DAG). Pull requests run iOS, macOS, and
+# Android. Manual dispatch still picks platforms (Android defaults off).
+# _make.yml: HIT build-{ios,macos,android}, make test only (no extra
+# framework-slice make build). No Linux Deps job.
 
 name: Test v2
 
 run-name: >-
-  Test v2 config:debug${{ inputs.ios == 'true' && ' iOS' || '' }}${{ inputs.macos == 'true' && (inputs.ios == 'true' && ', macOS' || ' macOS') || '' }}${{ inputs.windows == 'true' && ((inputs.ios == 'true' || inputs.macos == 'true') && ', Windows' || ' Windows') || '' }}
+  ${{ github.event_name == 'pull_request' && format('Test v2 PR #{0} iOS, macOS, Android', github.event.pull_request.number) || format('Test v2 config:debug{0}{1}{2}{3}', inputs.ios == 'true' && ' iOS' || '', inputs.macos == 'true' && (inputs.ios == 'true' && ', macOS' || ' macOS') || '', inputs.android == 'true' && ((inputs.ios == 'true' || inputs.macos == 'true') && ', Android' || ' Android') || '', inputs.windows == 'true' && ((inputs.ios == 'true' || inputs.macos == 'true' || inputs.android == 'true') && ', Windows' || ' Windows') || '') }}
 
 permissions:
   contents: read
 
+concurrency:
+  group: test-v2-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 on:
+  pull_request:
   workflow_dispatch:
     inputs:
       webrtc_ref:
@@ -25,6 +31,10 @@ on:
         description: Run macOS host tests
         type: boolean
         default: true
+      android:
+        description: Run Android emulator tests (x64 rtc_unittests)
+        type: boolean
+        default: false
       windows:
         description: Run Windows tests (fails clearly if the runner is not a WebRTC host)
         type: boolean
@@ -37,9 +47,9 @@ jobs:
     secrets: inherit
     with:
       mode: test
-      webrtc_ref: ${{ inputs.webrtc_ref }}
-      ios: ${{ inputs.ios }}
-      macos: ${{ inputs.macos }}
-      android: false
-      windows: ${{ inputs.windows }}
+      webrtc_ref: ${{ github.event.pull_request.head.sha || inputs.webrtc_ref }}
+      ios: ${{ github.event_name == 'pull_request' && true || inputs.ios }}
+      macos: ${{ github.event_name == 'pull_request' && true || inputs.macos }}
+      android: ${{ github.event_name == 'pull_request' && true || inputs.android }}
+      windows: ${{ github.event_name == 'pull_request' && false || inputs.windows || false }}
       config: debug
