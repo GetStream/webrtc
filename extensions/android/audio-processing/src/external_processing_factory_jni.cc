@@ -45,7 +45,6 @@ static jlong JNI_NativeExternalAudioProcessingFactory_CreateAudioProcessingModul
                  .Build(webrtc::CreateEnvironment());
   webrtc::AudioProcessing::Config config;
   config.echo_canceller.enabled = false;
-  config.echo_canceller.mobile_mode = true;
   apm->ApplyConfig(config);
   apm_ptr = apm.release();
   return webrtc::jni::jlongFromPointer(apm_ptr);

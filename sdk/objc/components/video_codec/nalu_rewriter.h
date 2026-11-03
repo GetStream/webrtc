@@ -49,7 +49,7 @@ bool H264AnnexBBufferToCMSampleBuffer(std::span<const uint8_t> annexb_buffer,
                                       CMSampleBufferRef* out_sample_buffer,
                                       CMMemoryPoolRef memory_pool);
 
-bool H265AnnexBBufferToCMSampleBuffer(ArrayView<const uint8_t> annexb_buffer,
+bool H265AnnexBBufferToCMSampleBuffer(std::span<const uint8_t> annexb_buffer,
                                       CMVideoFormatDescriptionRef video_format,
                                       CMSampleBufferRef* out_sample_buffer);
 
@@ -60,7 +60,7 @@ CMVideoFormatDescriptionRef CreateVideoFormatDescription(
     std::span<const uint8_t> annexb_buffer);
 
 CMVideoFormatDescriptionRef CreateH265VideoFormatDescription(
-    ArrayView<const uint8_t> annexb_buffer);
+    std::span<const uint8_t> annexb_buffer);
 
 // Helper class for reading NALUs from an RTP Annex B buffer.
 class AnnexBBufferReader final {

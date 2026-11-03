@@ -75,10 +75,6 @@ RTC_OBJC_EXPORT
  */
 @property(nonatomic, assign) BOOL adaptiveAudioPacketTime;
 
-/** A case-sensitive identifier of the scalability mode to be used for this stream.
-  https://w3c.github.io/webrtc-svc/#rtcrtpencodingparameters */
-@property(nonatomic, copy, nullable) NSString *scalabilityMode;
-
 - (instancetype)init;
 
 @end

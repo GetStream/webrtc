@@ -386,7 +386,7 @@ class FakeEncryptionManager : public EncryptionManager {
       return false;
     }
     out.Clear();
-    out.AppendData(in.data.subview(0, in.data.size() - 4));
+    out.AppendData(in.data.subspan(0, in.data.size() - 4));
     *state = kOk;
     return true;
   }
