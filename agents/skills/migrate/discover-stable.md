@@ -1,4 +1,4 @@
-# Discover the stable milestone
+# Discover the extended stable milestone
 
 Run the selector from the git root.
 
@@ -9,29 +9,33 @@ python3 agents/skills/migrate/scripts/discover_stable.py --current <milestone>
 
 The script prints JSON.
 
-Trust `stable` in that JSON.
+Trust `extended_stable` in that JSON.
 
-The purple row is `schedule_phase` `stable`.
+That row is the highest milestone whose `schedule_phase` is `extended`.
 
-Do not select `stable_cut` as the stable target.
+A lower `extended` row is stale.
 
-Do not select `extended` as the stable target.
+Do not select `stable` as the merge target.
+
+Do not select `stable_cut` as the merge target.
 
 `rejected` names those channel rows.
 
-`next` is the stable row.
+`next` is the extended stable row.
 
-Do not merge any milestone between the fork and `stable`.
+Do not merge any milestone between the fork and `extended_stable`.
 
-The Chrome releases feed can lag the branches page.
+The script reads the Chrome Extended channel.
 
-When `same_milestone_as_chrome` is false, keep the purple target.
+That feed can lag the branches page.
+
+When `same_milestone_as_chrome` is false, keep the extended stable target.
 
 Record both milestones in the PR.
 
 When that key is absent, record the feed failure.
 
-Keep the purple target.
+Keep the extended stable target.
 
 ## Read the fork branch
 
@@ -94,9 +98,9 @@ Pass the current milestone as `--current`.
 
 Use `next` from the JSON as the merge target.
 
-Stop when `already_on_stable` is true.
+Stop when `already_on_extended_stable` is true.
 
-Stop when the stable row is missing from the feed.
+Stop when the extended stable row is missing from the feed.
 
 ## Official commit
 

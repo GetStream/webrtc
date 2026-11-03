@@ -1,4 +1,4 @@
-# Merge the stable milestone
+# Merge the extended stable milestone
 
 Work on a new upgrade branch.
 
@@ -44,7 +44,7 @@ Fetch the fork's current official tip when ancestry is missing.
 
 That tip is the baseline already in the fork, or named by the squash subject.
 
-Do not fetch the milestones between the fork and stable.
+Do not fetch the milestones between the fork and extended stable.
 
 ## Cut the upgrade branch
 
@@ -82,7 +82,7 @@ git merge -s ours --no-edit <previous-baseline-sha>
 
 Use this repair only for the fork's current official tip.
 
-Do not point `-s ours` at a milestone between the fork and stable.
+Do not point `-s ours` at a milestone between the fork and extended stable.
 
 ## Merge
 

@@ -82,7 +82,7 @@ one/path/per/line
 ## Checks
 
 Local framework build: not run.
-Chrome stable milestone: <milestone or same>.
+Chrome extended stable milestone: <milestone or same>.
 
 Land this PR as a merge commit.
 Do not squash.
