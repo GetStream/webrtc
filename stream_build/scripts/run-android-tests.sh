@@ -170,6 +170,17 @@ run_target() {
   local wrapper="${BUILD_DIR}/bin/run_${target}"
   [[ -e "$wrapper" ]] || die "run script not found for ${target} at ${wrapper}"
   local args=()
+  local filter_file="${SCRIPT_DIR}/android-gtest-filter.txt"
+  # A caller-supplied filter replaces the emulator list. The runner treats
+  # --gtest-filter and --gtest-filter-file as mutually exclusive.
+  case " ${EXTRA_ARGS} " in
+    *--gtest-filter*|*--gtest_filter*|*--test-filter*|*--gtest-filter-file*|*--test-launcher-filter-file*)
+      ;;
+    *)
+      [[ -f "$filter_file" ]] || die "missing ${filter_file}"
+      args+=(--gtest-filter-file "$filter_file")
+      ;;
+  esac
   # shellcheck disable=SC2086
   if [[ -n "$EXTRA_ARGS" ]]; then
     # shellcheck disable=SC2206

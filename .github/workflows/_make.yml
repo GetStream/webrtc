@@ -12,7 +12,7 @@
 # and upload products-* (GitHub). Package combine consumes products-*
 # (no third ninja) and uploads final-*. Release attaches final-*. Tests
 # HIT the same per-platform key (out/ios_tests, out/webrtc_tests,
-# out/android_tests vs slice dirs). Android tests run only in test mode.
+# src/out/android_tests vs slice dirs). Android tests run only in test mode.
 
 name: WebRTC make v2
 

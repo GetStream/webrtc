@@ -126,8 +126,10 @@ checkout `src`, extract git-cache to `GIT_CACHE_PATH`
 `rewrite_git_cache_alternates` so Linux-packed cache paths retarget
 to this runner. Always `make deps` after HIT (cheap from cache).
 Build `CONFIG` is dispatch (default release); `make test` always uses debug
-in `out/ios_tests` / `out/webrtc_tests` / `out/android_tests`, so those
-subdirs do not mix with slice dirs. test-v2.yml HITs the same
+in `out/ios_tests` / `out/webrtc_tests` / `src/out/android_tests`, so those
+subdirs do not mix with slice dirs. Android tests stay inside `src/` because
+Chromium maps data dependencies by stripping `..` from the output directory,
+and that only reaches `resources/` from an out dir under `src`. test-v2.yml HITs the same
 `build-ios` / `build-macos` / `build-android` keys. Pull requests run
 Test v2 for iOS, macOS, and Android (`rtc_unittests` on an x64 emulator).
 Manual Test v2 still picks platforms; Android defaults off there.

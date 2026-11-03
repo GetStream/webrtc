@@ -69,6 +69,11 @@ IOS_TEST_TARGETS   ?= sdk_unittests sdk_framework_unittests
 MACOS_TEST_TARGETS ?= rtc_unittests rtc_pc_unittests rtc_stats_unittests
 WINDOWS_TEST_TARGETS ?= rtc_unittests rtc_pc_unittests rtc_stats_unittests
 ANDROID_TEST_TARGETS ?= rtc_unittests
+# Chromium's Android runner drops leading ".." from data-dep paths. That
+# lands on resources/ only when the output directory is inside src.
+# webrtc/out/android_tests pushes to src/resources/..., and tests open
+# /sdcard/chromium_tests_root/resources/...
+ANDROID_TEST_OUT := $(WEBRTC_SRC)/out/android_tests
 
 ios_slices      = $(if $(filter 1,$(SKIP_MACCATALYST)),$(filter-out $(CATALYST_SLICES),$(IOS_SLICES)),$(IOS_SLICES))
 android_slices  = $(if $(ARCHS),$(addprefix android-,$(ARCHS)),$(ANDROID_SLICES))
@@ -378,16 +383,16 @@ test-macos: require-darwin maybe-deps require-src
 test-android: require-linux maybe-deps require-src
 	@$(SCRIPTS)/gn-gen.sh \
 		--src "$(WEBRTC_SRC)" \
-		--out "$(OUT)/android_tests" \
+		--out "$(ANDROID_TEST_OUT)" \
 		--config debug \
 		--overlay android-test \
 		--extra "$(ALL_GN_ARGS)"
 	@ninja_bin="$$($(SCRIPTS)/common.sh ninja "$(WEBRTC_SRC)")"; \
 	 targets="$(if $(TEST_TARGETS),$(TEST_TARGETS),$(ANDROID_TEST_TARGETS))"; \
-	 echo "$$ninja_bin -C $(OUT)/android_tests $$targets"; \
-	 "$$ninja_bin" -C "$(OUT)/android_tests" $$targets -j"$(JOBS)"
+	 echo "$$ninja_bin -C $(ANDROID_TEST_OUT) $$targets"; \
+	 "$$ninja_bin" -C "$(ANDROID_TEST_OUT)" $$targets -j"$(JOBS)"
 	@$(SCRIPTS)/run-android-tests.sh \
-		--build-dir "$(OUT)/android_tests" \
+		--build-dir "$(ANDROID_TEST_OUT)" \
 		--targets "$(if $(TEST_TARGETS),$(TEST_TARGETS),$(ANDROID_TEST_TARGETS))" \
 		$(if $(EXTRA_ARGS),--extra "$(EXTRA_ARGS)",)
 
