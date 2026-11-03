@@ -68,6 +68,7 @@ WINDOWS_SLICES   := windows-x64 windows-arm64
 IOS_TEST_TARGETS   ?= sdk_unittests sdk_framework_unittests
 MACOS_TEST_TARGETS ?= rtc_unittests rtc_pc_unittests rtc_stats_unittests
 WINDOWS_TEST_TARGETS ?= rtc_unittests rtc_pc_unittests rtc_stats_unittests
+ANDROID_TEST_TARGETS ?= rtc_unittests
 
 ios_slices      = $(if $(filter 1,$(SKIP_MACCATALYST)),$(filter-out $(CATALYST_SLICES),$(IOS_SLICES)),$(IOS_SLICES))
 android_slices  = $(if $(ARCHS),$(addprefix android-,$(ARCHS)),$(ANDROID_SLICES))
@@ -220,6 +221,7 @@ announce:
 	   case "$(PLATFORM)" in \
 	     ios) echo "    tests:      $(if $(TEST_TARGETS),$(TEST_TARGETS),$(IOS_TEST_TARGETS))" ;; \
 	     macos) echo "    tests:      $(if $(TEST_TARGETS),$(TEST_TARGETS),$(MACOS_TEST_TARGETS))" ;; \
+	     android) echo "    tests:      $(if $(TEST_TARGETS),$(TEST_TARGETS),$(ANDROID_TEST_TARGETS))" ;; \
 	     windows) echo "    tests:      $(if $(TEST_TARGETS),$(TEST_TARGETS),$(WINDOWS_TEST_TARGETS))" ;; \
 	   esac; \
 	 fi; \
@@ -373,10 +375,21 @@ test-macos: require-darwin maybe-deps require-src
 	   "$(OUT)/webrtc_tests/$$target" --gtest_filter="-$$filter" $(EXTRA_ARGS); \
 	 done
 
-test-android:
-	@echo "error: make test android is not wired (no device runner)." >&2
-	@echo "use: make build android && make package android" >&2
-	@exit 1
+test-android: require-linux maybe-deps require-src
+	@$(SCRIPTS)/gn-gen.sh \
+		--src "$(WEBRTC_SRC)" \
+		--out "$(OUT)/android_tests" \
+		--config debug \
+		--overlay android-test \
+		--extra "$(ALL_GN_ARGS)"
+	@ninja_bin="$$($(SCRIPTS)/common.sh ninja "$(WEBRTC_SRC)")"; \
+	 targets="$(if $(TEST_TARGETS),$(TEST_TARGETS),$(ANDROID_TEST_TARGETS))"; \
+	 echo "$$ninja_bin -C $(OUT)/android_tests $$targets"; \
+	 "$$ninja_bin" -C "$(OUT)/android_tests" $$targets -j"$(JOBS)"
+	@$(SCRIPTS)/run-android-tests.sh \
+		--build-dir "$(OUT)/android_tests" \
+		--targets "$(if $(TEST_TARGETS),$(TEST_TARGETS),$(ANDROID_TEST_TARGETS))" \
+		$(if $(EXTRA_ARGS),--extra "$(EXTRA_ARGS)",)
 
 test-windows: require-windows maybe-deps require-src
 	@$(SCRIPTS)/gn-gen.sh \

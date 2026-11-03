@@ -3,14 +3,16 @@
 # Callers pass mode: build | test | package | release.
 #
 # I/O: iOS / macOS / Android jobs HIT Hetzner build-{ios,macos,android}.tar
-# (skip_deps_cache skips download), make deps, make build|test, then put
-# git-cache + src/resources + .cipd. No shared Linux Deps job. No GitHub
+# (skip_deps_cache skips download), make deps, make build|test. Build jobs
+# then put git-cache + src/resources + .cipd. Test jobs do not put.
+# No shared Linux Deps job. No GitHub
 # deps-key. Windows Deps stays deps-windows on GitHub. Build mode is
 # ninja plus release-config dSYM uploads (no packaged products).
 # Package/Release Build jobs also make package
 # and upload products-* (GitHub). Package combine consumes products-*
 # (no third ninja) and uploads final-*. Release attaches final-*. Tests
-# HIT the same per-platform key (out/ios_tests vs slice dirs).
+# HIT the same per-platform key (out/ios_tests, out/webrtc_tests,
+# out/android_tests vs slice dirs). Android tests run only in test mode.
 
 name: WebRTC make v2
 
@@ -99,10 +101,6 @@ jobs:
           if [[ "${BUILD_IOS}" != "true" && "${BUILD_MACOS}" != "true" &&
                 "${BUILD_ANDROID}" != "true" && "${BUILD_WINDOWS}" != "true" ]]; then
             echo "Select at least one platform."
-            exit 1
-          fi
-          if [[ "${MODE}" == "test" && "${BUILD_ANDROID}" == "true" ]]; then
-            echo "make test android is not wired. Disable Android on Test."
             exit 1
           fi
           if [[ "${MODE}" == "release" && -z "${{ inputs.version }}" ]]; then
@@ -447,15 +445,6 @@ jobs:
           DEPS_ROOT: ${{ github.workspace }}
           SKIP_DEPS: "1"
         run: make test ios
-      - name: Upload build-ios to Hetzner
-        if: ${{ inputs.mode == 'test' }}
-        uses: ./src/.github/actions/artifact-put
-        with:
-          path: build-ios
-          source: ${{ github.workspace }}
-          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
 
   test_macos:
     name: Test macOS
@@ -483,15 +472,34 @@ jobs:
           DEPS_ROOT: ${{ github.workspace }}
           SKIP_DEPS: "1"
         run: make test macos
-      - name: Upload build-macos to Hetzner
-        if: ${{ inputs.mode == 'test' }}
-        uses: ./src/.github/actions/artifact-put
+
+  test_android:
+    name: Test Android
+    needs: [plan]
+    if: ${{ inputs.mode == 'test' && inputs.android }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7
         with:
-          path: build-macos
-          source: ${{ github.workspace }}
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+      - uses: ./src/.github/actions/restore-tree
+        with:
+          webrtc_ref: ${{ inputs.webrtc_ref }}
+          target_os: ${{ needs.plan.outputs.android_target_os }}
+          cache_key: build-android
+          skip_cache: ${{ inputs.skip_deps_cache }}
+          install_android_packages: "true"
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+      - name: Test Android
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          SKIP_DEPS: "1"
+        run: make test android
 
   test_windows:
     name: Test Windows
