@@ -13,10 +13,10 @@ require_cmd python3
 require_cmd vpython3
 
 # Chromium's generated wrappers are `#!/usr/bin/env vpython3` and probe
-# upward for .vpython3. That works when out/ lives under src/. Stream's
-# out/ is a sibling of src/, so the probe never reaches src/.vpython3
-# (psutil / cipd wheels). Point vpython at Chromium's spec explicitly.
-vpython_spec="${WEBRTC_SRC:-$(cd "${PIPELINE_DIR}/.." && pwd)}/.vpython3"
+# upward for a spec. That works when out/ lives under src/. Stream's
+# out/ is a sibling of src/, so the probe never reaches src/vpython.toml
+# (psutil / cipd wheels). Point vpython at that spec explicitly.
+vpython_spec="${WEBRTC_SRC:-$(cd "${PIPELINE_DIR}/.." && pwd)}/vpython.toml"
 [[ -f "$vpython_spec" ]] || die "missing vpython spec: ${vpython_spec}"
 
 BUILD_DIR=""
