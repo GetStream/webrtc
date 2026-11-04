@@ -56,9 +56,9 @@ class AudioDeviceModuleImpl : public AudioDeviceModuleForTest {
   AudioDeviceModuleImpl(const Environment& env, AudioLayer audio_layer);
   // If `create_detached` is true, created ADM can be used on another thread
   // compared to the one on which it was created. It's useful for testing.
-  AudioDeviceModuleImpl(AudioLayer audio_layer,
+  AudioDeviceModuleImpl(const Environment& env,
+                        AudioLayer audio_layer,
                         std::unique_ptr<AudioDeviceGeneric> audio_device,
-                        TaskQueueFactory* task_queue_factory,
                         bool create_detached);
   ~AudioDeviceModuleImpl() override;
 

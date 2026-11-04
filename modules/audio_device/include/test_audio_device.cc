@@ -58,12 +58,12 @@ class TestAudioDeviceModuleImpl : public AudioDeviceModuleImpl {
       std::unique_ptr<TestAudioDeviceModule::Renderer> renderer,
       float speed = 1)
       : AudioDeviceModuleImpl(
+            env,
             AudioLayer::kDummyAudio,
             std::make_unique<TestAudioDevice>(env,
                                               std::move(capturer),
                                               std::move(renderer),
                                               speed),
-            &env.task_queue_factory(),
             /*create_detached=*/true) {}
 
   ~TestAudioDeviceModuleImpl() override = default;
