@@ -142,3 +142,5 @@ static void JNI_ExternalAudioProcessingFactory_Destroy(JNIEnv* env) {
 
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(ExternalAudioProcessingFactory)

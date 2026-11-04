@@ -59,3 +59,5 @@ static void JNI_NativeExternalAudioProcessingFactory_DestroyAudioProcessingModul
 }
 
 }  // end of namespace external
+
+DEFINE_JNI(NativeExternalAudioProcessingFactory)
