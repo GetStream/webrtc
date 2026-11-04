@@ -486,6 +486,8 @@ if grep -qE 'make rename |final-(apple|android)-renamed|StreamWebRTC\.xcframewor
   exit 1
 fi
 grep -q 'rewrite-android-namespace.sh' "$ROOT/Makefile"
+grep -q 'env -u TARGET' "$ROOT/Makefile"
+grep -q 'libjingle_peerconnection_so/libstream_jingle_peerconnection_so' "$ROOT/Makefile"
 grep -q 'io.getstream.webrtc' "$gha/workflows/_make.yml"
 grep -q 'products-android-repackaged' "$gha/workflows/_make.yml"
 grep -q 'final-android/libwebrtc.aar' "$gha/workflows/_make.yml"
