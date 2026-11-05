@@ -11,7 +11,7 @@
 # and upload products-* (GitHub). Package combine consumes products-*
 # (no third ninja) and uploads final-*. Release attaches final-*. Tests
 # HIT the same per-platform key (out/ios_tests, out/webrtc_tests,
-# src/out/android_tests vs slice dirs). Android tests run only in test mode.
+# src/out/android_tests vs slice dirs).
 
 name: WebRTC make
 
@@ -392,7 +392,7 @@ jobs:
   test_android:
     name: Test Android
     needs: [plan]
-    if: ${{ inputs.mode == 'test' && inputs.android }}
+    if: ${{ (inputs.mode == 'test' || inputs.mode == 'release') && inputs.android }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
@@ -453,7 +453,7 @@ jobs:
 
   tests_passed:
     name: Tests passed
-    needs: [plan, test_ios, test_macos, test_windows]
+    needs: [plan, test_ios, test_macos, test_android, test_windows]
     if: ${{ always() && !cancelled() && inputs.mode == 'release' }}
     runs-on: ubuntu-latest
     steps:
@@ -461,9 +461,11 @@ jobs:
         env:
           WANT_IOS: ${{ inputs.ios }}
           WANT_MACOS: ${{ inputs.macos }}
+          WANT_ANDROID: ${{ inputs.android }}
           WANT_WINDOWS: ${{ inputs.windows }}
           IOS_RESULT: ${{ needs.test_ios.result }}
           MACOS_RESULT: ${{ needs.test_macos.result }}
+          ANDROID_RESULT: ${{ needs.test_android.result }}
           WINDOWS_RESULT: ${{ needs.test_windows.result }}
         run: |
           set -euo pipefail
@@ -476,6 +478,10 @@ jobs:
             echo "::error::Release is blocked: macOS tests ${MACOS_RESULT}."
             failed=1
           fi
+          if [[ "${WANT_ANDROID}" == "true" && "${ANDROID_RESULT}" != "success" ]]; then
+            echo "::error::Release is blocked: Android tests ${ANDROID_RESULT}."
+            failed=1
+          fi
           if [[ "${WANT_WINDOWS}" == "true" && "${WINDOWS_RESULT}" != "success" ]]; then
             echo "::error::Release is blocked: Windows tests ${WINDOWS_RESULT}."
             failed=1
@@ -484,7 +490,7 @@ jobs:
             echo "If tests fail, do not publish."
             exit 1
           fi
-          echo "Selected-platform tests passed (Android tests are unwired and skipped)."
+          echo "Selected-platform tests passed."
 
   build_windows:
     name: Build Windows
