@@ -212,6 +212,10 @@ runs:
         test -d src/.git
         test -f src/DEPS
         test ! -L src
+        # src/resources in the tarball comes from whichever branch last
+        # uploaded this key, so it can replace this checkout's BUILD.gn.
+        # Restore tracked files. Untracked downloaded media stays.
+        git -C src checkout -- resources
         printf '%s\n' "${expected_size}" > \
           "${GITHUB_WORKSPACE}/.hetzner-hit-bytes"
         # Overlay members only. Do not touch .gclient-git-cache.
