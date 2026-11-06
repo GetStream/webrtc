@@ -128,7 +128,9 @@ Not packed: working trees (`src/third_party`, `src/build`,
 job), `src/.git`, Stream-tracked `src` files, `products/`. Restore:
 checkout `src`, extract git-cache to `GIT_CACHE_PATH`
 (`${{ github.workspace }}/.gclient-git-cache`), `src/resources`, and
-`.cipd` if present. Do not strip git alternates; `make deps` runs
+`.cipd` if present. Then `git checkout -- resources` so a cache packed
+from another branch cannot replace tracked files such as `BUILD.gn`.
+Do not strip git alternates; `make deps` runs
 `rewrite_git_cache_alternates` so Linux-packed cache paths retarget
 to this runner. Always `make deps` after HIT (cheap from cache).
 Build `CONFIG` is dispatch (default release); `make test` always uses debug
