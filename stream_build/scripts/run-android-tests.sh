@@ -14,8 +14,8 @@ require_cmd python3
 require_cmd vpython3
 
 # Generated wrappers are `#!/usr/bin/env vpython3` and probe upward for
-# .vpython3. out/ is a sibling of src/, so point vpython at the spec.
-vpython_spec="${WEBRTC_SRC:-$(cd "${PIPELINE_DIR}/.." && pwd)}/.vpython3"
+# a spec. out/ is a sibling of src/, so point vpython at M156's vpython.toml.
+vpython_spec="${WEBRTC_SRC:-$(cd "${PIPELINE_DIR}/.." && pwd)}/vpython.toml"
 [[ -f "$vpython_spec" ]] || die "missing vpython spec: ${vpython_spec}"
 
 BUILD_DIR=""

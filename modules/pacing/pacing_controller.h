@@ -17,10 +17,9 @@
 #include <array>
 #include <memory>
 #include <optional>
+#include <span>
 #include <vector>
 
-#include "absl/base/attributes.h"
-#include "api/array_view.h"
 #include "api/field_trials_view.h"
 #include "api/rtp_packet_sender.h"
 #include "api/transport/network_types.h"
@@ -59,7 +58,7 @@ class PacingController {
     // have been updated.
     virtual void OnAbortedRetransmissions(
         uint32_t /* ssrc */,
-        ArrayView<const uint16_t> /* sequence_numbers */) {}
+        std::span<const uint16_t> /* sequence_numbers */) {}
     virtual std::optional<uint32_t> GetRtxSsrcForMedia(
         uint32_t /* ssrc */) const {
       return std::nullopt;
@@ -102,10 +101,6 @@ class PacingController {
     // SetPacingRates() so that this limit will be upheld if
     // `drain_large_queues` is set.
     TimeDelta queue_time_limit = kMaxExpectedQueueLength;
-    // If the first packet of a keyframe is enqueued on a RTP stream, pacer
-    // skips forward to that packet and drops other enqueued packets on that
-    // stream, unless a keyframe is already being paced.
-    bool keyframe_flushing = false;
     // Audio retransmission is prioritized before video retransmission packets.
     bool prioritize_audio_retransmission = false;
     // Configure separate timeouts per priority. After a timeout, a packet of
@@ -117,6 +112,7 @@ class PacingController {
     // a packet "debt" that correspond to approximately the send rate during the
     // burst interval.
     TimeDelta send_burst_interval = PacerConfig::kDefaultTimeInterval;
+    std::optional<PacerConfig> initial_pacer_config;
   };
 
   static Configuration DefaultConfiguration() { return Configuration{}; }
@@ -133,7 +129,7 @@ class PacingController {
   void EnqueuePacket(std::unique_ptr<RtpPacketToSend> packet);
 
   void CreateProbeClusters(
-      ArrayView<const ProbeClusterConfig> probe_cluster_configs);
+      std::span<const ProbeClusterConfig> probe_cluster_configs);
 
   void Pause();   // Temporarily pause all sending.
   void Resume();  // Resume sending packets.
@@ -142,7 +138,7 @@ class PacingController {
   void SetCongested(bool congested);
 
   // Sets the pacing rates. Must be called once before packets can be sent.
-  ABSL_DEPRECATED("Use SetPacerConfig")
+  [[deprecated("Use SetPacerConfig")]]
   void SetPacingRates(DataRate pacing_rate, DataRate padding_rate);
   void SetPacerConfig(PacerConfig pacer_config);
 
@@ -159,7 +155,7 @@ class PacingController {
   // The pacer is allowed to send enqued packets in bursts and can build up a
   // packet "debt" that correspond to approximately the send rate during
   // 'burst_interval'.
-  ABSL_DEPRECATED("Use SetPacerConfig")
+  [[deprecated("Use SetPacerConfig")]]
   void SetSendBurstInterval(TimeDelta burst_interval);
 
   // A probe may be sent without first waing for a media packet.
@@ -248,7 +244,6 @@ class PacingController {
   const bool pace_audio_;
   const bool ignore_transport_overhead_;
   const bool fast_retransmissions_;
-  const bool keyframe_flushing_;
   DataSize transport_overhead_per_packet_;
   TimeDelta send_burst_interval_;
 

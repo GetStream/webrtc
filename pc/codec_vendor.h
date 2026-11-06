@@ -11,13 +11,16 @@
 #ifndef PC_CODEC_VENDOR_H_
 #define PC_CODEC_VENDOR_H_
 
+#include <span>
 #include <utility>
 #include <vector>
 
 #include "absl/base/nullability.h"
 #include "absl/strings/string_view.h"
 #include "api/field_trials_view.h"
+#include "api/media_types.h"
 #include "api/rtc_error.h"
+#include "api/rtp_parameters.h"
 #include "api/rtp_transceiver_direction.h"
 #include "api/sequence_checker.h"
 #include "call/payload_type.h"
@@ -74,7 +77,7 @@ class CodecVendor {
       RtpTransceiverDirection offer_rtd,
       RtpTransceiverDirection answer_rtd,
       const ContentInfo* current_content,
-      std::vector<Codec> codecs_from_offer,
+      std::span<const Codec> codecs_from_offer,
       PayloadTypeSuggester& pt_suggester);
 
   // Function exposed for issues.webrtc.org/412904801
@@ -83,6 +86,16 @@ class CodecVendor {
   // For each pair, the first element is the codec to be replaced,
   // and the second element is the codec to replace it with.
   void ModifyVideoCodecs(const std::vector<std::pair<Codec, Codec>>& changes);
+
+  // Workaround for issues.webrtc.org/412904801.
+  // Specifically sets packetization to "raw" for the matching codec in
+  // configurations_, to support the packetization=raw hack applied via SDP
+  // munging.
+  void SetRawPacketization(const Codec& codec);
+
+  bool payload_types_in_transport() const {
+    return payload_types_in_transport_;
+  }
 
   // Functions exposed for testing
   CodecList audio_sendrecv_codecs() const;
@@ -104,13 +117,27 @@ class CodecVendor {
       const RtpTransceiverDirection& offer,
       const RtpTransceiverDirection& answer) const;
 
+  RTCError MergeAndAssignConfiguredCodecs(
+      MediaType type,
+      RtpTransceiverDirection direction,
+      absl::string_view mid,
+      CodecList& codecs_out,
+      PayloadTypeSuggester& pt_suggester,
+      bool pick_from_top_of_range,
+      std::span<const RtpCodecCapability> codec_preferences = {},
+      bool vad_enabled = true);
+
   // Makes sure that modifications and reading data is done on the same thread
   // and to makessure we consistently make calls to GetNegotiatedCodecsForOffer
   // and GetNegotiatedCodecsForAnswer in the same calling context.
   RTC_NO_UNIQUE_ADDRESS SequenceChecker sequence_checker_;
 
+  const FieldTrialsView& trials_;
+
   const TypedCodecVendor audio_send_codecs_;
   const TypedCodecVendor audio_recv_codecs_;
+
+  const bool payload_types_in_transport_;
 
   // TODO: bugs.webrtc.org/412904801 - Make const. In order to be able to do
   // that, `ModifyVideoCodecs` needs to be removed. In the meantime, codec
@@ -135,10 +162,12 @@ class CodecLookupHelper {
 
 // A helper function to merge codecs numbered in one PT numberspace
 // into a list numbered in another PT numberspace. Exposed for testing.
+// This function is only available for testing the legacy path.
 RTCError MergeCodecsForTesting(const CodecList& reference_codecs,
                                absl::string_view mid,
                                CodecList& offered_codecs,
-                               PayloadTypeSuggester& pt_suggester);
+                               PayloadTypeSuggester& pt_suggester,
+                               bool pick_from_top_of_range = false);
 
 }  //  namespace webrtc
 

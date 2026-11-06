@@ -23,10 +23,10 @@
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/congestion_control_feedback.h"
 #include "rtc_base/containers/flat_map.h"
-#include "rtc_base/thread.h"
 #include "test/create_test_environment.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
+#include "test/run_loop.h"
 
 namespace webrtc {
 namespace {
@@ -102,8 +102,10 @@ rtcp::CongestionControlFeedback GenerateFeedback(
 
 TEST(RtpTransportControllerSendTest,
      IgnoresFeedbackForReportedReceivedPacketThatWereNotSent) {
-  AutoThread main_thread;
-  RtpTransportControllerSend transport({.env = CreateTestEnvironment()});
+  test::RunLoop main_thread;
+  RtpTransportControllerSend transport(
+      {.env = CreateTestEnvironment(),
+       .worker_thread = main_thread.task_queue()});
   transport.SetPreferredRtcpCcAckType(RtcpFeedbackType::CCFB);
   PacketSender sender(transport);
   sender.SimulateSentPackets({.ssrc = 123,
@@ -131,8 +133,10 @@ TEST(RtpTransportControllerSendTest,
      AccumulatesNumberOfReportedReceivedPacketsPerSsrcPerEcnMarkingType) {
   constexpr uint32_t kSsrc1 = 1'000;
   constexpr uint32_t kSsrc2 = 2'000;
-  AutoThread main_thread;
-  RtpTransportControllerSend transport({.env = CreateTestEnvironment()});
+  test::RunLoop main_thread;
+  RtpTransportControllerSend transport(
+      {.env = CreateTestEnvironment(),
+       .worker_thread = main_thread.task_queue()});
   transport.SetPreferredRtcpCcAckType(RtcpFeedbackType::CCFB);
 
   PacketSender sender(transport);
@@ -176,8 +180,10 @@ TEST(RtpTransportControllerSendTest,
 }
 
 TEST(RtpTransportControllerSendTest, CalculatesNumberOfBleachedPackets) {
-  AutoThread main_thread;
-  RtpTransportControllerSend transport({.env = CreateTestEnvironment()});
+  test::RunLoop main_thread;
+  RtpTransportControllerSend transport(
+      {.env = CreateTestEnvironment(),
+       .worker_thread = main_thread.task_queue()});
   transport.SetPreferredRtcpCcAckType(RtcpFeedbackType::CCFB);
   PacketSender sender(transport);
 
@@ -211,8 +217,10 @@ TEST(RtpTransportControllerSendTest, CalculatesNumberOfBleachedPackets) {
 
 TEST(RtpTransportControllerSendTest,
      AccumulatesNumberOfReportedLostAndRecoveredPackets) {
-  AutoThread main_thread;
-  RtpTransportControllerSend transport({.env = CreateTestEnvironment()});
+  test::RunLoop main_thread;
+  RtpTransportControllerSend transport(
+      {.env = CreateTestEnvironment(),
+       .worker_thread = main_thread.task_queue()});
   transport.SetPreferredRtcpCcAckType(RtcpFeedbackType::CCFB);
 
   PacketSender sender(transport);
@@ -258,8 +266,10 @@ TEST(RtpTransportControllerSendTest,
 
 TEST(RtpTransportControllerSendTest,
      DoesNotCountGapsInSequenceNumberBetweenReportsAsLoss) {
-  AutoThread main_thread;
-  RtpTransportControllerSend transport({.env = CreateTestEnvironment()});
+  test::RunLoop main_thread;
+  RtpTransportControllerSend transport(
+      {.env = CreateTestEnvironment(),
+       .worker_thread = main_thread.task_queue()});
   transport.SetPreferredRtcpCcAckType(RtcpFeedbackType::CCFB);
 
   PacketSender sender(transport);

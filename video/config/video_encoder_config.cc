@@ -14,6 +14,7 @@
 #include <string>
 
 #include "api/video/video_codec_type.h"
+#include "api/video_codecs/scalability_mode.h"
 #include "api/video_codecs/sdp_video_format.h"
 #include "api/video_codecs/video_codec.h"
 #include "rtc_base/checks.h"
@@ -36,8 +37,7 @@ VideoStream::VideoStream(const VideoStream& other) = default;
 VideoStream::~VideoStream() = default;
 
 std::string VideoStream::ToString() const {
-  char buf[1024];
-  SimpleStringBuilder ss(buf);
+  StringBuilder ss;
   ss << "{width: " << width;
   ss << ", height: " << height;
   ss << ", max_framerate: " << max_framerate;
@@ -53,8 +53,11 @@ std::string VideoStream::ToString() const {
     ss << ", scale_down_to: " << scale_resolution_down_to->width << "x"
        << scale_resolution_down_to->height;
   }
+  if (scalability_mode.has_value()) {
+    ss << ", scalability_mode: " << ScalabilityModeToString(*scalability_mode);
+  }
   ss << '}';
-  return ss.str();
+  return ss.Release();
 }
 
 VideoEncoderConfig::VideoEncoderConfig()
@@ -69,6 +72,7 @@ VideoEncoderConfig::VideoEncoderConfig()
       number_of_streams(0),
       legacy_conference_mode(false),
       is_quality_scaling_allowed(false),
+      allow_zero_hertz_video(false),
       max_qp(-1) {}
 
 VideoEncoderConfig::VideoEncoderConfig(VideoEncoderConfig&&) = default;
@@ -76,8 +80,7 @@ VideoEncoderConfig::VideoEncoderConfig(VideoEncoderConfig&&) = default;
 VideoEncoderConfig::~VideoEncoderConfig() = default;
 
 std::string VideoEncoderConfig::ToString() const {
-  char buf[1024];
-  SimpleStringBuilder ss(buf);
+  StringBuilder ss;
   ss << "{codec_type: " << CodecTypeToPayloadString(codec_type);
   ss << ", content_type: ";
   switch (content_type) {
@@ -95,12 +98,13 @@ std::string VideoEncoderConfig::ToString() const {
   ss << ", number_of_streams: " << number_of_streams;
   ss << ", legacy_conference_mode: " << legacy_conference_mode;
   ss << ", is_quality_scaling_allowed: " << is_quality_scaling_allowed;
+  ss << ", allow_zero_hertz_video: " << allow_zero_hertz_video;
   ss << ", max_qp: " << max_qp;
   for (size_t n = 0; n < simulcast_layers.size(); ++n) {
     ss << ", simulcast_layers[" << n << "]: " << simulcast_layers[n].ToString();
   }
   ss << '}';
-  return ss.str();
+  return ss.Release();
 }
 
 bool VideoEncoderConfig::HasScaleResolutionDownTo() const {

@@ -168,12 +168,12 @@ AudioDeviceModuleImpl::AudioDeviceModuleImpl(const Environment& env,
 }
 
 AudioDeviceModuleImpl::AudioDeviceModuleImpl(
+    const Environment& env,
     AudioLayer audio_layer,
     std::unique_ptr<AudioDeviceGeneric> audio_device,
-    TaskQueueFactory* task_queue_factory,
     bool create_detached)
     : audio_layer_(audio_layer),
-      env_(CreateEnvironment(task_queue_factory)),
+      env_(env),
       audio_device_buffer_(env_, create_detached),
       audio_device_(std::move(audio_device)) {
   RTC_DLOG(LS_INFO) << __FUNCTION__;

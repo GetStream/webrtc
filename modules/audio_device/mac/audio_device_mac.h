@@ -17,17 +17,17 @@
 
 #include <atomic>
 #include <memory>
+#include <span>
 
 #include "absl/strings/string_view.h"
 #include "modules/audio_device/audio_device_generic.h"
 #include "modules/audio_device/mac/audio_mixer_manager_mac.h"
+#include "modules/audio_device/mac/audio_ring_buffer_mac.h"
 #include "rtc_base/event.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/platform_thread.h"
 #include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/thread_annotations.h"
-
-struct PaUtilRingBuffer;
 
 namespace webrtc {
 
@@ -187,8 +187,8 @@ class AudioDeviceMac : public AudioDeviceGeneric {
 
   int32_t GetDeviceName(AudioObjectPropertyScope scope,
                         uint16_t index,
-                        webrtc::ArrayView<char> name,
-                        webrtc::ArrayView<char> guid);
+                        std::span<char> name,
+                        std::span<char> guid);
 
   int32_t InitDevice(uint16_t userDeviceIndex,
                      AudioDeviceID& deviceId,
@@ -300,9 +300,7 @@ class AudioDeviceMac : public AudioDeviceGeneric {
   uint8_t _recChannels;
   uint8_t _playChannels;
 
-  Float32* _captureBufData;
-  SInt16* _renderBufData;
-
+  Float32 _captureConvertData[REC_BUF_SIZE_IN_SAMPLES];
   SInt16 _renderConvertData[PLAY_BUF_SIZE_IN_SAMPLES];
 
   bool _initialized;
@@ -339,14 +337,11 @@ class AudioDeviceMac : public AudioDeviceGeneric {
 
   int32_t _renderDelayOffsetSamples;
 
-  PaUtilRingBuffer* _paCaptureBuffer;
-  PaUtilRingBuffer* _paRenderBuffer;
+  AudioRingBufferMac<Float32> _captureBuffer;
+  AudioRingBufferMac<SInt16> _renderBuffer;
 
   semaphore_t _renderSemaphore;
   semaphore_t _captureSemaphore;
-
-  int _captureBufSizeSamples;
-  int _renderBufSizeSamples;
 
   // Typing detection
   // 0x5c is key "9", after that comes function keys.

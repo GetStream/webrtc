@@ -18,13 +18,13 @@
 #include <vector>
 
 #include "api/scoped_refptr.h"
-#include "api/test/rtc_error_matchers.h"
 #include "api/units/time_delta.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/event.h"
 #include "rtc_base/thread.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
+#include "test/run_loop.h"
 #include "test/wait_until.h"
 
 namespace webrtc {
@@ -133,7 +133,8 @@ class OperationTrackerProxy {
     Event event;
     operations_chain_thread_->PostTask(
         [this, &event,
-         on_chain_empty_callback = std::move(on_chain_empty_callback)]() {
+         on_chain_empty_callback =
+             std::move(on_chain_empty_callback)]() mutable {
           operations_chain_->SetOnChainEmptyCallback(
               std::move(on_chain_empty_callback));
           event.Set();
@@ -397,7 +398,7 @@ TEST(OperationsChainTest, IsEmpty) {
 }
 
 TEST(OperationsChainTest, OnChainEmptyCallback) {
-  AutoThread main_thread;
+  test::RunLoop main_thread;
   OperationTrackerProxy operation_tracker_proxy;
   operation_tracker_proxy.Initialize()->Wait(Event::kForever);
 
@@ -415,9 +416,8 @@ TEST(OperationsChainTest, OnChainEmptyCallback) {
   // Completing the operation empties the chain, invoking the callback.
   unblock_async_operation_event0.Set();
   async_operation_completed_event0->Wait(Event::kForever);
-  EXPECT_THAT(WaitUntil([&] { return on_empty_callback_counter == 1u; },
-                        ::testing::IsTrue(), {.timeout = kDefaultTimeout}),
-              IsRtcOk());
+  EXPECT_TRUE(WaitUntil([&] { return on_empty_callback_counter == 1u; },
+                        {.timeout = kDefaultTimeout}));
 
   // Chain multiple events.
   Event unblock_async_operation_event1;
@@ -429,22 +429,19 @@ TEST(OperationsChainTest, OnChainEmptyCallback) {
       operation_tracker_proxy.PostAsynchronousOperation(
           &unblock_async_operation_event2);
   // Again, the callback is not invoked until the operation has completed.
-  EXPECT_THAT(WaitUntil([&] { return on_empty_callback_counter == 1u; },
-                        ::testing::IsTrue(), {.timeout = kDefaultTimeout}),
-              IsRtcOk());
+  EXPECT_TRUE(WaitUntil([&] { return on_empty_callback_counter == 1u; },
+                        {.timeout = kDefaultTimeout}));
   // Upon completing the first event, the chain is still not empty, so the
   // callback must not be invoked yet.
   unblock_async_operation_event1.Set();
   async_operation_completed_event1->Wait(Event::kForever);
-  EXPECT_THAT(WaitUntil([&] { return on_empty_callback_counter == 1u; },
-                        ::testing::IsTrue(), {.timeout = kDefaultTimeout}),
-              IsRtcOk());
+  EXPECT_TRUE(WaitUntil([&] { return on_empty_callback_counter == 1u; },
+                        {.timeout = kDefaultTimeout}));
   // Completing the last event empties the chain, invoking the callback.
   unblock_async_operation_event2.Set();
   async_operation_completed_event2->Wait(Event::kForever);
-  EXPECT_THAT(WaitUntil([&] { return on_empty_callback_counter == 2u; },
-                        ::testing::IsTrue(), {.timeout = kDefaultTimeout}),
-              IsRtcOk());
+  EXPECT_TRUE(WaitUntil([&] { return on_empty_callback_counter == 2u; },
+                        {.timeout = kDefaultTimeout}));
 }
 
 TEST(OperationsChainTest,

@@ -17,10 +17,10 @@
 #include <string>
 
 #include "absl/strings/string_view.h"
+#include "api/rtp_header_extension_id.h"
 #include "call/test/mock_rtp_packet_sink_interface.h"
 #include "modules/rtp_rtcp/source/rtp_header_extensions.h"
 #include "modules/rtp_rtcp/source/rtp_packet_received.h"
-#include "rtc_base/checks.h"
 #include "rtc_base/numerics/safe_conversions.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
@@ -113,7 +113,7 @@ class RtpDemuxerTest : public ::testing::Test {
       uint32_t ssrc,
       absl::string_view mid) {
     RtpPacketReceived::ExtensionManager extension_manager;
-    extension_manager.Register<RtpMid>(11);
+    extension_manager.Register<RtpMid>(RtpHeaderExtensionId(11));
 
     auto packet = CreatePacket(ssrc, &extension_manager);
     packet->SetExtension<RtpMid>(mid);
@@ -124,7 +124,7 @@ class RtpDemuxerTest : public ::testing::Test {
       uint32_t ssrc,
       absl::string_view rsid) {
     RtpPacketReceived::ExtensionManager extension_manager;
-    extension_manager.Register<RtpStreamId>(6);
+    extension_manager.Register<RtpStreamId>(RtpHeaderExtensionId(6));
 
     auto packet = CreatePacket(ssrc, &extension_manager);
     packet->SetExtension<RtpStreamId>(rsid);
@@ -135,7 +135,7 @@ class RtpDemuxerTest : public ::testing::Test {
       uint32_t ssrc,
       absl::string_view rrid) {
     RtpPacketReceived::ExtensionManager extension_manager;
-    extension_manager.Register<RepairedRtpStreamId>(7);
+    extension_manager.Register<RepairedRtpStreamId>(RtpHeaderExtensionId(7));
 
     auto packet = CreatePacket(ssrc, &extension_manager);
     packet->SetExtension<RepairedRtpStreamId>(rrid);
@@ -147,8 +147,8 @@ class RtpDemuxerTest : public ::testing::Test {
       absl::string_view mid,
       absl::string_view rsid) {
     RtpPacketReceived::ExtensionManager extension_manager;
-    extension_manager.Register<RtpMid>(11);
-    extension_manager.Register<RtpStreamId>(6);
+    extension_manager.Register<RtpMid>(RtpHeaderExtensionId(11));
+    extension_manager.Register<RtpStreamId>(RtpHeaderExtensionId(6));
 
     auto packet = CreatePacket(ssrc, &extension_manager);
     packet->SetExtension<RtpMid>(mid);
@@ -161,8 +161,8 @@ class RtpDemuxerTest : public ::testing::Test {
       absl::string_view rsid,
       absl::string_view rrid) {
     RtpPacketReceived::ExtensionManager extension_manager;
-    extension_manager.Register<RtpStreamId>(6);
-    extension_manager.Register<RepairedRtpStreamId>(7);
+    extension_manager.Register<RtpStreamId>(RtpHeaderExtensionId(6));
+    extension_manager.Register<RepairedRtpStreamId>(RtpHeaderExtensionId(7));
 
     auto packet = CreatePacket(ssrc, &extension_manager);
     packet->SetExtension<RtpStreamId>(rsid);
@@ -174,8 +174,6 @@ class RtpDemuxerTest : public ::testing::Test {
   std::set<RtpPacketSinkInterface*> sinks_to_tear_down_;
   uint16_t next_sequence_number_ = 1;
 };
-
-class RtpDemuxerDeathTest : public RtpDemuxerTest {};
 
 MATCHER_P(SamePacketAs, other, "") {
   return arg.Ssrc() == other.Ssrc() &&
@@ -367,6 +365,89 @@ TEST_F(RtpDemuxerTest, OnRtpPacketCalledOnCorrectSinkByPayloadType) {
   packet->SetPayloadType(payload_type);
   EXPECT_CALL(sink, OnRtpPacket(SamePacketAs(*packet))).Times(1);
   EXPECT_TRUE(demuxer_.OnRtpPacket(*packet));
+}
+
+TEST_F(RtpDemuxerTest, DontSignalRtpPayloadTypeWhenPtDemuxingDisabled) {
+  constexpr uint32_t ssrc1 = 10;
+  constexpr uint32_t ssrc2 = 11;
+  constexpr uint8_t pt1 = 30;
+  constexpr uint8_t pt2 = 31;
+
+  // Sink 1 registered when PT demuxing is enabled (default).
+  MockRtpPacketSink sink1;
+  RtpDemuxerCriteria criteria1;
+  criteria1.payload_types() = {pt1};
+  EXPECT_TRUE(AddSink(criteria1, &sink1));
+
+  // Disable PT demuxing.
+  demuxer_.set_use_payload_type_demuxing(false);
+
+  // Sink 2 registered when PT demuxing is disabled.
+  MockRtpPacketSink sink2;
+  RtpDemuxerCriteria criteria2;
+  criteria2.payload_types() = {pt2};
+  EXPECT_TRUE(AddSink(criteria2, &sink2));
+
+  // Packet with pt1 should not go to sink1 because fallback is disabled.
+  auto packet1 = CreatePacketWithSsrc(ssrc1);
+  packet1->SetPayloadType(pt1);
+  EXPECT_CALL(sink1, OnRtpPacket(_)).Times(0);
+  EXPECT_FALSE(demuxer_.OnRtpPacket(*packet1));
+
+  // Packet with pt2 should not go to sink2 because fallback is disabled and it
+  // was not registered by PT.
+  auto packet2 = CreatePacketWithSsrc(ssrc2);
+  packet2->SetPayloadType(pt2);
+  EXPECT_CALL(sink2, OnRtpPacket(_)).Times(0);
+  EXPECT_FALSE(demuxer_.OnRtpPacket(*packet2));
+}
+
+TEST_F(RtpDemuxerTest, DynamicPayloadTypeDemuxing) {
+  constexpr uint32_t ssrc = 10;
+  constexpr uint8_t payload_type = 30;
+
+  MockRtpPacketSink sink;
+  RtpDemuxerCriteria criteria;
+  criteria.payload_types() = {payload_type};
+
+  demuxer_.set_use_payload_type_demuxing(false);
+  EXPECT_TRUE(AddSink(criteria, &sink));
+
+  auto packet = CreatePacketWithSsrc(ssrc);
+  packet->SetPayloadType(payload_type);
+
+  EXPECT_CALL(sink, OnRtpPacket(_)).Times(0);
+  EXPECT_FALSE(demuxer_.OnRtpPacket(*packet));
+
+  demuxer_.set_use_payload_type_demuxing(true);
+
+  EXPECT_CALL(sink, OnRtpPacket(SamePacketAs(*packet))).Times(1);
+  EXPECT_TRUE(demuxer_.OnRtpPacket(*packet));
+}
+
+TEST_F(RtpDemuxerTest, SignaledSsrcOverridesLearnedBinding) {
+  constexpr uint32_t ssrc = 10;
+  constexpr uint8_t payload_type = 30;
+
+  MockRtpPacketSink sink1;
+  RtpDemuxerCriteria criteria1;
+  criteria1.payload_types() = {payload_type};
+  EXPECT_TRUE(AddSink(criteria1, &sink1));
+
+  auto packet1 = CreatePacketWithSsrc(ssrc);
+  packet1->SetPayloadType(payload_type);
+  EXPECT_CALL(sink1, OnRtpPacket(SamePacketAs(*packet1))).Times(1);
+  EXPECT_TRUE(demuxer_.OnRtpPacket(*packet1));
+
+  MockRtpPacketSink sink2;
+  RtpDemuxerCriteria criteria2;
+  criteria2.ssrcs().insert(ssrc);
+  EXPECT_TRUE(AddSink(criteria2, &sink2));
+
+  auto packet2 = CreatePacketWithSsrc(ssrc);
+  EXPECT_CALL(sink1, OnRtpPacket(_)).Times(0);
+  EXPECT_CALL(sink2, OnRtpPacket(SamePacketAs(*packet2))).Times(1);
+  EXPECT_TRUE(demuxer_.OnRtpPacket(*packet2));
 }
 
 TEST_F(RtpDemuxerTest, PacketsDeliveredInRightOrder) {
@@ -1266,37 +1347,168 @@ TEST_F(RtpDemuxerTest, PacketWithMidAndUnknownRsidIsNotRoutedByPayloadType) {
   EXPECT_FALSE(demuxer_.OnRtpPacket(*packet));
 }
 
-#if RTC_DCHECK_IS_ON && GTEST_HAS_DEATH_TEST && !defined(WEBRTC_ANDROID)
+TEST_F(RtpDemuxerTest, IsEmptyMatchesSinksPresence) {
+  EXPECT_TRUE(demuxer_.IsEmpty());
 
-TEST_F(RtpDemuxerDeathTest, MidMustNotExceedMaximumLength) {
+  MockRtpPacketSink sink;
+  constexpr uint32_t ssrc = 101;
+  EXPECT_TRUE(AddSinkOnlySsrc(ssrc, &sink));
+  EXPECT_FALSE(demuxer_.IsEmpty());
+
+  EXPECT_TRUE(RemoveSink(&sink));
+  EXPECT_TRUE(demuxer_.IsEmpty());
+}
+
+TEST_F(RtpDemuxerTest, RemoveAllSinksClearsAllSinks) {
+  MockRtpPacketSink sink_ssrc;
+  MockRtpPacketSink sink_mid;
+  MockRtpPacketSink sink_rsid;
+  MockRtpPacketSink sink_mid_rsid;
+  MockRtpPacketSink sink_pt;
+
+  ASSERT_TRUE(AddSinkOnlySsrc(101, &sink_ssrc));
+  ASSERT_TRUE(AddSinkOnlyMid("mid", &sink_mid));
+  ASSERT_TRUE(AddSinkOnlyRsid("rsid", &sink_rsid));
+  ASSERT_TRUE(AddSinkBothMidRsid("mid2", "rsid2", &sink_mid_rsid));
+
+  RtpDemuxerCriteria pt_criteria;
+  pt_criteria.payload_types().insert(30);
+  ASSERT_TRUE(AddSink(pt_criteria, &sink_pt));
+
+  EXPECT_FALSE(demuxer_.IsEmpty());
+
+  demuxer_.RemoveAllSinks();
+
+  EXPECT_TRUE(demuxer_.IsEmpty());
+
+  // Verify packets are no longer routed.
+  auto packet_ssrc = CreatePacketWithSsrc(101);
+  EXPECT_CALL(sink_ssrc, OnRtpPacket(_)).Times(0);
+  EXPECT_FALSE(demuxer_.OnRtpPacket(*packet_ssrc));
+
+  auto packet_mid = CreatePacketWithSsrcMid(102, "mid");
+  EXPECT_CALL(sink_mid, OnRtpPacket(_)).Times(0);
+  EXPECT_FALSE(demuxer_.OnRtpPacket(*packet_mid));
+
+  auto packet_rsid = CreatePacketWithSsrcRsid(103, "rsid");
+  EXPECT_CALL(sink_rsid, OnRtpPacket(_)).Times(0);
+  EXPECT_FALSE(demuxer_.OnRtpPacket(*packet_rsid));
+
+  auto packet_mid_rsid = CreatePacketWithSsrcMidRsid(104, "mid2", "rsid2");
+  EXPECT_CALL(sink_mid_rsid, OnRtpPacket(_)).Times(0);
+  EXPECT_FALSE(demuxer_.OnRtpPacket(*packet_mid_rsid));
+
+  auto packet_pt = CreatePacketWithSsrc(105);
+  packet_pt->SetPayloadType(30);
+  EXPECT_CALL(sink_pt, OnRtpPacket(_)).Times(0);
+  EXPECT_FALSE(demuxer_.OnRtpPacket(*packet_pt));
+}
+
+TEST_F(RtpDemuxerTest, RemoveAllSinksClearsMatchAnySink) {
+  MockRtpPacketSink match_any_sink;
+  auto match_any_criteria = RtpDemuxerCriteria::MatchAny();
+  ASSERT_TRUE(AddSink(match_any_criteria, &match_any_sink));
+
+  EXPECT_FALSE(demuxer_.IsEmpty());
+
+  demuxer_.RemoveAllSinks();
+
+  EXPECT_TRUE(demuxer_.IsEmpty());
+
+  auto packet = CreatePacketWithSsrc(123);
+  EXPECT_CALL(match_any_sink, OnRtpPacket(_)).Times(0);
+  EXPECT_FALSE(demuxer_.OnRtpPacket(*packet));
+}
+
+TEST_F(RtpDemuxerTest, RemoveAllSinksClearsLearnedBindings) {
+  const std::string mid = "v";
+  const std::string rsid = "1";
+  constexpr uint32_t ssrc_mid = 10;
+  constexpr uint32_t ssrc_rsid = 11;
+
+  // 1. Add sinks.
+  NiceMock<MockRtpPacketSink> sink_mid1;
+  ASSERT_TRUE(AddSinkOnlyMid(mid, &sink_mid1));
+
+  NiceMock<MockRtpPacketSink> sink_rsid1;
+  ASSERT_TRUE(AddSinkOnlyRsid(rsid, &sink_rsid1));
+
+  // 2. Route packets to learn bindings.
+  auto packet_with_mid = CreatePacketWithSsrcMid(ssrc_mid, mid);
+  ASSERT_TRUE(demuxer_.OnRtpPacket(*packet_with_mid));
+
+  auto packet_with_rsid = CreatePacketWithSsrcRsid(ssrc_rsid, rsid);
+  ASSERT_TRUE(demuxer_.OnRtpPacket(*packet_with_rsid));
+
+  // 3. Verify SSRC only packets are routed.
+  auto packet_with_ssrc_mid = CreatePacketWithSsrc(ssrc_mid);
+  EXPECT_CALL(sink_mid1, OnRtpPacket(SamePacketAs(*packet_with_ssrc_mid)))
+      .Times(1);
+  ASSERT_TRUE(demuxer_.OnRtpPacket(*packet_with_ssrc_mid));
+
+  auto packet_with_ssrc_rsid = CreatePacketWithSsrc(ssrc_rsid);
+  EXPECT_CALL(sink_rsid1, OnRtpPacket(SamePacketAs(*packet_with_ssrc_rsid)))
+      .Times(1);
+  ASSERT_TRUE(demuxer_.OnRtpPacket(*packet_with_ssrc_rsid));
+
+  // 4. Remove all sinks.
+  demuxer_.RemoveAllSinks();
+  sinks_to_tear_down_.clear();
+
+  // 5. Add new sinks.
+  MockRtpPacketSink sink_mid2;
+  ASSERT_TRUE(AddSinkOnlyMid(mid, &sink_mid2));
+
+  MockRtpPacketSink sink_rsid2;
+  ASSERT_TRUE(AddSinkOnlyRsid(rsid, &sink_rsid2));
+
+  // 6. Send SSRC only packets. They should NOT be routed.
+  EXPECT_CALL(sink_mid2, OnRtpPacket(_)).Times(0);
+  EXPECT_FALSE(demuxer_.OnRtpPacket(*packet_with_ssrc_mid));
+
+  EXPECT_CALL(sink_rsid2, OnRtpPacket(_)).Times(0);
+  EXPECT_FALSE(demuxer_.OnRtpPacket(*packet_with_ssrc_rsid));
+}
+
+TEST_F(RtpDemuxerTest, ResolveSinkReturnsCorrectSink) {
+  constexpr uint32_t ssrc = 101;
+  MockRtpPacketSink sink;
+  EXPECT_TRUE(AddSinkOnlySsrc(ssrc, &sink));
+
+  auto packet = CreatePacketWithSsrc(ssrc);
+  EXPECT_EQ(demuxer_.ResolveSink(*packet), &sink);
+
+  auto unknown_packet = CreatePacketWithSsrc(ssrc + 1);
+  EXPECT_EQ(demuxer_.ResolveSink(*unknown_packet), nullptr);
+}
+
+TEST_F(RtpDemuxerTest, MidMustNotExceedMaximumLength) {
   MockRtpPacketSink sink1;
   std::string mid1(BaseRtpStringExtension::kMaxValueSizeBytes + 1, 'a');
-  EXPECT_DEATH(AddSinkOnlyMid(mid1, &sink1), "");
+  EXPECT_FALSE(AddSinkOnlyMid(mid1, &sink1));
 }
 
-TEST_F(RtpDemuxerDeathTest, CriteriaMustBeNonEmpty) {
+TEST_F(RtpDemuxerTest, CriteriaMustBeNonEmpty) {
   MockRtpPacketSink sink;
   RtpDemuxerCriteria criteria;
-  EXPECT_DEATH(AddSink(criteria, &sink), "");
+  EXPECT_FALSE(AddSink(criteria, &sink));
 }
 
-TEST_F(RtpDemuxerDeathTest, RsidMustBeAlphaNumeric) {
+TEST_F(RtpDemuxerTest, RsidMustBeAlphaNumeric) {
   MockRtpPacketSink sink;
-  EXPECT_DEATH(AddSinkOnlyRsid("a_3", &sink), "");
+  EXPECT_FALSE(AddSinkOnlyRsid("a_3", &sink));
 }
 
-TEST_F(RtpDemuxerDeathTest, MidMustBeToken) {
+TEST_F(RtpDemuxerTest, MidMustBeToken) {
   MockRtpPacketSink sink;
-  EXPECT_DEATH(AddSinkOnlyMid("a(3)", &sink), "");
+  EXPECT_FALSE(AddSinkOnlyMid("a(3)", &sink));
 }
 
-TEST_F(RtpDemuxerDeathTest, RsidMustNotExceedMaximumLength) {
+TEST_F(RtpDemuxerTest, RsidMustNotExceedMaximumLength) {
   MockRtpPacketSink sink;
   std::string rsid(BaseRtpStringExtension::kMaxValueSizeBytes + 1, 'a');
-  EXPECT_DEATH(AddSinkOnlyRsid(rsid, &sink), "");
+  EXPECT_FALSE(AddSinkOnlyRsid(rsid, &sink));
 }
-
-#endif
 
 }  // namespace
 }  // namespace webrtc

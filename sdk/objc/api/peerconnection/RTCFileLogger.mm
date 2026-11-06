@@ -109,7 +109,10 @@ const char * RTC_CONSTANT_TYPE(RTCFileLoggerRotatingLogPrefix) = "rotating_log";
   if (_shouldDisableBuffering) {
     _logSink->DisableBuffering();
   }
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
   webrtc::LogMessage::LogThreads(true);
+#pragma clang diagnostic pop
   webrtc::LogMessage::LogTimestamps(true);
   webrtc::LogMessage::AddLogToStream(_logSink.get(), [self rtcSeverity]);
   _hasStarted = YES;

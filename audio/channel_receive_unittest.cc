@@ -14,22 +14,28 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <optional>
+#include <span>
 #include <vector>
 
 #include "absl/strings/string_view.h"
-#include "api/array_view.h"
 #include "api/audio/audio_frame.h"
 #include "api/audio_codecs/audio_decoder_factory.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
+#include "api/call/audio_sink.h"
 #include "api/call/transport.h"
 #include "api/crypto/crypto_options.h"
-#include "api/environment/environment_factory.h"
 #include "api/make_ref_counted.h"
+#include "api/rtp_packet_infos.h"
 #include "api/scoped_refptr.h"
 #include "api/test/mock_frame_transformer.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
+#include "call/syncable.h"
+#include "logging/rtc_event_log/mock/mock_rtc_event_log.h"
 #include "modules/audio_device/include/mock_audio_device.h"
+#include "modules/pacing/packet_router.h"
+#include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/ntp_time_util.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/receiver_report.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/report_block.h"
@@ -38,6 +44,7 @@
 #include "rtc_base/logging.h"
 #include "rtc_base/string_encode.h"
 #include "system_wrappers/include/ntp_time.h"
+#include "test/create_test_environment.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 #include "test/mock_transport.h"
@@ -52,7 +59,7 @@ using ::testing::NotNull;
 using ::testing::Return;
 using ::testing::Test;
 
-constexpr uint32_t kLocalSsrc = 1111;
+constexpr uint32_t kLocalSsrc = kFallbackRtcpSsrcForAudio;
 constexpr uint32_t kRemoteSsrc = 2222;
 // We run RTP data with 8 kHz PCMA (fixed payload type 8).
 constexpr char kPayloadName[] = "PCMA";
@@ -71,15 +78,16 @@ class ChannelReceiveTest : public Test {
   std::unique_ptr<ChannelReceiveInterface> CreateTestChannelReceive() {
     CryptoOptions crypto_options;
     auto channel = CreateChannelReceive(
-        CreateEnvironment(time_controller_.GetClock()),
+        CreateTestEnvironment({.time = &time_controller_, .event_log = &log_}),
         /* neteq_factory= */ nullptr, audio_device_module_.get(), &transport_,
-        kLocalSsrc, kRemoteSsrc,
+        kRemoteSsrc,
         /* jitter_buffer_max_packets= */ 0,
         /* jitter_buffer_fast_playout= */ false,
         /* jitter_buffer_min_delay_ms= */ 0,
         /* enable_non_sender_rtt= */ false, audio_decoder_factory_,
         /* frame_decryptor_interface= */ nullptr, crypto_options,
-        /* frame_transformer= */ nullptr);
+        /* frame_transformer= */ nullptr,
+        /* on_first_packet= */ nullptr, &packet_router_);
     channel->SetReceiveCodecs(
         {{kPayloadType, {kPayloadName, kSampleRateHz, 1}}});
     return channel;
@@ -93,12 +101,15 @@ class ChannelReceiveTest : public Test {
            kSampleRateHz;
   }
 
-  RtpPacketReceived CreateRtpPacket() {
+  RtpPacketReceived CreateRtpPacket(std::span<const uint32_t> csrcs = {}) {
     RtpPacketReceived packet;
     packet.set_arrival_time(time_controller_.GetClock()->CurrentTime());
     packet.SetTimestamp(RtpNow());
     packet.SetSsrc(kLocalSsrc);
     packet.SetPayloadType(kPayloadType);
+    if (!csrcs.empty()) {
+      packet.SetCsrcs(csrcs);
+    }
     // Packet size should be enough to give at least 10 ms of data.
     // For PCMA, that's 80 bytes; this should be enough.
     uint8_t* datapos = packet.SetPayloadSize(100);
@@ -140,7 +151,7 @@ class ChannelReceiveTest : public Test {
   }
 
   void HandleGeneratedRtcp(ChannelReceiveInterface& /* channel */,
-                           ArrayView<const uint8_t> packet) {
+                           std::span<const uint8_t> packet) {
     if (packet[1] == rtcp::ReceiverReport::kPacketType) {
       // Ignore RR, it requires no response
     } else {
@@ -167,9 +178,11 @@ class ChannelReceiveTest : public Test {
 
  protected:
   GlobalSimulatedTimeController time_controller_;
+  NiceMock<MockRtcEventLog> log_;
   scoped_refptr<test::MockAudioDeviceModule> audio_device_module_;
   scoped_refptr<AudioDecoderFactory> audio_decoder_factory_;
   MockTransport transport_;
+  PacketRouter packet_router_;
 };
 
 TEST_F(ChannelReceiveTest, CreateAndDestroy) {
@@ -182,7 +195,7 @@ TEST_F(ChannelReceiveTest, ReceiveReportGeneratedOnTime) {
 
   bool receiver_report_sent = false;
   EXPECT_CALL(transport_, SendRtcp)
-      .WillRepeatedly([&](ArrayView<const uint8_t> packet,
+      .WillRepeatedly([&](std::span<const uint8_t> packet,
                           const PacketOptions& options) {
         if (packet.size() >= 2 &&
             packet[1] == rtcp::ReceiverReport::kPacketType) {
@@ -202,7 +215,7 @@ TEST_F(ChannelReceiveTest, CaptureStartTimeBecomesValid) {
 
   EXPECT_CALL(transport_, SendRtcp)
       .WillRepeatedly(
-          [&](ArrayView<const uint8_t> packet, const PacketOptions& options) {
+          [&](std::span<const uint8_t> packet, const PacketOptions& options) {
             HandleGeneratedRtcp(*channel, packet);
             return true;
           });
@@ -288,6 +301,117 @@ TEST_F(ChannelReceiveTest, ClearingFrameTransformerUnregistersCallback) {
   channel->StartPlayout();
   EXPECT_CALL(*mock_frame_transformer, Transform).Times(0);
   channel->OnRtpPacket(CreateRtpPacket());
+}
+
+TEST_F(ChannelReceiveTest, TransformsAndInsertsTransformedFrame) {
+  auto channel = CreateTestChannelReceive();
+
+  scoped_refptr<MockFrameTransformer> mock_frame_transformer =
+      make_ref_counted<MockFrameTransformer>();
+  scoped_refptr<TransformedFrameCallback> callback;
+  EXPECT_CALL(*mock_frame_transformer, RegisterTransformedFrameCallback)
+      .WillOnce([&](scoped_refptr<TransformedFrameCallback> cb) {
+        callback = std::move(cb);
+      });
+  channel->SetDepacketizerToDecoderFrameTransformer(mock_frame_transformer);
+  ASSERT_TRUE(callback);
+
+  channel->StartPlayout();
+
+  EXPECT_CALL(*mock_frame_transformer, Transform)
+      .WillOnce([&](std::unique_ptr<TransformableFrameInterface> frame) {
+        callback->OnTransformedFrame(std::move(frame));
+      });
+
+  channel->OnRtpPacket(CreateRtpPacket());
+  time_controller_.AdvanceTime(TimeDelta::Zero());
+
+  AudioFrame audio_frame;
+  EXPECT_EQ(channel->GetAudioFrameWithInfo(kSampleRateHz, &audio_frame),
+            AudioMixer::Source::AudioFrameInfo::kNormal);
+  // Proves that the transformed payload reached NetEq.
+  ASSERT_THAT(audio_frame.packet_infos_, SizeIs(1));
+  EXPECT_EQ(audio_frame.packet_infos_[0].ssrc(), kLocalSsrc);
+}
+
+TEST_F(ChannelReceiveTest, LogsReceivedPacketToEventLog) {
+  auto channel = CreateTestChannelReceive();
+
+  RtpPacketReceived packet = CreateRtpPacket();
+
+  EXPECT_CALL(log_, LogProxy);
+  channel->OnRtpPacket(packet);
+}
+
+TEST_F(ChannelReceiveTest, GetPlayoutRtpTimestamp) {
+  auto channel = CreateTestChannelReceive();
+
+  // Before playout starts, no timestamp is available.
+  EXPECT_FALSE(channel->GetPlayoutRtpTimestamp().has_value());
+
+  channel->StartPlayout();
+  // Playout started, but no audio frames have been pulled yet.
+  EXPECT_FALSE(channel->GetPlayoutRtpTimestamp().has_value());
+
+  // Deliver an RTP packet and pull an audio frame.
+  channel->OnRtpPacket(CreateRtpPacket());
+  AudioFrame audio_frame;
+  channel->GetAudioFrameWithInfo(kSampleRateHz, &audio_frame);
+
+  Timestamp playout_time = time_controller_.GetClock()->CurrentTime();
+  std::optional<Syncable::PlayoutInfo> playout_info =
+      channel->GetPlayoutRtpTimestamp();
+  ASSERT_TRUE(playout_info.has_value());
+  EXPECT_EQ(playout_info->time, playout_time);
+
+  // Stopping playout clears playout timestamp.
+  channel->StopPlayout();
+  EXPECT_FALSE(channel->GetPlayoutRtpTimestamp().has_value());
+
+  // Restarting playout requires pulling another frame.
+  channel->StartPlayout();
+  EXPECT_FALSE(channel->GetPlayoutRtpTimestamp().has_value());
+
+  channel->OnRtpPacket(CreateRtpPacket());
+  channel->GetAudioFrameWithInfo(kSampleRateHz, &audio_frame);
+  playout_time = time_controller_.GetClock()->CurrentTime();
+  playout_info = channel->GetPlayoutRtpTimestamp();
+  ASSERT_TRUE(playout_info.has_value());
+  EXPECT_EQ(playout_info->time, playout_time);
+
+  // Stopping playout clears playout timestamp.
+  channel->StopPlayout();
+  EXPECT_FALSE(channel->GetPlayoutRtpTimestamp().has_value());
+}
+
+TEST_F(ChannelReceiveTest, AudioSinkReceivesPacketInfos) {
+  class TestAudioSink : public AudioSinkInterface {
+   public:
+    void OnData(const Data& audio) override {
+      data_called_ = true;
+      if (audio.packet_infos != nullptr) {
+        last_packet_infos_ = *audio.packet_infos;
+      }
+    }
+    bool data_called_ = false;
+    RtpPacketInfos last_packet_infos_;
+  };
+
+  auto channel = CreateTestChannelReceive();
+  TestAudioSink sink;
+  channel->SetSink(&sink);
+  channel->StartPlayout();
+
+  const uint32_t kCsrcs[] = {1111, 2222};
+  channel->OnRtpPacket(CreateRtpPacket(kCsrcs));
+
+  AudioFrame audio_frame;
+  channel->GetAudioFrameWithInfo(kSampleRateHz, &audio_frame);
+
+  EXPECT_TRUE(sink.data_called_);
+  ASSERT_EQ(sink.last_packet_infos_.size(), 1u);
+  EXPECT_THAT(sink.last_packet_infos_[0].csrcs(),
+              ::testing::ElementsAre(1111, 2222));
 }
 
 }  // namespace

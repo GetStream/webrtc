@@ -19,14 +19,17 @@
 
 namespace webrtc {
 
-WindowInfo CreateTestWindow(const WCHAR* window_title,
-                            const WCHAR* window_class) {
-  return CreateTestWindow(window_title, /*height=*/240, /*width=*/320,
-                          /*extended_styles=*/0, window_class);
-}
-
 class FullScreenWinApplicationHandlerTest : public ::testing::Test {
  public:
+  WindowInfo CreateTestWindow(const WCHAR* window_title,
+                              const WCHAR* window_class) {
+    WindowInfo info = webrtc::CreateTestWindow(
+        window_title, /*height=*/240, /*width=*/320,
+        /*extended_styles=*/0, window_class);
+    created_windows_.push_back(info);
+    return info;
+  }
+
   void CreateEditorWindow(
       const WCHAR* title,
       const WCHAR* window_class = L"PPTFrameClass",
@@ -69,11 +72,13 @@ class FullScreenWinApplicationHandlerTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    DestroyTestWindow(editor_window_info_);
-    DestroyTestWindow(slide_show_window_info_);
+    for (const auto& window : created_windows_) {
+      DestroyTestWindow(window);
+    }
   }
 
  protected:
+  std::vector<WindowInfo> created_windows_;
   WindowInfo editor_window_info_;
   WindowInfo slide_show_window_info_;
   std::unique_ptr<FullScreenPowerPointHandler> full_screen_ppt_handler_;
@@ -272,7 +277,6 @@ TEST_F(FullScreenWinApplicationHandlerTest,
   EXPECT_EQ(FindFullScreenWindow(), correct_slide_show);
 }
 
-// TODO(crbug.com/409473386): Add DestroyTestWindow to clean the tests.
 TEST_F(FullScreenWinApplicationHandlerTest,
        FullScreenWindowsFoundWhenMultipleEditorsAndSlideShowsExist) {
   std::vector<WindowInfo> editors = {
@@ -321,8 +325,6 @@ TEST_F(FullScreenWinApplicationHandlerTest,
 
   EXPECT_NE(FindFullScreenWindow(), slide_show);
   EXPECT_EQ(FindFullScreenWindow(), reinterpret_cast<HWND>(0));
-
-  DestroyTestWindow(second_editor_window_info);
 }
 
 TEST_F(FullScreenWinApplicationHandlerTest,
@@ -343,8 +345,6 @@ TEST_F(FullScreenWinApplicationHandlerTest, EditorWindowFound) {
 
   // Create FullScreenPowerPointHandler using the slide show WindowInfo.
   CreateSlideShowWindow(L"PowerPoint Slide Show - [My - Title]");
-  full_screen_ppt_handler_->SetHeuristicForFindingEditor(
-      /*use_heuristic=*/true);
 
   EXPECT_EQ(FindEditorWindow(), editor_window_info_.hwnd);
 }
@@ -358,37 +358,8 @@ TEST_F(FullScreenWinApplicationHandlerTest,
       CreateSlideShowWindow(L"PowerPoint Slide Show - [My - Title]");
   full_screen_ppt_handler_.reset(new FullScreenPowerPointHandler(
       reinterpret_cast<DesktopCapturer::SourceId>(slide_show)));
-  full_screen_ppt_handler_->SetHeuristicForFindingEditor(
-      /*use_heuristic=*/true);
 
   EXPECT_EQ(FindEditorWindow(), editor_window_info_.hwnd);
-}
-
-TEST_F(FullScreenWinApplicationHandlerTest,
-       EditorWindowNotFoundWithHeuristicOff) {
-  CreateEditorWindow(L"My - Title - PowerPoint");
-
-  // Create FullScreenPowerPointHandler using the slide show WindowInfo.
-  CreateSlideShowWindow(L"PowerPoint Slide Show - [My - Title]");
-  full_screen_ppt_handler_->SetHeuristicForFindingEditor(
-      /*use_heuristic=*/false);
-
-  EXPECT_NE(FindEditorWindow(), editor_window_info_.hwnd);
-}
-
-TEST_F(FullScreenWinApplicationHandlerTest,
-       EditorWindowNotFoundWithHeuristicOffAndPPTHandlerUsesSlideShowWindow) {
-  CreateEditorWindow(L"My - Title - PowerPoint");
-
-  // Create FullScreenPowerPointHandler using the slide show WindowInfo.
-  HWND slide_show =
-      CreateSlideShowWindow(L"PowerPoint Slide Show - [My - Title]");
-  full_screen_ppt_handler_.reset(new FullScreenPowerPointHandler(
-      reinterpret_cast<DesktopCapturer::SourceId>(slide_show)));
-  full_screen_ppt_handler_->SetHeuristicForFindingEditor(
-      /*use_heuristic=*/false);
-
-  EXPECT_NE(FindEditorWindow(), editor_window_info_.hwnd);
 }
 
 }  // namespace webrtc

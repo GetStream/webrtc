@@ -97,7 +97,7 @@ class GoogCcNetworkController : public NetworkControllerInterface {
   const std::unique_ptr<CongestionWindowPushbackController>
       congestion_window_pushback_controller_;
 
-  std::unique_ptr<SendSideBandwidthEstimation> bandwidth_estimation_;
+  SendSideBandwidthEstimation bandwidth_estimation_;
   AlrDetector alr_detector_;
   std::unique_ptr<ProbeBitrateEstimator> probe_bitrate_estimator_;
   std::unique_ptr<NetworkStateEstimator> network_estimator_;
@@ -133,6 +133,7 @@ class GoogCcNetworkController : public NetworkControllerInterface {
   DataRate max_padding_rate_;
 
   bool previously_in_alr_ = false;
+  bool last_is_bandwidth_limited_ = true;
 
   std::optional<DataSize> current_data_window_;
 };

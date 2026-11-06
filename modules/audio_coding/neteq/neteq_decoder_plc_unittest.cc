@@ -14,13 +14,14 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "api/array_view.h"
 #include "api/audio_codecs/audio_decoder.h"
 #include "api/audio_codecs/audio_format.h"
+#include "api/field_trials.h"
 #include "api/make_ref_counted.h"
 #include "api/neteq/neteq.h"
 #include "modules/audio_coding/codecs/pcm16b/audio_encoder_pcm16b.h"
@@ -34,6 +35,7 @@
 #include "rtc_base/checks.h"
 #include "rtc_base/numerics/safe_conversions.h"
 #include "test/audio_decoder_proxy_factory.h"
+#include "test/create_test_field_trials.h"
 #include "test/gtest.h"
 #include "test/testsupport/file_utils.h"
 
@@ -107,9 +109,9 @@ class AudioDecoderPlc : public AudioDecoder {
 // An input sample generator which generates only zero-samples.
 class ZeroSampleGenerator : public EncodeNetEqInput::Generator {
  public:
-  ArrayView<const int16_t> Generate(size_t num_samples) override {
+  std::span<const int16_t> Generate(size_t num_samples) override {
     vec.resize(num_samples, 0);
-    ArrayView<const int16_t> view(vec);
+    std::span<const int16_t> view(vec);
     RTC_DCHECK_EQ(view.size(), num_samples);
     return view;
   }
@@ -223,11 +225,13 @@ TestStatistics RunTest(int loss_cadence,
   // No callback objects.
   NetEqTest::Callbacks callbacks;
 
-  NetEqTest neteq_test(
-      config, /*decoder_factory=*/
-      make_ref_counted<test::AudioDecoderProxyFactory>(&dec),
-      /*codecs=*/decoders, /*text_log=*/nullptr, /*neteq_factory=*/nullptr,
-      /*input=*/std::move(lossy_input), std::move(output), callbacks);
+  FieldTrials field_trials = CreateTestFieldTrials("");
+  NetEqTest neteq_test(config, /*decoder_factory=*/
+                       make_ref_counted<test::AudioDecoderProxyFactory>(&dec),
+                       /*codecs=*/decoders, /*text_log=*/nullptr,
+                       /*neteq_factory=*/nullptr,
+                       /*input=*/std::move(lossy_input), std::move(output),
+                       callbacks, &field_trials);
   EXPECT_LE(kRunTimeMs, neteq_test.Run());
 
   auto lifetime_stats = neteq_test.LifetimeStats();

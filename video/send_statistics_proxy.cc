@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "absl/strings/match.h"
+#include "api/environment/environment.h"
 #include "api/field_trials_view.h"
 #include "api/units/data_rate.h"
 #include "api/units/time_delta.h"
@@ -35,7 +36,6 @@
 #include "api/video/video_codec_constants.h"
 #include "api/video/video_codec_type.h"
 #include "api/video/video_content_type.h"
-#include "api/video/video_frame_type.h"
 #include "api/video/video_timing.h"
 #include "api/video_codecs/video_codec.h"
 #include "call/rtp_config.h"
@@ -161,24 +161,24 @@ std::optional<int> GetFallbackMaxPixelsIfFieldTrialDisabled(
              ? GetFallbackMaxPixels(group.substr(8))
              : std::optional<int>();
 }
+
 }  // namespace
 
 SendStatisticsProxy::SendStatisticsProxy(
-    Clock* clock,
+    const Environment& env,
     const VideoSendStream::Config& config,
-    VideoEncoderConfig::ContentType content_type,
-    const FieldTrialsView& field_trials)
-    : clock_(clock),
+    VideoEncoderConfig::ContentType content_type)
+    : env_(env),
       payload_name_(config.rtp.payload_name),
       rtp_config_(config.rtp),
       fallback_max_pixels_(
-          GetFallbackMaxPixelsIfFieldTrialEnabled(field_trials)),
+          GetFallbackMaxPixelsIfFieldTrialEnabled(env_.field_trials())),
       fallback_max_pixels_disabled_(
-          GetFallbackMaxPixelsIfFieldTrialDisabled(field_trials)),
+          GetFallbackMaxPixelsIfFieldTrialDisabled(env_.field_trials())),
       content_type_(content_type),
-      start_(clock->CurrentTime()),
+      start_(env_.clock().CurrentTime()),
       encode_time_(kEncodeTimeWeigthFactor),
-      quality_limitation_reason_tracker_(clock_),
+      quality_limitation_reason_tracker_(&env_.clock()),
       media_byte_rate_tracker_(kBucketSizeMs, kBucketCount),
       encoded_frame_rate_tracker_(kBucketSizeMs, kBucketCount),
       last_num_spatial_layers_(0),
@@ -186,15 +186,15 @@ SendStatisticsProxy::SendStatisticsProxy(
       last_spatial_layer_use_{},
       bw_limited_layers_(false),
       internal_encoder_scaler_(false),
-      uma_container_(
-          new UmaSamplesContainer(GetUmaPrefix(content_type_), stats_, clock)) {
-}
+      uma_container_(new UmaSamplesContainer(GetUmaPrefix(content_type_),
+                                             stats_,
+                                             &env_.clock())) {}
 
 SendStatisticsProxy::~SendStatisticsProxy() {
   MutexLock lock(&mutex_);
   uma_container_->UpdateHistograms(rtp_config_, stats_);
 
-  TimeDelta elapsed = clock_->CurrentTime() - start_;
+  TimeDelta elapsed = env_.clock().CurrentTime() - start_;
   RTC_HISTOGRAM_COUNTS_100000("WebRTC.Video.SendStreamLifetimeInSeconds",
                               elapsed.seconds());
 
@@ -290,6 +290,70 @@ void SendStatisticsProxy::UmaSamplesContainer::RemoveOld(int64_t now_ms) {
   }
 }
 
+void SendStatisticsProxy::UmaSamplesContainer::LogPsnrValues(
+    const PsnrCounters& psnr_counters,
+    std::optional<int> spatial_id) {
+  constexpr int kPsnrScalingFactor = 10;
+  constexpr int kPsnrMin = 1;
+  constexpr int kPsnrMax = 1000;
+  constexpr int kPsnrBucketCount = 1000;
+
+  if (spatial_id.has_value()) {
+    RTC_CHECK_GE(*spatial_id, 0);
+    RTC_CHECK_LT(*spatial_id, kMaxSpatialLayers);
+  }
+
+  StringBuilder ssb;
+  ssb << uma_prefix_ << "Psnr";
+  if (spatial_id.has_value()) {
+    ssb << ".S" << *spatial_id;
+  }
+  ssb << ".X";
+  std::string uma_name = ssb.Release();
+
+  std::optional<float> psnr_y =
+      psnr_counters.psnr_y.Avg(kMinRequiredPsnrSamples);
+  if (psnr_y.has_value()) {
+    uma_name.back() = 'Y';
+    metrics::Histogram* histogram = metrics::HistogramFactoryGetCountsLinear(
+        uma_name, kPsnrMin, kPsnrMax, kPsnrBucketCount);
+    if (histogram) {
+      metrics::HistogramAdd(histogram, psnr_y.value() * kPsnrScalingFactor);
+    } else {
+      RTC_LOG(LS_WARNING) << "Failed to create histogram for " << uma_name
+                          << ". psnr_y = " << psnr_y.value();
+    }
+  }
+
+  std::optional<float> psnr_u =
+      psnr_counters.psnr_u.Avg(kMinRequiredPsnrSamples);
+  if (psnr_u.has_value()) {
+    uma_name.back() = 'U';
+    metrics::Histogram* histogram = metrics::HistogramFactoryGetCountsLinear(
+        uma_name, kPsnrMin, kPsnrMax, kPsnrBucketCount);
+    if (histogram) {
+      metrics::HistogramAdd(histogram, psnr_u.value() * kPsnrScalingFactor);
+    } else {
+      RTC_LOG(LS_WARNING) << "Failed to create histogram for " << uma_name
+                          << ". psnr_u = " << psnr_u.value();
+    }
+  }
+
+  std::optional<float> psnr_v =
+      psnr_counters.psnr_v.Avg(kMinRequiredPsnrSamples);
+  if (psnr_v.has_value()) {
+    uma_name.back() = 'V';
+    metrics::Histogram* histogram = metrics::HistogramFactoryGetCountsLinear(
+        uma_name, kPsnrMin, kPsnrMax, kPsnrBucketCount);
+    if (histogram) {
+      metrics::HistogramAdd(histogram, psnr_v.value() * kPsnrScalingFactor);
+    } else {
+      RTC_LOG(LS_WARNING) << "Failed to create histogram for " << uma_name
+                          << ". psnr_v = " << psnr_v.value();
+    }
+  }
+}
+
 bool SendStatisticsProxy::UmaSamplesContainer::InsertEncodedFrame(
     const EncodedImage& encoded_frame,
     int simulcast_idx) {
@@ -336,8 +400,7 @@ void SendStatisticsProxy::UmaSamplesContainer::UpdateHistograms(
   RTC_DCHECK(uma_prefix_ == kRealtimePrefix || uma_prefix_ == kScreenPrefix);
   const int kIndex = uma_prefix_ == kScreenPrefix ? 1 : 0;
   const int kMinRequiredPeriodicSamples = 6;
-  char log_stream_buf[8 * 1024];
-  SimpleStringBuilder log_stream(log_stream_buf);
+  StringBuilder log_stream;
   int in_width = input_width_counter_.Avg(kMinRequiredMetricsSamples);
   int in_height = input_height_counter_.Avg(kMinRequiredMetricsSamples);
   if (in_width != -1) {
@@ -515,6 +578,52 @@ void SendStatisticsProxy::UmaSamplesContainer::UpdateHistograms(
             << "QP stats not recorded for H264 spatial idx " << spatial_idx;
       }
     }
+    int qp_av1 = it.second.av1.Avg(kMinRequiredMetricsSamples);
+    if (qp_av1 != -1) {
+      int spatial_idx = it.first;
+      if (spatial_idx == -1) {
+        RTC_HISTOGRAMS_COUNTS_500(kIndex, uma_prefix_ + "Encoded.Qp.Av1",
+                                  qp_av1);
+      } else if (spatial_idx == 0) {
+        RTC_HISTOGRAMS_COUNTS_500(kIndex, uma_prefix_ + "Encoded.Qp.Av1.S0",
+                                  qp_av1);
+      } else if (spatial_idx == 1) {
+        RTC_HISTOGRAMS_COUNTS_500(kIndex, uma_prefix_ + "Encoded.Qp.Av1.S1",
+                                  qp_av1);
+      } else if (spatial_idx == 2) {
+        RTC_HISTOGRAMS_COUNTS_500(kIndex, uma_prefix_ + "Encoded.Qp.Av1.S2",
+                                  qp_av1);
+      } else {
+        RTC_LOG(LS_WARNING)
+            << "QP stats not recorded for AV1 spatial idx " << spatial_idx;
+      }
+    }
+    int qp_h265 = it.second.h265.Avg(kMinRequiredMetricsSamples);
+    if (qp_h265 != -1) {
+      int spatial_idx = it.first;
+      if (spatial_idx == -1) {
+        RTC_HISTOGRAMS_COUNTS_200(kIndex, uma_prefix_ + "Encoded.Qp.H265",
+                                  qp_h265);
+      } else if (spatial_idx == 0) {
+        RTC_HISTOGRAMS_COUNTS_200(kIndex, uma_prefix_ + "Encoded.Qp.H265.S0",
+                                  qp_h265);
+      } else if (spatial_idx == 1) {
+        RTC_HISTOGRAMS_COUNTS_200(kIndex, uma_prefix_ + "Encoded.Qp.H265.S1",
+                                  qp_h265);
+      } else if (spatial_idx == 2) {
+        RTC_HISTOGRAMS_COUNTS_200(kIndex, uma_prefix_ + "Encoded.Qp.H265.S2",
+                                  qp_h265);
+      } else {
+        RTC_LOG(LS_WARNING)
+            << "QP stats not recorded for H265 spatial idx " << spatial_idx;
+      }
+    }
+  }
+
+  for (const auto& [spatial_idx, psnr_counter] : psnr_counters_) {
+    LogPsnrValues(psnr_counter, spatial_idx == -1
+                                    ? std::nullopt
+                                    : std::optional<int>(spatial_idx));
   }
 
   if (first_rtp_stats_time_ms_ != -1) {
@@ -721,7 +830,7 @@ void SendStatisticsProxy::OnEncoderReconfigured(
   if (content_type_ != config.content_type) {
     uma_container_->UpdateHistograms(rtp_config_, stats_);
     uma_container_.reset(new UmaSamplesContainer(
-        GetUmaPrefix(config.content_type), stats_, clock_));
+        GetUmaPrefix(config.content_type), stats_, &env_.clock()));
     content_type_ = config.content_type;
   }
   uma_container_->encoded_frames_.clear();
@@ -741,7 +850,7 @@ void SendStatisticsProxy::OnEncodedFrameTimeMeasured(int encode_time_ms,
 }
 
 void SendStatisticsProxy::OnSuspendChange(bool is_suspended) {
-  int64_t now_ms = clock_->TimeInMilliseconds();
+  int64_t now_ms = env_.clock().TimeInMilliseconds();
   MutexLock lock(&mutex_);
   stats_.suspended = is_suspended;
   if (is_suspended) {
@@ -779,7 +888,7 @@ void SendStatisticsProxy::OnSuspendChange(bool is_suspended) {
 
 VideoSendStream::Stats SendStatisticsProxy::GetStats() {
   MutexLock lock(&mutex_);
-  Timestamp now = clock_->CurrentTime();
+  Timestamp now = env_.clock().CurrentTime();
   PurgeOldStats(now);
   stats_.input_frame_rate = uma_container_->input_frame_rate_tracker_.Rate(now);
   stats_.frames = uma_container_->input_frame_rate_tracker_.TotalSampleCount();
@@ -875,7 +984,7 @@ void SendStatisticsProxy::OnSetEncoderTargetRate(uint32_t bitrate_bps) {
   if (uma_container_->target_rate_updates_.last_ms == -1 && bitrate_bps == 0)
     return;  // Start on first non-zero bitrate, may initially be zero.
 
-  int64_t now = clock_->TimeInMilliseconds();
+  int64_t now = env_.clock().TimeInMilliseconds();
   if (uma_container_->target_rate_updates_.last_ms != -1) {
     bool was_paused = stats_.target_media_bitrate_bps == 0;
     int64_t diff_ms = now - uma_container_->target_rate_updates_.last_ms;
@@ -911,7 +1020,7 @@ void SendStatisticsProxy::UpdateEncoderFallbackStats(
 
   FallbackEncoderInfo* fallback_info = &uma_container_->fallback_info_;
 
-  const int64_t now_ms = clock_->TimeInMilliseconds();
+  const int64_t now_ms = env_.clock().TimeInMilliseconds();
   bool is_active = fallback_info->is_active;
   if (encoder_changed_) {
     // Implementation changed.
@@ -979,7 +1088,7 @@ void SendStatisticsProxy::OnSendEncodedImage(
     const CodecSpecificInfo* codec_info) {
   int simulcast_idx = encoded_image.SimulcastIndex().value_or(0);
   MutexLock lock(&mutex_);
-  Timestamp now = clock_->CurrentTime();
+  Timestamp now = env_.clock().CurrentTime();
   ++stats_.frames_encoded;
   // The current encode frame rate is based on previously encoded frames.
   double encode_frame_rate = encoded_frame_rate_tracker_.Rate(now);
@@ -1030,8 +1139,7 @@ void SendStatisticsProxy::OnSendEncodedImage(
     track.resolution_update = now;
   }
 
-  uma_container_->key_frame_counter_.Add(encoded_image._frameType ==
-                                         VideoFrameType::kVideoFrameKey);
+  uma_container_->key_frame_counter_.Add(encoded_image.IsKey());
 
   if (encoded_image.qp_ != -1) {
     if (!stats->qp_sum)
@@ -1053,6 +1161,13 @@ void SendStatisticsProxy::OnSendEncodedImage(
       } else if (codec_info->codecType == kVideoCodecH264) {
         int spatial_idx = (rtp_config_.ssrcs.size() == 1) ? -1 : simulcast_idx;
         uma_container_->qp_counters_[spatial_idx].h264.Add(encoded_image.qp_);
+      } else if (codec_info->codecType == kVideoCodecAV1) {
+        int stream_idx = encoded_image.SpatialIndex().value_or(
+            encoded_image.SimulcastIndex().value_or(-1));
+        uma_container_->qp_counters_[stream_idx].av1.Add(encoded_image.qp_);
+      } else if (codec_info->codecType == kVideoCodecH265) {
+        int spatial_idx = (rtp_config_.ssrcs.size() == 1) ? -1 : simulcast_idx;
+        uma_container_->qp_counters_[spatial_idx].h265.Add(encoded_image.qp_);
       }
     }
   }
@@ -1063,6 +1178,11 @@ void SendStatisticsProxy::OnSendEncodedImage(
     stats->psnr_sum.u += psnr->u;
     stats->psnr_sum.v += psnr->v;
     stats->psnr_measurements += 1;
+
+    int spatial_idx = (rtp_config_.ssrcs.size() == 1) ? -1 : simulcast_idx;
+    uma_container_->psnr_counters_[spatial_idx].psnr_y.Add(psnr->y);
+    uma_container_->psnr_counters_[spatial_idx].psnr_u.Add(psnr->u);
+    uma_container_->psnr_counters_[spatial_idx].psnr_v.Add(psnr->v);
   }
 
   // If any of the simulcast streams have a huge frame, it should be counted
@@ -1119,18 +1239,18 @@ void SendStatisticsProxy::OnEncoderImplementationChanged(
 
 int SendStatisticsProxy::GetInputFrameRate() const {
   MutexLock lock(&mutex_);
-  return round(
-      uma_container_->input_frame_rate_tracker_.Rate(clock_->CurrentTime()));
+  return round(uma_container_->input_frame_rate_tracker_.Rate(
+      env_.clock().CurrentTime()));
 }
 
 int SendStatisticsProxy::GetSendFrameRate() const {
   MutexLock lock(&mutex_);
-  return round(encoded_frame_rate_tracker_.Rate(clock_->CurrentTime()));
+  return round(encoded_frame_rate_tracker_.Rate(env_.clock().CurrentTime()));
 }
 
 void SendStatisticsProxy::OnIncomingFrame(int width, int height) {
   MutexLock lock(&mutex_);
-  Timestamp now = clock_->CurrentTime();
+  Timestamp now = env_.clock().CurrentTime();
   uma_container_->input_frame_rate_tracker_.Update(1, now);
   uma_container_->input_fps_counter_.Add(1);
   uma_container_->input_width_counter_.Add(width);
@@ -1271,20 +1391,20 @@ void SendStatisticsProxy::OnBitrateAllocationUpdated(
     const VideoCodec& codec,
     const VideoBitrateAllocation& allocation) {
   int num_spatial_layers = 0;
-  for (int i = 0; i < kMaxSpatialLayers; i++) {
+  for (size_t i = 0; i < kMaxSpatialLayers; i++) {
     if (codec.spatialLayers[i].active) {
       num_spatial_layers++;
     }
   }
   int num_simulcast_streams = 0;
-  for (int i = 0; i < kMaxSimulcastStreams; i++) {
+  for (size_t i = 0; i < kMaxSimulcastStreams; i++) {
     if (codec.simulcastStream[i].active) {
       num_simulcast_streams++;
     }
   }
 
   std::array<bool, kMaxSpatialLayers> spatial_layers;
-  for (int i = 0; i < kMaxSpatialLayers; i++) {
+  for (size_t i = 0; i < kMaxSpatialLayers; i++) {
     spatial_layers[i] = (allocation.GetSpatialLayerSum(i) > 0);
   }
 
@@ -1365,10 +1485,10 @@ void SendStatisticsProxy::SetAdaptTimer(const MaskedAdaptationCounts& counts,
   if (counts.resolution_adaptations || counts.num_framerate_reductions) {
     // Adaptation enabled.
     if (!stats_.suspended)
-      timer->Start(clock_->TimeInMilliseconds());
+      timer->Start(env_.clock().TimeInMilliseconds());
     return;
   }
-  timer->Stop(clock_->TimeInMilliseconds());
+  timer->Stop(env_.clock().TimeInMilliseconds());
 }
 
 void SendStatisticsProxy::RtcpPacketTypesCounterUpdated(
@@ -1381,7 +1501,8 @@ void SendStatisticsProxy::RtcpPacketTypesCounterUpdated(
 
   stats->rtcp_packet_type_counts = packet_counter;
   if (uma_container_->first_rtcp_stats_time_ms_ == -1)
-    uma_container_->first_rtcp_stats_time_ms_ = clock_->TimeInMilliseconds();
+    uma_container_->first_rtcp_stats_time_ms_ =
+        env_.clock().TimeInMilliseconds();
 }
 
 void SendStatisticsProxy::OnReportBlockDataUpdated(
@@ -1416,7 +1537,7 @@ void SendStatisticsProxy::DataCountersUpdated(
 
   stats->rtp_stats = counters;
   if (uma_container_->first_rtp_stats_time_ms_ == -1) {
-    int64_t now_ms = clock_->TimeInMilliseconds();
+    int64_t now_ms = env_.clock().TimeInMilliseconds();
     uma_container_->first_rtp_stats_time_ms_ = now_ms;
     uma_container_->cpu_adapt_timer_.Restart(now_ms);
     uma_container_->quality_adapt_timer_.Restart(now_ms);
@@ -1498,7 +1619,7 @@ void SendStatisticsProxy::Trackers::AddSendDelay(Timestamp now,
 }
 
 void SendStatisticsProxy::OnSendPacket(uint32_t ssrc, Timestamp capture_time) {
-  Timestamp now = clock_->CurrentTime();
+  Timestamp now = env_.clock().CurrentTime();
 
   MutexLock lock(&mutex_);
   VideoSendStream::StreamStats* stats = GetStatsEntry(ssrc);
@@ -1575,6 +1696,18 @@ int SendStatisticsProxy::BoolSampleCounter::Fraction(
   if (num_samples < min_required_samples || num_samples == 0)
     return -1;
   return static_cast<int>((sum * multiplier / num_samples) + 0.5f);
+}
+
+void SendStatisticsProxy::FloatSampleCounter::Add(float sample) {
+  sum_ += sample;
+  ++num_samples_;
+}
+
+std::optional<float> SendStatisticsProxy::FloatSampleCounter::Avg(
+    int64_t min_required_samples) const {
+  if (num_samples_ < min_required_samples || num_samples_ == 0)
+    return std::nullopt;
+  return static_cast<float>(sum_ / num_samples_);
 }
 
 SendStatisticsProxy::MaskedAdaptationCounts

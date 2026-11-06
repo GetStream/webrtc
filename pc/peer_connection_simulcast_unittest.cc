@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "absl/algorithm/container.h"
+#include "absl/strings/string_view.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "api/audio_codecs/builtin_audio_encoder_factory.h"
 #include "api/create_peerconnection_factory.h"
@@ -50,6 +51,7 @@
 #include "pc/test/simulcast_layer_util.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/thread.h"
+#include "test/create_test_field_trials.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 
@@ -91,13 +93,24 @@ class PeerConnectionSimulcastTests : public ::testing::Test {
                                             OpenH264DecoderTemplateAdapter,
                                             Dav1dDecoderTemplateAdapter>>(),
             nullptr,
-            nullptr)) {}
+            nullptr,
+            nullptr,
+            CreateTestFieldTrialsPtr())) {}
 
   scoped_refptr<PeerConnectionInterface> CreatePeerConnection(
       MockPeerConnectionObserver* observer) {
+    return CreatePeerConnection(observer, "");
+  }
+
+  scoped_refptr<PeerConnectionInterface> CreatePeerConnection(
+      MockPeerConnectionObserver* observer,
+      absl::string_view field_trials) {
     PeerConnectionInterface::RTCConfiguration config;
     config.sdp_semantics = SdpSemantics::kUnifiedPlan;
     PeerConnectionDependencies pcd(observer);
+    if (!field_trials.empty()) {
+      pcd.trials = CreateTestFieldTrialsPtr(field_trials);
+    }
     auto result =
         pc_factory_->CreatePeerConnectionOrError(config, std::move(pcd));
     EXPECT_TRUE(result.ok());
@@ -106,8 +119,13 @@ class PeerConnectionSimulcastTests : public ::testing::Test {
   }
 
   std::unique_ptr<PeerConnectionWrapper> CreatePeerConnectionWrapper() {
+    return CreatePeerConnectionWrapper("");
+  }
+
+  std::unique_ptr<PeerConnectionWrapper> CreatePeerConnectionWrapper(
+      absl::string_view field_trials) {
     auto observer = std::make_unique<MockPeerConnectionObserver>();
-    auto pc = CreatePeerConnection(observer.get());
+    auto pc = CreatePeerConnection(observer.get(), field_trials);
     return std::make_unique<PeerConnectionWrapper>(pc_factory_, pc,
                                                    std::move(observer));
   }
@@ -539,7 +557,9 @@ TEST_F(PeerConnectionSimulcastTests, SimulcastAudioRejected) {
 // Check that modifying the offer to remove simulcast and at the same
 // time leaving in a RID line does not cause an exception.
 TEST_F(PeerConnectionSimulcastTests, SimulcastSldModificationRejected) {
-  auto local = CreatePeerConnectionWrapper();
+  // Munging allowed: kUnknownModification (simulcast modification RID removal)
+  auto local = CreatePeerConnectionWrapper(
+      "WebRTC-NoSdpMangleAllowForTesting/Enabled,1/");
   auto remote = CreatePeerConnectionWrapper();
   auto layers = CreateLayers({"1", "2", "3"}, true);
   AddTransceiver(local.get(), layers);
@@ -556,4 +576,115 @@ TEST_F(PeerConnectionSimulcastTests, SimulcastSldModificationRejected) {
   EXPECT_TRUE(modified_offer);
   EXPECT_TRUE(local->SetLocalDescription(std::move(modified_offer)));
 }
+
+// Reproduces the bug reported by @ibc where RTP extension IDs are reassigned
+// to different URIs in subsequent offers, causing SetLocalDescription to fail.
+TEST_F(PeerConnectionSimulcastTests,
+       NoRtpExtensionIdReassignmentWhenAddingTransceiver) {
+  auto local = CreatePeerConnectionWrapper();
+  auto layers = CreateLayers({"f", "h", "q"}, true);
+
+  // Add video transceiver with simulcast.
+  AddTransceiver(local.get(), layers);
+  ASSERT_TRUE(local->CreateOfferAndSetAsLocal());
+
+  // Set remote answer without header extensions.
+  std::string remote_answer_sdp =
+      "v=0\r\n"
+      "o=- 8403615332048243445 2 IN IP4 127.0.0.1\r\n"
+      "s=-\r\n"
+      "t=0 0\r\n"
+      "a=group:BUNDLE 0\r\n"
+      "m=video 9 UDP/TLS/RTP/SAVPF 96\r\n"
+      "c=IN IP4 0.0.0.0\r\n"
+      "a=mid:0\r\n"
+      "a=ice-ufrag:IZeV\r\n"
+      "a=ice-pwd:uaZhQD4rYM/Tta2qWBT1Bbt4\r\n"
+      "a=fingerprint:sha-256 "
+      "D8:6C:3D:FA:23:E2:2C:63:11:2D:D0:86:BE:C4:D0:65:F9:42:F7:1C:06:04:27:E6:"
+      "1C:2C:74:01:8D:50:67:23\r\n"
+      "a=setup:active\r\n"
+      "a=rtcp-mux\r\n"
+      "a=extmap:9 urn:ietf:params:rtp-hdrext:sdes:mid\r\n"
+      "a=extmap:10 urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id\r\n"
+      "a=extmap:11 urn:ietf:params:rtp-hdrext:sdes:repaired-rtp-stream-id\r\n"
+      "a=extmap:2 "
+      "http://www.webrtc.org/experiments/rtp-hdrext/abs-send-time\r\n"
+      "a=extmap:4 "
+      "http://www.ietf.org/id/"
+      "draft-holmer-rmcat-transport-wide-cc-extensions-01\r\n"
+      "a=extmap:3 urn:3gpp:video-orientation\r\n"
+      "a=extmap:1 urn:ietf:params:rtp-hdrext:toffset\r\n"
+      "a=extmap:5 "
+      "http://www.webrtc.org/experiments/rtp-hdrext/playout-delay\r\n"
+      "a=rtpmap:96 VP8/90000\r\n";
+  // Answer recvonly.
+  ASSERT_TRUE(local->SetRemoteDescription(CreateSessionDescription(
+      SdpType::kAnswer, remote_answer_sdp + "a=recvonly\r\n")));
+
+  ASSERT_TRUE(local->CreateOfferAndSetAsLocal());
+  // Answer inactive.
+  ASSERT_TRUE(local->SetRemoteDescription(CreateSessionDescription(
+      SdpType::kAnswer, remote_answer_sdp + "a=inactive\r\n")));
+
+  // Add an audio transceiver.
+  local->AddAudioTrack("audio");
+  EXPECT_TRUE(local->CreateOfferAndSetAsLocal());
+}
+
+// Returns `offer` with the third simulcast layer removed, as an application
+// that munges the offer before applying it would produce.
+std::unique_ptr<SessionDescriptionInterface> RemoveThirdLayer(
+    const SessionDescriptionInterface& offer) {
+  std::string sdp;
+  EXPECT_TRUE(offer.ToString(&sdp));
+  const std::string rid_line = "a=rid:3 send\r\n";
+  size_t pos = sdp.find(rid_line);
+  EXPECT_NE(pos, std::string::npos);
+  sdp.erase(pos, rid_line.size());
+  pos = sdp.find("a=simulcast:send 1;2;3\r\n");
+  EXPECT_NE(pos, std::string::npos);
+  sdp.replace(pos, strlen("a=simulcast:send 1;2;3\r\n"),
+              "a=simulcast:send 1;2\r\n");
+  return CreateSessionDescription(SdpType::kOffer, sdp, nullptr);
+}
+
+// The local description is authoritative for the number of send layers. An
+// application that removes a layer from the offer before applying it gets a
+// sender with the layers that remain, rather than a failure.
+TEST_F(PeerConnectionSimulcastTests, MungedLocalOfferWithFewerLayers) {
+  // Munging allowed: kNumSimulcastLayers.
+  auto local = CreatePeerConnectionWrapper(
+      "WebRTC-NoSdpMangleAllowForTesting/Enabled,1/");
+  auto layers = CreateLayers({"1", "2", "3"}, true);
+  auto transceiver = AddTransceiver(local.get(), layers);
+  std::unique_ptr<SessionDescriptionInterface> munged_offer =
+      RemoveThirdLayer(*local->CreateOffer());
+  ASSERT_THAT(munged_offer, NotNull());
+  ASSERT_TRUE(local->SetLocalDescription(std::move(munged_offer)));
+
+  EXPECT_THAT(transceiver->sender()->GetParameters().encodings, SizeIs(2));
+}
+
+// Rolling back a local offer detaches the sender from the send stream that the
+// offer described. A subsequent offer that describes fewer layers can then be
+// applied, rather than failing against a channel that no longer exists.
+TEST_F(PeerConnectionSimulcastTests,
+       MungedLocalOfferWithFewerLayersAfterRollback) {
+  // Munging allowed: kNumSimulcastLayers.
+  auto local = CreatePeerConnectionWrapper(
+      "WebRTC-NoSdpMangleAllowForTesting/Enabled,1/");
+  auto layers = CreateLayers({"1", "2", "3"}, true);
+  auto transceiver = AddTransceiver(local.get(), layers);
+  ASSERT_TRUE(local->SetLocalDescription(local->CreateOffer()));
+  ASSERT_TRUE(local->SetLocalDescription(local->CreateRollback()));
+
+  std::unique_ptr<SessionDescriptionInterface> munged_offer =
+      RemoveThirdLayer(*local->CreateOffer());
+  ASSERT_THAT(munged_offer, NotNull());
+  ASSERT_TRUE(local->SetLocalDescription(std::move(munged_offer)));
+
+  EXPECT_THAT(transceiver->sender()->GetParameters().encodings, SizeIs(2));
+}
+
 }  // namespace webrtc

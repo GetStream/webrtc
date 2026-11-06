@@ -12,25 +12,16 @@
 
 #include "api/audio_options.h"
 #include "api/make_ref_counted.h"
-#include "api/media_stream_interface.h"
 #include "api/scoped_refptr.h"
-
-using webrtc::MediaSourceInterface;
 
 namespace webrtc {
 
 scoped_refptr<LocalAudioSource> LocalAudioSource::Create(
     const AudioOptions* audio_options) {
-  auto source = make_ref_counted<LocalAudioSource>();
-  source->Initialize(audio_options);
-  return source;
+  return make_ref_counted<LocalAudioSource>(audio_options);
 }
 
-void LocalAudioSource::Initialize(const AudioOptions* audio_options) {
-  if (!audio_options)
-    return;
-
-  options_ = *audio_options;
-}
+LocalAudioSource::LocalAudioSource(const AudioOptions* audio_options)
+    : options_(audio_options ? *audio_options : AudioOptions()) {}
 
 }  // namespace webrtc

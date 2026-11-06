@@ -32,14 +32,15 @@
   _config.echo_canceller.enabled = value;
 }
 
-// config.echo_canceller.mobile_mode
+// M156 removed EchoCanceller::mobile_mode along with AECM. The property stays
+// so existing callers compile; it no longer changes APM config.
 
 - (BOOL)isEchoCancellationMobileMode {
-  return _config.echo_canceller.mobile_mode;
+  return NO;
 }
 
 - (void)setIsEchoCancellationMobileMode:(BOOL)value {
-  _config.echo_canceller.mobile_mode = value;
+  (void)value;
 }
 
 // config.noise_suppression.enabled

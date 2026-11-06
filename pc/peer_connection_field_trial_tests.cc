@@ -23,6 +23,7 @@
 #include "api/jsep.h"
 #include "api/media_types.h"
 #include "api/peer_connection_interface.h"
+#include "api/rtp_header_extension_id.h"
 #include "api/rtp_parameters.h"
 #include "api/scoped_refptr.h"
 #include "pc/peer_connection_wrapper.h"
@@ -36,6 +37,7 @@
 #include "system_wrappers/include/clock.h"
 #include "test/create_test_field_trials.h"
 #include "test/gtest.h"
+#include "test/run_loop.h"
 
 #ifdef WEBRTC_ANDROID
 #include "pc/test/android_test_initializer.h"
@@ -93,7 +95,7 @@ class PeerConnectionFieldTrialTest : public ::testing::Test {
 
   Clock* const clock_;
   std::unique_ptr<SocketServer> socket_server_;
-  AutoSocketServerThread main_thread_;
+  test::RunLoop main_thread_;
   scoped_refptr<PeerConnectionFactoryInterface> pc_factory_ = nullptr;
   PeerConnectionInterface::RTCConfiguration config_;
 };
@@ -158,7 +160,7 @@ TEST_F(PeerConnectionFieldTrialTest, MAYBE_InjectDependencyDescriptor) {
 
   std::set<int> existing_ids;
   for (const RtpExtension& rtp_extension : rtp_header_extensions1) {
-    existing_ids.insert(rtp_extension.id);
+    existing_ids.insert(rtp_extension.id.value());
   }
 
   // Find the currently unused RTP header extension ID.
@@ -176,7 +178,7 @@ TEST_F(PeerConnectionFieldTrialTest, MAYBE_InjectDependencyDescriptor) {
   }
 
   rtp_header_extensions1.emplace_back(RtpExtension::kDependencyDescriptorUri,
-                                      insert_id);
+                                      RtpHeaderExtensionId(insert_id));
   media_description1->set_rtp_header_extensions(rtp_header_extensions1);
 
   caller->SetLocalDescription(offer->Clone());

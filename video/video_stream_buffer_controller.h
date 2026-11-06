@@ -26,12 +26,8 @@
 #include "api/video/encoded_frame.h"
 #include "api/video/frame_buffer.h"
 #include "api/video/video_content_type.h"
-#include "api/video/video_timing.h"
 #include "modules/video_coding/include/video_coding_defines.h"
-#include "modules/video_coding/timing/inter_frame_delay_variation_calculator.h"
-#include "modules/video_coding/timing/jitter_estimator.h"
 #include "modules/video_coding/timing/timing.h"
-#include "rtc_base/experiments/field_trial_parser.h"
 #include "rtc_base/system/no_unique_address.h"
 #include "rtc_base/thread_annotations.h"
 #include "system_wrappers/include/clock.h"
@@ -73,8 +69,6 @@ class VideoStreamBufferControllerStatsObserver {
                                            int jitter_delay_ms,
                                            int min_playout_delay_ms,
                                            int render_delay_ms) = 0;
-
-  virtual void OnTimingFrameInfoUpdated(const TimingFrameInfo& info) = 0;
 };
 
 class VideoStreamBufferController {
@@ -92,6 +86,7 @@ class VideoStreamBufferController {
   virtual ~VideoStreamBufferController() = default;
 
   void Stop();
+  bool stopped() const;
   void SetProtectionMode(VCMVideoProtection protection_mode);
   void Clear();
   std::optional<int64_t> InsertFrame(std::unique_ptr<EncodedFrame> frame);
@@ -109,7 +104,6 @@ class VideoStreamBufferController {
   void FrameReadyForDecode(uint32_t rtp_timestamp, Timestamp render_time);
   void UpdateDroppedFrames() RTC_RUN_ON(&worker_sequence_checker_);
   void UpdateFrameBufferTimings(Timestamp min_receive_time, Timestamp now);
-  void UpdateTimingFrameInfo();
   bool IsTooManyFramesQueued() const RTC_RUN_ON(&worker_sequence_checker_);
   void ForceKeyFrameReleaseImmediately() RTC_RUN_ON(&worker_sequence_checker_);
   void MaybeScheduleFrameForRelease() RTC_RUN_ON(&worker_sequence_checker_);
@@ -123,9 +117,6 @@ class VideoStreamBufferController {
   const std::unique_ptr<FrameDecodeScheduler> frame_decode_scheduler_
       RTC_GUARDED_BY(&worker_sequence_checker_);
 
-  JitterEstimator jitter_estimator_ RTC_GUARDED_BY(&worker_sequence_checker_);
-  InterFrameDelayVariationCalculator ifdv_calculator_
-      RTC_GUARDED_BY(&worker_sequence_checker_);
   bool keyframe_required_ RTC_GUARDED_BY(&worker_sequence_checker_) = false;
   std::unique_ptr<FrameBuffer> buffer_
       RTC_GUARDED_BY(&worker_sequence_checker_);
@@ -143,13 +134,6 @@ class VideoStreamBufferController {
   // fast-forwarded when the decoder is slow or hangs.
   bool decoder_ready_for_new_frame_ RTC_GUARDED_BY(&worker_sequence_checker_) =
       false;
-
-  // Maximum number of frames in the decode queue to allow pacing. If the
-  // queue grows beyond the max limit, pacing will be disabled and frames will
-  // be pushed to the decoder as soon as possible. This only has an effect
-  // when the low-latency rendering path is active, which is indicated by
-  // the frame's render time == 0.
-  FieldTrialParameter<unsigned> zero_playout_delay_max_decode_queue_size_;
 
   ScopedTaskSafety worker_safety_;
 };

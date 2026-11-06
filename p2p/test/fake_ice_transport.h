@@ -16,15 +16,15 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
-#include "api/array_view.h"
 #include "api/candidate.h"
-#include "api/field_trials.h"
+#include "api/environment/environment.h"
 #include "api/ice_transport_interface.h"
 #include "api/sequence_checker.h"
 #include "api/task_queue/pending_task_safety_flag.h"
@@ -49,8 +49,6 @@
 #include "rtc_base/socket.h"
 #include "rtc_base/task_queue_for_test.h"
 #include "rtc_base/thread_annotations.h"
-#include "rtc_base/time_utils.h"
-#include "test/create_test_field_trials.h"
 
 namespace webrtc {
 
@@ -59,15 +57,16 @@ namespace webrtc {
 // constructor).
 class FakeIceTransportInternal : public IceTransportInternal {
  public:
-  explicit FakeIceTransportInternal(absl::string_view name,
+  explicit FakeIceTransportInternal(const Environment& env,
+                                    absl::string_view name,
                                     int component,
-                                    TaskQueueBase* network_thread = nullptr,
-                                    absl::string_view field_trials_string = "")
-      : name_(name),
+                                    TaskQueueBase* network_thread = nullptr)
+      : IceTransportInternal(network_thread),
+        env_(env),
+        name_(name),
         component_(component),
         network_thread_(network_thread ? network_thread
-                                       : TaskQueueBase::Current()),
-        field_trials_(CreateTestFieldTrials(field_trials_string)) {
+                                       : TaskQueueBase::Current()) {
     RTC_DCHECK(network_thread_);
   }
 
@@ -186,6 +185,8 @@ class FakeIceTransportInternal : public IceTransportInternal {
     RTC_DCHECK_RUN_ON(network_thread_);
     return remote_candidates_;
   }
+
+  TaskQueueBase* network_thread() const { return network_thread_; }
 
   // Fake IceTransportInternal implementation.
   const std::string& transport_name() const override { return name_; }
@@ -348,7 +349,8 @@ class FakeIceTransportInternal : public IceTransportInternal {
       }
     }
 
-    SentPacketInfo sent_packet(options.packet_id, TimeMillis());
+    SentPacketInfo sent_packet(options.packet_id,
+                               env_.clock().TimeInMilliseconds());
     NotifySentPacket(this, sent_packet);
     return static_cast<int>(len);
   }
@@ -431,7 +433,7 @@ class FakeIceTransportInternal : public IceTransportInternal {
   bool SendIcePing() {
     RTC_DCHECK_RUN_ON(network_thread_);
     RTC_DLOG(LS_INFO) << name_ << ": SendIcePing()";
-    last_sent_ping_timestamp_ = TimeMicros();
+    last_sent_ping_timestamp_ = env_.clock().TimeInMicroseconds();
     auto msg = std::make_unique<IceMessage>(STUN_BINDING_REQUEST);
     MaybeAddDtlsPiggybackingAttributes(msg.get());
     msg->AddFingerprint();
@@ -487,7 +489,7 @@ class FakeIceTransportInternal : public IceTransportInternal {
 
   int GetCountOfReceivedPackets() { return received_packets_; }
 
-  const FieldTrialsView* field_trials() const { return &field_trials_; }
+  const FieldTrialsView* field_trials() const { return &env_.field_trials(); }
 
   void set_drop_non_stun_unless_writable(bool value) {
     drop_non_stun_unless_writable_ = value;
@@ -521,8 +523,7 @@ class FakeIceTransportInternal : public IceTransportInternal {
                           int flags)
       RTC_EXCLUSIVE_LOCKS_REQUIRED(network_thread_) {
     last_sent_packet_ = packet;
-    bool is_stun =
-        StunMessage::ValidateFingerprint(packet.data<char>(), packet.size());
+    bool is_stun = StunMessage::ValidateFingerprint(packet);
     if (packet_send_filter_func_ &&
         packet_send_filter_func_(packet.data<char>(), packet.size(), options,
                                  flags)) {
@@ -559,7 +560,7 @@ class FakeIceTransportInternal : public IceTransportInternal {
 
   void ReceivePacketInternal(const CopyOnWriteBuffer& packet) {
     RTC_DCHECK_RUN_ON(network_thread_);
-    auto now = TimeMicros();
+    int64_t now = env_.clock().TimeInMicroseconds();
     if (auto msg = GetStunMessage(packet)) {
       RTC_LOG(LS_INFO) << name_ << ": RECV STUN message: "
                        << ", data[0]: "
@@ -574,7 +575,7 @@ class FakeIceTransportInternal : public IceTransportInternal {
                         << " attr: " << (dtls_piggyback_attr != nullptr)
                         << " ack: " << (dtls_piggyback_ack != nullptr);
       if (!dtls_stun_piggyback_callbacks_.empty()) {
-        std::optional<ArrayView<uint8_t>> piggyback_attr;
+        std::optional<std::span<uint8_t>> piggyback_attr;
         if (dtls_piggyback_attr) {
           piggyback_attr = dtls_piggyback_attr->array_view();
         }
@@ -609,16 +610,17 @@ class FakeIceTransportInternal : public IceTransportInternal {
   }
 
   std::unique_ptr<IceMessage> GetStunMessage(const CopyOnWriteBuffer& packet) {
-    if (!StunMessage::ValidateFingerprint(packet.data<char>(), packet.size())) {
+    if (!StunMessage::ValidateFingerprint(packet)) {
       return nullptr;
     }
 
     std::unique_ptr<IceMessage> stun_msg(new IceMessage());
-    ByteBufferReader buf(MakeArrayView(packet.data(), packet.size()));
+    ByteBufferReader buf(std::span(packet.data(), packet.size()));
     RTC_CHECK(stun_msg->Read(&buf));
     return stun_msg;
   }
 
+  const Environment env_;
   const std::string name_;
   const int component_;
   FakeIceTransportInternal* dest_ RTC_GUARDED_BY(network_thread_) = nullptr;
@@ -660,7 +662,6 @@ class FakeIceTransportInternal : public IceTransportInternal {
   DtlsStunPiggybackCallbacks dtls_stun_piggyback_callbacks_;
   std::map<int, int> received_stun_messages_per_type;
   int received_packets_ = 0;
-  FieldTrials field_trials_;
   bool drop_non_stun_unless_writable_ = false;
 };
 

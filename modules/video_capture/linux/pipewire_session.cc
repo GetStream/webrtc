@@ -29,6 +29,7 @@
 #include <cstring>
 #include <memory>
 #include <optional>
+#include <utility>
 
 #include "absl/strings/string_view.h"
 #include "common_video/libyuv/include/webrtc_libyuv.h"
@@ -44,6 +45,11 @@
 
 namespace webrtc {
 namespace videocapturemodule {
+
+// Checks that the pod matches the expected type and is large enough to hold it.
+static bool SpaValueIsType(const spa_pod* val, uint32_t type) {
+  return val->type == type && val->size >= spa_pod_type_size(type);
+}
 
 VideoType PipeWireRawFormatToVideoType(uint32_t id) {
   switch (id) {
@@ -75,7 +81,9 @@ VideoType PipeWireRawFormatToVideoType(uint32_t id) {
 void PipeWireNode::PipeWireNodeDeleter::operator()(
     PipeWireNode* node) const noexcept {
   spa_hook_remove(&node->node_listener_);
+  spa_hook_remove(&node->proxy_listener_);
   pw_proxy_destroy(node->proxy_);
+  pw_node_info_free(node->info_);
 }
 
 // static
@@ -105,12 +113,25 @@ PipeWireNode::PipeWireNode(PipeWireSession* session,
   };
 
   pw_node_add_listener(reinterpret_cast<pw_node*>(proxy_), &node_listener_, &node_events, this);
+
+  static const pw_proxy_events proxy_events{
+      .version = PW_VERSION_PROXY_EVENTS,
+      .done = OnProxyDone,
+  };
+
+  pw_proxy_add_listener(proxy_, &proxy_listener_, &proxy_events, this);
 }
 
 // static
 RTC_NO_SANITIZE("cfi-icall")
 void PipeWireNode::OnNodeInfo(void* data, const pw_node_info* info) {
   PipeWireNode* that = static_cast<PipeWireNode*>(data);
+
+  that->info_ = pw_node_info_update(that->info_, info);
+  if (!that->info_)
+    return;
+
+  info = that->info_;
 
   if (info->change_mask & PW_NODE_CHANGE_MASK_PROPS) {
     const char* vid_str;
@@ -133,14 +154,20 @@ void PipeWireNode::OnNodeInfo(void* data, const pw_node_info* info) {
 
   if (info->change_mask & PW_NODE_CHANGE_MASK_PARAMS) {
     for (uint32_t i = 0; i < info->n_params; i++) {
+      if (info->params[i].user == 0)
+        continue;
+      info->params[i].user = 0;
+
       uint32_t id = info->params[i].id;
       if (id == SPA_PARAM_EnumFormat &&
           info->params[i].flags & SPA_PARAM_INFO_READ) {
+        that->pending_capabilities_.clear();
         pw_node_enum_params(reinterpret_cast<pw_node*>(that->proxy_), 0, id, 0, UINT32_MAX, nullptr);
+        that->sync_seq_ = pw_proxy_sync(that->proxy_, that->sync_seq_);
+        that->session_->PipeWireSync();
         break;
       }
     }
-    that->session_->PipeWireSync();
   }
 }
 
@@ -165,20 +192,21 @@ void PipeWireNode::OnNodeParam(void* data,
   prop = spa_pod_object_find_prop(obj, prop, SPA_FORMAT_VIDEO_framerate);
   if (prop) {
     val = spa_pod_get_values(&prop->value, &n_items, &choice);
-    if (val->type == SPA_TYPE_Fraction) {
+    if (SpaValueIsType(val, SPA_TYPE_Fraction)) {
       spa_fraction* fract;
 
       fract = static_cast<spa_fraction*>(SPA_POD_BODY(val));
 
-      if (choice == SPA_CHOICE_None) {
+      if (choice == SPA_CHOICE_None && n_items >= 1) {
         cap.maxFPS = 1.0 * fract[0].num / fract[0].denom;
-      } else if (choice == SPA_CHOICE_Enum) {
+      } else if (choice == SPA_CHOICE_Enum && n_items >= 2) {
         for (uint32_t i = 1; i < n_items; i++) {
           cap.maxFPS = std::max(
               static_cast<int32_t>(1.0 * fract[i].num / fract[i].denom),
               cap.maxFPS);
         }
-      } else if (choice == SPA_CHOICE_Range && fract[1].num > 0) {
+      } else if (choice == SPA_CHOICE_Range && n_items >= 2 &&
+                 fract[1].num > 0) {
         cap.maxFPS = 1.0 * fract[1].num / fract[1].denom;
       }
     }
@@ -189,10 +217,10 @@ void PipeWireNode::OnNodeParam(void* data,
     return;
 
   val = spa_pod_get_values(&prop->value, &n_items, &choice);
-  if (val->type != SPA_TYPE_Rectangle)
+  if (!SpaValueIsType(val, SPA_TYPE_Rectangle))
     return;
 
-  if (choice != SPA_CHOICE_None)
+  if (choice != SPA_CHOICE_None || n_items < 1)
     return;
 
   if (!ParseFormat(param, &cap))
@@ -208,7 +236,18 @@ void PipeWireNode::OnNodeParam(void* data,
                       << cap.width << "x" << cap.height << "@" << cap.maxFPS
                       << ")";
 
-  that->capabilities_.push_back(cap);
+  that->pending_capabilities_.push_back(cap);
+}
+
+// static
+void PipeWireNode::OnProxyDone(void* data, int seq) {
+  PipeWireNode* that = static_cast<PipeWireNode*>(data);
+
+  if (seq != that->sync_seq_)
+    return;
+
+  that->capabilities_ = std::move(that->pending_capabilities_);
+  that->pending_capabilities_.clear();
 }
 
 // static
@@ -236,10 +275,10 @@ bool PipeWireNode::ParseFormat(const spa_pod* param,
       return false;
 
     val = spa_pod_get_values(&prop->value, &n_items, &choice);
-    if (val->type != SPA_TYPE_Id)
+    if (!SpaValueIsType(val, SPA_TYPE_Id))
       return false;
 
-    if (choice != SPA_CHOICE_None)
+    if (choice != SPA_CHOICE_None || n_items < 1)
       return false;
 
     id = static_cast<uint32_t*>(SPA_POD_BODY(val));

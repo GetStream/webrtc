@@ -19,7 +19,6 @@
 
 #include "absl/algorithm/container.h"
 #include "absl/strings/string_view.h"
-#include "api/array_view.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
 #include "net/dcsctp/common/internal_types.h"
@@ -251,6 +250,14 @@ bool RetransmissionQueue::IsSackValid(const SackChunk& sack) const {
   } else if (cumulative_tsn_ack > outstanding_data_.highest_outstanding_tsn()) {
     return false;
   }
+
+  for (const auto& block : sack.gap_ack_blocks()) {
+    if (UnwrappedTSN::AddTo(cumulative_tsn_ack, block.end) >
+        outstanding_data_.highest_outstanding_tsn()) {
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -577,27 +584,35 @@ void RetransmissionQueue::RollbackResetStreams() {
 
 HandoverReadinessStatus RetransmissionQueue::GetHandoverReadiness() const {
   HandoverReadinessStatus status;
-  if (!outstanding_data_.empty()) {
+  bool block_on_outstanding_data =
+      !options_.enable_handover_with_outstanding_data;
+  if (block_on_outstanding_data && !outstanding_data_.empty()) {
     status.Add(HandoverUnreadinessReason::kRetransmissionQueueOutstandingData);
   }
   if (fast_recovery_exit_tsn_.has_value()) {
     status.Add(HandoverUnreadinessReason::kRetransmissionQueueFastRecovery);
   }
-  if (outstanding_data_.has_data_to_be_retransmitted()) {
+  if (block_on_outstanding_data &&
+      outstanding_data_.has_data_to_be_retransmitted()) {
     status.Add(HandoverUnreadinessReason::kRetransmissionQueueNotEmpty);
   }
   return status;
 }
 
-void RetransmissionQueue::AddHandoverState(DcSctpSocketHandoverState& state) {
+void RetransmissionQueue::AddHandoverState(webrtc::Timestamp now,
+                                           DcSctpSocketHandoverState& state) {
   state.tx.next_tsn = next_tsn().value();
   state.tx.rwnd = rwnd_;
   state.tx.cwnd = cwnd_;
   state.tx.ssthresh = ssthresh_;
   state.tx.partial_bytes_acked = partial_bytes_acked_;
+  state.tx.last_cumulative_tsn_ack =
+      outstanding_data_.last_cumulative_tsn_ack().value();
+  outstanding_data_.AddHandoverState(now, state);
 }
 
 void RetransmissionQueue::RestoreFromState(
+    webrtc::Timestamp now,
     const DcSctpSocketHandoverState& state) {
   // Validate that the component is in pristine state.
   RTC_DCHECK(outstanding_data_.empty());
@@ -609,7 +624,20 @@ void RetransmissionQueue::RestoreFromState(
   ssthresh_ = state.tx.ssthresh;
   partial_bytes_acked_ = state.tx.partial_bytes_acked;
 
-  outstanding_data_.ResetSequenceNumbers(
-      tsn_unwrapper_.Unwrap(TSN(state.tx.next_tsn - 1)));
+  if (options_.enable_handover_with_outstanding_data) {
+    UnwrappedTSN last_cumulative_tsn_ack =
+        state.tx.outstanding_data.empty()
+            ? tsn_unwrapper_.Unwrap(TSN(state.tx.next_tsn - 1))
+            : tsn_unwrapper_.Unwrap(TSN(state.tx.last_cumulative_tsn_ack));
+
+    outstanding_data_.RestoreFromState(now, last_cumulative_tsn_ack, state);
+
+    if (!outstanding_data_.empty()) {
+      t3_rtx_.Start();
+    }
+  } else {
+    outstanding_data_.ResetSequenceNumbers(
+        tsn_unwrapper_.Unwrap(TSN(state.tx.next_tsn - 1)));
+  }
 }
 }  // namespace dcsctp

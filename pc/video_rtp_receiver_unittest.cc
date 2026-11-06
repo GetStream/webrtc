@@ -14,21 +14,27 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "api/make_ref_counted.h"
 #include "api/media_stream_interface.h"
+#include "api/media_types.h"
+#include "api/rtp_packet_info.h"
+#include "api/rtp_packet_infos.h"
+#include "api/rtp_receiver_interface.h"
 #include "api/scoped_refptr.h"
 #include "api/task_queue/task_queue_base.h"
+#include "api/units/timestamp.h"
 #include "api/video/recordable_encoded_frame.h"
 #include "api/video/test/mock_recordable_encoded_frame.h"
 #include "api/video/video_sink_interface.h"
 #include "media/base/fake_media_engine.h"
 #include "media/base/media_channel.h"
-#include "rtc_base/task_queue_for_test.h"
 #include "rtc_base/thread.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
+#include "test/run_loop.h"
 
 using ::testing::_;
 using ::testing::AnyNumber;
@@ -82,7 +88,8 @@ class VideoRtpReceiverTest : public testing::Test {
         receiver_(make_ref_counted<VideoRtpReceiver>(
             worker_thread_.get(),
             "receiver",
-            std::vector<std::string>({"stream"}))) {
+            std::vector<std::string>({"stream"}),
+            /*enable_sframe_at_owner=*/nullptr)) {
     worker_thread_->Start();
     SetMediaChannel(&channel_);
   }
@@ -96,15 +103,15 @@ class VideoRtpReceiverTest : public testing::Test {
   }
 
   void SetMediaChannel(MediaReceiveChannelInterface* media_channel) {
-    SendTask(worker_thread_.get(),
-             [&]() { receiver_->SetMediaChannel(media_channel); });
+    worker_thread_->BlockingCall(
+        [&]() { receiver_->SetMediaChannel(media_channel); });
   }
 
   VideoTrackSourceInterface* Source() {
     return receiver_->streams()[0]->FindVideoTrack("receiver")->GetSource();
   }
 
-  AutoThread main_thread_;
+  test::RunLoop loop_;
   std::unique_ptr<Thread> worker_thread_;
   NiceMock<MockVideoMediaReceiveChannel> channel_;
   scoped_refptr<VideoRtpReceiver> receiver_;
@@ -197,7 +204,7 @@ TEST_F(VideoRtpReceiverTest, BroadcastsEncodedFramesWhenEnabled) {
   EXPECT_CALL(sink, OnFrame).Times(2);
   MockRecordableEncodedFrame frame;
   broadcast(frame);
-  SendTask(worker_thread_.get(), [&] { broadcast(frame); });
+  worker_thread_->BlockingCall([&] { broadcast(frame); });
 }
 
 TEST_F(VideoRtpReceiverTest, EnablesEncodedOutputOnChannelRestart) {
@@ -205,10 +212,111 @@ TEST_F(VideoRtpReceiverTest, EnablesEncodedOutputOnChannelRestart) {
   MockVideoSink sink;
   Source()->AddEncodedSink(&sink);
   EXPECT_CALL(channel_, SetRecordableEncodedFrameCallback(4711, _));
-  receiver_->SetupMediaChannel(4711);
+  auto setup_media_channel = receiver_->GetSetupForMediaChannel(4711);
+  worker_thread_->BlockingCall([&]() { std::move(setup_media_channel)(); });
   EXPECT_CALL(channel_, ClearRecordableEncodedFrameCallback(4711));
   EXPECT_CALL(channel_, SetRecordableEncodedFrameCallback(0, _));
-  receiver_->SetupUnsignaledMediaChannel();
+  auto setup_task = receiver_->GetSetupForUnsignaledMediaChannel();
+  worker_thread_->BlockingCall([&]() { std::move(setup_task)(); });
+}
+
+class FakeVideoRtpReceiverObserver : public RtpReceiverObserverInterface {
+ public:
+  void OnFirstPacketReceived(MediaType media_type) override {}
+  void OnSourceChanged(bool ssrc_changed, bool csrc_changed) override {
+    source_changed_count_++;
+    last_ssrc_changed_ = ssrc_changed;
+    last_csrc_changed_ = csrc_changed;
+  }
+
+  int source_changed_count() const { return source_changed_count_; }
+  bool last_ssrc_changed() const { return last_ssrc_changed_; }
+  bool last_csrc_changed() const { return last_csrc_changed_; }
+
+ private:
+  int source_changed_count_ = 0;
+  bool last_ssrc_changed_ = false;
+  bool last_csrc_changed_ = false;
+};
+
+TEST_F(VideoRtpReceiverTest, SourceChangeNotification) {
+  constexpr uint32_t kVideoSsrc = 12345;
+  FakeVideoRtpReceiverObserver observer;
+  receiver_->SetObserver(&observer);
+
+  // Deliver initial packet info.
+  receiver_->OnFrameDelivered(
+      RtpPacketInfos(
+          {RtpPacketInfo(kVideoSsrc, {}, 100, Timestamp::Millis(100))}),
+      Timestamp::Millis(100));
+
+  EXPECT_EQ(observer.source_changed_count(), 1);
+  EXPECT_TRUE(observer.last_ssrc_changed());
+  EXPECT_FALSE(observer.last_csrc_changed());
+
+  // Subsequent frame with same SSRC should not fire callback.
+  receiver_->OnFrameDelivered(
+      RtpPacketInfos(
+          {RtpPacketInfo(kVideoSsrc, {}, 101, Timestamp::Millis(120))}),
+      Timestamp::Millis(120));
+
+  EXPECT_EQ(observer.source_changed_count(), 1);
+
+  // Frame with CSRC change should fire callback.
+  receiver_->OnFrameDelivered(
+      RtpPacketInfos(
+          {RtpPacketInfo(kVideoSsrc, {9999}, 102, Timestamp::Millis(140))}),
+      Timestamp::Millis(140));
+
+  EXPECT_EQ(observer.source_changed_count(), 2);
+  EXPECT_FALSE(observer.last_ssrc_changed());
+  EXPECT_TRUE(observer.last_csrc_changed());
+
+  receiver_->SetObserver(nullptr);
+}
+
+TEST_F(VideoRtpReceiverTest, LateObserverRegistration) {
+  constexpr uint32_t kVideoSsrc = 12345;
+  FakeVideoRtpReceiverObserver observer;
+
+  // Frame delivered before observer is registered.
+  receiver_->OnFrameDelivered(
+      RtpPacketInfos(
+          {RtpPacketInfo(kVideoSsrc, {}, 100, Timestamp::Millis(100))}),
+      Timestamp::Millis(100));
+
+  EXPECT_EQ(observer.source_changed_count(), 0);
+
+  // Setting observer should trigger callback for existing source.
+  receiver_->SetObserver(&observer);
+
+  EXPECT_EQ(observer.source_changed_count(), 1);
+  EXPECT_TRUE(observer.last_ssrc_changed());
+  EXPECT_FALSE(observer.last_csrc_changed());
+
+  receiver_->SetObserver(nullptr);
+}
+
+TEST_F(VideoRtpReceiverTest, ObserverTeardownStopsNotifications) {
+  constexpr uint32_t kVideoSsrc = 12345;
+  FakeVideoRtpReceiverObserver observer;
+  receiver_->SetObserver(&observer);
+
+  receiver_->OnFrameDelivered(
+      RtpPacketInfos(
+          {RtpPacketInfo(kVideoSsrc, {}, 100, Timestamp::Millis(100))}),
+      Timestamp::Millis(100));
+  EXPECT_EQ(observer.source_changed_count(), 1);
+
+  receiver_->SetObserver(nullptr);
+
+  // New SSRC after observer is cleared should not reach observer.
+  receiver_->OnFrameDelivered(
+      RtpPacketInfos(
+          {RtpPacketInfo(kVideoSsrc + 1, {}, 101, Timestamp::Millis(120))}),
+      Timestamp::Millis(120));
+
+  EXPECT_EQ(observer.source_changed_count(), 1);
 }
 
 }  // namespace

@@ -14,7 +14,6 @@
 #include <cstddef>
 #include <memory>
 
-#include "api/test/rtc_error_matchers.h"
 #include "rtc_base/ip_address.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/net_helpers.h"
@@ -24,9 +23,8 @@
 #include "rtc_base/socket_address.h"
 #include "rtc_base/socket_unittest.h"
 #include "rtc_base/test_utils.h"
-#include "rtc_base/thread.h"
-#include "test/gmock.h"
 #include "test/gtest.h"
+#include "test/run_loop.h"
 #include "test/wait_until.h"
 
 #define MAYBE_SKIP_IPV4                        \
@@ -130,7 +128,7 @@ class PhysicalSocketTest : public SocketTest {
   void WritableAfterPartialWrite(const IPAddress& loopback);
 
   FakePhysicalSocketServer server_;
-  AutoSocketServerThread thread_;
+  test::RunLoop thread_;
   bool fail_accept_;
   int max_send_size_;
 };
@@ -240,10 +238,8 @@ void PhysicalSocketTest::ConnectInternalAcceptError(const IPAddress& loopback) {
   EXPECT_FALSE(sink.Check(client1.get(), testing::SSE_CLOSE));
 
   // Server has pending connection, try to accept it (will fail).
-  EXPECT_THAT(
-      WaitUntil([&] { return (sink.Check(server.get(), testing::SSE_READ)); },
-                ::testing::IsTrue()),
-      IsRtcOk());
+  EXPECT_TRUE(
+      WaitUntil([&] { return (sink.Check(server.get(), testing::SSE_READ)); }));
   // Simulate "::accept" returning an error.
   SetFailAccept(true);
   std::unique_ptr<Socket> accepted(server->Accept(&accept_addr));
@@ -266,10 +262,8 @@ void PhysicalSocketTest::ConnectInternalAcceptError(const IPAddress& loopback) {
   EXPECT_FALSE(sink.Check(client2.get(), testing::SSE_CLOSE));
 
   // Server has pending connection, try to accept it (will succeed).
-  EXPECT_THAT(
-      WaitUntil([&] { return (sink.Check(server.get(), testing::SSE_READ)); },
-                ::testing::IsTrue()),
-      IsRtcOk());
+  EXPECT_TRUE(
+      WaitUntil([&] { return (sink.Check(server.get(), testing::SSE_READ)); }));
   SetFailAccept(false);
   std::unique_ptr<Socket> accepted2(server->Accept(&accept_addr));
   ASSERT_TRUE(accepted2);

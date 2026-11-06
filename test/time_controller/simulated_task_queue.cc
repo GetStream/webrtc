@@ -28,13 +28,10 @@ namespace webrtc {
 SimulatedTaskQueue::SimulatedTaskQueue(
     sim_time_impl::SimulatedTimeControllerImpl* handler,
     absl::string_view name)
-    : handler_(handler), name_(new char[name.size()]) {
-  std::copy_n(name.begin(), name.size(), name_);
-}
+    : handler_(handler), name_(name) {}
 
 SimulatedTaskQueue::~SimulatedTaskQueue() {
   handler_->Unregister(this);
-  delete[] name_;
 }
 
 void SimulatedTaskQueue::Delete() {
@@ -47,8 +44,14 @@ void SimulatedTaskQueue::Delete() {
     ready_tasks_.swap(ready_tasks);
     delayed_tasks_.swap(delayed_tasks);
   }
-  ready_tasks.clear();
-  delayed_tasks.clear();
+  {
+    // Posted tasks are guaranteed to be destroyed with Current() pointing to
+    // the task queue they were posted to, whether they're executed or not.
+    // See TaskQueueBase::PostTask.
+    CurrentTaskQueueSetter set_current(this);
+    ready_tasks.clear();
+    delayed_tasks.clear();
+  }
   delete this;
 }
 

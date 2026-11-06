@@ -16,6 +16,7 @@
 
 #include <memory>
 #include <optional>
+#include <span>
 #include <vector>
 
 #include "api/field_trials_view.h"
@@ -53,7 +54,9 @@ class TaskQueuePacedSender : public RtpPacketPacer, public RtpPacketSender {
                        PacingController::PacketSender* packet_sender,
                        const FieldTrialsView& field_trials,
                        TimeDelta max_hold_back_window,
-                       int max_hold_back_window_in_packets);
+                       int max_hold_back_window_in_packets,
+                       TaskQueueBase* task_queue,
+                       PacerConfig initial_pacer_config);
 
   ~TaskQueuePacedSender() override;
 
@@ -75,7 +78,7 @@ class TaskQueuePacedSender : public RtpPacketPacer, public RtpPacketSender {
   // Methods implementing RtpPacketPacer.
 
   void CreateProbeClusters(
-      std::vector<ProbeClusterConfig> probe_cluster_configs) override;
+      std::span<const ProbeClusterConfig> probe_cluster_configs) override;
 
   // Temporarily pause all sending.
   void Pause() override;
@@ -129,6 +132,14 @@ class TaskQueuePacedSender : public RtpPacketPacer, public RtpPacketSender {
   void OnStatsUpdated(const Stats& stats);
 
  private:
+  TaskQueuePacedSender(Clock* clock,
+                       PacingController::PacketSender* packet_sender,
+                       const FieldTrialsView& field_trials,
+                       TimeDelta max_hold_back_window,
+                       int max_hold_back_window_in_packets,
+                       TaskQueueBase* task_queue,
+                       PacingController::Configuration pacing_config);
+
   // Call in response to state updates that could warrant sending out packets.
   // API methods should use this method if the method can be executed as a
   // consequence of sending a packet to avoid sending another packet in the same

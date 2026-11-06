@@ -12,8 +12,11 @@
 
 #include <cstddef>
 #include <map>
+#include <span>
+#include <utility>
 #include <vector>
 
+#include "api/payload_type.h"
 #include "api/rtc_error.h"
 #include "media/base/codec.h"
 #include "media/base/media_constants.h"
@@ -26,23 +29,34 @@ namespace webrtc {
 
 namespace {
 
-RTCError CheckInputConsistency(const std::vector<Codec>& codecs) {
-  std::map<int, int> pt_to_index;
-  // Create a map of payload type to index, and ensure
-  // that there are no duplicates.
+// Checks that no two codecs in `codecs` use the same payload type, and fills
+// `pt_to_index` with the payload type of each codec that has one. This
+// invariant holds both while a codec list is being built and once it is
+// complete.
+RTCError CheckPayloadTypesAreUnique(std::span<const Codec> codecs,
+                                    std::map<int, int>& pt_to_index) {
   for (size_t i = 0; i < codecs.size(); i++) {
     const Codec& codec = codecs[i];
-    if (codec.id != Codec::kIdNotSet) {
-      auto [it, success] = pt_to_index.insert({codec.id, i});
+    if (codec.id != PayloadType::NotSet()) {
+      auto [it, success] = pt_to_index.insert({codec.id, static_cast<int>(i)});
       if (!success) {
         RTC_LOG(LS_ERROR) << "Duplicate payload type in codec list, " << codec
                           << " and " << codecs[it->second]
                           << " have the same ID";
-        LOG_AND_RETURN_ERROR(RTCErrorType::INVALID_PARAMETER,
-                             "Duplicate payload type in codec list");
+        return RTC_LOG_ERROR(RTCError(RTCErrorType::INVALID_PARAMETER)
+                             << "Duplicate payload type in codec list");
       }
     }
   }
+  return RTCError::OK();
+}
+
+// Checks that the codecs referred to by RTX codecs are present in `codecs`.
+// This invariant only holds for a complete codec list: while a list is being
+// built, an RTX codec can be added before the codec that it refers to.
+RTCError CheckReferencedCodecsArePresent(
+    std::span<const Codec> codecs,
+    const std::map<int, int>& pt_to_index) {
   for (const Codec& codec : codecs) {
     switch (codec.GetResiliencyType()) {
       case Codec::ResiliencyType::kRed:
@@ -56,7 +70,7 @@ RTCError CheckInputConsistency(const std::vector<Codec>& codecs) {
         // TODO: https://issues.webrtc.org/384756622 - reject codec earlier and
         // enable check. RTC_DCHECK(apt_it != codec.params.end()); Until that is
         // fixed:
-        if (codec.id == Codec::kIdNotSet) {
+        if (codec.id == PayloadType::NotSet()) {
           // Should not have an apt parameter.
           if (apt_it != codec.params.end()) {
             RTC_LOG(LS_WARNING) << "Surprising condition: RTX codec without "
@@ -74,18 +88,18 @@ RTCError CheckInputConsistency(const std::vector<Codec>& codecs) {
         if (!(FromString(apt_it->second, &associated_pt))) {
           RTC_LOG(LS_ERROR) << "Non-numeric argument to rtx apt: " << codec
                             << " apt=" << apt_it->second;
-          LOG_AND_RETURN_ERROR(RTCErrorType::INVALID_PARAMETER,
-                               "Non-numeric argument to rtx apt parameter");
+          return RTC_LOG_ERROR(RTCError(RTCErrorType::INVALID_PARAMETER)
+                               << "Non-numeric argument to rtx apt parameter");
         }
-        if (codec.id != Codec::kIdNotSet &&
+        if (codec.id != PayloadType::NotSet() &&
             pt_to_index.count(associated_pt) != 1) {
           RTC_LOG(LS_WARNING)
               << "Surprising condition: RTX codec APT not found: " << codec
               << " points to a PT that occurs "
               << pt_to_index.count(associated_pt) << " times";
-          LOG_AND_RETURN_ERROR(
-              RTCErrorType::INVALID_PARAMETER,
-              "PT pointed to by rtx apt parameter does not exist");
+          return RTC_LOG_ERROR(
+              RTCError(RTCErrorType::INVALID_PARAMETER)
+              << "PT pointed to by rtx apt parameter does not exist");
         }
         // const Codec& referred_codec = codecs[pt_to_index[associated_pt]];
         // Not true:
@@ -106,10 +120,19 @@ RTCError CheckInputConsistency(const std::vector<Codec>& codecs) {
   return RTCError::OK();
 }
 
+RTCError CheckInputConsistency(std::span<const Codec> codecs) {
+  std::map<int, int> pt_to_index;
+  RTCError error = CheckPayloadTypesAreUnique(codecs, pt_to_index);
+  if (!error.ok()) {
+    return error;
+  }
+  return CheckReferencedCodecsArePresent(codecs, pt_to_index);
+}
+
 }  // namespace
 
 // static
-RTCErrorOr<CodecList> CodecList::Create(const std::vector<Codec>& codecs) {
+RTCErrorOr<CodecList> CodecList::Create(std::span<const Codec> codecs) {
   RTCError error = CheckInputConsistency(codecs);
   if (!error.ok()) {
     return error;
@@ -117,19 +140,45 @@ RTCErrorOr<CodecList> CodecList::Create(const std::vector<Codec>& codecs) {
   return CodecList(codecs);
 }
 
-bool CodecList::PushIfNotPresent(const Codec& codec) {
+CodecList::PushResult CodecList::PushIfNotPresent(const Codec& codec) {
   for (const Codec& present_codec : codecs_) {
     if (present_codec.id == codec.id) {
-      RTC_DCHECK(present_codec == codec);
-      return false;
+      if (present_codec != codec) {
+        RTC_LOG(LS_ERROR) << "Payload type " << codec.id
+                          << " is already used by " << present_codec
+                          << ", not adding " << codec;
+        return PushResult::kConflict;
+      }
+      return PushResult::kDuplicate;
     }
   }
   push_back(codec);
-  return true;
+  return PushResult::kInserted;
+}
+
+void CodecList::push_back(const Codec& codec) {
+  codecs_.push_back(codec);
+  // Only the payload types are checked here. A codec list that is under
+  // construction may contain an RTX codec that refers to a codec that has not
+  // been added yet; that is checked by CheckConsistency().
+#if RTC_DCHECK_IS_ON
+  std::map<int, int> pt_to_index;
+  RTC_DCHECK(CheckPayloadTypesAreUnique(codecs_, pt_to_index).ok());
+#endif
 }
 
 void CodecList::CheckConsistency() {
   RTC_DCHECK(CheckInputConsistency(codecs_).ok());
+}
+
+RTCErrorOr<std::vector<Codec>> CodecList::Finalize() && {
+  std::vector<Codec> codecs = std::move(codecs_);
+  codecs_.clear();
+  RTCError error = CheckInputConsistency(codecs);
+  if (!error.ok()) {
+    return error;
+  }
+  return codecs;
 }
 
 }  // namespace webrtc

@@ -15,6 +15,7 @@
 #include <string>
 
 #include "absl/strings/match.h"
+#include "absl/strings/string_view.h"
 #include "api/video/video_codec_type.h"
 #include "api/video_codecs/scalability_mode.h"
 #include "api/video_codecs/sdp_video_format.h"
@@ -78,8 +79,7 @@ VideoCodec::VideoCodec()
       complexity_(VideoCodecComplexity::kComplexityNormal) {}
 
 std::string VideoCodec::ToString() const {
-  char string_buf[2048];
-  SimpleStringBuilder ss(string_buf);
+  StringBuilder ss;
 
   ss << "VideoCodec {" << "type: " << CodecTypeToPayloadString(codecType)
      << ", mode: "
@@ -100,7 +100,7 @@ std::string VideoCodec::ToString() const {
     ss << "}";
   }
   ss << "}";
-  return ss.str();
+  return ss.Release();
 }
 
 VideoCodecVP8* VideoCodec::VP8() {
@@ -161,7 +161,7 @@ const char* CodecTypeToPayloadString(VideoCodecType type) {
   RTC_CHECK_NOTREACHED();
 }
 
-VideoCodecType PayloadStringToCodecType(const std::string& name) {
+VideoCodecType PayloadStringToCodecType(absl::string_view name) {
   if (absl::EqualsIgnoreCase(name, kPayloadNameVp8))
     return kVideoCodecVP8;
   if (absl::EqualsIgnoreCase(name, kPayloadNameVp9))

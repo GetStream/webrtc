@@ -14,6 +14,8 @@
 #include <memory>
 #include <utility>
 
+#include "absl/base/nullability.h"
+#include "api/audio_options.h"
 #include "api/environment/environment.h"
 #include "api/packet_socket_factory.h"
 #include "api/peer_connection_interface.h"
@@ -22,7 +24,6 @@
 #include "api/sequence_checker.h"
 #include "api/transport/sctp_transport_factory_interface.h"
 #include "media/base/media_engine.h"
-#include "rtc_base/memory/always_valid_pointer.h"
 #include "rtc_base/network.h"
 #include "rtc_base/network_monitor_factory.h"
 #include "rtc_base/socket_factory.h"
@@ -45,7 +46,7 @@ class ConnectionContext final : public RefCountedNonVirtual<ConnectionContext> {
   // being added to the ConnectionContext.
   static scoped_refptr<ConnectionContext> Create(
       const Environment& env,
-      PeerConnectionFactoryDependencies* dependencies);
+      PeerConnectionFactoryDependencies* absl_nonnull dependencies);
 
   class MediaEngineReference {
    public:
@@ -84,12 +85,15 @@ class ConnectionContext final : public RefCountedNonVirtual<ConnectionContext> {
     return media_engine_.get();
   }
 
+  VoiceChannelFactoryInterface* voice_channel_factory();
+  VideoChannelFactoryInterface* video_channel_factory();
+
   bool is_configured_for_media() const { return is_configured_for_media_; }
 
   Thread* signaling_thread() { return signaling_thread_; }
   const Thread* signaling_thread() const { return signaling_thread_; }
-  Thread* worker_thread() { return worker_thread_.get(); }
-  const Thread* worker_thread() const { return worker_thread_.get(); }
+  Thread* worker_thread() { return worker_thread_; }
+  const Thread* worker_thread() const { return worker_thread_; }
   Thread* network_thread() { return network_thread_; }
   const Thread* network_thread() const { return network_thread_; }
 
@@ -103,18 +107,13 @@ class ConnectionContext final : public RefCountedNonVirtual<ConnectionContext> {
     return default_socket_factory_.get();
   }
   MediaFactory* call_factory() {
-    RTC_DCHECK_RUN_ON(worker_thread());
+    RTC_DCHECK_RUN_ON(signaling_thread_);
     return call_factory_.get();
   }
   UniqueRandomIdGenerator* ssrc_generator() { return &ssrc_generator_; }
-  // Note: There is lots of code that wants to know whether or not we
-  // use RTX, but so far, no code has been found that sets it to false.
-  // Kept in the API in order to ease introduction if we want to resurrect
-  // the functionality.
-  bool use_rtx() const { return use_rtx_; }
 
-  // For use by tests.
-  void set_use_rtx(bool use_rtx) { use_rtx_ = use_rtx; }
+  // Apply global audio options. Must be called on the worker thread.
+  void ApplyGlobalAudioOptions(const AudioOptions& options);
 
  protected:
   friend class MediaEngineReference;
@@ -130,8 +129,9 @@ class ConnectionContext final : public RefCountedNonVirtual<ConnectionContext> {
   // on the worker thread.
   MediaEngineInterface* media_engine_w();
 
-  ConnectionContext(const Environment& env,
-                    PeerConnectionFactoryDependencies* dependencies);
+  ConnectionContext(
+      const Environment& env,
+      PeerConnectionFactoryDependencies* absl_nonnull dependencies);
 
   friend class RefCountedNonVirtual<ConnectionContext>;
   ~ConnectionContext();
@@ -146,7 +146,7 @@ class ConnectionContext final : public RefCountedNonVirtual<ConnectionContext> {
       RTC_GUARDED_BY(signaling_thread_);
   bool blocking_media_engine_destruction_;
   Thread* const network_thread_;
-  AlwaysValidPointer<Thread> const worker_thread_;
+  Thread* const worker_thread_;
   Thread* const signaling_thread_;
 
   // This object is const over the lifetime of the ConnectionContext, and is
@@ -164,15 +164,15 @@ class ConnectionContext final : public RefCountedNonVirtual<ConnectionContext> {
   std::unique_ptr<NetworkManager> default_network_manager_
       RTC_GUARDED_BY(signaling_thread_);
   std::unique_ptr<MediaFactory> const call_factory_
-      RTC_GUARDED_BY(worker_thread());
+      RTC_GUARDED_BY(signaling_thread_);
 
   std::unique_ptr<PacketSocketFactory> default_socket_factory_
       RTC_GUARDED_BY(signaling_thread_);
   std::unique_ptr<SctpTransportFactoryInterface> const sctp_factory_;
 
-  // Controls whether to announce support for the the rfc4588 payload format
-  // for retransmitted video packets.
-  bool use_rtx_;
+  // Stored global audio options applied to the media engine upon
+  // initialization.
+  AudioOptions global_audio_options_ RTC_GUARDED_BY(worker_thread());
 };
 
 }  // namespace webrtc

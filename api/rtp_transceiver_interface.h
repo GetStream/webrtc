@@ -12,11 +12,10 @@
 #define API_RTP_TRANSCEIVER_INTERFACE_H_
 
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
-#include "absl/base/attributes.h"
-#include "api/array_view.h"
 #include "api/media_types.h"
 #include "api/ref_count.h"
 #include "api/rtc_error.h"
@@ -25,6 +24,7 @@
 #include "api/rtp_sender_interface.h"
 #include "api/rtp_transceiver_direction.h"
 #include "api/scoped_refptr.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/system/rtc_export.h"
 
 namespace webrtc {
@@ -111,7 +111,7 @@ class RTC_EXPORT RtpTransceiverInterface : public RefCountInterface {
   // https://w3c.github.io/webrtc-pc/#dom-rtcrtptransceiver-direction
   // TODO(hta): Deprecate SetDirection without error and rename
   // SetDirectionWithError to SetDirection, remove default implementations.
-  ABSL_DEPRECATED("Use SetDirectionWithError instead")
+  [[deprecated("Use SetDirectionWithError instead")]]
   virtual void SetDirection(RtpTransceiverDirection new_direction);
   virtual RTCError SetDirectionWithError(RtpTransceiverDirection new_direction);
 
@@ -146,13 +146,13 @@ class RTC_EXPORT RtpTransceiverInterface : public RefCountInterface {
   // This is an internal function, and is exposed for historical reasons.
   // https://w3c.github.io/webrtc-pc/#dfn-stop-the-rtcrtptransceiver
   virtual void StopInternal();
-  ABSL_DEPRECATED("Use StopStandard instead") virtual void Stop();
+  [[deprecated("Use StopStandard instead")]] virtual void Stop();
 
   // The SetCodecPreferences method overrides the default codec preferences used
   // by WebRTC for this transceiver.
   // https://w3c.github.io/webrtc-pc/#dom-rtcrtptransceiver-setcodecpreferences
   virtual RTCError SetCodecPreferences(
-      ArrayView<RtpCodecCapability> codecs) = 0;
+      std::span<RtpCodecCapability> codecs) = 0;
   virtual std::vector<RtpCodecCapability> codec_preferences() const = 0;
 
   // Returns the set of header extensions that was set
@@ -172,7 +172,19 @@ class RTC_EXPORT RtpTransceiverInterface : public RefCountInterface {
   // so that it negotiates use of header extensions which are not kStopped.
   // https://w3c.github.io/webrtc-extensions/#rtcrtptransceiver-interface
   virtual RTCError SetHeaderExtensionsToNegotiate(
-      ArrayView<const RtpHeaderExtensionCapability> header_extensions) = 0;
+      std::span<const RtpHeaderExtensionCapability> header_extensions) = 0;
+
+  // Returns the negotiated SFrame state for this transceiver.
+  // - nullopt: SFrame state has not yet been decided (no negotiation).
+  // - true:    SFrame is enabled.
+  // - false:   SFrame is disabled (locked after negotiation without SFrame).
+  // Default implementation of SframeEnabled.
+  // TODO: bugs.webrtc.org/479862368 - remove when all implementations are
+  // updated
+  virtual std::optional<bool> SframeEnabled() const {
+    RTC_DCHECK_NOTREACHED();
+    return std::nullopt;
+  }
 
  protected:
   ~RtpTransceiverInterface() override = default;

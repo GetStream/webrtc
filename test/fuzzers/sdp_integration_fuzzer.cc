@@ -23,6 +23,7 @@
 #include "pc/test/integration_test_helpers.h"
 #include "pc/test/mock_peer_connection_observers.h"
 #include "rtc_base/checks.h"
+#include "test/fuzzers/fuzz_data_helper.h"
 #include "test/gmock.h"
 #include "test/wait_until.h"
 
@@ -47,18 +48,14 @@ class FuzzerTest : public PeerConnectionIntegrationBaseTest {
     caller()->pc()->SetRemoteDescription(std::move(sdp), srd_observer);
     // Wait a short time for observer to be called. Timeout is short
     // because the fuzzer should be trying many branches.
-    EXPECT_THAT(
-        WaitUntil([&] { return srd_observer->called(); }, ::testing::IsTrue()),
-        IsRtcOk());
+    EXPECT_TRUE(WaitUntil([&] { return srd_observer->called(); }));
 
     // If set-remote-description was successful, try to answer.
     auto sld_observer =
         webrtc::make_ref_counted<FakeSetLocalDescriptionObserver>();
     if (srd_observer->error().ok()) {
       caller()->pc()->SetLocalDescription(sld_observer);
-      EXPECT_THAT(WaitUntil([&] { return sld_observer->called(); },
-                            ::testing::IsTrue()),
-                  IsRtcOk());
+      EXPECT_TRUE(WaitUntil([&] { return sld_observer->called(); }));
     }
     // If there is an EXPECT failure, die here.
     RTC_CHECK(!HasFailure());
@@ -69,14 +66,13 @@ class FuzzerTest : public PeerConnectionIntegrationBaseTest {
   void TestBody() override {}
 };
 
-void FuzzOneInput(const uint8_t* data, size_t size) {
-  if (size > 16384) {
+void FuzzOneInput(FuzzDataHelper fuzz_data) {
+  if (fuzz_data.size() > 16384) {
     return;
   }
 
   FuzzerTest test;
-  test.RunNegotiateCycle(
-      absl::string_view(reinterpret_cast<const char*>(data), size));
+  test.RunNegotiateCycle(fuzz_data.ReadString());
 }
 
 }  // namespace webrtc

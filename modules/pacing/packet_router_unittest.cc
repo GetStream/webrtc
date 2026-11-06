@@ -17,10 +17,10 @@
 #include <utility>
 #include <vector>
 
+#include "api/rtp_header_extension_id.h"
 #include "api/rtp_headers.h"
 #include "api/transport/network_types.h"
 #include "api/units/data_size.h"
-#include "api/units/time_delta.h"
 #include "modules/rtp_rtcp/include/rtp_header_extension_map.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/mocks/mock_rtp_rtcp.h"
@@ -29,7 +29,6 @@
 #include "modules/rtp_rtcp/source/rtp_header_extensions.h"
 #include "modules/rtp_rtcp/source/rtp_packet_to_send.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/fake_clock.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 
@@ -59,7 +58,8 @@ constexpr int kProbeMinBytes = 1000;
 class PacketRouterTest : public ::testing::Test {
  public:
   PacketRouterTest() {
-    extension_manager.Register<TransportSequenceNumber>(/*id=*/1);
+    extension_manager.Register<TransportSequenceNumber>(
+        RtpHeaderExtensionId(1));
   }
 
  protected:
@@ -423,8 +423,7 @@ TEST_F(PacketRouterTest,
   EXPECT_CALL(rtp_1, CanSendPacket).WillRepeatedly(Return(true));
 
   packet_router.AddSendRtpModule(&rtp_1, false);
-  packet_router.ConfigureForRtcpFeedback(/*set_transport_seq=*/true,
-                                         /*send_rtp_packets_as_ect1=*/false);
+  packet_router.SetGenerateTransportSequenceNumbers(true);
 
   auto packet = BuildRtpPacket(kSsrc1);
   EXPECT_CALL(notify_bwe_callback, Call)
@@ -446,8 +445,7 @@ TEST_F(PacketRouterTest, SendPacketsAsEct1IfConfigured) {
   ON_CALL(rtp_1, CanSendPacket).WillByDefault(Return(kSsrc1));
 
   packet_router.AddSendRtpModule(&rtp_1, false);
-  packet_router.ConfigureForRtcpFeedback(/*set_transport_seq=*/true,
-                                         /*send_rtp_packets_as_ect1=*/true);
+  packet_router.SetSendPacketsAsEct1(true);
 
   testing::Sequence s;
   EXPECT_CALL(
@@ -460,8 +458,7 @@ TEST_F(PacketRouterTest, SendPacketsAsEct1IfConfigured) {
       .InSequence(s);
 
   packet_router.SendPacket(BuildRtpPacket(kSsrc1), PacedPacketInfo());
-  packet_router.ConfigureForRtcpFeedback(/*set_transport_seq=*/true,
-                                         /*send_rtp_packets_as_ect1=*/false);
+  packet_router.SetSendPacketsAsEct1(false);
   packet_router.SendPacket(BuildRtpPacket(kSsrc1), PacedPacketInfo());
 
   packet_router.OnBatchComplete();
@@ -676,7 +673,6 @@ TEST_F(PacketRouterTest, DuplicateRemovalOfSendModuleIgnored) {
 }
 
 TEST(PacketRouterRembTest, ChangeSendRtpModuleChangeRembSender) {
-  ScopedFakeClock clock;
   NiceMock<MockRtpRtcpInterface> rtp_send;
   NiceMock<MockRtpRtcpInterface> rtp_recv;
   PacketRouter packet_router;
@@ -701,7 +697,6 @@ TEST(PacketRouterRembTest, ChangeSendRtpModuleChangeRembSender) {
 // Only register receiving modules and make sure we fallback to trigger a REMB
 // packet on this one.
 TEST(PacketRouterRembTest, NoSendingRtpModule) {
-  ScopedFakeClock clock;
   NiceMock<MockRtpRtcpInterface> rtp;
   PacketRouter packet_router;
 
@@ -722,7 +717,6 @@ TEST(PacketRouterRembTest, NoSendingRtpModule) {
 }
 
 TEST(PacketRouterRembTest, NonCandidateSendRtpModuleNotUsedForRemb) {
-  ScopedFakeClock clock;
   PacketRouter packet_router;
   NiceMock<MockRtpRtcpInterface> module;
 
@@ -740,7 +734,6 @@ TEST(PacketRouterRembTest, NonCandidateSendRtpModuleNotUsedForRemb) {
 }
 
 TEST(PacketRouterRembTest, CandidateSendRtpModuleUsedForRemb) {
-  ScopedFakeClock clock;
   PacketRouter packet_router;
   NiceMock<MockRtpRtcpInterface> module;
 
@@ -758,7 +751,6 @@ TEST(PacketRouterRembTest, CandidateSendRtpModuleUsedForRemb) {
 }
 
 TEST(PacketRouterRembTest, NonCandidateReceiveRtpModuleNotUsedForRemb) {
-  ScopedFakeClock clock;
   PacketRouter packet_router;
   NiceMock<MockRtpRtcpInterface> module;
 
@@ -776,7 +768,6 @@ TEST(PacketRouterRembTest, NonCandidateReceiveRtpModuleNotUsedForRemb) {
 }
 
 TEST(PacketRouterRembTest, CandidateReceiveRtpModuleUsedForRemb) {
-  ScopedFakeClock clock;
   PacketRouter packet_router;
   NiceMock<MockRtpRtcpInterface> module;
 
@@ -795,7 +786,6 @@ TEST(PacketRouterRembTest, CandidateReceiveRtpModuleUsedForRemb) {
 
 TEST(PacketRouterRembTest,
      SendCandidatePreferredOverReceiveCandidate_SendModuleAddedFirst) {
-  ScopedFakeClock clock;
   PacketRouter packet_router;
   NiceMock<MockRtpRtcpInterface> send_module;
   NiceMock<MockRtpRtcpInterface> receive_module;
@@ -822,7 +812,6 @@ TEST(PacketRouterRembTest,
 
 TEST(PacketRouterRembTest,
      SendCandidatePreferredOverReceiveCandidate_ReceiveModuleAddedFirst) {
-  ScopedFakeClock clock;
   PacketRouter packet_router;
   NiceMock<MockRtpRtcpInterface> send_module;
   NiceMock<MockRtpRtcpInterface> receive_module;
@@ -840,7 +829,6 @@ TEST(PacketRouterRembTest,
   EXPECT_CALL(send_module, SetRemb(bitrate_estimate, ssrcs));
   EXPECT_CALL(receive_module, SetRemb(_, _)).Times(0);
 
-  clock.AdvanceTime(TimeDelta::Millis(1000));
   packet_router.SendRemb(bitrate_estimate, ssrcs);
 
   // Test tear-down
@@ -849,7 +837,6 @@ TEST(PacketRouterRembTest,
 }
 
 TEST(PacketRouterRembTest, ReceiveModuleTakesOverWhenLastSendModuleRemoved) {
-  ScopedFakeClock clock;
   PacketRouter packet_router;
   NiceMock<MockRtpRtcpInterface> send_module;
   NiceMock<MockRtpRtcpInterface> receive_module;

@@ -212,6 +212,10 @@ runs:
         test -d src/.git
         test -f src/DEPS
         test ! -L src
+        # The tarball includes git-tracked src/resources files. An older
+        # cache would hide this checkout's BUILD.gn and .sha1 list.
+        # Downloaded blobs stay; hooks run after this step.
+        git -C src checkout -- resources
         printf '%s\n' "${expected_size}" > \
           "${GITHUB_WORKSPACE}/.hetzner-hit-bytes"
         # Overlay members only. Do not touch .gclient-git-cache.

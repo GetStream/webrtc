@@ -13,27 +13,27 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "absl/memory/memory.h"
-#include "api/array_view.h"
 #include "api/frame_transformer_interface.h"
 #include "api/rtp_packet_infos.h"
 #include "api/scoped_refptr.h"
 #include "api/sequence_checker.h"
+#include "api/task_queue/task_queue_base.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
 #include "api/video/encoded_image.h"
 #include "api/video/video_frame_metadata.h"
-#include "api/video/video_frame_type.h"
 #include "api/video/video_timing.h"
 #include "api/video_codecs/video_codec.h"
 #include "modules/rtp_rtcp/source/frame_object.h"
 #include "modules/rtp_rtcp/source/rtp_video_header.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/thread.h"
 #include "system_wrappers/include/clock.h"
 #include "system_wrappers/include/ntp_time.h"
 
@@ -55,11 +55,11 @@ class TransformableVideoReceiverFrame
   ~TransformableVideoReceiverFrame() override = default;
 
   // Implements TransformableVideoFrameInterface.
-  ArrayView<const uint8_t> GetData() const override {
+  std::span<const uint8_t> GetData() const override {
     return *frame_->GetEncodedData();
   }
 
-  void SetData(ArrayView<const uint8_t> data) override {
+  void SetData(std::span<const uint8_t> data) override {
     frame_->SetEncodedData(
         EncodedImageBuffer::Create(data.data(), data.size()));
   }
@@ -67,13 +67,14 @@ class TransformableVideoReceiverFrame
   uint8_t GetPayloadType() const override { return frame_->PayloadType(); }
   uint32_t GetSsrc() const override { return Metadata().GetSsrc(); }
   uint32_t GetTimestamp() const override { return frame_->RtpTimestamp(); }
+  RtpTimestampInfo GetRtpTimestampInfo() const override {
+    return RtpTimestampWithOffset(frame_->RtpTimestamp());
+  }
   void SetRTPTimestamp(uint32_t timestamp) override {
     frame_->SetRtpTimestamp(timestamp);
   }
 
-  bool IsKeyFrame() const override {
-    return frame_->FrameType() == VideoFrameType::kVideoFrameKey;
-  }
+  bool IsKeyFrame() const override { return frame_->IsKey(); }
 
   VideoFrameMetadata Metadata() const override { return metadata_; }
 
@@ -82,7 +83,7 @@ class TransformableVideoReceiverFrame
     // dependencies.
     VideoFrameMetadata new_metadata = Metadata();
     new_metadata.SetFrameId(metadata.GetFrameId());
-    new_metadata.SetFrameDependencies(metadata.GetFrameDependencies());
+    new_metadata.SetDependencies(metadata.GetDependencies());
     RTC_DCHECK(new_metadata == metadata)
         << "TransformableVideoReceiverFrame::SetMetadata can be only used to "
            "change frameID and dependencies";
@@ -138,11 +139,11 @@ RtpVideoStreamReceiverFrameTransformerDelegate::
         RtpVideoFrameReceiver* receiver,
         Clock* clock,
         scoped_refptr<FrameTransformerInterface> frame_transformer,
-        Thread* network_thread,
+        TaskQueueBase* task_queue,
         uint32_t ssrc)
     : receiver_(receiver),
       frame_transformer_(std::move(frame_transformer)),
-      network_thread_(network_thread),
+      network_thread_(task_queue),
       ssrc_(ssrc),
       clock_(clock) {}
 
@@ -235,8 +236,10 @@ void RtpVideoStreamReceiverFrameTransformerDelegate::ManageFrame(
     VideoFrameMetadata metadata = transformed_frame->Metadata();
     RTPVideoHeader video_header = RTPVideoHeader::FromMetadata(metadata);
     VideoSendTiming timing;
-    ArrayView<const uint8_t> data = transformed_frame->GetData();
-    int64_t receive_time = clock_->CurrentTime().ms();
+    std::span<const uint8_t> data = transformed_frame->GetData();
+    Timestamp receive_time = clock_->CurrentTime();
+    RTC_CHECK(std::holds_alternative<RtpTimestampWithOffset>(
+        transformed_frame->GetRtpTimestampInfo()));
     receiver_->ManageFrame(std::make_unique<RtpFrameObject>(
         /*first_seq_num=*/metadata.GetFrameId().value_or(0),
         /*last_seq_num=*/metadata.GetFrameId().value_or(0),
@@ -244,7 +247,9 @@ void RtpVideoStreamReceiverFrameTransformerDelegate::ManageFrame(
         /*times_nacked=*/0,
         /*first_packet_received_time=*/receive_time,
         /*last_packet_received_time=*/receive_time,
-        /*rtp_timestamp=*/transformed_frame->GetTimestamp(),
+        /*rtp_timestamp=*/
+        std::get<RtpTimestampWithOffset>(
+            transformed_frame->GetRtpTimestampInfo()),
         /*ntp_time_ms=*/0, timing, transformed_frame->GetPayloadType(),
         metadata.GetCodec(), metadata.GetRotation(), metadata.GetContentType(),
         video_header, video_header.color_space,

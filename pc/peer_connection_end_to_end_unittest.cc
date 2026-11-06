@@ -48,6 +48,7 @@
 #include "test/create_test_environment.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
+#include "test/run_loop.h"
 #include "test/wait_until.h"
 
 #ifdef WEBRTC_ANDROID
@@ -65,6 +66,9 @@ using ::testing::AtLeast;
 using ::testing::Eq;
 using ::testing::Ge;
 using ::testing::Gt;
+using ::testing::IsTrue;
+using ::testing::Ne;
+using ::testing::NotNull;
 using ::testing::SizeIs;
 using ::testing::StrictMock;
 using ::testing::Values;
@@ -80,14 +84,12 @@ class PeerConnectionEndToEndBaseTest : public ::testing::Test {
 
   explicit PeerConnectionEndToEndBaseTest(SdpSemantics sdp_semantics)
       : env_(CreateTestEnvironment()),
-        network_thread_(std::make_unique<Thread>(&pss_)),
-        worker_thread_(Thread::Create()) {
+        network_thread_(std::make_unique<Thread>(&pss_)) {
     RTC_CHECK(network_thread_->Start());
-    RTC_CHECK(worker_thread_->Start());
     caller_ = make_ref_counted<PeerConnectionTestWrapper>(
-        "caller", env_, &pss_, network_thread_.get(), worker_thread_.get());
+        "caller", env_, &pss_, network_thread_.get());
     callee_ = make_ref_counted<PeerConnectionTestWrapper>(
-        "callee", env_, &pss_, network_thread_.get(), worker_thread_.get());
+        "callee", env_, &pss_, network_thread_.get());
     PeerConnectionInterface::IceServer ice_server;
     ice_server.uri = "stun:stun.l.google.com:19302";
     caller_config_.servers.push_back(ice_server);
@@ -244,11 +246,10 @@ class PeerConnectionEndToEndBaseTest : public ::testing::Test {
   }
 
  protected:
-  AutoThread main_thread_;
+  test::RunLoop main_thread_;
   PhysicalSocketServer pss_;
   Environment env_;
   std::unique_ptr<Thread> network_thread_;
-  std::unique_ptr<Thread> worker_thread_;
   scoped_refptr<PeerConnectionTestWrapper> caller_;
   scoped_refptr<PeerConnectionTestWrapper> callee_;
   DataChannelList caller_signaled_data_channels_;
@@ -285,13 +286,13 @@ std::unique_ptr<AudioDecoder> CreateForwardingMockDecoder(
       .WillRepeatedly([dec] { return dec->Channels(); });
   EXPECT_CALL(*mock_decoder, DecodeInternal(_, _, _, _, _))
       .Times(AtLeast(1))
-      .WillRepeatedly(
-          [dec](const uint8_t* encoded, size_t encoded_len, int sample_rate_hz,
-                int16_t* decoded, AudioDecoder::SpeechType* speech_type) {
-            return dec->Decode(encoded, encoded_len, sample_rate_hz,
-                               std::numeric_limits<size_t>::max(), decoded,
-                               speech_type);
-          });
+      .WillRepeatedly([dec](const uint8_t* encoded, size_t encoded_len,
+                            int sample_rate_hz, int16_t* decoded,
+                            AudioDecoder::SpeechType* speech_type) {
+        return dec->Decode(encoded, encoded_len, sample_rate_hz,
+                           std::numeric_limits<size_t>::max(), decoded,
+                           speech_type);
+      });
   EXPECT_CALL(*mock_decoder, Die());
   EXPECT_CALL(*mock_decoder, HasDecodePlc()).WillRepeatedly([dec] {
     return dec->HasDecodePlc();
@@ -324,15 +325,14 @@ scoped_refptr<AudioDecoderFactory> CreateForwardingMockDecoderFactory(
       });
   EXPECT_CALL(*mock_decoder_factory, Create)
       .Times(AtLeast(2))
-      .WillRepeatedly(
-          [real_decoder_factory](const Environment& env,
-                                 const SdpAudioFormat& format,
-                                 std::optional<AudioCodecPairId> /* pair */) {
-            auto real_decoder = real_decoder_factory->Create(env, format);
-            return real_decoder
-                       ? CreateForwardingMockDecoder(std::move(real_decoder))
-                       : nullptr;
-          });
+      .WillRepeatedly([real_decoder_factory](
+                          const Environment& env, const SdpAudioFormat& format,
+                          std::optional<AudioCodecPairId> /* pair */) {
+        auto real_decoder = real_decoder_factory->Create(env, format);
+        return real_decoder
+                   ? CreateForwardingMockDecoder(std::move(real_decoder))
+                   : nullptr;
+      });
   return mock_decoder_factory;
 }
 
@@ -438,10 +438,10 @@ TEST_P(PeerConnectionEndToEndTest, CreateDataChannelBeforeNegotiate) {
             MockAudioDecoderFactory::CreateEmptyFactory());
 
   DataChannelInit init;
-  scoped_refptr<DataChannelInterface> caller_dc(
-      caller_->CreateDataChannel("data", init));
-  scoped_refptr<DataChannelInterface> callee_dc(
-      callee_->CreateDataChannel("data", init));
+  scoped_refptr<DataChannelInterface> caller_dc =
+      caller_->CreateDataChannel("data", init);
+  scoped_refptr<DataChannelInterface> callee_dc =
+      callee_->CreateDataChannel("data", init);
 
   Negotiate();
   WaitForConnection();
@@ -467,8 +467,8 @@ TEST_P(PeerConnectionEndToEndTest, CreateDataChannelAfterNegotiate) {
   DataChannelInit init;
 
   // This DataChannel is for creating the data content in the negotiation.
-  scoped_refptr<DataChannelInterface> dummy(
-      caller_->CreateDataChannel("data", init));
+  scoped_refptr<DataChannelInterface> dummy =
+      caller_->CreateDataChannel("data", init);
   Negotiate();
   WaitForConnection();
 
@@ -476,10 +476,10 @@ TEST_P(PeerConnectionEndToEndTest, CreateDataChannelAfterNegotiate) {
   WaitForDataChannelsToOpen(dummy.get(), callee_signaled_data_channels_, 0);
 
   // Create new DataChannels after the negotiation and verify their states.
-  scoped_refptr<DataChannelInterface> caller_dc(
-      caller_->CreateDataChannel("hello", init));
-  scoped_refptr<DataChannelInterface> callee_dc(
-      callee_->CreateDataChannel("hello", init));
+  scoped_refptr<DataChannelInterface> caller_dc =
+      caller_->CreateDataChannel("hello", init);
+  scoped_refptr<DataChannelInterface> callee_dc =
+      callee_->CreateDataChannel("hello", init);
 
   WaitForDataChannelsToOpen(caller_dc.get(), callee_signaled_data_channels_, 1);
   WaitForDataChannelsToOpen(callee_dc.get(), caller_signaled_data_channels_, 0);
@@ -501,8 +501,8 @@ TEST_P(PeerConnectionEndToEndTest, CreateDataChannelLargeTransfer) {
   DataChannelInit init;
 
   // This DataChannel is for creating the data content in the negotiation.
-  scoped_refptr<DataChannelInterface> dummy(
-      caller_->CreateDataChannel("data", init));
+  scoped_refptr<DataChannelInterface> dummy =
+      caller_->CreateDataChannel("data", init);
   Negotiate();
   WaitForConnection();
 
@@ -510,10 +510,10 @@ TEST_P(PeerConnectionEndToEndTest, CreateDataChannelLargeTransfer) {
   WaitForDataChannelsToOpen(dummy.get(), callee_signaled_data_channels_, 0);
 
   // Create new DataChannels after the negotiation and verify their states.
-  scoped_refptr<DataChannelInterface> caller_dc(
-      caller_->CreateDataChannel("hello", init));
-  scoped_refptr<DataChannelInterface> callee_dc(
-      callee_->CreateDataChannel("hello", init));
+  scoped_refptr<DataChannelInterface> caller_dc =
+      caller_->CreateDataChannel("hello", init);
+  scoped_refptr<DataChannelInterface> callee_dc =
+      callee_->CreateDataChannel("hello", init);
 
   WaitForDataChannelsToOpen(caller_dc.get(), callee_signaled_data_channels_, 1);
   WaitForDataChannelsToOpen(callee_dc.get(), caller_signaled_data_channels_, 0);
@@ -533,22 +533,37 @@ TEST_P(PeerConnectionEndToEndTest, DataChannelIdAssignment) {
             MockAudioDecoderFactory::CreateEmptyFactory());
 
   DataChannelInit init;
-  scoped_refptr<DataChannelInterface> caller_dc_1(
-      caller_->CreateDataChannel("data", init));
-  scoped_refptr<DataChannelInterface> callee_dc_1(
-      callee_->CreateDataChannel("data", init));
+  scoped_refptr<DataChannelInterface> caller_dc_1 =
+      caller_->CreateDataChannel("data", init);
+  scoped_refptr<DataChannelInterface> callee_dc_1 =
+      callee_->CreateDataChannel("data", init);
+
+  MockDataChannelObserver caller_dc_1_observer(caller_dc_1.get());
+  MockDataChannelObserver callee_dc_1_observer(callee_dc_1.get());
 
   Negotiate();
   WaitForConnection();
+  EXPECT_TRUE(WaitUntil([&] { return caller_dc_1_observer.IsOpen(); }));
+  EXPECT_TRUE(WaitUntil([&] { return callee_dc_1_observer.IsOpen(); }));
 
+  EXPECT_NE(-1, caller_dc_1->id());
+  EXPECT_NE(-1, callee_dc_1->id());
   EXPECT_EQ(1, caller_dc_1->id() % 2);
   EXPECT_EQ(0, callee_dc_1->id() % 2);
 
-  scoped_refptr<DataChannelInterface> caller_dc_2(
-      caller_->CreateDataChannel("data", init));
-  scoped_refptr<DataChannelInterface> callee_dc_2(
-      callee_->CreateDataChannel("data", init));
+  scoped_refptr<DataChannelInterface> caller_dc_2 =
+      caller_->CreateDataChannel("data", init);
+  scoped_refptr<DataChannelInterface> callee_dc_2 =
+      callee_->CreateDataChannel("data", init);
 
+  MockDataChannelObserver caller_dc_2_observer(caller_dc_2.get());
+  MockDataChannelObserver callee_dc_2_observer(callee_dc_2.get());
+
+  EXPECT_TRUE(WaitUntil([&] { return caller_dc_2_observer.IsOpen(); }));
+  EXPECT_TRUE(WaitUntil([&] { return callee_dc_2_observer.IsOpen(); }));
+
+  EXPECT_NE(-1, caller_dc_2->id());
+  EXPECT_NE(-1, callee_dc_2->id());
   EXPECT_EQ(1, caller_dc_2->id() % 2);
   EXPECT_EQ(0, callee_dc_2->id() % 2);
 }
@@ -562,10 +577,10 @@ TEST_P(PeerConnectionEndToEndTest,
 
   DataChannelInit init;
 
-  scoped_refptr<DataChannelInterface> caller_dc_1(
-      caller_->CreateDataChannel("data", init));
-  scoped_refptr<DataChannelInterface> caller_dc_2(
-      caller_->CreateDataChannel("data", init));
+  scoped_refptr<DataChannelInterface> caller_dc_1 =
+      caller_->CreateDataChannel("data", init);
+  scoped_refptr<DataChannelInterface> caller_dc_2 =
+      caller_->CreateDataChannel("data", init);
 
   Negotiate();
   WaitForConnection();
@@ -609,8 +624,8 @@ TEST_P(PeerConnectionEndToEndTest,
             MockAudioDecoderFactory::CreateEmptyFactory());
 
   DataChannelInit init;
-  scoped_refptr<DataChannelInterface> caller_dc(
-      caller_->CreateDataChannel("data", init));
+  scoped_refptr<DataChannelInterface> caller_dc =
+      caller_->CreateDataChannel("data", init);
 
   Negotiate();
   WaitForConnection();
@@ -647,8 +662,8 @@ TEST_P(PeerConnectionEndToEndTest, CloseDataChannelRemotelyWhileNotReferenced) {
             MockAudioDecoderFactory::CreateEmptyFactory());
 
   DataChannelInit init;
-  scoped_refptr<DataChannelInterface> caller_dc(
-      caller_->CreateDataChannel("data", init));
+  scoped_refptr<DataChannelInterface> caller_dc =
+      caller_->CreateDataChannel("data", init);
 
   Negotiate();
   WaitForConnection();
@@ -664,7 +679,7 @@ TEST_P(PeerConnectionEndToEndTest, CloseDataChannelRemotelyWhileNotReferenced) {
 
   // Wait for a bit longer so the remote data channel will receive the
   // close message and be destroyed.
-  Thread::Current()->ProcessMessages(100);
+  main_thread_.RunFor(webrtc::TimeDelta::Millis(100));
 }
 
 // Test behavior of creating too many datachannels.
@@ -679,8 +694,8 @@ TEST_P(PeerConnectionEndToEndTest, TooManyDataChannelsOpenedBeforeConnecting) {
   // Add datachannels that will be assigned 0, 2 and 4 or 1, 3 and 5
   // depending on DTLS role.
   for (int i = 0; i <= kReducedMaxSctpStreams / 2; i++) {
-    scoped_refptr<DataChannelInterface> caller_dc(
-        caller_->CreateDataChannel("data", init));
+    scoped_refptr<DataChannelInterface> caller_dc =
+        caller_->CreateDataChannel("data", init);
     channels.push_back(std::move(caller_dc));
   }
   Negotiate();
@@ -689,23 +704,64 @@ TEST_P(PeerConnectionEndToEndTest, TooManyDataChannelsOpenedBeforeConnecting) {
       caller_->pc()->GetSctpTransport();
   scoped_refptr<SctpTransportInterface> callee_transport =
       callee_->pc()->GetSctpTransport();
-  std::optional<int> caller_channels =
-      caller_transport->Information().MaxChannels();
-  std::optional<int> callee_channels =
-      callee_transport->Information().MaxChannels();
-  ASSERT_TRUE(caller_channels.has_value());
-  ASSERT_TRUE(callee_channels.has_value());
-  EXPECT_THAT(caller_channels.value(), Eq(kReducedMaxSctpStreams));
-  EXPECT_THAT(callee_channels.value(), Eq(kReducedMaxSctpStreams));
+  ASSERT_THAT(caller_transport, NotNull());
+  ASSERT_THAT(callee_transport, NotNull());
+  // SCTP handshake completes asynchronously after ICE connection; wait for
+  // MaxChannels to be negotiated.
+  EXPECT_THAT(
+      WaitUntil([&] { return caller_transport->Information().MaxChannels(); },
+                Eq(kReducedMaxSctpStreams),
+                {.timeout = TimeDelta::Millis(kMaxWait)}),
+      IsRtcOk());
+  EXPECT_THAT(
+      WaitUntil([&] { return callee_transport->Information().MaxChannels(); },
+                Eq(kReducedMaxSctpStreams),
+                {.timeout = TimeDelta::Millis(kMaxWait)}),
+      IsRtcOk());
   EXPECT_THAT(WaitUntil([&] { return callee_signaled_data_channels_; },
                         SizeIs(Ge(kReducedMaxSctpStreams / 2)),
                         {.timeout = TimeDelta::Millis(kMaxWait)}),
               IsRtcOk());
   // 0 and 2 should be open, 4 should be rejected as "ID too large".
-  EXPECT_EQ(DataChannelInterface::kOpen,
-            channels[(kReducedMaxSctpStreams / 2) - 1]->state());
-  EXPECT_EQ(DataChannelInterface::kClosed,
-            channels[kReducedMaxSctpStreams / 2]->state());
+  EXPECT_THAT(
+      WaitUntil(
+          [&] { return channels[(kReducedMaxSctpStreams / 2) - 1]->state(); },
+          Eq(DataChannelInterface::kOpen),
+          {.timeout = TimeDelta::Millis(kMaxWait)}),
+      IsRtcOk());
+  EXPECT_THAT(
+      WaitUntil([&] { return channels[kReducedMaxSctpStreams / 2]->state(); },
+                Eq(DataChannelInterface::kClosed),
+                {.timeout = TimeDelta::Millis(kMaxWait)}),
+      IsRtcOk());
+}
+
+// Verifies that max-message-size is propagated to the DataChannel.
+TEST_P(PeerConnectionEndToEndTest, MaxMessageSizePropagated) {
+  CreatePcs(MockAudioEncoderFactory::CreateEmptyFactory(),
+            MockAudioDecoderFactory::CreateEmptyFactory());
+
+  DataChannelInit init;
+  scoped_refptr<DataChannelInterface> caller_dc =
+      caller_->CreateDataChannel("caller", init);
+  MockDataChannelObserver caller_dc_observer(caller_dc.get());
+
+  Negotiate();
+  WaitForConnection();
+
+  EXPECT_TRUE(WaitUntil([&] { return caller_dc_observer.IsOpen(); }));
+
+  // Attempting to send a message larger than our announced
+  // max-message-size should fail.
+  DataBuffer buffer(CopyOnWriteBuffer(kSctpSendBufferSize + 64),
+                    /*binary=*/true);
+  EXPECT_FALSE(caller_dc->Send(buffer));
+
+  scoped_refptr<DataChannelInterface> callee_dc =
+      callee_->CreateDataChannel("callee", init);
+  MockDataChannelObserver callee_dc_observer(callee_dc.get());
+  EXPECT_TRUE(WaitUntil([&] { return caller_dc_observer.IsOpen(); }));
+  EXPECT_FALSE(callee_dc->Send(buffer));
 }
 
 #endif  // WEBRTC_HAVE_SCTP

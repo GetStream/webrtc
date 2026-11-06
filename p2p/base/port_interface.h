@@ -16,9 +16,12 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "absl/base/macros.h"
 #include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
 #include "api/candidate.h"
@@ -32,6 +35,7 @@
 #include "rtc_base/network/sent_packet.h"
 #include "rtc_base/socket.h"
 #include "rtc_base/socket_address.h"
+#include "rtc_base/span_helpers.h"
 
 namespace webrtc {
 
@@ -48,13 +52,12 @@ class PortInterface {
   virtual ~PortInterface();
 
   virtual IceCandidateType Type() const = 0;
-  virtual const ::webrtc::Network* Network() const = 0;
+  virtual const Network* Network() const = 0;
 
   // Methods to set/get ICE role and tiebreaker values.
   virtual void SetIceRole(IceRole role) = 0;
   virtual IceRole GetIceRole() const = 0;
 
-  virtual void SetIceTiebreaker(uint64_t tiebreaker) = 0;
   virtual uint64_t IceTiebreaker() const = 0;
 
   virtual bool SharedSocket() const = 0;
@@ -87,23 +90,37 @@ class PortInterface {
 
   // Sends the given packet to the given address, provided that the address is
   // that of a connection or an address that has sent to us already.
-  virtual int SendTo(const void* data,
-                     size_t size,
+  virtual int SendTo(std::span<const uint8_t> data,
                      const SocketAddress& addr,
                      const AsyncSocketPacketOptions& options,
-                     bool payload) = 0;
+                     bool payload) {
+    // This function has a default implementation in order to support
+    // downstream code that has subclasses with the old SendTo method.
+    // If a subclass implements neither, this will cause a recursion,
+    // which should be easy to detect.
+    // TODO: bugs.webrtc.org/42225170 - make pure virtual when the function
+    // below has been removed.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    return SendTo(data.data(), data.size(), addr, options, payload);
+#pragma clang diagnostic pop
+  }
+
+  // This function is not marked ABSL_DEPRECATE_AND_INLINE() because
+  // blindly inlining it will lead to unexpected behavior in subclasses.
+  [[deprecated("Use version with span")]] virtual int SendTo(
+      const void* data,
+      size_t size,
+      const SocketAddress& addr,
+      const AsyncSocketPacketOptions& options,
+      bool payload) {
+    return SendTo(AsUint8Span(std::span(static_cast<const char*>(data), size)),
+                  addr, options, payload);
+  }
 
   // Indicates that we received a successful STUN binding request from an
   // address that doesn't correspond to any current connection.  To turn this
   // into a real connection, call CreateConnection.
-  [[deprecated("Use SubscribeUnknownAddress(const void* tag, ...)")]]
-  virtual void SubscribeUnknownAddress(
-      absl::AnyInvocable<void(PortInterface*,
-                              const SocketAddress&,
-                              ProtocolType,
-                              IceMessage*,
-                              const std::string&,
-                              bool)> callback) = 0;
   virtual void SubscribeUnknownAddress(
       const void* tag,
       absl::AnyInvocable<void(PortInterface*,
@@ -128,9 +145,6 @@ class PortInterface {
 
   // Signaled when this port decides to delete itself because it no longer has
   // any usefulness.
-  [[deprecated("Use SubscribePortDestroyed(const void* tag, ...)")]]
-  virtual void SubscribePortDestroyed(
-      std::function<void(PortInterface*)> callback) = 0;
   virtual void SubscribePortDestroyed(
       const void* tag,
       std::function<void(PortInterface*)> callback) = 0;
@@ -143,25 +157,38 @@ class PortInterface {
   // unknown address).  Calling this method turns off delivery of packets
   // through this port.
   virtual void EnablePortPackets() = 0;
-  [[deprecated("Use SubscribeReadPacket(const void* tag, ...)")]]
+  virtual void SubscribeReadPacket(
+      const void* tag,
+      absl::AnyInvocable<void(PortInterface*,
+                              std::span<const uint8_t>,
+                              const SocketAddress&)> callback) = 0;
+
+  ABSL_DEPRECATE_AND_INLINE()
   virtual void SubscribeReadPacket(
       absl::AnyInvocable<
           void(PortInterface*, const char*, size_t, const SocketAddress&)>
-          callback) = 0;
+          callback) {
+    SubscribeReadPacket(nullptr, std::move(callback));
+  }
+
+  ABSL_DEPRECATE_AND_INLINE()
   virtual void SubscribeReadPacket(
       const void* tag,
       absl::AnyInvocable<
           void(PortInterface*, const char*, size_t, const SocketAddress&)>
-          callback) = 0;
+          callback) {
+    SubscribeReadPacket(
+        tag, [cb = std::move(callback)](PortInterface* port,
+                                        std::span<const uint8_t> data,
+                                        const SocketAddress& addr) mutable {
+          cb(port, AsCharSpan(data).data(), data.size(), addr);
+        });
+  }
   virtual void NotifyReadPacket(PortInterface* port_interface,
-                                const char*,
-                                size_t,
-                                const SocketAddress&) = 0;
+                                std::span<const uint8_t> data,
+                                const SocketAddress& addr) = 0;
 
   // Emitted each time a packet is sent on this port.
-  [[deprecated("Use SubscribeSentPacket(const void* tag, ...)")]]
-  virtual void SubscribeSentPacket(
-      absl::AnyInvocable<void(const SentPacketInfo&)> callback) = 0;
   virtual void SubscribeSentPacket(
       const void* tag,
       absl::AnyInvocable<void(const SentPacketInfo&)> callback) = 0;
@@ -208,8 +235,7 @@ class PortInterface {
   // with this port's username fragment, msg will contain the parsed STUN
   // message.  Otherwise, the function may send a STUN response internally.
   // remote_username contains the remote fragment of the STUN username.
-  virtual bool GetStunMessage(const char* data,
-                              size_t size,
+  virtual bool GetStunMessage(std::span<const uint8_t> data,
                               const SocketAddress& addr,
                               std::unique_ptr<IceMessage>* out_msg,
                               std::string* out_username) = 0;

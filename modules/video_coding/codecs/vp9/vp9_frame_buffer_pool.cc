@@ -15,8 +15,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
+#include "absl/algorithm/container.h"
 #include "api/scoped_refptr.h"
+#include "api/video/video_codec_constants.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/synchronization/mutex.h"
@@ -35,7 +38,12 @@ size_t Vp9FrameBufferPool::Vp9FrameBuffer::GetDataSize() const {
 }
 
 void Vp9FrameBufferPool::Vp9FrameBuffer::SetSize(size_t size) {
+  const size_t old_size = data_.size();
   data_.SetSize(size);
+  // libvpx requires the frame buffer callback to zero the memory it hands out.
+  if (size > old_size) {
+    absl::c_fill(std::span(data_).subspan(old_size), 0);
+  }
 }
 
 bool Vp9FrameBufferPool::InitializeVpxUsePool(
@@ -145,12 +153,11 @@ int32_t Vp9FrameBufferPool::VpxGetFrameBuffer(void* user_priv,
   RTC_DCHECK(user_priv);
   RTC_DCHECK(fb);
 
-#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
-  // Limit size of 8k YUV highdef frame
-  size_t size_limit = 7680 * 4320 * 3 / 2 * 2;
+  // Limit size to the maximum supported YUV 4:4:4 12-bit frame buffer, which
+  // requires 2 bytes per sample.
+  size_t size_limit = static_cast<size_t>(kMaxFrameSizePixels) * 3 * 2;
   if (min_size > size_limit)
     return -1;
-#endif
 
   Vp9FrameBufferPool* pool = static_cast<Vp9FrameBufferPool*>(user_priv);
 

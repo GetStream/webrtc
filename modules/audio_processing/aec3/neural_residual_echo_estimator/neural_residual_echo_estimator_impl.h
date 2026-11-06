@@ -13,15 +13,24 @@
 
 #include <array>
 #include <memory>
+#include <span>
+#include <utility>
 #include <vector>
 
 #include "absl/base/nullability.h"
-#include "api/array_view.h"
 #include "api/audio/echo_canceller3_config.h"
 #include "api/audio/neural_residual_echo_estimator.h"
+#include "api/audio/tflite_model_handle.h"
+#include "api/environment/environment.h"
+#include "api/ref_count.h"
+#include "api/scoped_refptr.h"
+#include "api/task_queue/task_queue_base.h"
 #include "modules/audio_processing/aec3/aec3_common.h"
 #include "modules/audio_processing/aec3/neural_residual_echo_estimator/neural_feature_extractor.h"
 #include "modules/audio_processing/logging/apm_data_dumper.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/synchronization/mutex.h"
+#include "rtc_base/thread_annotations.h"
 #include "third_party/tflite/src/tensorflow/lite/model_builder.h"
 #include "third_party/tflite/src/tensorflow/lite/op_resolver.h"
 #ifdef WEBRTC_ANDROID_PLATFORM_BUILD
@@ -31,6 +40,17 @@
 #endif
 
 namespace webrtc {
+
+// Status categories for async neural residual echo estimator model
+// initialization.
+// Must match enum WebRtcNeuralResidualEchoEstimatorInitResult in
+// web_rtc/enums.xml.
+enum class NeuralResidualEchoEstimatorInitResult {
+  kSuccess = 0,
+  kModelLoadFailed = 1,
+  kDestroyedBeforeResolved = 2,
+  kNumCategories = 3,
+};
 
 // Implements the NeuralResidualEchoEstimator's virtual methods to estimate
 // residual echo not fully removed by the linear AEC3 estimator. It uses a
@@ -45,12 +65,13 @@ class NeuralResidualEchoEstimatorImpl : public NeuralResidualEchoEstimator {
     virtual ~ModelRunner() = default;
 
     virtual int StepSize() const = 0;
-    virtual ArrayView<float> GetInput(
+    virtual std::span<float> GetInput(
         FeatureExtractor::ModelInputEnum input_enum) = 0;
-    virtual ArrayView<const float> GetOutput(
+    virtual std::span<const float> GetOutput(
         FeatureExtractor::ModelOutputEnum output_enum) = 0;
     virtual const audioproc::ReeModelMetadata& GetMetadata() const = 0;
     virtual bool Invoke() = 0;
+    virtual void Reset() = 0;
   };
 
   // Loads a model into a ModelRunner and creates a NeuralResidualEchoEstimator
@@ -59,47 +80,125 @@ class NeuralResidualEchoEstimatorImpl : public NeuralResidualEchoEstimator {
       const tflite::FlatBufferModel* model,
       const tflite::OpResolver& op_resolver);
 
+  // Same as `Create`, but always returns a valid echo estimator and initializes
+  // asynchronously on a background thread.
+  // All APIs may be called before initialization, but will be no-ops. Use
+  // `IsInitialized()` to poll for when the estimator starts producing real
+  // estimates.
+  static absl_nonnull std::unique_ptr<NeuralResidualEchoEstimator> CreateAsync(
+      const Environment& env,
+      std::unique_ptr<tflite::OpResolver> op_resolver,
+      scoped_refptr<TfliteModelHandle> model_handle);
+
   // Load a TF Lite model into a ModelRunner. Exposed for testing.
   static std::unique_ptr<ModelRunner> LoadTfLiteModel(
       const tflite::FlatBufferModel* model,
       const tflite::OpResolver& op_resolver);
 
-  // Constructor used for testing with a mock ModelRunner.
+  // Constructor used for synchronous initialization.
   explicit NeuralResidualEchoEstimatorImpl(
-      absl_nonnull std::unique_ptr<ModelRunner> model_runner);
+      std::unique_ptr<ModelRunner> model_runner);
+  ~NeuralResidualEchoEstimatorImpl() override;
 
   void Estimate(
       const Block& render,
-      ArrayView<const std::array<float, kBlockSize>> y,
-      ArrayView<const std::array<float, kBlockSize>> e,
-      ArrayView<const std::array<float, kFftLengthBy2Plus1>> S2,
-      ArrayView<const std::array<float, kFftLengthBy2Plus1>> Y2,
-      ArrayView<const std::array<float, kFftLengthBy2Plus1>> E2,
+      std::span<const std::array<float, kBlockSize>> y,
+      std::span<const std::array<float, kBlockSize>> e,
+      std::span<const std::array<float, kFftLengthBy2Plus1>> S2,
+      std::span<const std::array<float, kFftLengthBy2Plus1>> Y2,
+      std::span<const std::array<float, kFftLengthBy2Plus1>> E2,
       bool dominant_nearend,
-      ArrayView<std::array<float, kFftLengthBy2Plus1>> R2,
-      ArrayView<std::array<float, kFftLengthBy2Plus1>> R2_unbounded) override;
+      std::span<std::array<float, kFftLengthBy2Plus1>> R2,
+      std::span<std::array<float, kFftLengthBy2Plus1>> R2_unbounded) override;
 
-  EchoCanceller3Config GetConfiguration(bool multi_channel) const override;
+  EchoCanceller3Config::Suppressor AdjustConfig(
+      const EchoCanceller3Config::Suppressor& config) const override;
+
+  void Reset() override;
+
+  bool IsInitialized() override;
 
  private:
+  // State needed for inference, initialized separately from the estimator.
+  struct ModelBundle {
+    // If present, contains ML model data used by `model_runner`.
+    // Keep declaration order: Must outlive `model_runner`.
+    scoped_refptr<TfliteModelHandle> model_handle;
+    // Encapsulates all ML inference work.
+    std::unique_ptr<ModelRunner> model_runner;
+    // Feature extractor for the `model_runner`.
+    std::unique_ptr<FeatureExtractor> feature_extractor;
+    // Metadata from the ML model about how to interpret its outputs.
+    bool use_unbounded_mask = false;
+  };
+
+  // Thread-safe accessor for sending an initialized model bundle across
+  // threads. A background thread uses `Set()` to pass initialized model data
+  // when ready. The realtime capture thread uses `TryGet()` to access the data.
+  //
+  // All state is guarded by mutex. Minimize access on realtime threads.
+  struct CrossThreadState : public RefCountInterface {
+   public:
+    enum class Resolution { kPending, kSuccess, kFailed };
+
+    // Sets the initialized model data to be used for processing.
+    // Should only be called once, as the capture thread will stop polling
+    // `TryGet()` after receiving a model.
+    void Set(std::unique_ptr<ModelBundle> bundle) {
+      webrtc::MutexLock lock(&mutex_);
+      RTC_DCHECK(!model_bundle_);
+      model_bundle_ = std::move(bundle);
+      resolution_ = Resolution::kSuccess;
+    }
+
+    void MarkFailed() {
+      webrtc::MutexLock lock(&mutex_);
+      resolution_ = Resolution::kFailed;
+    }
+
+    // Retrieves the model data to be used for processing, if available.
+    std::unique_ptr<ModelBundle> TryGet() {
+      webrtc::MutexLock lock(&mutex_);
+      return std::move(model_bundle_);
+    }
+
+    Resolution GetResolution() const {
+      webrtc::MutexLock lock(&mutex_);
+      return resolution_;
+    }
+
+   private:
+    mutable webrtc::Mutex mutex_;
+    std::unique_ptr<ModelBundle> model_bundle_ RTC_GUARDED_BY(mutex_);
+    Resolution resolution_ RTC_GUARDED_BY(mutex_) = Resolution::kPending;
+  };
+
+  // Constructor used for async initialization. See CreateAsync for details.
+  NeuralResidualEchoEstimatorImpl(
+      const Environment& env,
+      std::unique_ptr<tflite::OpResolver> op_resolver,
+      scoped_refptr<TfliteModelHandle> model_handle);
+
   void DumpInputs(const Block& render,
-                  ArrayView<const std::array<float, kBlockSize>> y,
-                  ArrayView<const std::array<float, kBlockSize>> e);
+                  std::span<const std::array<float, kBlockSize>> y,
+                  std::span<const std::array<float, kBlockSize>> e);
 
-  // Encapsulates all ML model invocation work.
-  const std::unique_ptr<ModelRunner> model_runner_;
-
-  const bool use_unbounded_mask_;
-  std::unique_ptr<FeatureExtractor> feature_extractor_;
+  // Synchronization state for initializing inference objects off the main
+  // thread or realtime threads.
+  const scoped_refptr<CrossThreadState> cross_thread_state_;
+  // Once initialized, this contains the objects needed for ML inference.
+  std::unique_ptr<ModelBundle> model_bundle_;
+  // Task queue used to manage background thread initialization.
+  std::unique_ptr<TaskQueueBase, TaskQueueDeleter> init_queue_;
 
   // Downsampled model output for what fraction of the power content in the
   // linear AEC output is echo for each bin.
   std::array<float, kFftLengthBy2Plus1> output_mask_;
   std::array<float, kFftLengthBy2Plus1> output_mask_unbounded_;
 
-  std::vector<ArrayView<const float, kBlockSize>> render_channels_;
-  std::vector<ArrayView<const float, kBlockSize>> y_channels_;
-  std::vector<ArrayView<const float, kBlockSize>> e_channels_;
+  std::vector<std::span<const float, kBlockSize>> render_channels_;
+  std::vector<std::span<const float, kBlockSize>> y_channels_;
+  std::vector<std::span<const float, kBlockSize>> e_channels_;
 
   static int instance_count_;
   // Pointer to a data dumper that is used for debugging purposes.

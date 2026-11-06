@@ -50,7 +50,6 @@
 #include "rtc_base/checks.h"
 #include "rtc_base/experiments/encoder_info_settings.h"
 #include "rtc_base/experiments/encoder_speed_experiment.h"
-#include "rtc_base/experiments/psnr_experiment.h"
 #include "rtc_base/logging.h"
 #include "system_wrappers/include/clock.h"
 #include "third_party/libaom/source/libaom/aom/aom_codec.h"
@@ -61,6 +60,16 @@
 #if (defined(WEBRTC_ARCH_ARM) || defined(WEBRTC_ARCH_ARM64)) && \
     (defined(WEBRTC_ANDROID) || defined(WEBRTC_IOS))
 #define MOBILE_ARM
+#endif
+
+#ifndef AOM_EFLAG_CALCULATE_PSNR
+#define AOM_EFLAG_CALCULATE_PSNR (1 << 3)
+#endif
+
+#if defined(WEBRTC_ENCODER_PSNR_STATS)
+constexpr bool kEnablePsnrStats = true;
+#else
+constexpr bool kEnablePsnrStats = false;
 #endif
 
 #define SET_ENCODER_PARAM_OR_RETURN_ERROR(param_id, param_value) \
@@ -116,6 +125,8 @@ EncoderSpeedController::EncodeResults ToSpeedControllerEncodeResult(
       .speed = speed,
       .encode_time = encode_result.encode_time,
       .qp = image.qp_ / 4,  // Use [0, 63] range instead of [0, 255].
+      .psnr = image.psnr().has_value() ? std::optional<double>(image.psnr()->y)
+                                       : std::nullopt,
       .frame_info = frame_info};
 }
 
@@ -183,8 +194,7 @@ class LibaomAv1Encoder final : public VideoEncoder {
 
   CodecSpecificInfo CreateCodecSpecificInfo(
       const EncodedImage& image,
-      const ScalableVideoController::LayerFrameConfig& layer_frame,
-      bool end_of_picture);
+      const ScalableVideoController::LayerFrameConfig& layer_frame);
 
   std::unique_ptr<ScalableVideoController> svc_controller_;
   std::optional<ScalabilityMode> scalability_mode_;
@@ -205,14 +215,10 @@ class LibaomAv1Encoder final : public VideoEncoder {
   EncodedImageCallback* encoded_image_callback_;
   double framerate_fps_;  // Current target frame rate.
   int64_t timestamp_;
+  const Environment env_;
   const LibaomAv1EncoderInfoSettings encoder_info_override_;
-  // TODO(webrtc:351644568): Remove this kill-switch after the feature is fully
-  // deployed.
-  const bool post_encode_frame_drop_;
 
   // Determine whether the frame should be sampled for PSNR.
-  // TODO(webrtc:388070060): Remove after rollout.
-  const PsnrExperiment psnr_experiment_;
   FrameSampler psnr_frame_sampler_;
   const bool drop_repeat_frames_on_enhancement_layers_;
   std::map<int, uint32_t> last_encoded_timestamp_by_sid_;
@@ -262,11 +268,9 @@ LibaomAv1Encoder::LibaomAv1Encoder(const Environment& env,
       encoded_image_callback_(nullptr),
       framerate_fps_(0),
       timestamp_(0),
-      encoder_info_override_(env.field_trials()),
-      post_encode_frame_drop_(!env.field_trials().IsDisabled(
-          "WebRTC-LibaomAv1Encoder-PostEncodeFrameDrop")),
-      psnr_experiment_(env.field_trials()),
-      psnr_frame_sampler_(psnr_experiment_.SamplingInterval()),
+      env_(env),
+      encoder_info_override_(env_.field_trials()),
+      psnr_frame_sampler_(FrameSampler::kDefaultPsnrFrameSamplingInterval),
       drop_repeat_frames_on_enhancement_layers_(env.field_trials().IsEnabled(
           "WebRTC-LibaomAv1Encoder-DropRepeatFramesOnEnhancementLayers")),
       encoder_speed_experiment_(env.field_trials()),
@@ -425,10 +429,7 @@ int LibaomAv1Encoder::InitEncode(const VideoCodec* codec_settings,
   SET_ENCODER_PARAM_OR_RETURN_ERROR(AV1E_SET_ENABLE_TX64, 0);
   SET_ENCODER_PARAM_OR_RETURN_ERROR(AV1E_SET_MAX_REFERENCE_FRAMES, 3);
   SET_ENCODER_PARAM_OR_RETURN_ERROR(AV1E_SET_MAX_CONSEC_FRAME_DROP_MS_CBR, 250);
-
-  if (post_encode_frame_drop_) {
-    SET_ENCODER_PARAM_OR_RETURN_ERROR(AV1E_SET_POSTENCODE_DROP_RTC, 1);
-  }
+  SET_ENCODER_PARAM_OR_RETURN_ERROR(AV1E_SET_POSTENCODE_DROP_RTC, 1);
 
   if (encoder_speed_experiment_.IsDynamicSpeedEnabled()) {
     LibaomSpeedConfigFactory speed_config_factory(
@@ -796,8 +797,9 @@ int32_t LibaomAv1Encoder::Encode(
           it != last_encoded_timestamp_by_sid_.end()) {
         // Get the time since the last encoded frame for this spatial layer.
         // Don't drop enhancement layer repeat frame if last encode was more
-        // than one second ago.
-        if ((frame.rtp_timestamp() - it->second) > kVideoPayloadTypeFrequency) {
+        // than 500ms ago.
+        if ((frame.rtp_timestamp() - it->second) >
+            kVideoPayloadTypeFrequency / 2) {
           all_layers_droppable = false;
           break;
         }
@@ -864,6 +866,13 @@ int32_t LibaomAv1Encoder::Encode(
                                mapped_buffer->height());
       auto i420_buffer = mapped_buffer->GetI420();
       RTC_DCHECK(i420_buffer);
+
+      // TODO: crbug.com/492213293 - Remove once the root cause is fixed.
+      if (i420_buffer->StrideU() != i420_buffer->StrideV()) {
+        RTC_LOG(LS_ERROR) << "Libaom requires the U and V strides to be equal.";
+        return WEBRTC_VIDEO_CODEC_ENCODER_FAILURE;
+      }
+
       RTC_CHECK_EQ(i420_buffer->width(), frame_for_encode_->d_w);
       RTC_CHECK_EQ(i420_buffer->height(), frame_for_encode_->d_h);
       frame_for_encode_->planes[AOM_PLANE_Y] =
@@ -905,6 +914,9 @@ int32_t LibaomAv1Encoder::Encode(
       svc_params_ ? svc_params_->number_spatial_layers : 1;
   auto next_layer_frame = layer_frames.begin();
   std::vector<std::pair<EncodedImage, CodecSpecificInfo>> encoded_images;
+  // Index into `encoded_images` indicating the last active layer which produced
+  // an encoded image. Used to correctly set `end_of_picture`.
+  std::optional<size_t> last_encoded_image_index;
   for (size_t sid = 0; sid < num_spatial_layers; ++sid) {
     // The libaom AV1 encoder requires that `aom_codec_encode` is called for
     // every spatial layer, even if the configured bitrate for that layer is
@@ -921,7 +933,6 @@ int32_t LibaomAv1Encoder::Encode(
       non_encoded_layer_frame.emplace().S(sid);
       layer_frame = &*non_encoded_layer_frame;
     }
-    const bool end_of_picture = (next_layer_frame == layer_frames.end());
 
     aom_enc_frame_flags_t flags =
         layer_frame->IsKeyframe() ? AOM_EFLAG_FORCE_KF : 0;
@@ -931,25 +942,50 @@ int32_t LibaomAv1Encoder::Encode(
       SetSvcRefFrameConfig(*layer_frame);
     }
 
-#if defined(WEBRTC_ENCODER_PSNR_STATS) && defined(AOM_EFLAG_CALCULATE_PSNR)
-    if (psnr_experiment_.IsEnabled() &&
-        psnr_frame_sampler_.ShouldBeSampled(frame)) {
-      flags |= AOM_EFLAG_CALCULATE_PSNR;
-    }
-#endif
-
+    EncodeResult output;
     if (!speed_controllers_.empty()) {
       RTC_DCHECK_GT(speed_controllers_.size(), sid);
       EncoderSpeedController& speed_controller = *speed_controllers_[sid];
 
       EncoderSpeedController::FrameEncodingInfo frame_info{
           .reference_type = AsSpeedControllerFrameType(*layer_frame),
-          .is_repeat_frame = frame.is_repeat_frame()};
+          .is_repeat_frame = frame.is_repeat_frame(),
+          .timestamp = Timestamp::Millis(frame.render_time_ms())};
       EncoderSpeedController::EncodeSettings settings =
           speed_controller.GetEncodeSettings(frame_info);
 
+      if (settings.calculate_psnr && kEnablePsnrStats) {
+        flags |= AOM_EFLAG_CALCULATE_PSNR;
+      }
+
+      // Encode with baseline settings in case a speed control probe is
+      // requested.
+      std::optional<EncodeResult> baseline_output;
+      if (settings.baseline_comparison_speed.has_value()) {
+        // Configure the desired speed setting.
+        SET_ENCODER_PARAM_OR_RETURN_ERROR(AOME_SET_CPUUSED,
+                                          *settings.baseline_comparison_speed);
+
+        // Encode the frame, with the encoder internal state frozen - so that
+        // rate control etc is not updated.
+        baseline_output = DoEncode(
+            duration, flags | AOM_EFLAG_FREEZE_INTERNAL_STATE, layer_frame);
+
+        if (baseline_output->status_code != AOM_CODEC_OK) {
+          RTC_LOG(LS_WARNING)
+              << "LibaomAv1Encoder::Encode returned error: '"
+              << aom_codec_err_to_string(baseline_output->status_code) << "'.";
+          return WEBRTC_VIDEO_CODEC_ERROR;
+        }
+
+        if (!baseline_output->encoded_image.has_value()) {
+          // Frame dropped, no point in trying to encode a second time.
+          continue;
+        }
+      }
+
       SET_ENCODER_PARAM_OR_RETURN_ERROR(AOME_SET_CPUUSED, settings.speed);
-      EncodeResult output = DoEncode(duration, flags, layer_frame);
+      output = DoEncode(duration, flags, layer_frame);
       if (output.status_code != AOM_CODEC_OK) {
         RTC_LOG(LS_WARNING)
             << "LibaomAv1Encoder::Encode returned error: '"
@@ -957,65 +993,89 @@ int32_t LibaomAv1Encoder::Encode(
         return WEBRTC_VIDEO_CODEC_ERROR;
       }
 
-      if (!output.encoded_image.has_value()) {
+      if (non_encoded_layer_frame || !output.encoded_image.has_value()) {
         // Frame dropped, presumably by rate controller. This is not an error.
-        continue;
+        if (baseline_output.has_value() &&
+            baseline_output->encoded_image.has_value()) {
+          // Second encoding dropped frame, but not the first. This is
+          // unexpected. Use baseline encoding as main frame instead.
+          output = *baseline_output;
+          baseline_output.reset();
+          RTC_LOG(LS_WARNING) << "AV1 Encoder unexpectedly dropped frame on "
+                              << "second encoding of PSNR probe.";
+        } else {
+          EncodedImage dropped_image;
+          dropped_image.SetSpatialIndex(sid);
+          dropped_image.set_end_of_temporal_unit(sid == num_spatial_layers - 1);
+          encoded_images.emplace_back(std::move(dropped_image),
+                                      CodecSpecificInfo());
+          continue;
+        }
       }
-
-      RTC_DCHECK(output.encoded_image.has_value());
 
       speed_controller.OnEncodedFrame(
-          ToSpeedControllerEncodeResult(output, frame_info, settings.speed));
+          ToSpeedControllerEncodeResult(output, frame_info, settings.speed),
+          baseline_output.has_value()
+              ? std::optional<EncoderSpeedController::EncodeResults>(
+                    ToSpeedControllerEncodeResult(
+                        *baseline_output, frame_info,
+                        *settings.baseline_comparison_speed))
+              : std::nullopt);
 
-      RTC_DCHECK_GT(output.encoded_image->size(), 0u);
-      PopulateEncodedImageFromVideoFrame(frame, *output.encoded_image);
-      CodecSpecificInfo codec_specifics = CreateCodecSpecificInfo(
-          *output.encoded_image, *layer_frame, end_of_picture);
-
-      if (non_encoded_layer_frame) {
-        continue;
-      }
-
-      encoded_images.emplace_back(std::move(*output.encoded_image),
-                                  std::move(codec_specifics));
     } else {
       // No speed controller used.
-      EncodeResult output = DoEncode(duration, flags, layer_frame);
+
+      if (kEnablePsnrStats && psnr_frame_sampler_.ShouldBeSampled(frame)) {
+        flags |= AOM_EFLAG_CALCULATE_PSNR;
+      }
+
+      output = DoEncode(duration, flags, layer_frame);
       if (output.status_code != AOM_CODEC_OK) {
         RTC_LOG(LS_WARNING)
             << "LibaomAv1Encoder::Encode returned error: '"
             << aom_codec_err_to_string(output.status_code) << "'.";
         return WEBRTC_VIDEO_CODEC_ERROR;
       }
-      if (!output.encoded_image.has_value()) {
-        // Status code OK but no image - the encoder dropped the frame,
-        // presumable due to rate control. This is not an error.
+      if (non_encoded_layer_frame || !output.encoded_image.has_value()) {
+        // Frame dropped, presumably by rate controller. This is not an error.
+        EncodedImage dropped_image;
+        dropped_image.SetSpatialIndex(sid);
+        dropped_image.set_end_of_temporal_unit(sid == num_spatial_layers - 1);
+        encoded_images.emplace_back(std::move(dropped_image),
+                                    CodecSpecificInfo());
         continue;
       }
+    }
 
-      if (non_encoded_layer_frame) {
-        continue;
+    RTC_DCHECK(output.encoded_image.has_value());
+    RTC_DCHECK_GT(output.encoded_image->size(), 0u);
+
+    PopulateEncodedImageFromVideoFrame(frame, *output.encoded_image);
+    CodecSpecificInfo codec_specifics =
+        CreateCodecSpecificInfo(*output.encoded_image, *layer_frame);
+
+    output.encoded_image->set_end_of_temporal_unit(sid ==
+                                                   num_spatial_layers - 1);
+    last_encoded_image_index = encoded_images.size();
+    encoded_images.emplace_back(std::move(*output.encoded_image),
+                                std::move(codec_specifics));
+  }
+
+  for (size_t i = 0; i < encoded_images.size(); ++i) {
+    auto& [encoded_image, codec_specifics] = encoded_images[i];
+    codec_specifics.end_of_picture = i == last_encoded_image_index;
+    if (encoded_image.size() > 0) {
+      encoded_image_callback_->OnEncodedImage(encoded_image, &codec_specifics);
+      if (encoded_image.SpatialIndex().has_value()) {
+        last_encoded_timestamp_by_sid_[*encoded_image.SpatialIndex()] =
+            frame.rtp_timestamp();
       }
-
-      RTC_DCHECK_GT(output.encoded_image->size(), 0u);
-      PopulateEncodedImageFromVideoFrame(frame, *output.encoded_image);
-      CodecSpecificInfo codec_specifics = CreateCodecSpecificInfo(
-          *output.encoded_image, *layer_frame, end_of_picture);
-
-      encoded_images.emplace_back(std::move(*output.encoded_image),
-                                  std::move(codec_specifics));
+      continue;
     }
-  }
-
-  if (!encoded_images.empty()) {
-    encoded_images.back().second.end_of_picture = true;
-  }
-  for (auto& [encoded_image, codec_specifics] : encoded_images) {
-    encoded_image_callback_->OnEncodedImage(encoded_image, &codec_specifics);
-    if (encoded_image.SpatialIndex().has_value()) {
-      last_encoded_timestamp_by_sid_[*encoded_image.SpatialIndex()] =
-          frame.rtp_timestamp();
-    }
+    // Size 0 indicates a dropped frame (inserted above).
+    encoded_image_callback_->OnFrameDropped(
+        frame.rtp_timestamp(), *encoded_image.SpatialIndex(),
+        *encoded_image.is_end_of_temporal_unit());
   }
 
   return WEBRTC_VIDEO_CODEC_OK;
@@ -1062,9 +1122,9 @@ EncodeResult LibaomAv1Encoder::DoEncode(
         layer_frame->Keyframe();
       }
 
-      encoded_image._frameType = layer_frame->IsKeyframe()
-                                     ? VideoFrameType::kVideoFrameKey
-                                     : VideoFrameType::kVideoFrameDelta;
+      encoded_image.set_frame_type(layer_frame->IsKeyframe()
+                                       ? VideoFrameType::kVideoFrameKey
+                                       : VideoFrameType::kVideoFrameDelta);
 
       encoded_image.content_type_ = VideoContentType::UNSPECIFIED;
       // If encoded image width/height info are added to aom_codec_cx_pkt_t,
@@ -1108,11 +1168,9 @@ EncodeResult LibaomAv1Encoder::DoEncode(
 
 CodecSpecificInfo LibaomAv1Encoder::CreateCodecSpecificInfo(
     const EncodedImage& image,
-    const ScalableVideoController::LayerFrameConfig& layer_frame,
-    bool end_of_picture) {
+    const ScalableVideoController::LayerFrameConfig& layer_frame) {
   CodecSpecificInfo codec_specific_info;
   codec_specific_info.codecType = kVideoCodecAV1;
-  codec_specific_info.end_of_picture = end_of_picture;
   codec_specific_info.scalability_mode = scalability_mode_;
   bool is_keyframe = layer_frame.IsKeyframe();
   codec_specific_info.generic_frame_info =

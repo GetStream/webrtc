@@ -21,16 +21,18 @@
 #include "absl/strings/string_view.h"
 #include "api/rtc_error.h"
 #include "p2p/base/p2p_constants.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/ssl_fingerprint.h"
 #include "rtc_base/strings/string_builder.h"
 
-using webrtc::RTCError;
-using webrtc::RTCErrorOr;
-using webrtc::RTCErrorType;
-
 namespace webrtc {
 namespace {
+
+// ice-char = ALPHA / DIGIT / "+" / "/", RFC 8839 section 5.6.
+bool IsValidIceChar(char c) {
+  return absl::ascii_isalnum(c) || c == '+' || c == '/';
+}
 
 bool IsIceChar(char c) {
   // Note: '-', '=', '#' and '_' are *not* valid ice-chars but temporarily
@@ -43,7 +45,7 @@ bool IsIceChar(char c) {
         << "the future. See https://crbug.com/1053756";
     return true;
   }
-  return absl::ascii_isalnum(c) || c == '+' || c == '/';
+  return IsValidIceChar(c);
 }
 
 RTCError ValidateIceUfrag(absl::string_view raw_ufrag) {
@@ -151,7 +153,9 @@ bool ConnectionRoleToString(const ConnectionRole& role, std::string* role_str) {
 }
 
 TransportDescription::TransportDescription()
-    : ice_mode(ICEMODE_FULL), connection_role(CONNECTIONROLE_NONE) {}
+    : ice_mode(ICEMODE_FULL),
+      connection_role(CONNECTIONROLE_NONE),
+      cryptex(false) {}
 
 TransportDescription::TransportDescription(
     const std::vector<std::string>& transport_options,
@@ -165,14 +169,16 @@ TransportDescription::TransportDescription(
       ice_pwd(ice_pwd),
       ice_mode(ice_mode),
       connection_role(role),
-      identity_fingerprint(CopyFingerprint(identity_fingerprint)) {}
+      identity_fingerprint(CopyFingerprint(identity_fingerprint)),
+      cryptex(false) {}
 
 TransportDescription::TransportDescription(absl::string_view ice_ufrag,
                                            absl::string_view ice_pwd)
     : ice_ufrag(ice_ufrag),
       ice_pwd(ice_pwd),
       ice_mode(ICEMODE_FULL),
-      connection_role(CONNECTIONROLE_NONE) {}
+      connection_role(CONNECTIONROLE_NONE),
+      cryptex(false) {}
 
 TransportDescription::TransportDescription(const TransportDescription& from)
     : transport_options(from.transport_options),
@@ -180,7 +186,8 @@ TransportDescription::TransportDescription(const TransportDescription& from)
       ice_pwd(from.ice_pwd),
       ice_mode(from.ice_mode),
       connection_role(from.connection_role),
-      identity_fingerprint(CopyFingerprint(from.identity_fingerprint.get())) {}
+      identity_fingerprint(CopyFingerprint(from.identity_fingerprint.get())),
+      cryptex(from.cryptex) {}
 
 TransportDescription::~TransportDescription() = default;
 
@@ -197,7 +204,15 @@ TransportDescription& TransportDescription::operator=(
   connection_role = from.connection_role;
 
   identity_fingerprint.reset(CopyFingerprint(from.identity_fingerprint.get()));
+  cryptex = from.cryptex;
   return *this;
+}
+
+void TransportDescription::AddOption(absl::string_view option) {
+  // ice-option-tag is 1*ice-char, RFC 8839 section 5.6.
+  RTC_DCHECK(!option.empty() && absl::c_all_of(option, IsValidIceChar))
+      << "Invalid ice-option-tag: " << option;
+  transport_options.emplace_back(option);
 }
 
 }  // namespace webrtc

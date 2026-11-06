@@ -18,16 +18,14 @@ rtc_library("streams_config") {
 
   deps = [
     ":encoder_config",
-    "../../api:array_view",
     "../../api:field_trials_view",
     "../../api/units:data_rate",
     "../../api/video:resolution",
-    "../../api/video:video_codec_constants",
+    "../../api/video:video_adapter",
     "../../api/video:video_frame",
     "../../api/video_codecs:video_codecs_api",
     "../../call/adaptation:resource_adaptation",
     "../../media:media_constants",
-    "../../media:video_adapter",
     "../../modules/video_coding:video_coding_utility",
     "../../modules/video_coding:webrtc_vp9_helpers",
     "../../rtc_base:checks",
@@ -57,13 +55,12 @@ rtc_library("encoder_config") {
     "../../api/video_codecs:scalability_mode",
     "../../api/video_codecs:video_codecs_api",
     "../../rtc_base:checks",
-    "../../rtc_base:refcount",
     "../../rtc_base:stringutils",
   ]
 }
 
 if (rtc_include_tests) {
-  rtc_library("video_config_tests") {
+  rtc_cc_test("video_config_tests") {
     testonly = true
 
     defines = []
@@ -90,8 +87,5 @@ if (rtc_include_tests) {
       "../../test:test_support",
       "//third_party/abseil-cpp/absl/strings:string_view",
     ]
-    if (!build_with_mozilla) {
-      deps += [ "../../media:rtc_media_base" ]
-    }
   }
 }

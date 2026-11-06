@@ -11,6 +11,8 @@
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 #import <XCTest/XCTest.h>
+
+#include "test/gtest.h"
 #import "api/peerconnection/RTCPeerConnectionFactory+Native.h"
 #import "api/peerconnection/RTCPeerConnectionFactoryBuilder+DefaultComponents.h"
 #import "api/peerconnection/RTCPeerConnectionFactoryBuilder.h"
@@ -24,7 +26,6 @@
 
 #include <utility>
 
-#include "rtc_base/gunit.h"
 
 namespace {
 

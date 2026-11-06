@@ -17,6 +17,7 @@
 #include <iterator>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -24,7 +25,6 @@
 #include "absl/memory/memory.h"
 #include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
-#include "api/array_view.h"
 #include "api/audio_codecs/audio_encoder.h"
 #include "api/audio_codecs/audio_format.h"
 #include "api/audio_codecs/opus/audio_encoder_opus_config.h"
@@ -400,12 +400,10 @@ AudioEncoderOpusImpl::AudioEncoderOpusImpl(
   // of. See https://bugs.chromium.org/p/webrtc/issues/detail?id=7847
   RTC_CHECK(config_.payload_type == -1 || config_.payload_type == payload_type);
   RTC_CHECK(RecreateEncoderInstance());
-
-  SetProjectedPacketLossRate(packet_loss_rate_);
 }
 
 AudioEncoderOpusImpl::~AudioEncoderOpusImpl() {
-  RTC_CHECK_EQ(0, WebRtcOpus_EncoderFree(inst_));
+  RTC_CHECK_EQ(WebRtcOpus_EncoderFree(inst_), 0);
 }
 
 int AudioEncoderOpusImpl::SampleRateHz() const {
@@ -438,9 +436,9 @@ void AudioEncoderOpusImpl::Reset() {
 
 bool AudioEncoderOpusImpl::SetFec(bool enable) {
   if (enable) {
-    RTC_CHECK_EQ(0, WebRtcOpus_EnableFec(inst_));
+    RTC_CHECK_EQ(WebRtcOpus_EnableFec(inst_), 0);
   } else {
-    RTC_CHECK_EQ(0, WebRtcOpus_DisableFec(inst_));
+    RTC_CHECK_EQ(WebRtcOpus_DisableFec(inst_), 0);
   }
   config_.fec_enabled = enable;
   return true;
@@ -448,9 +446,9 @@ bool AudioEncoderOpusImpl::SetFec(bool enable) {
 
 bool AudioEncoderOpusImpl::SetDtx(bool enable) {
   if (enable) {
-    RTC_CHECK_EQ(0, WebRtcOpus_EnableDtx(inst_));
+    RTC_CHECK_EQ(WebRtcOpus_EnableDtx(inst_), 0);
   } else {
-    RTC_CHECK_EQ(0, WebRtcOpus_DisableDtx(inst_));
+    RTC_CHECK_EQ(WebRtcOpus_DisableDtx(inst_), 0);
   }
   config_.dtx_enabled = enable;
   return true;
@@ -504,24 +502,11 @@ void AudioEncoderOpusImpl::OnReceivedTargetAudioBitrate(
   SetTargetBitrate(target_audio_bitrate_bps);
 }
 
-void AudioEncoderOpusImpl::OnReceivedUplinkBandwidthImpl(
-    int target_audio_bitrate_bps,
-    std::optional<int64_t> bwe_period_ms) {
+void AudioEncoderOpusImpl::OnReceivedUplinkAllocation(
+    BitrateAllocationUpdate update) {
+  int target_audio_bitrate_bps = update.target_bitrate.bps();
   if (audio_network_adaptor_) {
     audio_network_adaptor_->SetTargetAudioBitrate(target_audio_bitrate_bps);
-    // We give smoothed bitrate allocation to audio network adaptor as
-    // the uplink bandwidth.
-    // The BWE spikes should not affect the bitrate smoother more than 25%.
-    // To simplify the calculations we use a step response as input signal.
-    // The step response of an exponential filter is
-    // u(t) = 1 - e^(-t / time_constant).
-    // In order to limit the affect of a BWE spike within 25% of its value
-    // before
-    // the next BWE update, we would choose a time constant that fulfills
-    // 1 - e^(-bwe_period_ms / time_constant) < 0.25
-    // Then 4 * bwe_period_ms is a good choice.
-    if (bwe_period_ms)
-      bitrate_smoother_->SetTimeConstantMs(*bwe_period_ms * 4);
     bitrate_smoother_->AddSample(target_audio_bitrate_bps,
                                  env_.clock().CurrentTime());
 
@@ -540,17 +525,6 @@ void AudioEncoderOpusImpl::OnReceivedUplinkBandwidthImpl(
                  std::max(AudioEncoderOpusConfig::kMinBitrateBps,
                           target_audio_bitrate_bps - overhead_bps)));
   }
-}
-void AudioEncoderOpusImpl::OnReceivedUplinkBandwidth(
-    int target_audio_bitrate_bps,
-    std::optional<int64_t> bwe_period_ms) {
-  OnReceivedUplinkBandwidthImpl(target_audio_bitrate_bps, bwe_period_ms);
-}
-
-void AudioEncoderOpusImpl::OnReceivedUplinkAllocation(
-    BitrateAllocationUpdate update) {
-  OnReceivedUplinkBandwidthImpl(update.target_bitrate.bps(),
-                                update.bwe_period.ms());
 }
 
 void AudioEncoderOpusImpl::OnReceivedRtt(int rtt_ms) {
@@ -583,14 +557,14 @@ void AudioEncoderOpusImpl::SetReceiverFrameLengthRange(
 
 AudioEncoder::EncodedInfo AudioEncoderOpusImpl::EncodeImpl(
     uint32_t rtp_timestamp,
-    ArrayView<const int16_t> audio,
+    std::span<const int16_t> audio,
     Buffer* encoded) {
   MaybeUpdateUplinkBandwidth();
 
   if (input_buffer_.empty())
     first_timestamp_in_buffer_ = rtp_timestamp;
 
-  input_buffer_.insert(input_buffer_.end(), audio.cbegin(), audio.cend());
+  input_buffer_.insert(input_buffer_.end(), audio.begin(), audio.end());
   if (input_buffer_.size() <
       (Num10msFramesPerPacket() * SamplesPer10msFrame())) {
     return EncodedInfo();
@@ -601,13 +575,13 @@ AudioEncoder::EncodedInfo AudioEncoderOpusImpl::EncodeImpl(
   const size_t max_encoded_bytes = SufficientOutputBufferSize();
   EncodedInfo info;
   info.encoded_bytes =
-      encoded->AppendData(max_encoded_bytes, [&](ArrayView<uint8_t> encoded) {
+      encoded->AppendData(max_encoded_bytes, [&](std::span<uint8_t> encoded) {
         int status = WebRtcOpus_Encode(
             inst_, &input_buffer_[0],
             CheckedDivExact(input_buffer_.size(), config_.num_channels),
-            saturated_cast<int16_t>(max_encoded_bytes), encoded.data());
+            max_encoded_bytes, encoded.data());
 
-        RTC_CHECK_GE(status, 0);  // Fails only if fed invalid data.
+        RTC_CHECK_GE(status, 0);  // Fails on bad input or too small a buffer.
 
         return static_cast<size_t>(status);
       });
@@ -619,7 +593,7 @@ AudioEncoder::EncodedInfo AudioEncoderOpusImpl::EncodeImpl(
   if (adjust_bandwidth_ && bitrate_changed_) {
     const auto bandwidth = GetNewBandwidth(config_, inst_);
     if (bandwidth) {
-      RTC_CHECK_EQ(0, WebRtcOpus_SetBandwidth(inst_, *bandwidth));
+      RTC_CHECK_EQ(WebRtcOpus_SetBandwidth(inst_, *bandwidth), 0);
     }
     bitrate_changed_ = false;
   }
@@ -664,43 +638,44 @@ bool AudioEncoderOpusImpl::RecreateEncoderInstance(
 
 bool AudioEncoderOpusImpl::RecreateEncoderInstance() {
   if (inst_)
-    RTC_CHECK_EQ(0, WebRtcOpus_EncoderFree(inst_));
+    RTC_CHECK_EQ(WebRtcOpus_EncoderFree(inst_), 0);
   input_buffer_.clear();
   input_buffer_.reserve(Num10msFramesPerPacket() * SamplesPer10msFrame());
-  RTC_CHECK_EQ(0, WebRtcOpus_EncoderCreate(
-                      &inst_, config_.num_channels,
-                      config_.application ==
-                              AudioEncoderOpusConfig::ApplicationMode::kVoip
-                          ? 0
-                          : 1,
-                      config_.sample_rate_hz));
+  RTC_CHECK_EQ(
+      WebRtcOpus_EncoderCreate(
+          &inst_, config_.num_channels,
+          config_.application == AudioEncoderOpusConfig::ApplicationMode::kVoip
+              ? 0
+              : 1,
+          config_.sample_rate_hz),
+      0);
   const int bitrate = GetBitrateBps(config_);
-  RTC_CHECK_EQ(0, WebRtcOpus_SetBitRate(inst_, bitrate));
+  RTC_CHECK_EQ(WebRtcOpus_SetBitRate(inst_, bitrate), 0);
   RTC_LOG(LS_VERBOSE) << "Set Opus bitrate to " << bitrate << " bps.";
   if (config_.fec_enabled) {
-    RTC_CHECK_EQ(0, WebRtcOpus_EnableFec(inst_));
+    RTC_CHECK_EQ(WebRtcOpus_EnableFec(inst_), 0);
   } else {
-    RTC_CHECK_EQ(0, WebRtcOpus_DisableFec(inst_));
+    RTC_CHECK_EQ(WebRtcOpus_DisableFec(inst_), 0);
   }
   RTC_CHECK_EQ(
-      0, WebRtcOpus_SetMaxPlaybackRate(inst_, config_.max_playback_rate_hz));
+      WebRtcOpus_SetMaxPlaybackRate(inst_, config_.max_playback_rate_hz), 0);
   // Use the default complexity if the start bitrate is within the hysteresis
   // window.
   complexity_ = GetNewComplexity(config_).value_or(config_.complexity);
-  RTC_CHECK_EQ(0, WebRtcOpus_SetComplexity(inst_, complexity_));
+  RTC_CHECK_EQ(WebRtcOpus_SetComplexity(inst_, complexity_), 0);
   bitrate_changed_ = true;
   if (config_.dtx_enabled) {
-    RTC_CHECK_EQ(0, WebRtcOpus_EnableDtx(inst_));
+    RTC_CHECK_EQ(WebRtcOpus_EnableDtx(inst_), 0);
   } else {
-    RTC_CHECK_EQ(0, WebRtcOpus_DisableDtx(inst_));
+    RTC_CHECK_EQ(WebRtcOpus_DisableDtx(inst_), 0);
   }
-  RTC_CHECK_EQ(0,
-               WebRtcOpus_SetPacketLossRate(
-                   inst_, static_cast<int32_t>(packet_loss_rate_ * 100 + .5)));
+  RTC_CHECK_EQ(WebRtcOpus_SetPacketLossRate(
+                   inst_, static_cast<int32_t>(packet_loss_rate_ * 100 + .5)),
+               0);
   if (config_.cbr_enabled) {
-    RTC_CHECK_EQ(0, WebRtcOpus_EnableCbr(inst_));
+    RTC_CHECK_EQ(WebRtcOpus_EnableCbr(inst_), 0);
   } else {
-    RTC_CHECK_EQ(0, WebRtcOpus_DisableCbr(inst_));
+    RTC_CHECK_EQ(WebRtcOpus_DisableCbr(inst_), 0);
   }
   num_channels_to_encode_ = NumChannels();
   next_frame_length_ms_ = config_.frame_size_ms;
@@ -724,7 +699,7 @@ void AudioEncoderOpusImpl::SetNumChannelsToEncode(
   if (num_channels_to_encode_ == num_channels_to_encode)
     return;
 
-  RTC_CHECK_EQ(0, WebRtcOpus_SetForceChannels(inst_, num_channels_to_encode));
+  RTC_CHECK_EQ(WebRtcOpus_SetForceChannels(inst_, num_channels_to_encode), 0);
   num_channels_to_encode_ = num_channels_to_encode;
 }
 
@@ -732,9 +707,9 @@ void AudioEncoderOpusImpl::SetProjectedPacketLossRate(float fraction) {
   fraction = std::min(std::max(fraction, 0.0f), kMaxPacketLossFraction);
   if (packet_loss_rate_ != fraction) {
     packet_loss_rate_ = fraction;
-    RTC_CHECK_EQ(
-        0, WebRtcOpus_SetPacketLossRate(
-               inst_, static_cast<int32_t>(packet_loss_rate_ * 100 + .5)));
+    RTC_CHECK_EQ(WebRtcOpus_SetPacketLossRate(
+                     inst_, static_cast<int32_t>(packet_loss_rate_ * 100 + .5)),
+                 0);
   }
 }
 
@@ -747,8 +722,9 @@ void AudioEncoderOpusImpl::SetTargetBitrate(int bits_per_second) {
     RTC_DCHECK(config_.IsOk());
     const int bitrate = GetBitrateBps(config_);
     RTC_CHECK_EQ(
-        0, WebRtcOpus_SetBitRate(
-               inst_, GetMultipliedBitrate(bitrate, bitrate_multipliers_)));
+        WebRtcOpus_SetBitRate(
+            inst_, GetMultipliedBitrate(bitrate, bitrate_multipliers_)),
+        0);
     RTC_LOG(LS_VERBOSE) << "Set Opus bitrate to " << bitrate << " bps.";
     bitrate_changed_ = true;
   }
@@ -756,7 +732,7 @@ void AudioEncoderOpusImpl::SetTargetBitrate(int bits_per_second) {
   const auto new_complexity = GetNewComplexity(config_);
   if (new_complexity && complexity_ != *new_complexity) {
     complexity_ = *new_complexity;
-    RTC_CHECK_EQ(0, WebRtcOpus_SetComplexity(inst_, complexity_));
+    RTC_CHECK_EQ(WebRtcOpus_SetComplexity(inst_, complexity_), 0);
   }
 }
 

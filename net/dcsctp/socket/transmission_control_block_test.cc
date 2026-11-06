@@ -11,12 +11,13 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
-#include "api/array_view.h"
 #include "api/task_queue/task_queue_base.h"
 #include "net/dcsctp/common/internal_types.h"
 #include "net/dcsctp/public/dcsctp_options.h"
 #include "net/dcsctp/public/dcsctp_socket.h"
+#include "net/dcsctp/public/types.h"
 #include "net/dcsctp/socket/capabilities.h"
 #include "net/dcsctp/socket/mock_dcsctp_socket_callbacks.h"
 #include "net/dcsctp/socket/packet_sender.h"
@@ -49,8 +50,7 @@ class TransmissionControlBlockTest : public testing::Test {
   Capabilities capabilities_;
   StrictMock<MockDcSctpSocketCallbacks> callbacks_;
   StrictMock<MockSendQueue> send_queue_;
-  testing::MockFunction<void(webrtc::ArrayView<const uint8_t>,
-                             SendPacketStatus)>
+  testing::MockFunction<void(std::span<const uint8_t>, SendPacketStatus)>
       on_send_fn_;
   testing::MockFunction<bool()> on_connection_established;
   PacketSender sender_;
@@ -79,7 +79,8 @@ TEST_F(TransmissionControlBlockTest, LogsAllCapabilitiesInToSring) {
   capabilities_.negotiated_maximum_outgoing_streams = 2000;
   capabilities_.message_interleaving = true;
   capabilities_.partial_reliability = true;
-  capabilities_.zero_checksum = true;
+  capabilities_.zero_checksum_method =
+      ZeroChecksumAlternateErrorDetectionMethod::LowerLayerDtls();
   capabilities_.reconfig = true;
 
   TransmissionControlBlock tcb(

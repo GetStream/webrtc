@@ -16,7 +16,6 @@
 #include <optional>
 #include <string>
 
-#include "absl/base/attributes.h"
 #include "api/audio/audio_processing.h"
 #include "api/audio/audio_view.h"
 #include "modules/audio_processing/include/audio_frame_view.h"
@@ -40,9 +39,6 @@ struct InternalAPMConfig {
   bool aec_drift_compensation_enabled = false;
   bool aec_extended_filter_enabled = false;
   int aec_suppression_level = 0;
-  bool aecm_enabled = false;
-  bool aecm_comfort_noise_enabled = false;
-  int aecm_routing_mode = 0;
   bool agc_enabled = false;
   int agc_mode = 0;
   bool agc_limiter_enabled = false;
@@ -54,6 +50,7 @@ struct InternalAPMConfig {
   bool pre_amplifier_enabled = false;
   float pre_amplifier_fixed_gain_factor = 1.f;
   std::string experiments_description = "";
+  std::string api_config_string = "";
 };
 
 // An interface for recording configuration and input/output streams
@@ -78,7 +75,7 @@ class AecDump {
   // Logs Event::Type INIT message.
   virtual void WriteInitMessage(const ProcessingConfig& api_format,
                                 int64_t time_now_ms) = 0;
-  ABSL_DEPRECATED("")
+  [[deprecated]]
   void WriteInitMessage(const ProcessingConfig& api_format) {
     WriteInitMessage(api_format, 0);
   }

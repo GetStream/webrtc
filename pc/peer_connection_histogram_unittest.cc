@@ -8,6 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <array>
 #include <memory>
 #include <optional>
 #include <set>
@@ -19,6 +20,7 @@
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "api/create_modular_peer_connection_factory.h"
+#include "api/environment/environment.h"
 #include "api/jsep.h"
 #include "api/peer_connection_interface.h"
 #include "api/rtc_error.h"
@@ -41,8 +43,10 @@
 #include "rtc_base/thread.h"
 #include "rtc_base/virtual_socket_server.h"
 #include "system_wrappers/include/metrics.h"
+#include "test/create_test_environment.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
+#include "test/run_loop.h"
 #include "test/wait_until.h"
 
 namespace webrtc {
@@ -74,8 +78,8 @@ a=rtpmap:101 fake_audio_codec/8000
 
 constexpr char kUsagePatternMetric[] = "WebRTC.PeerConnection.UsagePattern";
 constexpr TimeDelta kDefaultTimeout = TimeDelta::Millis(10000);
-const SocketAddress kLocalAddrs[2] = {SocketAddress("1.1.1.1", 0),
-                                      SocketAddress("2.2.2.2", 0)};
+const std::array kLocalAddrs{SocketAddress("1.1.1.1", 0),
+                             SocketAddress("2.2.2.2", 0)};
 const SocketAddress kPrivateLocalAddress("10.1.1.1", 0);
 const SocketAddress kPrivateIpv6LocalAddress("fd12:3456:789a:1::1", 0);
 
@@ -200,9 +204,7 @@ class PeerConnectionWrapperForUsageHistogramTest
     if (!set_local_offer) {
       return false;
     }
-    EXPECT_THAT(WaitUntil([&] { return observer()->ice_gathering_complete_; },
-                          ::testing::IsTrue()),
-                IsRtcOk());
+    EXPECT_TRUE(WaitUntil([&] { return observer()->ice_gathering_complete_; }));
     return true;
   }
 
@@ -230,7 +232,10 @@ class PeerConnectionUsageHistogramTest : public ::testing::Test {
   typedef std::unique_ptr<PeerConnectionWrapperForUsageHistogramTest>
       WrapperPtr;
 
-  PeerConnectionUsageHistogramTest() : main_(&vss_) { metrics::Reset(); }
+  PeerConnectionUsageHistogramTest()
+      : env_(CreateTestEnvironment()), main_(&vss_) {
+    metrics::Reset();
+  }
 
   WrapperPtr CreatePeerConnection() {
     RTCConfiguration config;
@@ -310,6 +315,7 @@ class PeerConnectionUsageHistogramTest : public ::testing::Test {
       pcf_deps.network_manager = std::move(fake_network);
     }
     EnableFakeMedia(pcf_deps);
+    pcf_deps.env = env_;
 
     auto pc_factory = CreateModularPeerConnectionFactory(std::move(pcf_deps));
     pc_factory->SetOptions(factory_options);
@@ -341,9 +347,10 @@ class PeerConnectionUsageHistogramTest : public ::testing::Test {
     return kLocalAddrs[next_local_address_++];
   }
 
+  const Environment env_;
   int next_local_address_ = 0;
   VirtualSocketServer vss_;
-  AutoSocketServerThread main_;
+  test::RunLoop main_;
 };
 
 TEST_F(PeerConnectionUsageHistogramTest, UsageFingerprintHistogramFromTimeout) {
@@ -478,9 +485,7 @@ TEST_F(PeerConnectionUsageHistogramTest, FingerprintDataOnly) {
   auto callee = CreatePeerConnection();
   caller->CreateDataChannel("foodata");
   ASSERT_TRUE(caller->ConnectTo(callee.get()));
-  ASSERT_THAT(
-      WaitUntil([&] { return callee->HaveDataChannel(); }, ::testing::IsTrue()),
-      IsRtcOk());
+  ASSERT_TRUE(WaitUntil([&] { return callee->HaveDataChannel(); }));
   caller->pc()->Close();
   callee->pc()->Close();
   int expected_fingerprint = MakeUsageFingerprint(
@@ -701,18 +706,11 @@ TEST_F(PeerConnectionUsageHistogramTest,
   std::unique_ptr<SessionDescriptionInterface> answer = callee->CreateAnswer();
   callee->SetLocalDescription(answer->Clone());
   caller->SetRemoteDescription(std::move(answer));
-  EXPECT_THAT(
-      WaitUntil([&] { return caller->IsConnected(); }, ::testing::IsTrue()),
-      IsRtcOk());
-  EXPECT_THAT(
-      WaitUntil([&] { return callee->IsConnected(); }, ::testing::IsTrue()),
-      IsRtcOk());
+  EXPECT_TRUE(WaitUntil([&] { return caller->IsConnected(); }));
+  EXPECT_TRUE(WaitUntil([&] { return callee->IsConnected(); }));
   // The callee needs to process the open message to have the data channel open.
-  EXPECT_THAT(
-      WaitUntil(
-          [&] { return callee->observer()->last_datachannel_ != nullptr; },
-          ::testing::IsTrue()),
-      IsRtcOk());
+  EXPECT_TRUE(WaitUntil(
+      [&] { return callee->observer()->last_datachannel_ != nullptr; }));
   caller->pc()->Close();
   callee->pc()->Close();
 

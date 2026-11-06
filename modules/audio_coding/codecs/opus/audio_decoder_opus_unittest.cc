@@ -16,24 +16,22 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <span>
 #include <utility>
 #include <vector>
 
-#include "api/array_view.h"
 #include "api/audio/audio_frame.h"
 #include "api/audio_codecs/audio_decoder.h"
 #include "api/audio_codecs/audio_encoder.h"
 #include "api/audio_codecs/opus/audio_encoder_opus_config.h"
 #include "api/environment/environment.h"
-#include "api/environment/environment_factory.h"
-#include "api/field_trials.h"
 #include "modules/audio_coding/codecs/opus/audio_encoder_opus.h"
 #include "modules/audio_coding/test/PCMFile.h"
 #include "rtc_base/buffer.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/numerics/safe_conversions.h"
 #include "rtc_base/random.h"
-#include "test/create_test_field_trials.h"
+#include "test/create_test_environment.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 #include "test/testsupport/file_utils.h"
@@ -82,7 +80,7 @@ class WhiteNoiseGenerator {
                                     std::numeric_limits<int16_t>::max())),
         random_generator_(42) {}
 
-  void GenerateNextFrame(ArrayView<int16_t> frame) {
+  void GenerateNextFrame(std::span<int16_t> frame) {
     for (size_t i = 0; i < frame.size(); ++i) {
       frame[i] = saturated_cast<int16_t>(
           random_generator_.Rand(-amplitude_, amplitude_));
@@ -94,7 +92,7 @@ class WhiteNoiseGenerator {
   Random random_generator_;
 };
 
-bool IsZeroedFrame(ArrayView<const int16_t> audio) {
+bool IsZeroedFrame(std::span<const int16_t> audio) {
   for (const int16_t& v : audio) {
     if (v != 0)
       return false;
@@ -102,7 +100,7 @@ bool IsZeroedFrame(ArrayView<const int16_t> audio) {
   return true;
 }
 
-bool IsTrivialStereo(ArrayView<const int16_t> audio) {
+bool IsTrivialStereo(std::span<const int16_t> audio) {
   const int num_samples = CheckedDivExact(audio.size(), static_cast<size_t>(2));
   for (int i = 0, j = 0; i < num_samples; ++i, j += 2) {
     if (audio[j] != audio[j + 1]) {
@@ -246,7 +244,7 @@ std::vector<int16_t> EncodeDecodeSpeechUntilOneFrameIsDecoded(
 }  // namespace
 
 TEST(AudioDecoderOpusTest, MonoEncoderStereoDecoderOutputsTrivialStereo) {
-  const Environment env = EnvironmentFactory().Create();
+  const Environment env = CreateTestEnvironment();
   WhiteNoiseGenerator generator(/*amplitude_dbfs=*/-70.0);
   std::array<int16_t, kInputFrameLength> input_frame;
   // Create a mono encoder.
@@ -284,7 +282,7 @@ TEST(AudioDecoderOpusTest, MonoEncoderStereoDecoderOutputsTrivialStereo) {
 
 TEST(AudioDecoderOpusTest,
      MonoEncoderStereoDecoderOutputsTrivialStereoComfortNoise) {
-  const Environment env = EnvironmentFactory().Create();
+  const Environment env = CreateTestEnvironment();
   // Create a mono encoder.
   AudioEncoderOpusConfig encoder_config =
       GetEncoderConfig(/*num_channels=*/1, /*dtx_enabled=*/true);
@@ -313,7 +311,7 @@ TEST(AudioDecoderOpusTest,
   ASSERT_EQ(speech_type, AudioDecoder::SpeechType::kComfortNoise);
   RTC_CHECK_GT(num_decoded_samples, 0);
   RTC_CHECK_LE(num_decoded_samples, decoded_frame.size());
-  ArrayView<const int16_t> decoded_view(decoded_frame.data(),
+  std::span<const int16_t> decoded_view(decoded_frame.data(),
                                         num_decoded_samples);
   // Make sure that comfort noise is not a muted frame.
   ASSERT_FALSE(IsZeroedFrame(decoded_view));
@@ -328,9 +326,8 @@ TEST(AudioDecoderOpusTest,
 }
 
 TEST(AudioDecoderOpusTest, MonoEncoderStereoDecoderOutputsTrivialStereoPlc) {
-  const FieldTrials trials =
-      CreateTestFieldTrials("WebRTC-Audio-OpusGeneratePlc/Enabled/");
-  const Environment env = CreateEnvironment(&trials);
+  const Environment env = CreateTestEnvironment(
+      {.field_trials = "WebRTC-Audio-OpusGeneratePlc/Enabled/"});
   // Create a mono encoder.
   AudioEncoderOpusConfig encoder_config =
       GetEncoderConfig(/*num_channels=*/1, /*dtx_enabled=*/false);
@@ -351,8 +348,10 @@ TEST(AudioDecoderOpusTest, MonoEncoderStereoDecoderOutputsTrivialStereoPlc) {
   constexpr int kIgnored = 123;
   decoder.GeneratePlc(/*requested_samples_per_channel=*/kIgnored,
                       &concealment_audio);
-  RTC_CHECK_GT(concealment_audio.size(), 0);
-  ArrayView<const int16_t> decoded_view(concealment_audio.data(),
+  // Opus generates one 10 ms block per call, regardless of the request.
+  RTC_CHECK_EQ(concealment_audio.size(),
+               kSampleRateHz / 100 * kDecoderNumChannels);
+  std::span<const int16_t> decoded_view(concealment_audio.data(),
                                         concealment_audio.size());
   // Make sure that packet loss concealment is not a muted frame.
   ASSERT_FALSE(IsZeroedFrame(decoded_view));
@@ -367,7 +366,7 @@ TEST(AudioDecoderOpusTest, MonoEncoderStereoDecoderOutputsTrivialStereoPlc) {
 }
 
 TEST(AudioDecoderOpusTest, MonoEncoderStereoDecoderOutputsTrivialStereoFec) {
-  const Environment env = EnvironmentFactory().Create();
+  const Environment env = CreateTestEnvironment();
   AudioEncoderOpusConfig encoder_config =
       GetEncoderConfig(/*num_channels=*/1, /*dtx_enabled=*/false);
   encoder_config.fec_enabled = true;
@@ -422,7 +421,7 @@ TEST(AudioDecoderOpusTest, MonoEncoderStereoDecoderOutputsTrivialStereoFec) {
 
 TEST(AudioDecoderOpusTest,
      StereoEncoderStereoDecoderOutputsNonTrivialStereoComfortNoise) {
-  const Environment env = EnvironmentFactory().Create();
+  const Environment env = CreateTestEnvironment();
   // Create a stereo encoder.
   AudioEncoderOpusConfig encoder_config =
       GetEncoderConfig(/*num_channels=*/2, /*dtx_enabled=*/true);
@@ -450,7 +449,7 @@ TEST(AudioDecoderOpusTest,
   ASSERT_EQ(speech_type, AudioDecoder::SpeechType::kComfortNoise);
   RTC_CHECK_GT(num_decoded_samples, 0);
   RTC_CHECK_LE(num_decoded_samples, decoded_frame.size());
-  ArrayView<const int16_t> decoded_view(decoded_frame.data(),
+  std::span<const int16_t> decoded_view(decoded_frame.data(),
                                         num_decoded_samples);
   // Make sure that comfort noise is not a muted frame.
   ASSERT_FALSE(IsZeroedFrame(decoded_view));
@@ -460,9 +459,8 @@ TEST(AudioDecoderOpusTest,
 
 TEST(AudioDecoderOpusTest,
      StereoEncoderStereoDecoderOutputsNonTrivialStereoPlc) {
-  const FieldTrials trials =
-      CreateTestFieldTrials("WebRTC-Audio-OpusGeneratePlc/Enabled/");
-  const Environment env = CreateEnvironment(&trials);
+  const Environment env = CreateTestEnvironment(
+      {.field_trials = "WebRTC-Audio-OpusGeneratePlc/Enabled/"});
   // Create a stereo encoder.
   AudioEncoderOpusConfig encoder_config =
       GetEncoderConfig(/*num_channels=*/2, /*dtx_enabled=*/false);
@@ -484,7 +482,7 @@ TEST(AudioDecoderOpusTest,
   decoder.GeneratePlc(/*requested_samples_per_channel=*/kIgnored,
                       &concealment_audio);
   RTC_CHECK_GT(concealment_audio.size(), 0);
-  ArrayView<const int16_t> decoded_view(concealment_audio.data(),
+  std::span<const int16_t> decoded_view(concealment_audio.data(),
                                         concealment_audio.size());
   // Make sure that packet loss concealment is not a muted frame.
   ASSERT_FALSE(IsZeroedFrame(decoded_view));

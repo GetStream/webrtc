@@ -16,13 +16,14 @@
 #include <optional>
 #include <utility>
 
+#include "api/environment/environment.h"
 #include "api/media_stream_interface.h"
 #include "api/scoped_refptr.h"
 #include "api/task_queue/pending_task_safety_flag.h"
+#include "api/video/adapted_video_track_source.h"
 #include "api/video/video_frame.h"
 #include "api/video/video_frame_buffer.h"
 #include "api/video/video_rotation.h"
-#include "media/base/adapted_video_track_source.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/thread.h"
@@ -31,6 +32,7 @@
 #include "sdk/android/native_api/jni/java_types.h"
 #include "sdk/android/native_api/jni/scoped_java_ref.h"
 #include "sdk/android/src/jni/video_frame.h"
+#include "system_wrappers/include/clock.h"
 
 namespace webrtc {
 namespace jni {
@@ -58,14 +60,47 @@ AndroidVideoTrackSource::AndroidVideoTrackSource(Thread* signaling_thread,
                                                  JNIEnv* jni,
                                                  bool is_screencast,
                                                  bool align_timestamps)
+    : AndroidVideoTrackSource(signaling_thread,
+                              jni,
+                              is_screencast,
+                              align_timestamps,
+                              std::nullopt) {}
+
+AndroidVideoTrackSource::AndroidVideoTrackSource(Thread* signaling_thread,
+                                                 JNIEnv* jni,
+                                                 bool is_screencast,
+                                                 bool align_timestamps,
+                                                 std::optional<Environment> env)
     : AdaptedVideoTrackSource(kRequiredResolutionAlignment),
+      env_(env),
+      clock_(env_.has_value() ? env_->clock() : *Clock::GetRealTimeClock()),
       signaling_thread_(signaling_thread),
       is_screencast_(is_screencast),
       align_timestamps_(align_timestamps),
-      safety_(PendingTaskSafetyFlag::Create()) {
+      safety_(PendingTaskSafetyFlag::CreateAttachedToTaskQueue(
+          /*alive=*/true,
+          signaling_thread)) {
+  RTC_DCHECK(signaling_thread_);
   RTC_LOG(LS_INFO) << "AndroidVideoTrackSource ctor";
 }
-AndroidVideoTrackSource::~AndroidVideoTrackSource() = default;
+
+AndroidVideoTrackSource::~AndroidVideoTrackSource() {
+  RTC_LOG(LS_INFO) << "AndroidVideoTrackSource dtor";
+
+  // TODO(b/403168866): This is a workaround to ensure
+  // safety_flag_->SetNotAlive() is called on the signaling thread.
+  //
+  // In production code, this object should always be destroyed on the signaling
+  // thread. However, during teardown in instrumentation tests, calling
+  // VideoSource.dispose() from Java drops the last reference to this object on
+  // the Java test thread. This trigger destruction on the wrong thread, which
+  // would cause a crash due to the sequence checker DCHECK in SetNotAlive().
+  if (signaling_thread_->IsCurrent()) {
+    safety_->SetNotAlive();
+  } else {
+    signaling_thread_->BlockingCall([&] { safety_->SetNotAlive(); });
+  }
+}
 
 bool AndroidVideoTrackSource::is_screencast() const {
   return is_screencast_.load();
@@ -110,10 +145,10 @@ ScopedJavaLocalRef<jobject> AndroidVideoTrackSource::AdaptFrame(
 
   const int64_t camera_time_us = j_timestamp_ns / kNumNanosecsPerMicrosec;
   const int64_t aligned_timestamp_ns =
-      align_timestamps_
-          ? kNumNanosecsPerMicrosec * timestamp_aligner_.TranslateTimestamp(
-                                          camera_time_us, TimeMicros())
-          : j_timestamp_ns;
+      align_timestamps_ ? kNumNanosecsPerMicrosec *
+                              timestamp_aligner_.TranslateTimestamp(
+                                  camera_time_us, clock_.TimeInMicroseconds())
+                        : j_timestamp_ns;
 
   int adapted_width = 0;
   int adapted_height = 0;
@@ -180,3 +215,5 @@ void AndroidVideoTrackSource::AdaptOutputFormat(
 
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(NativeAndroidVideoTrackSource)

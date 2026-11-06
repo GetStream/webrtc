@@ -15,16 +15,11 @@
 #include <atomic>
 #include <vector>
 
-#include "absl/base/attributes.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/synchronization/mutex.h"
 
 #import "RTCAudioSessionConfiguration.h"
 #import "base/RTCLogging.h"
-
-#if !defined(ABSL_HAVE_THREAD_LOCAL)
-#error ABSL_HAVE_THREAD_LOCAL should be defined for MacOS / iOS Targets.
-#endif
 
 NSString *const RTC_CONSTANT_TYPE(RTCAudioSessionErrorDomain) = @"org.webrtc.RTC_OBJC_TYPE(RTCAudioSession)";
 NSInteger const RTC_CONSTANT_TYPE(RTCAudioSessionErrorLockRequired) = -1;
@@ -35,7 +30,7 @@ namespace {
 // Since webrtc::Mutex is not a reentrant lock and cannot check if the mutex is
 // locked, we need a separate variable to check that the mutex is locked in the
 // RTCAudioSession.
-ABSL_CONST_INIT thread_local bool mutex_locked = false;
+constinit thread_local bool mutex_locked = false;
 }  // namespace
 
 @interface RTC_OBJC_TYPE (RTCAudioSession)

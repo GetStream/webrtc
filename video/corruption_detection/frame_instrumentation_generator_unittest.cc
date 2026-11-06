@@ -99,6 +99,100 @@ TEST(FrameInstrumentationGeneratorTest,
 }
 
 TEST(FrameInstrumentationGeneratorTest,
+     ReturnsSyncMessageForKeyFrameWhenNoCapturedFrameProvided) {
+  const Environment env = CreateTestEnvironment();
+  FrameInstrumentationGeneratorImpl generator(
+      &env, VideoCodecType::kVideoCodecVP8, ScalabilityMode::kL1T1);
+
+  EncodedImage encoded_image;
+  encoded_image.SetRtpTimestamp(1);
+  encoded_image.set_frame_type(VideoFrameType::kVideoFrameKey);
+
+  std::optional<FrameInstrumentationData> data =
+      generator.OnEncodedImage(encoded_image);
+  ASSERT_TRUE(data.has_value());
+  EXPECT_TRUE(data->is_sync_only());
+  EXPECT_EQ(data->sequence_index(), 0);
+}
+
+TEST(FrameInstrumentationGeneratorTest,
+     EstablishesContextWithSyncMessageWhenCapturedFrameIsMissingOnKeyFrame) {
+  const Environment env = CreateTestEnvironment();
+  FrameInstrumentationGeneratorImpl generator(
+      &env, VideoCodecType::kVideoCodecVP8, ScalabilityMode::kL1T1);
+
+  // 1. Send KeyFrame without captured frame -> returns sync message.
+  EncodedImage key_image;
+  key_image.SetRtpTimestamp(1);
+  key_image.set_frame_type(VideoFrameType::kVideoFrameKey);
+  std::optional<FrameInstrumentationData> sync_data =
+      generator.OnEncodedImage(key_image);
+  ASSERT_TRUE(sync_data.has_value());
+  EXPECT_TRUE(sync_data->is_sync_only());
+
+  // 2. Send DeltaFrame WITH captured frame -> should succeed.
+  VideoFrame frame = VideoFrame::Builder()
+                         .set_video_frame_buffer(MakeDefaultI420FrameBuffer())
+                         .set_rtp_timestamp(90002)
+                         .build();
+  generator.OnCapturedFrame(frame);
+
+  EncodedImage delta_image;
+  delta_image.SetRtpTimestamp(90002);
+  delta_image.set_frame_type(VideoFrameType::kVideoFrameDelta);
+  delta_image.qp_ = 10;
+  delta_image._encodedWidth = kDefaultScaledWidth;
+  delta_image._encodedHeight = kDefaultScaledHeight;
+
+  std::optional<FrameInstrumentationData> delta_data =
+      generator.OnEncodedImage(delta_image);
+  EXPECT_TRUE(delta_data.has_value());
+}
+
+TEST(FrameInstrumentationGeneratorTest,
+     ReturnsSyncMessageForDeltaFrameWhenNoRawFrameButShouldBeInstrumented) {
+  const Environment env = CreateTestEnvironment();
+  FrameInstrumentationGeneratorImpl generator(
+      &env, VideoCodecType::kVideoCodecVP8, ScalabilityMode::kL1T1);
+
+  // 1. Send KeyFrame with captured frame (to establish context and set last
+  // sampled timestamp to 1).
+  VideoFrame key_frame =
+      VideoFrame::Builder()
+          .set_video_frame_buffer(MakeDefaultI420FrameBuffer())
+          .set_rtp_timestamp(1)
+          .build();
+  generator.OnCapturedFrame(key_frame);
+
+  EncodedImage key_image;
+  key_image.SetRtpTimestamp(1);
+  key_image.set_frame_type(VideoFrameType::kVideoFrameKey);
+  key_image.qp_ = 10;
+  key_image._encodedWidth = kDefaultScaledWidth;
+  key_image._encodedHeight = kDefaultScaledHeight;
+
+  std::optional<FrameInstrumentationData> key_data =
+      generator.OnEncodedImage(key_image);
+  ASSERT_TRUE(key_data.has_value());
+  EXPECT_FALSE(key_data->is_sync_only());
+
+  // 2. Send DeltaFrame WITHOUT captured frame, but with timestamp 90001
+  // (EnoughTimeHasPassed is true, should be instrumented).
+  EncodedImage delta_image;
+  delta_image.SetRtpTimestamp(90001);
+  delta_image.set_frame_type(VideoFrameType::kVideoFrameDelta);
+  delta_image.qp_ = 10;
+  delta_image._encodedWidth = kDefaultScaledWidth;
+  delta_image._encodedHeight = kDefaultScaledHeight;
+
+  std::optional<FrameInstrumentationData> delta_data =
+      generator.OnEncodedImage(delta_image);
+  ASSERT_TRUE(delta_data.has_value());
+  EXPECT_TRUE(delta_data->is_sync_only());
+  EXPECT_EQ(delta_data->sequence_index(), 13);
+}
+
+TEST(FrameInstrumentationGeneratorTest,
      ReturnsNothingWhenTheFirstFrameOfASpatialOrSimulcastLayerIsNotAKeyFrame) {
   const Environment env = CreateTestEnvironment();
   FrameInstrumentationGeneratorImpl generator(
@@ -111,7 +205,7 @@ TEST(FrameInstrumentationGeneratorTest,
   // Delta frame with no preceding key frame.
   EncodedImage encoded_image;
   encoded_image.SetRtpTimestamp(1);
-  encoded_image.SetFrameType(VideoFrameType::kVideoFrameDelta);
+  encoded_image.set_frame_type(VideoFrameType::kVideoFrameDelta);
   encoded_image.SetSpatialIndex(0);
   encoded_image.SetSimulcastIndex(0);
 
@@ -134,7 +228,7 @@ TEST(FrameInstrumentationGeneratorTest,
   // Frame where QP is unset and QP is not parseable from the encoded data.
   EncodedImage encoded_image;
   encoded_image.SetRtpTimestamp(1);
-  encoded_image.SetFrameType(VideoFrameType::kVideoFrameKey);
+  encoded_image.set_frame_type(VideoFrameType::kVideoFrameKey);
 
   generator.OnCapturedFrame(frame);
 
@@ -153,7 +247,7 @@ TEST(FrameInstrumentationGeneratorTest, FailsWhenCodecIsUnsupported) {
                          .build();
   EncodedImage encoded_image;
   encoded_image.SetRtpTimestamp(1);
-  encoded_image.SetFrameType(VideoFrameType::kVideoFrameKey);
+  encoded_image.set_frame_type(VideoFrameType::kVideoFrameKey);
   encoded_image.qp_ = 10;
 
   generator.OnCapturedFrame(frame);
@@ -175,7 +269,7 @@ TEST(FrameInstrumentationGeneratorTest,
   // VP8 key frame with QP set.
   EncodedImage encoded_image;
   encoded_image.SetRtpTimestamp(1);
-  encoded_image.SetFrameType(VideoFrameType::kVideoFrameKey);
+  encoded_image.set_frame_type(VideoFrameType::kVideoFrameKey);
   encoded_image.qp_ = 10;
   encoded_image._encodedWidth = kDefaultScaledWidth;
   encoded_image._encodedHeight = kDefaultScaledHeight;
@@ -212,7 +306,7 @@ TEST(FrameInstrumentationGeneratorTest,
                                  sizeof(kCodedFrameVp8Qp25));
   EncodedImage encoded_image;
   encoded_image.SetRtpTimestamp(1);
-  encoded_image.SetFrameType(VideoFrameType::kVideoFrameKey);
+  encoded_image.set_frame_type(VideoFrameType::kVideoFrameKey);
   encoded_image.SetEncodedData(encoded_image_buffer);
   encoded_image._encodedWidth = kDefaultScaledWidth;
   encoded_image._encodedHeight = kDefaultScaledHeight;
@@ -240,7 +334,7 @@ TEST(FrameInstrumentationGeneratorTest,
                          .build();
   EncodedImage encoded_image1;
   encoded_image1.SetRtpTimestamp(1);
-  encoded_image1.SetFrameType(VideoFrameType::kVideoFrameKey);
+  encoded_image1.set_frame_type(VideoFrameType::kVideoFrameKey);
   encoded_image1.SetSpatialIndex(0);
   encoded_image1.qp_ = 10;
   encoded_image1._encodedWidth = kDefaultScaledWidth;
@@ -249,7 +343,7 @@ TEST(FrameInstrumentationGeneratorTest,
   // Delta frame that is an upper layer of an SVC key frame.
   EncodedImage encoded_image2;
   encoded_image2.SetRtpTimestamp(1);
-  encoded_image2.SetFrameType(VideoFrameType::kVideoFrameDelta);
+  encoded_image2.set_frame_type(VideoFrameType::kVideoFrameDelta);
   encoded_image2.SetSpatialIndex(1);
   encoded_image2.qp_ = 10;
   encoded_image2._encodedWidth = kDefaultScaledWidth;
@@ -283,7 +377,7 @@ TEST(FrameInstrumentationGeneratorTest,
                           .build();
   EncodedImage encoded_image1;
   encoded_image1.SetRtpTimestamp(1);
-  encoded_image1.SetFrameType(VideoFrameType::kVideoFrameKey);
+  encoded_image1.set_frame_type(VideoFrameType::kVideoFrameKey);
   encoded_image1.SetSpatialIndex(0);
   encoded_image1.qp_ = 10;
   encoded_image1._encodedWidth = kDefaultScaledWidth;
@@ -293,7 +387,7 @@ TEST(FrameInstrumentationGeneratorTest,
   // passed time < 90'000.
   EncodedImage encoded_image2;
   encoded_image2.SetRtpTimestamp(2);
-  encoded_image2.SetFrameType(VideoFrameType::kVideoFrameDelta);
+  encoded_image2.set_frame_type(VideoFrameType::kVideoFrameDelta);
   encoded_image2.SetSpatialIndex(0);
   encoded_image2.qp_ = 10;
   encoded_image2._encodedWidth = kDefaultScaledWidth;
@@ -322,7 +416,7 @@ TEST(FrameInstrumentationGeneratorTest,
   for (const VideoFrame& frame : {frame1, frame2}) {
     EncodedImage encoded_image1;
     encoded_image1.SetRtpTimestamp(frame.rtp_timestamp());
-    encoded_image1.SetFrameType(VideoFrameType::kVideoFrameKey);
+    encoded_image1.set_frame_type(VideoFrameType::kVideoFrameKey);
     encoded_image1.SetSpatialIndex(0);
     encoded_image1.qp_ = 10;
     encoded_image1._encodedWidth = kDefaultScaledWidth;
@@ -330,7 +424,7 @@ TEST(FrameInstrumentationGeneratorTest,
 
     EncodedImage encoded_image2;
     encoded_image2.SetRtpTimestamp(frame.rtp_timestamp());
-    encoded_image2.SetFrameType(VideoFrameType::kVideoFrameDelta);
+    encoded_image2.set_frame_type(VideoFrameType::kVideoFrameDelta);
     encoded_image2.SetSpatialIndex(1);
     encoded_image2.qp_ = 10;
     encoded_image2._encodedWidth = kDefaultScaledWidth;
@@ -370,7 +464,7 @@ TEST(FrameInstrumentationGeneratorTest,
   for (const VideoFrame& frame : {frame1, frame2}) {
     EncodedImage encoded_image1;
     encoded_image1.SetRtpTimestamp(frame.rtp_timestamp());
-    encoded_image1.SetFrameType(VideoFrameType::kVideoFrameKey);
+    encoded_image1.set_frame_type(VideoFrameType::kVideoFrameKey);
     encoded_image1.SetSpatialIndex(0);
     encoded_image1.qp_ = 10;
     encoded_image1._encodedWidth = kDefaultScaledWidth;
@@ -378,7 +472,7 @@ TEST(FrameInstrumentationGeneratorTest,
 
     EncodedImage encoded_image2;
     encoded_image2.SetRtpTimestamp(frame.rtp_timestamp());
-    encoded_image2.SetFrameType(VideoFrameType::kVideoFrameDelta);
+    encoded_image2.set_frame_type(VideoFrameType::kVideoFrameDelta);
     encoded_image2.SetSpatialIndex(1);
     encoded_image2.qp_ = 10;
     encoded_image2._encodedWidth = kDefaultScaledWidth;
@@ -422,8 +516,8 @@ TEST(FrameInstrumentationGeneratorTest,
                            .build();
     EncodedImage encoded_image1;
     encoded_image1.SetRtpTimestamp(frame.rtp_timestamp());
-    encoded_image1.SetFrameType(i == 0 ? VideoFrameType::kVideoFrameKey
-                                       : VideoFrameType::kVideoFrameDelta);
+    encoded_image1.set_frame_type(i == 0 ? VideoFrameType::kVideoFrameKey
+                                         : VideoFrameType::kVideoFrameDelta);
     encoded_image1.SetSimulcastIndex(0);
     encoded_image1.qp_ = 10;
     encoded_image1._encodedWidth = kDefaultScaledWidth;
@@ -431,8 +525,8 @@ TEST(FrameInstrumentationGeneratorTest,
 
     EncodedImage encoded_image2;
     encoded_image2.SetRtpTimestamp(frame.rtp_timestamp());
-    encoded_image2.SetFrameType(i == 0 ? VideoFrameType::kVideoFrameKey
-                                       : VideoFrameType::kVideoFrameDelta);
+    encoded_image2.set_frame_type(i == 0 ? VideoFrameType::kVideoFrameKey
+                                         : VideoFrameType::kVideoFrameDelta);
     encoded_image2.SetSimulcastIndex(1);
     encoded_image2.qp_ = 10;
     encoded_image2._encodedWidth = kDefaultScaledWidth;
@@ -482,7 +576,7 @@ TEST(FrameInstrumentationGeneratorTest,
           .build();
   EncodedImage encoded_image1;
   encoded_image1.SetRtpTimestamp(1);
-  encoded_image1.SetFrameType(VideoFrameType::kVideoFrameKey);
+  encoded_image1.set_frame_type(VideoFrameType::kVideoFrameKey);
   encoded_image1.qp_ = 10;
   encoded_image1._encodedWidth = kDefaultScaledWidth;
   encoded_image1._encodedHeight = kDefaultScaledHeight;
@@ -490,7 +584,7 @@ TEST(FrameInstrumentationGeneratorTest,
   // Delta frame that is an upper layer of an SVC key frame.
   EncodedImage encoded_image2;
   encoded_image2.SetRtpTimestamp(2);
-  encoded_image2.SetFrameType(VideoFrameType::kVideoFrameKey);
+  encoded_image2.set_frame_type(VideoFrameType::kVideoFrameKey);
   encoded_image2.qp_ = 10;
   encoded_image2._encodedWidth = kDefaultScaledWidth;
   encoded_image2._encodedHeight = kDefaultScaledHeight;
@@ -532,7 +626,7 @@ TEST(FrameInstrumentationGeneratorTest,
           .build();
   EncodedImage encoded_image1;
   encoded_image1.SetRtpTimestamp(1);
-  encoded_image1.SetFrameType(VideoFrameType::kVideoFrameKey);
+  encoded_image1.set_frame_type(VideoFrameType::kVideoFrameKey);
   encoded_image1.qp_ = 10;
   encoded_image1._encodedWidth = kDefaultScaledWidth;
   encoded_image1._encodedHeight = kDefaultScaledHeight;
@@ -540,7 +634,7 @@ TEST(FrameInstrumentationGeneratorTest,
 
   EncodedImage encoded_image2;
   encoded_image2.SetRtpTimestamp(2);
-  encoded_image2.SetFrameType(VideoFrameType::kVideoFrameKey);
+  encoded_image2.set_frame_type(VideoFrameType::kVideoFrameKey);
   encoded_image2.qp_ = 10;
   encoded_image2._encodedWidth = kDefaultScaledWidth;
   encoded_image2._encodedHeight = kDefaultScaledHeight;
@@ -582,7 +676,7 @@ TEST(FrameInstrumentationGeneratorTest,
           .build();
   EncodedImage encoded_image1;
   encoded_image1.SetRtpTimestamp(1);
-  encoded_image1.SetFrameType(VideoFrameType::kVideoFrameKey);
+  encoded_image1.set_frame_type(VideoFrameType::kVideoFrameKey);
   encoded_image1.qp_ = 10;
   encoded_image1._encodedWidth = kDefaultScaledWidth;
   encoded_image1._encodedHeight = kDefaultScaledHeight;
@@ -590,7 +684,7 @@ TEST(FrameInstrumentationGeneratorTest,
   // Delta frame that is an upper layer of an SVC key frame.
   EncodedImage encoded_image2;
   encoded_image2.SetRtpTimestamp(2);
-  encoded_image2.SetFrameType(VideoFrameType::kVideoFrameKey);
+  encoded_image2.set_frame_type(VideoFrameType::kVideoFrameKey);
   encoded_image2.qp_ = 10;
   encoded_image2._encodedWidth = kDefaultScaledWidth;
   encoded_image2._encodedHeight = kDefaultScaledHeight;
@@ -626,7 +720,7 @@ TEST(FrameInstrumentationGeneratorTest,
           .build());
   EncodedImage encoded_image;
   encoded_image.SetRtpTimestamp(1);
-  encoded_image.SetFrameType(VideoFrameType::kVideoFrameDelta);
+  encoded_image.set_frame_type(VideoFrameType::kVideoFrameDelta);
   encoded_image.qp_ = 10;
   encoded_image._encodedWidth = kDefaultScaledWidth;
   encoded_image._encodedHeight = kDefaultScaledHeight;
@@ -743,7 +837,7 @@ TEST(FrameInstrumentationGeneratorTest,
   // No QP needed when frame provides filter settings.
   EncodedImage encoded_image;
   encoded_image.SetRtpTimestamp(1);
-  encoded_image.SetFrameType(VideoFrameType::kVideoFrameKey);
+  encoded_image.set_frame_type(VideoFrameType::kVideoFrameKey);
   encoded_image._encodedWidth = kDefaultScaledWidth;
   encoded_image._encodedHeight = kDefaultScaledHeight;
   encoded_image.set_corruption_detection_filter_settings(
@@ -807,6 +901,95 @@ TEST(FrameInstrumentationGeneratorTest, UsesFrameSelectorWhenEnabled) {
 
   generator.OnCapturedFrame(frame2);
   EXPECT_TRUE(generator.OnEncodedImage(encoded_image2).has_value());
+}
+
+TEST(FrameInstrumentationGeneratorTest, FrameReleasedRemovesFramesFromQueue) {
+  const Environment env = CreateTestEnvironment();
+  auto generator = std::make_unique<FrameInstrumentationGeneratorImpl>(
+      &env, VideoCodecType::kVideoCodecVP8, ScalabilityMode::kL1T1);
+
+  bool frames_destroyed[2] = {};
+  class TestBuffer : public I420Buffer {
+   public:
+    TestBuffer(int width, int height, bool* frame_destroyed_indicator)
+        : I420Buffer(width, height),
+          frame_destroyed_indicator_(frame_destroyed_indicator) {
+      SetBlack(this);
+    }
+
+   private:
+    friend class RefCountedObject<TestBuffer>;
+    ~TestBuffer() override { *frame_destroyed_indicator_ = true; }
+
+    bool* frame_destroyed_indicator_;
+  };
+
+  generator->OnCapturedFrame(
+      VideoFrame::Builder()
+          .set_video_frame_buffer(make_ref_counted<TestBuffer>(
+              kDefaultScaledWidth, kDefaultScaledHeight, &frames_destroyed[0]))
+          .set_rtp_timestamp(1)
+          .build());
+  generator->OnCapturedFrame(
+      VideoFrame::Builder()
+          .set_video_frame_buffer(make_ref_counted<TestBuffer>(
+              kDefaultScaledWidth, kDefaultScaledHeight, &frames_destroyed[1]))
+          .set_rtp_timestamp(2)
+          .build());
+
+  EXPECT_FALSE(frames_destroyed[0]);
+  EXPECT_FALSE(frames_destroyed[1]);
+
+  // Releasing the first frame should destroy it.
+  generator->OnFrameReleased(1);
+  EXPECT_TRUE(frames_destroyed[0]);
+  EXPECT_FALSE(frames_destroyed[1]);
+
+  // Releasing the second frame should destroy it.
+  generator->OnFrameReleased(2);
+  EXPECT_TRUE(frames_destroyed[1]);
+}
+
+TEST(FrameInstrumentationGeneratorTest,
+     EndOfTemporalUnitRemovesFrameFromQueue) {
+  const Environment env = CreateTestEnvironment();
+  auto generator = std::make_unique<FrameInstrumentationGeneratorImpl>(
+      &env, VideoCodecType::kVideoCodecVP8, ScalabilityMode::kL1T1);
+
+  bool frame_destroyed = false;
+  class TestBuffer : public I420Buffer {
+   public:
+    TestBuffer(int width, int height, bool* frame_destroyed_indicator)
+        : I420Buffer(width, height),
+          frame_destroyed_indicator_(frame_destroyed_indicator) {
+      SetBlack(this);
+    }
+
+   private:
+    friend class RefCountedObject<TestBuffer>;
+    ~TestBuffer() override { *frame_destroyed_indicator_ = true; }
+
+    bool* frame_destroyed_indicator_;
+  };
+
+  generator->OnCapturedFrame(
+      VideoFrame::Builder()
+          .set_video_frame_buffer(make_ref_counted<TestBuffer>(
+              kDefaultScaledWidth, kDefaultScaledHeight, &frame_destroyed))
+          .set_rtp_timestamp(1)
+          .build());
+
+  EncodedImage encoded_image;
+  encoded_image.SetRtpTimestamp(1);
+  encoded_image.set_frame_type(VideoFrameType::kVideoFrameKey);
+  encoded_image.qp_ = 10;
+  encoded_image._encodedWidth = kDefaultScaledWidth;
+  encoded_image._encodedHeight = kDefaultScaledHeight;
+  encoded_image.set_end_of_temporal_unit(true);
+
+  EXPECT_FALSE(frame_destroyed);
+  ASSERT_TRUE(generator->OnEncodedImage(encoded_image).has_value());
+  EXPECT_TRUE(frame_destroyed);
 }
 
 }  // namespace

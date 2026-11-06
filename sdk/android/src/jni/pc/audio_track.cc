@@ -48,3 +48,5 @@ static void JNI_AudioTrack_FreeSink(JNIEnv* jni, jlong j_native_sink) {
 
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(AudioTrack)

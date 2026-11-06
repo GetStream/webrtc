@@ -17,11 +17,11 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
 #include "api/adaptation/resource.h"
-#include "api/array_view.h"
 #include "api/call/bitrate_allocation.h"
 #include "api/environment/environment.h"
 #include "api/fec_controller.h"
@@ -37,10 +37,10 @@
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
 #include "api/video/encoded_image.h"
-#include "api/video/video_bitrate_allocation.h"
 #include "api/video/video_frame.h"
 #include "api/video/video_layers_allocation.h"
 #include "api/video/video_source_interface.h"
+#include "api/video/video_stream_encoder_settings.h"
 #include "api/video_codecs/video_encoder.h"
 #include "call/bitrate_allocator.h"
 #include "call/rtp_config.h"
@@ -88,23 +88,25 @@ class VideoSendStreamImpl : public webrtc::VideoSendStream,
   using RtpStateMap = std::map<uint32_t, RtpState>;
   using RtpPayloadStateMap = std::map<uint32_t, RtpPayloadState>;
 
-  VideoSendStreamImpl(const Environment& env,
-                      int num_cpu_cores,
-                      RtcpRttStats* call_stats,
-                      RtpTransportControllerSendInterface* transport,
-                      Metronome* metronome,
-                      BitrateAllocatorInterface* bitrate_allocator,
-                      SendDelayStats* send_delay_stats,
-                      VideoSendStream::Config config,
-                      VideoEncoderConfig encoder_config,
-                      const RtpStateMap& suspended_ssrcs,
-                      const RtpPayloadStateMap& suspended_payload_states,
-                      std::unique_ptr<FecController> fec_controller,
-                      std::unique_ptr<VideoStreamEncoderInterface>
-                          video_stream_encoder_for_test = nullptr);
+  VideoSendStreamImpl(
+      const Environment& env,
+      int num_cpu_cores,
+      RtcpRttStats* call_stats,
+      RtpTransportControllerSendInterface* transport,
+      Metronome* metronome,
+      BitrateAllocatorInterface* bitrate_allocator,
+      SendDelayStats* send_delay_stats,
+      VideoSendStream::Config config,
+      VideoEncoderConfig encoder_config,
+      const RtpStateMap& suspended_ssrcs,
+      const RtpPayloadStateMap& suspended_payload_states,
+      std::unique_ptr<FecController> fec_controller,
+      EncoderSwitchRequestCallback encoder_switch_request_callback = nullptr,
+      std::unique_ptr<VideoStreamEncoderInterface>
+          video_stream_encoder_for_test = nullptr);
   ~VideoSendStreamImpl() override;
 
-  void DeliverRtcp(ArrayView<const uint8_t> packet);
+  void DeliverRtcp(std::span<const uint8_t> packet);
 
   // webrtc::VideoSendStream implementation.
   void Start() override;
@@ -123,7 +125,7 @@ class VideoSendStreamImpl : public webrtc::VideoSendStream,
   Stats GetStats() override;
   void SetStats(const Stats& stats) override;
 
-  void SetCsrcs(ArrayView<const uint32_t> csrcs) override;
+  void SetCsrcs(std::span<const uint32_t> csrcs) override;
 
   void StopPermanentlyAndGetRtpStates(RtpStateMap* rtp_state_map,
                                       RtpPayloadStateMap* payload_state_map);
@@ -134,9 +136,6 @@ class VideoSendStreamImpl : public webrtc::VideoSendStream,
 
   std::map<uint32_t, RtpPayloadState> GetRtpPayloadStates() const;
 
-  const std::optional<float>& configured_pacing_factor() const {
-    return configured_pacing_factor_;
-  }
 
  private:
   friend class test::VideoSendStreamPeer;
@@ -160,7 +159,6 @@ class VideoSendStreamImpl : public webrtc::VideoSendStream,
     SendDelayStats& send_delay_stats_;
   };
 
-  std::optional<float> GetPacingFactorOverride() const;
   // Implements BitrateAllocatorObserver.
   uint32_t OnBitrateUpdated(BitrateAllocationUpdate update) override;
   std::optional<DataRate> GetUsedRate() const override;
@@ -172,8 +170,6 @@ class VideoSendStreamImpl : public webrtc::VideoSendStream,
       VideoEncoderConfig::ContentType content_type,
       int min_transmit_bitrate_bps) override;
 
-  void OnBitrateAllocationUpdated(
-      const VideoBitrateAllocation& allocation) override;
   void OnVideoLayersAllocationUpdated(
       VideoLayersAllocation allocation) override;
 
@@ -185,7 +181,9 @@ class VideoSendStreamImpl : public webrtc::VideoSendStream,
       const CodecSpecificInfo* codec_specific_info) override;
 
   // Implements EncodedImageCallback.
-  void OnDroppedFrame(EncodedImageCallback::DropReason reason) override;
+  void OnFrameDropped(uint32_t rtp_timestamp,
+                      int spatial_id,
+                      bool is_end_of_temporal_unit) override;
 
   // Starts monitoring and sends a keyframe.
   void StartupVideoSendStream();
@@ -233,25 +231,22 @@ class VideoSendStreamImpl : public webrtc::VideoSendStream,
   bool has_active_encodings_ RTC_GUARDED_BY(thread_checker_);
   bool disable_padding_ RTC_GUARDED_BY(thread_checker_);
   int max_padding_bitrate_ RTC_GUARDED_BY(thread_checker_);
-  int encoder_min_bitrate_bps_ RTC_GUARDED_BY(thread_checker_);
-  uint32_t encoder_max_bitrate_bps_ RTC_GUARDED_BY(thread_checker_);
-  uint32_t encoder_target_rate_bps_ RTC_GUARDED_BY(thread_checker_);
+  DataRate encoder_min_bitrate_ RTC_GUARDED_BY(thread_checker_);
+  // The current maximum total bitrate across all active layers, if any.
+  std::optional<DataRate> encoder_max_bitrate_ RTC_GUARDED_BY(thread_checker_);
+  // The currently configured global max bitrate (from
+  // VideoEncoderConfig::max_bitrate_bps).
+  DataRate configured_max_bitrate_ RTC_GUARDED_BY(thread_checker_);
+  DataRate encoder_target_rate_ RTC_GUARDED_BY(thread_checker_);
   double encoder_bitrate_priority_ RTC_GUARDED_BY(thread_checker_);
-  const int encoder_av1_priority_bitrate_override_bps_
+
+  // Resources added via AddAdaptationResource(). Only used to implement
+  // GetAdaptationResources(); the encoder owns its own list of resources,
+  // which includes internally created ones.
+  std::vector<scoped_refptr<Resource>> adaptation_resources_
       RTC_GUARDED_BY(thread_checker_);
 
   ScopedTaskSafety worker_queue_safety_;
-
-  // Context for the most recent and last sent video bitrate allocation. Used to
-  // throttle sending of similar bitrate allocations.
-  struct VbaSendContext {
-    VideoBitrateAllocation last_sent_allocation;
-    std::optional<VideoBitrateAllocation> throttled_allocation;
-    int64_t last_send_time_ms;
-  };
-  std::optional<VbaSendContext> video_bitrate_allocation_context_
-      RTC_GUARDED_BY(thread_checker_);
-  const std::optional<float> configured_pacing_factor_;
 };
 }  // namespace internal
 }  // namespace webrtc

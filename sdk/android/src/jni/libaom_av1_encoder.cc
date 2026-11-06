@@ -40,3 +40,5 @@ static  webrtc::ScopedJavaLocalRef<jobject> JNI_LibaomAv1Encoder_GetSupportedSca
 }
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(LibaomAv1Encoder)

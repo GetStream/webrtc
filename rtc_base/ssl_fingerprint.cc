@@ -14,27 +14,25 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
+#include <utility>
 
 #include "absl/algorithm/container.h"
 #include "absl/strings/string_view.h"
-#include "api/array_view.h"
 #include "rtc_base/buffer.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/message_digest.h"
 #include "rtc_base/rtc_certificate.h"
+#include "rtc_base/span_helpers.h"
 #include "rtc_base/ssl_certificate.h"
 #include "rtc_base/ssl_identity.h"
 #include "rtc_base/string_encode.h"
 
 namespace webrtc {
 
-SSLFingerprint* SSLFingerprint::Create(absl::string_view algorithm,
-                                       const SSLIdentity* identity) {
-  return CreateUnique(algorithm, *identity).release();
-}
-
-std::unique_ptr<SSLFingerprint> SSLFingerprint::CreateUnique(
+std::unique_ptr<SSLFingerprint> SSLFingerprint::Create(
     absl::string_view algorithm,
     const SSLIdentity& identity) {
   return Create(algorithm, identity.certificate());
@@ -43,7 +41,7 @@ std::unique_ptr<SSLFingerprint> SSLFingerprint::CreateUnique(
 std::unique_ptr<SSLFingerprint> SSLFingerprint::Create(
     absl::string_view algorithm,
     const SSLCertificate& cert) {
-  Buffer digest(0, MessageDigest::kMaxSize);
+  Buffer digest = Buffer::CreateWithCapacity(MessageDigest::kMaxSize);
   bool ret = cert.ComputeDigest(algorithm, digest);
   if (!ret) {
     return nullptr;
@@ -51,13 +49,7 @@ std::unique_ptr<SSLFingerprint> SSLFingerprint::Create(
   return std::make_unique<SSLFingerprint>(algorithm, digest);
 }
 
-SSLFingerprint* SSLFingerprint::CreateFromRfc4572(
-    absl::string_view algorithm,
-    absl::string_view fingerprint) {
-  return CreateUniqueFromRfc4572(algorithm, fingerprint).release();
-}
-
-std::unique_ptr<SSLFingerprint> SSLFingerprint::CreateUniqueFromRfc4572(
+std::unique_ptr<SSLFingerprint> SSLFingerprint::CreateFromRfc4572(
     absl::string_view algorithm,
     absl::string_view fingerprint) {
   if (algorithm.empty() || !IsFips180DigestAlgorithm(algorithm))
@@ -68,13 +60,21 @@ std::unique_ptr<SSLFingerprint> SSLFingerprint::CreateUniqueFromRfc4572(
 
   char value[MessageDigest::kMaxSize];
   size_t value_len =
-      hex_decode_with_delimiter(ArrayView<char>(value), fingerprint, ':');
+      hex_decode_with_delimiter(std::span<char>(value), fingerprint, ':');
   if (!value_len)
     return nullptr;
 
   return std::make_unique<SSLFingerprint>(
-      algorithm,
-      ArrayView<const uint8_t>(reinterpret_cast<uint8_t*>(value), value_len));
+      algorithm, AsUint8Span(std::span(value, value_len)));
+}
+
+std::optional<SSLFingerprint> SSLFingerprint::CreateOptionalFromRfc4572(
+    absl::string_view algorithm,
+    absl::string_view fingerprint) {
+  if (auto parsed = CreateFromRfc4572(algorithm, fingerprint)) {
+    return std::move(*parsed);
+  }
+  return std::nullopt;
 }
 
 std::unique_ptr<SSLFingerprint> SSLFingerprint::CreateFromCertificate(
@@ -87,8 +87,8 @@ std::unique_ptr<SSLFingerprint> SSLFingerprint::CreateFromCertificate(
   }
 
   std::unique_ptr<SSLFingerprint> fingerprint =
-      CreateUnique(digest_alg, *cert.identity());
-  if (!fingerprint) {
+      Create(digest_alg, *cert.identity());
+  if (fingerprint == nullptr) {
     RTC_LOG(LS_ERROR) << "Failed to create identity fingerprint, alg="
                       << digest_alg;
   }
@@ -96,13 +96,8 @@ std::unique_ptr<SSLFingerprint> SSLFingerprint::CreateFromCertificate(
 }
 
 SSLFingerprint::SSLFingerprint(absl::string_view algorithm,
-                               ArrayView<const uint8_t> digest_view)
+                               std::span<const uint8_t> digest_view)
     : algorithm(algorithm), digest(digest_view.data(), digest_view.size()) {}
-
-SSLFingerprint::SSLFingerprint(absl::string_view algorithm,
-                               const uint8_t* digest_in,
-                               size_t digest_len)
-    : SSLFingerprint(algorithm, MakeArrayView(digest_in, digest_len)) {}
 
 bool SSLFingerprint::operator==(const SSLFingerprint& other) const {
   return algorithm == other.algorithm && digest == other.digest;

@@ -29,6 +29,7 @@
 #include "pc/test/mock_peer_connection_observers.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/thread.h"
+#include "test/create_test_environment.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 #include "test/run_loop.h"
@@ -81,17 +82,15 @@ class QuitOnSuccessSetObserver : public SetLocalDescriptionObserverInterface {
 class PeerConnectionAudioOptionsTest : public ::testing::Test {
  public:
   PeerConnectionAudioOptionsTest()
-      : worker_thread_(Thread::Create()),
-        network_thread_(Thread::CreateWithSocketServer()) {
+      : network_thread_(Thread::CreateWithSocketServer()) {
     network_thread_->Start();
-    worker_thread_->Start();
 
     PeerConnectionFactoryDependencies dependencies;
     dependencies.network_thread = network_thread_.get();
-    dependencies.worker_thread = worker_thread_.get();
     dependencies.signaling_thread = Thread::Current();
 
     EnableFakeMedia(dependencies, std::make_unique<FakeMediaEngine>());
+    dependencies.env = CreateTestEnvironment();
 
     pc_factory_ = CreateModularPeerConnectionFactory(std::move(dependencies));
   }
@@ -117,9 +116,7 @@ class PeerConnectionAudioOptionsTest : public ::testing::Test {
             pc_.get());
     return static_cast<PeerConnection*>(proxy->internal());
   }
-
   RunLoop loop_;
-  std::unique_ptr<Thread> worker_thread_;
   std::unique_ptr<Thread> network_thread_;
   scoped_refptr<PeerConnectionFactoryInterface> pc_factory_;
   scoped_refptr<PeerConnectionInterface> pc_;
@@ -141,7 +138,7 @@ TEST_F(PeerConnectionAudioOptionsTest, AudioOptionsAppliedOnCreateChannel) {
   auto transceivers = pc()->GetTransceiversInternal();
   ASSERT_EQ(transceivers.size(), 1u);
   auto* transceiver_impl = transceivers[0]->internal();
-  ASSERT_THAT(transceiver_impl->channel(), IsNull());
+  ASSERT_FALSE(transceiver_impl->HasChannel());
 
   // Create offer and set local description to trigger CreateChannel.
   auto offer_observer = make_ref_counted<QuitOnSuccessCreateObserver>(loop_);
@@ -157,9 +154,9 @@ TEST_F(PeerConnectionAudioOptionsTest, AudioOptionsAppliedOnCreateChannel) {
 
   // Verify that now the channel() exists and that the options were applied to
   // the voice engine.
-  ASSERT_THAT(transceiver_impl->channel(), NotNull());
+  ASSERT_TRUE(transceiver_impl->HasChannel());
 
-  auto* media_channel = transceiver_impl->channel()->media_receive_channel();
+  auto* media_channel = transceiver_impl->media_receive_channel();
   ASSERT_TRUE(media_channel);
   auto* voice_channel =
       static_cast<FakeVoiceMediaReceiveChannel*>(media_channel);

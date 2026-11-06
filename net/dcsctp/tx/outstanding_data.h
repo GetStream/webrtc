@@ -16,10 +16,10 @@
 #include <functional>
 #include <optional>
 #include <set>
+#include <span>
 #include <utility>
 #include <vector>
 
-#include "api/array_view.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
 #include "net/dcsctp/common/internal_types.h"
@@ -28,6 +28,7 @@
 #include "net/dcsctp/packet/chunk/iforward_tsn_chunk.h"
 #include "net/dcsctp/packet/chunk/sack_chunk.h"
 #include "net/dcsctp/packet/data.h"
+#include "net/dcsctp/public/dcsctp_handover_state.h"
 #include "net/dcsctp/public/types.h"
 #include "rtc_base/containers/flat_set.h"
 
@@ -89,10 +90,9 @@ class OutstandingData {
         last_cumulative_tsn_ack_(last_cumulative_tsn_ack),
         discard_from_send_queue_(std::move(discard_from_send_queue)) {}
 
-  AckInfo HandleSack(
-      UnwrappedTSN cumulative_tsn_ack,
-      webrtc::ArrayView<const SackChunk::GapAckBlock> gap_ack_blocks,
-      bool is_in_fast_recovery);
+  AckInfo HandleSack(UnwrappedTSN cumulative_tsn_ack,
+                     std::span<const SackChunk::GapAckBlock> gap_ack_blocks,
+                     bool is_in_fast_recovery);
 
   // Returns as many of the chunks that are eligible for fast retransmissions
   // and that would fit in a single packet of `max_size`. The eligible chunks
@@ -178,6 +178,12 @@ class OutstandingData {
   // as a breakpoint that a FORWARD-TSN shouldn't cross.
   void BeginResetStreams();
 
+  void AddHandoverState(webrtc::Timestamp now,
+                        DcSctpSocketHandoverState& state) const;
+  void RestoreFromState(webrtc::Timestamp now,
+                        UnwrappedTSN last_cumulative_tsn_ack,
+                        const DcSctpSocketHandoverState& state);
+
  private:
   // A fragmented message's DATA chunk while in the retransmission queue, and
   // its associated metadata.
@@ -194,10 +200,12 @@ class OutstandingData {
          webrtc::Timestamp time_sent,
          MaxRetransmits max_retransmissions,
          webrtc::Timestamp expires_at,
-         LifecycleId lifecycle_id)
+         LifecycleId lifecycle_id,
+         uint16_t num_retransmissions = 0)
         : message_id_(message_id),
           time_sent_(time_sent),
           max_retransmissions_(max_retransmissions),
+          num_retransmissions_(num_retransmissions),
           expires_at_(expires_at),
           lifecycle_id_(lifecycle_id),
           data_(std::move(data)) {}
@@ -208,6 +216,10 @@ class OutstandingData {
     OutgoingMessageId message_id() const { return message_id_; }
 
     webrtc::Timestamp time_sent() const { return time_sent_; }
+    webrtc::Timestamp expires_at() const { return expires_at_; }
+
+    MaxRetransmits max_retransmissions() const { return max_retransmissions_; }
+    uint16_t num_retransmissions() const { return num_retransmissions_; }
 
     const Data& data() const { return data_; }
 
@@ -224,10 +236,22 @@ class OutstandingData {
     // clears all nack counters.
     void MarkAsRetransmitted();
 
-    // Marks this item as abandoned.
+    void MarkAsToBeRetransmitted() {
+      lifecycle_ = Lifecycle::kToBeRetransmitted;
+      ack_state_ = AckState::kNacked;
+    }
+
+    void MarkAsNacked() { ack_state_ = AckState::kNacked; }
+
     void Abandon();
 
-    bool is_outstanding() const { return ack_state_ == AckState::kUnacked; }
+    bool is_outstanding() const {
+      return ack_state_ != AckState::kAcked && lifecycle_ == Lifecycle::kActive;
+    }
+    bool is_unacked() const {
+      return ack_state_ == AckState::kUnacked &&
+             lifecycle_ == Lifecycle::kActive;
+    }
     bool is_acked() const { return ack_state_ == AckState::kAcked; }
     bool is_nacked() const { return ack_state_ == AckState::kNacked; }
     bool is_abandoned() const { return lifecycle_ == Lifecycle::kAbandoned; }
@@ -312,10 +336,9 @@ class OutstandingData {
 
   // Will mark the chunks covered by the `gap_ack_blocks` from an incoming SACK
   // as "acked" and update `ack_info` by adding new TSNs to `added_tsns`.
-  void AckGapBlocks(
-      UnwrappedTSN cumulative_tsn_ack,
-      webrtc::ArrayView<const SackChunk::GapAckBlock> gap_ack_blocks,
-      AckInfo& ack_info);
+  void AckGapBlocks(UnwrappedTSN cumulative_tsn_ack,
+                    std::span<const SackChunk::GapAckBlock> gap_ack_blocks,
+                    AckInfo& ack_info);
 
   // Mark chunks reported as "missing", as "nacked" or "to be retransmitted"
   // depending how many times this has happened. Only packets up until
@@ -323,8 +346,9 @@ class OutstandingData {
   // nacked/retransmitted. The method will set `ack_info.has_packet_loss`.
   void NackBetweenAckBlocks(
       UnwrappedTSN cumulative_tsn_ack,
-      webrtc::ArrayView<const SackChunk::GapAckBlock> gap_ack_blocks,
+      std::span<const SackChunk::GapAckBlock> gap_ack_blocks,
       bool is_in_fast_recovery,
+      bool cumulative_tsn_acked_advanced,
       OutstandingData::AckInfo& ack_info);
 
   // Process the acknowledgement of the chunk referenced by `iter` and updates

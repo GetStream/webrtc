@@ -489,6 +489,37 @@ if grep -qE 'make rename |final-(apple|android)-renamed|StreamWebRTC\.xcframewor
   exit 1
 fi
 grep -q 'rewrite-android-namespace.sh' "$ROOT/Makefile"
+grep -q 'pin-android-java.sh' "$ROOT/Makefile"
+grep -q 'direct_deps_only = false' "$ROOT/../sdk/android/BUILD.gn"
+grep -q 'jar_excluded_patterns = \[ "androidx/\*" \]' "$ROOT/../sdk/android/BUILD.gn"
+pin_root="$(mktemp -d)"
+mkdir -p "$pin_root/build/android/gyp"
+cat > "$pin_root/build/android/gyp/compile_java.py" <<'EOF'
+        # Keep consistent with javac_cmd in //build/android/gyp/turbine.py.
+        # LINT.IfChange
+        '25',
+EOF
+printf "%s\n" "    javac_cmd = ['--release', '25']" \
+  > "$pin_root/build/android/gyp/turbine.py"
+"$ROOT/scripts/pin-android-java.sh" --src "$pin_root"
+grep -q "'17'" "$pin_root/build/android/gyp/compile_java.py"
+grep -q "'17'" "$pin_root/build/android/gyp/turbine.py"
+"$ROOT/scripts/pin-android-java.sh" --src "$pin_root"
+grep -q "'17'" "$pin_root/build/android/gyp/compile_java.py"
+printf '%s\n' 'javac_cmd = ["--release", "25"]' \
+  > "$pin_root/build/android/gyp/turbine.py"
+if "$ROOT/scripts/pin-android-java.sh" --src "$pin_root" 2>"$pin_root/err"; then
+  echo "expected a moved Java release pin to fail" >&2
+  exit 1
+fi
+grep -q 'Java release pin not found' "$pin_root/err" || {
+  echo "unexpected pin failure:" >&2
+  cat "$pin_root/err" >&2
+  exit 1
+}
+rm -rf "$pin_root"
+grep -q 'env -u TARGET' "$ROOT/Makefile"
+grep -q 'libjingle_peerconnection_so/libstream_jingle_peerconnection_so' "$ROOT/Makefile"
 grep -q 'io.getstream.webrtc' "$gha/workflows/_make.yml"
 grep -q 'products-android-repackaged' "$gha/workflows/_make.yml"
 grep -q 'final-android/libwebrtc.aar' "$gha/workflows/_make.yml"

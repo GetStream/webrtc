@@ -985,8 +985,8 @@ bool DefaultEncryptionManager::DecryptFramed(const FrameCryptoInput& in,
   if (trailer->is_rbsp) {
     // Unescape ciphertext+trailer as one unit. Escape bytes can sit inside
     // the trailer, so counter / prefix / key index must be re-read after.
-    const int seed = BoundarySeedZeros(in.data.subview(0, clear_bytes));
-    auto unit = RbspUnescape(in.data.subview(clear_bytes), seed);
+    const int seed = BoundarySeedZeros(in.data.subspan(0, clear_bytes));
+    auto unit = RbspUnescape(in.data.subspan(clear_bytes), seed);
     auto fields = ReadUnescapedTrailerFields(unit);
     if (!fields) {
       *state = kNew;
@@ -1176,13 +1176,13 @@ bool DefaultEncryptionManager::DecryptLegacy(const FrameCryptoInput& in,
   auto uncrypted_magic_bytes = key_provider_->options().uncrypted_magic_bytes;
   if (uncrypted_magic_bytes.size() > 0 &&
       in.data.size() >= uncrypted_magic_bytes.size()) {
-    auto tmp = in.data.subview(in.data.size() - uncrypted_magic_bytes.size(),
+    auto tmp = in.data.subspan(in.data.size() - uncrypted_magic_bytes.size(),
                                uncrypted_magic_bytes.size());
     std::vector<uint8_t> data(tmp.begin(), tmp.end());
     if (uncrypted_magic_bytes == data) {
       out.Clear();
       out.AppendData(
-          in.data.subview(0, in.data.size() - uncrypted_magic_bytes.size()));
+          in.data.subspan(0, in.data.size() - uncrypted_magic_bytes.size()));
       *state = kOk;
       return true;
     }

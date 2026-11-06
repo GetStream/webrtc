@@ -13,9 +13,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <vector>
 
-#include "api/array_view.h"
 #include "common_video/h264/h264_common.h"
 #include "rtc_base/bit_buffer.h"
 #include "rtc_base/buffer.h"
@@ -138,7 +138,7 @@ void WritePps(const PpsParser::PpsState& pps,
     bit_buffer.GetCurrentOffset(&byte_offset, &bit_offset);
   }
 
-  H264::WriteRbsp(MakeArrayView(data, byte_offset), out_buffer);
+  H264::WriteRbsp(std::span(data, byte_offset), out_buffer);
 }
 
 class PpsParserTest : public ::testing::Test {
@@ -223,7 +223,7 @@ TEST_F(PpsParserTest, MaxPps) {
 }
 
 TEST_F(PpsParserTest, ParseSliceHeader) {
-  ArrayView<const uint8_t> chunk(kH264BitstreamChunk);
+  std::span<const uint8_t> chunk(kH264BitstreamChunk);
   std::vector<H264::NaluIndex> nalu_indices = H264::FindNaluIndices(chunk);
   EXPECT_EQ(nalu_indices.size(), 3ull);
   for (const auto& index : nalu_indices) {
@@ -232,7 +232,7 @@ TEST_F(PpsParserTest, ParseSliceHeader) {
     if (nalu_type == H264::NaluType::kIdr) {
       // Skip NAL type header and parse slice header.
       std::optional<PpsParser::SliceHeader> slice_header =
-          PpsParser::ParseSliceHeader(chunk.subview(
+          PpsParser::ParseSliceHeader(chunk.subspan(
               index.payload_start_offset + 1, index.payload_size - 1));
       ASSERT_TRUE(slice_header.has_value());
       EXPECT_EQ(slice_header->first_mb_in_slice, 0u);
@@ -240,6 +240,48 @@ TEST_F(PpsParserTest, ParseSliceHeader) {
       break;
     }
   }
+}
+
+TEST_F(PpsParserTest, ParsePpsIdsInvalid) {
+  uint32_t pps_id;
+  uint32_t sps_id;
+
+  // Valid pps_id=255, sps_id=31
+  buffer_.Clear();
+  generated_pps_.id = 255;
+  generated_pps_.sps_id = 31;
+  WritePps(generated_pps_, 0, 1, 0, &buffer_);
+  EXPECT_TRUE(PpsParser::ParsePpsIds(buffer_, &pps_id, &sps_id));
+
+  // Invalid pps_id=256
+  buffer_.Clear();
+  generated_pps_.id = 256;
+  generated_pps_.sps_id = 0;
+  WritePps(generated_pps_, 0, 1, 0, &buffer_);
+  EXPECT_FALSE(PpsParser::ParsePpsIds(buffer_, &pps_id, &sps_id));
+
+  // Invalid sps_id=32
+  buffer_.Clear();
+  generated_pps_.id = 0;
+  generated_pps_.sps_id = 32;
+  WritePps(generated_pps_, 0, 1, 0, &buffer_);
+  EXPECT_FALSE(PpsParser::ParsePpsIds(buffer_, &pps_id, &sps_id));
+}
+
+TEST_F(PpsParserTest, ParsePpsInvalidSpsPpsId) {
+  // Invalid pps_id=256
+  buffer_.Clear();
+  generated_pps_.id = 256;
+  generated_pps_.sps_id = 0;
+  WritePps(generated_pps_, 0, 1, 0, &buffer_);
+  EXPECT_EQ(PpsParser::ParsePps(buffer_), std::nullopt);
+
+  // Invalid sps_id=32
+  buffer_.Clear();
+  generated_pps_.id = 0;
+  generated_pps_.sps_id = 32;
+  WritePps(generated_pps_, 0, 1, 0, &buffer_);
+  EXPECT_EQ(PpsParser::ParsePps(buffer_), std::nullopt);
 }
 
 }  // namespace webrtc
