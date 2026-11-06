@@ -298,6 +298,9 @@ ninja: require-src
 	 if [[ -z "$$ninja_target" ]]; then \
 	   ninja_target="$$($(SCRIPTS)/gn-gen.sh --ninja-target "$(TARGET)")"; \
 	 fi; \
+	 if [[ "$(TARGET)" == android-* ]]; then \
+	   "$(SCRIPTS)/pin-android-java.sh" --src "$(WEBRTC_SRC)"; \
+	 fi; \
 	 if [[ "$(ANDROID_NAMESPACE)" == io.getstream.webrtc ]]; then \
 	   ninja_target="$${ninja_target//libjingle_peerconnection_so/libstream_jingle_peerconnection_so}"; \
 	 fi; \
@@ -390,6 +393,7 @@ test-android: require-linux maybe-deps require-src
 		--config debug \
 		--overlay android-test \
 		--extra "$(ALL_GN_ARGS)"
+	@"$(SCRIPTS)/pin-android-java.sh" --src "$(WEBRTC_SRC)"
 	@ninja_bin="$$($(SCRIPTS)/common.sh ninja "$(WEBRTC_SRC)")"; \
 	 targets="$(if $(TEST_TARGETS),$(TEST_TARGETS),$(ANDROID_TEST_TARGETS))"; \
 	 echo "$$ninja_bin -C $(ANDROID_TEST_OUT) $$targets"; \

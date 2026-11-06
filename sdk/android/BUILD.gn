@@ -30,7 +30,13 @@ if (is_android) {
   dist_jar("libwebrtc") {
     _target_dir_name = get_label_info(":$target_name", "dir")
     output = "${root_out_dir}/lib.java${_target_dir_name}/${target_name}.jar"
-    direct_deps_only = true
+
+    # STREAM-CUSTOM: Proxy natives live in generated *_jni_java jars, and
+    # Dav1dDecoder lives in :dav1d_java. direct_deps_only left both out of
+    # the AAR. Recurse so those jars are packed, but keep androidx
+    # annotations out; apps already provide them.
+    direct_deps_only = false
+    jar_excluded_patterns = [ "androidx/*" ]
     use_unprocessed_jars = true
     requires_android = true
 
