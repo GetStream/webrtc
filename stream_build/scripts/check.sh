@@ -597,6 +597,62 @@ if "$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/nojni.jar" \
 fi
 grep -q 'no generated \*Jni.class' "$jar_root/err"
 rm -rf "$jar_root"
+jni_root="$(mktemp -d)"
+mkdir -p "$jni_root/sdk/android/api/org/webrtc" "$jni_root/sdk/android/src/jni"
+cat > "$jni_root/sdk/android/BUILD.gn" <<'EOF'
+dist_jar("libwebrtc") {
+  deps = [ ":foo_java", ":bar_java" ]
+}
+rtc_android_library("foo_java") {
+  deps = [ ":generated_foo_jni_java" ]
+}
+rtc_android_library("bar_java") {
+  deps = [ ":generated_bar_jni_java" ]
+}
+rtc_shared_library("libjingle_peerconnection_so") {
+  deps = [ ":foo_jni", "//third_party/jni_zero" ]
+}
+rtc_library("foo_jni") {
+  sources = [ "src/jni/foo.cc" ]
+  deps = [ ":generated_foo_jni" ]
+}
+rtc_library("bar_jni") {
+  sources = [ "src/jni/bar.cc" ]
+  deps = [ ":generated_bar_jni" ]
+}
+generate_jni("generated_foo_jni") {
+  sources = [ "api/org/webrtc/Foo.java" ]
+}
+generate_jni("generated_bar_jni") {
+  sources = [ "api/org/webrtc/Bar.java" ]
+}
+EOF
+printf 'class Foo { private static native long nativeCreate(); }\n' \
+  > "$jni_root/sdk/android/api/org/webrtc/Foo.java"
+printf 'class Bar { @NativeMethods interface Natives { long create(); } }\n' \
+  > "$jni_root/sdk/android/api/org/webrtc/Bar.java"
+printf '#include "sdk/android/generated_foo_jni/Foo_jni.h"\n' \
+  > "$jni_root/sdk/android/src/jni/foo.cc"
+printf '#include "sdk/android/generated_bar_jni/Bar_jni.h"\nDEFINE_JNI(Bar)\n' \
+  > "$jni_root/sdk/android/src/jni/bar.cc"
+if "$ROOT/scripts/check-android-jni.sh" --src "$jni_root" 2>"$jni_root/err"; then
+  echo "expected check-android-jni.sh to fail" >&2
+  exit 1
+fi
+grep -q 'generated_bar_jni: libwebrtc packs its Java, but' "$jni_root/err"
+grep -q 'foo.cc: includes Foo_jni.h but never invokes DEFINE_JNI(Foo)' \
+  "$jni_root/err"
+if grep -q 'bar.cc' "$jni_root/err"; then
+  echo "check-android-jni.sh flagged a file that invokes DEFINE_JNI" >&2
+  exit 1
+fi
+sed -i.bak 's/deps = \[ ":foo_jni",/deps = [ ":foo_jni", ":bar_jni",/' \
+  "$jni_root/sdk/android/BUILD.gn"
+printf '#include "sdk/android/generated_foo_jni/Foo_jni.h"\nDEFINE_JNI(Foo)\n' \
+  > "$jni_root/sdk/android/src/jni/foo.cc"
+"$ROOT/scripts/check-android-jni.sh" --src "$jni_root" >/dev/null
+grep -q 'check-android-jni.sh' "$ROOT/../agents/skills/migrate/resolve-conflicts.md"
+rm -rf "$jni_root"
 pin_root="$(mktemp -d)"
 mkdir -p "$pin_root/build/android/gyp"
 cat > "$pin_root/build/android/gyp/compile_java.py" <<'EOF'
