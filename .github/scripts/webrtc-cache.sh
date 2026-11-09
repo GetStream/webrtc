@@ -152,84 +152,72 @@ PY
   fi
   local blobdir="$work/blobs"
   mkdir -p "$blobdir"
-  local digest size media title
-  local max="${PULL_CONCURRENCY:-3}"
-  local running=0
   local failfile="$work/fetch-fail"
   rm -f "$failfile"
-  while IFS=$'\t' read -r digest size media title; do
-    if [[ -e "$failfile" ]]; then
-      break
-    fi
-    (
-      echo "fetch ${title} (${size} bytes)"
-      if ! retry_oras oras blob fetch "${CACHE_IMAGE}@${digest}" --output "${blobdir}/${title}"; then
-        echo "blob download failed: ${title}" >&2
-        touch "$failfile"
-        exit 1
-      fi
-    ) &
-    running=$((running + 1))
-    if [[ "$running" -ge "$max" ]]; then
-      wait -n || true
-      running=$((running - 1))
-    fi
-  done <"$list"
-  wait || true
-  if [[ -e "$failfile" ]]; then
-    echo "blob download failed" >&2
-    return 2
-  fi
-  local first
-  first="$(cut -f4 "$list" | head -n 1)"
-  # The archive bytes stay on stdin. The program text must not be a heredoc,
-  # or Python reads the script instead of the decompressed cache.
-  report_extract() {
-    python3 -u -c '
-import sys
-import time
-
-label = sys.argv[1]
-read = 0
-last = time.time()
-while True:
-    buf = sys.stdin.buffer.read(8 * 1024 * 1024)
-    if not buf:
-        break
-    sys.stdout.buffer.write(buf)
-    sys.stdout.buffer.flush()
-    read += len(buf)
-    now = time.time()
-    if now - last >= 15:
-        print(f"{label} {read / (1024 ** 3):.1f} GiB", file=sys.stderr, flush=True)
-        last = now
-if read == 0:
-    print(f"{label} read nothing", file=sys.stderr, flush=True)
-    sys.exit(1)
-print(f"{label} done {read / (1024 ** 3):.1f} GiB", file=sys.stderr, flush=True)
-' "$1"
-  }
-  if [[ "$first" == chunk-* ]] || grep -q 'git-cache.chunk' "$list"; then
-    local files=("$blobdir"/chunk-*)
-    local total="${#files[@]}"
-    local i=0
+  # Extract as soon as chunk 0 is complete. Later chunks are read in order
+  # and the pipe waits when the next file has not been renamed into place.
+  (
+    set -o pipefail
+    total="$(wc -l < "$list" | tr -d ' ')"
     echo "stitching ${total} blobs" >&2
-    if ! {
-      for f in "${files[@]}"; do
-        i=$((i + 1))
-        echo "stitch ${i}/${total} $(basename "$f")" >&2
-        cat "$f"
-      done | zstd -d -c | report_extract "extract" | tar -C "$root" -xf -
-    }; then
-      echo "extract failed" >&2
-      return 2
+    i=0
+    while IFS=$'\t' read -r _digest _size _media title; do
+      i=$((i + 1))
+      ready="${blobdir}/${title}"
+      while [[ ! -f "$ready" ]]; do
+        if [[ -e "$failfile" ]]; then
+          echo "extract aborted; ${title} was not downloaded" >&2
+          exit 1
+        fi
+        sleep 0.2
+      done
+      echo "stitch ${i}/${total} ${title}" >&2
+      cat "$ready"
+    done < "$list" | zstd -d -T0 -c -v | tar -C "$root" -xf -
+  ) &
+  local extract_pid=$!
+  (
+    set +e
+    digest="" size="" media="" title=""
+    max="${PULL_CONCURRENCY:-3}"
+    running=0
+    while IFS=$'\t' read -r digest size media title; do
+      if [[ -e "$failfile" ]]; then
+        break
+      fi
+      (
+        echo "fetch ${title} (${size} bytes)"
+        tmp="${blobdir}/${title}.partial"
+        if ! retry_oras oras blob fetch "${CACHE_IMAGE}@${digest}" --output "$tmp"; then
+          echo "blob download failed: ${title}" >&2
+          touch "$failfile"
+          rm -f "$tmp"
+          exit 1
+        fi
+        mv "$tmp" "${blobdir}/${title}"
+      ) &
+      running=$((running + 1))
+      if [[ "$running" -ge "$max" ]]; then
+        wait -n || true
+        running=$((running - 1))
+      fi
+    done <"$list"
+    wait || true
+    if [[ -e "$failfile" ]]; then
+      exit 1
     fi
-  else
-    echo "extracting ${first}" >&2
-    if ! zstd -d -c "${blobdir}/${first}" | report_extract "extract" | tar -C "$root" -xf -; then
-      echo "extract failed" >&2
-      return 2
-    fi
+  ) &
+  local download_pid=$!
+  local download_rc=0 extract_rc=0
+  set +e
+  wait "$download_pid"
+  download_rc=$?
+  wait "$extract_pid"
+  extract_rc=$?
+  set -e
+  if [[ "$download_rc" -ne 0 || "$extract_rc" -ne 0 || -e "$failfile" ]]; then
+    echo "extract failed" >&2
+    return 2
   fi
   if [[ -z "$(ls -A "${root}/.gclient-git-cache" 2>/dev/null || true)" ]]; then
     echo "extract produced an empty git cache" >&2
