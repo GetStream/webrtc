@@ -9,6 +9,7 @@
  */
 
 #include "modules/video_coding/codecs/av1/libaom_av1_encoder.h"
+#include "modules/video_coding/svc/create_scalability_structure.h"
 
 #include <jni.h>
 
