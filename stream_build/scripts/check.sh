@@ -537,4 +537,50 @@ assert sibling == "src/resources/reference_video_640x360_30fps.y4m", sibling
 assert inside == "resources/reference_video_640x360_30fps.y4m", inside
 PY
 
+cache_sh="$gha/scripts/webrtc-cache.sh"
+cache_wf="$gha/workflows/update-webrtc-cache.yml"
+cache_daily="$gha/workflows/update-webrtc-cache-daily.yml"
+bash -n "$cache_sh"
+got="$("$cache_sh" resolve-tag automatic 42 3 20261109)"
+[[ "$got" == "20261109-42.3" ]]
+got="$("$cache_sh" resolve-tag '' 42 3 20261109)"
+[[ "$got" == "20261109-42.3" ]]
+got="$("$cache_sh" resolve-tag '  nightly_1  ' 42 3 20261109)"
+[[ "$got" == "nightly_1" ]]
+if "$cache_sh" resolve-tag current 1 1 20261109 >/dev/null; then
+  echo "expected tag current to be rejected" >&2
+  exit 1
+fi
+if "$cache_sh" resolve-tag 'bad tag' 1 1 20261109 >/dev/null; then
+  echo "expected invalid tag to be rejected" >&2
+  exit 1
+fi
+grep -q 'starting from an empty git cache' "$cache_sh"
+grep -q 'name: Update WebRTC Cache$' "$cache_wf"
+grep -q 'workflow_dispatch:' "$cache_wf"
+grep -q 'workflow_call:' "$cache_wf"
+! grep -q 'schedule:' "$cache_wf"
+grep -q 'packages: write' "$cache_wf"
+grep -q 'contents: read' "$cache_wf"
+grep -q 'github.token' "$cache_wf"
+! grep -q 'secrets\.' "$cache_wf"
+grep -q 'ghcr.io/getstream/webrtc-cache' "$cache_wf"
+grep -q 'default: automatic' "$cache_wf"
+grep -q 'default: true' "$cache_wf"
+grep -q 'TARGET_OS: ios,mac,android,unix' "$cache_wf"
+grep -q 'RUN_HOOKS: "0"' "$cache_wf"
+grep -q 'Pull current cache, or start empty' "$cache_wf"
+grep -q 'oras-project/setup-oras@v2$' "$cache_wf"
+! grep -q 'ORAS_SHA256' "$cache_wf"
+grep -q 'group: webrtc-cache' "$cache_wf"
+! grep -q 'concurrency:' "$cache_daily"
+grep -q 'name: Update WebRTC Cache daily' "$cache_daily"
+grep -q 'cron: "0 4 \* \* \*"' "$cache_daily"
+grep -q 'uses: \./\.github/workflows/update-webrtc-cache\.yml' "$cache_daily"
+grep -q 'packages: write' "$cache_daily"
+grep -q 'tag: automatic' "$cache_daily"
+grep -q 'update_current: true' "$cache_daily"
+! grep -q 'workflow_dispatch:' "$cache_daily"
+[[ ! -e "$gha/workflows/webrtc-cache.yml" ]]
+
 echo "ok"

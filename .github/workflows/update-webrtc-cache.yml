@@ -1,0 +1,162 @@
+# Publish the gclient git cache to GHCR. Run this from the Actions tab,
+# or call it from the daily workflow. Pull requests do not run it.
+#
+# The job token is github.token (contents: read, packages: write).
+# No stored secret. A missing ghcr.io/getstream/webrtc-cache:current
+# starts from an empty cache; the first successful push creates it.
+# :current moves only when update_current is true.
+
+name: Update WebRTC Cache
+
+run-name: >-
+  Update WebRTC Cache ${{ inputs.tag }}
+  update_current:${{ inputs.update_current }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      webrtc_ref:
+        description: Branch, tag, or SHA whose DEPS to sync.
+        type: string
+        default: main
+      tag:
+        description: Registry tag. automatic generates YYYYMMDD-<run_id>.<run_attempt>.
+        type: string
+        default: automatic
+      update_current:
+        description: Move the current tag to this publish.
+        type: boolean
+        default: true
+  workflow_call:
+    inputs:
+      webrtc_ref:
+        description: Branch, tag, or SHA whose DEPS to sync.
+        type: string
+        default: main
+      tag:
+        description: Registry tag. automatic generates YYYYMMDD-<run_id>.<run_attempt>.
+        type: string
+        default: automatic
+      update_current:
+        description: Move the current tag to this publish.
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: webrtc-cache
+  cancel-in-progress: false
+
+env:
+  CACHE_IMAGE: ghcr.io/getstream/webrtc-cache
+
+jobs:
+  publish:
+    name: Publish git cache
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Check out this workflow
+        uses: actions/checkout@v7
+        with:
+          path: publisher
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+
+      - name: Check out WebRTC
+        uses: actions/checkout@v7
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+          fetch-depth: 1
+          fetch-tags: false
+
+      - id: src
+        name: Record synced revision
+        run: echo "sha=$(git -C src rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - id: resolved
+        name: Resolve tag
+        env:
+          TAG_INPUT: ${{ inputs.tag }}
+          UPDATE_CURRENT: ${{ inputs.update_current && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          tag="$(publisher/.github/scripts/webrtc-cache.sh resolve-tag \
+            "$TAG_INPUT" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT")"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "update_current=${UPDATE_CURRENT}" >> "$GITHUB_OUTPUT"
+          {
+            echo "### WebRTC cache"
+            echo
+            echo "- image: \`${CACHE_IMAGE}\`"
+            echo "- tag: \`${tag}\`"
+            echo "- update_current: ${UPDATE_CURRENT}"
+            echo "- revision: \`${{ steps.src.outputs.sha }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Set up WebRTC checkout
+        uses: ./src/.github/actions/setup-webrtc
+        with:
+          webrtc_ref: ${{ inputs.webrtc_ref }}
+
+      - name: Install oras
+        uses: oras-project/setup-oras@v2
+
+      - name: Install zstd
+        run: |
+          set -euo pipefail
+          if ! command -v zstd >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y zstd
+          fi
+
+      - name: Log in to GHCR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "$GH_TOKEN" | oras login ghcr.io \
+            --username "${{ github.actor }}" \
+            --password-stdin
+
+      - name: Pull current cache, or start empty
+        env:
+          CACHE_ROOT: ${{ github.workspace }}
+        run: publisher/.github/scripts/webrtc-cache.sh pull
+
+      - name: Sync deps into the git cache
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          WEBRTC_SRC: ${{ github.workspace }}/src
+          GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
+          TARGET_OS: ios,mac,android,unix
+          JOBS: "8"
+          SHALLOW: "1"
+          RUN_HOOKS: "0"
+          WEBRTC_REPO: https://github.com/GetStream/webrtc.git
+        run: |
+          set -euo pipefail
+          df -h "${GITHUB_WORKSPACE}" || true
+          make deps
+
+      - name: Drop dep checkouts
+        working-directory: src
+        run: |
+          set -euo pipefail
+          git clean -ffdx -q
+          df -h "${GITHUB_WORKSPACE}" || true
+
+      - name: Push git cache
+        env:
+          CACHE_ROOT: ${{ github.workspace }}
+          CACHE_TAG: ${{ steps.resolved.outputs.tag }}
+          UPDATE_CURRENT: ${{ steps.resolved.outputs.update_current }}
+          GIT_REVISION: ${{ steps.src.outputs.sha }}
+          IMAGE_SOURCE: https://github.com/GetStream/webrtc
+        run: publisher/.github/scripts/webrtc-cache.sh push
