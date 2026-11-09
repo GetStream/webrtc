@@ -8,14 +8,14 @@ set -euo pipefail
 
 CACHE_IMAGE="${CACHE_IMAGE:-ghcr.io/getstream/webrtc-cache}"
 IMAGE_SOURCE="${IMAGE_SOURCE:-https://github.com/GetStream/webrtc}"
-ARTIFACT_TYPE="application/vnd.getstream.webrtc.git-cache.v1"
+ARTIFACT_TYPE="${ARTIFACT_TYPE:-application/vnd.getstream.webrtc.git-cache.v1}"
 ARCHIVE_NAME="gclient-git-cache.tar.zst"
 CHUNK_BYTES=$((512 * 1024 * 1024))
-CHUNK_TYPE="application/vnd.getstream.webrtc.git-cache.chunk.v1"
+CHUNK_TYPE="${CHUNK_TYPE:-application/vnd.getstream.webrtc.git-cache.chunk.v1}"
 
 usage() {
   cat <<'EOF'
-usage: webrtc-cache.sh resolve-tag|pull|fingerprint|push
+usage: webrtc-cache.sh resolve-tag|pull|fingerprint|list-members|members-for|push
 
 resolve-tag <input> <run_id> <run_attempt> [yyyymmdd]
   Print the tag to push. input "automatic" or empty becomes
@@ -25,12 +25,25 @@ pull
   Extract :latest into $CACHE_ROOT/.gclient-git-cache.
   A missing :latest restores :current when that tag exists, otherwise
   leaves an empty cache. Other errors fail. Prints restored_from=.
+  ARCHIVE_MEMBERS packs those paths under ARCHIVE_ROOT instead, and a
+  missing tag leaves them absent. There is no :current fallback.
 
 fingerprint
   Print a sha256 of file sizes and paths in the git cache.
 
+list-members
+  Print the relative paths push will pack. The git cache is
+  .gclient-git-cache. ARCHIVE_MEMBERS skips a path that is missing
+  or empty, and fails when every path is skipped. A member may be a
+  relative glob, such as src/build/linux/*-sysroot.
+
+members-for <ios|macos|android>
+  Print the ARCHIVE_MEMBERS for that platform. ios and macos pack
+  .cipd and src/resources. android also packs Debian sysroots under
+  src/build/linux.
+
 push
-  Pack $CACHE_ROOT/.gclient-git-cache and push $CACHE_IMAGE:$CACHE_TAG.
+  Pack the list-members paths and push $CACHE_IMAGE:$CACHE_TAG.
   UPDATE_LATEST=true also points :latest at that tag.
   GIT_REVISION is stored on the manifest.
 EOF
@@ -115,6 +128,90 @@ note_restored() {
   echo "restored_from=${from}"
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     echo "restored_from=${from}" >> "$GITHUB_OUTPUT"
+  fi
+}
+
+archive_root() {
+  if [[ -n "${ARCHIVE_MEMBERS:-}" ]]; then
+    printf '%s\n' "${ARCHIVE_ROOT:?ARCHIVE_ROOT is required}"
+    return 0
+  fi
+  printf '%s\n' "${CACHE_ROOT:?CACHE_ROOT is required}"
+}
+
+directory_has_files() {
+  local dir="$1"
+  [[ -d "$dir" ]] || return 1
+  [[ -n "$(ls -A "$dir" 2>/dev/null || true)" ]]
+}
+
+cmd_members_for() {
+  case "${1:-}" in
+    ios|macos)
+      printf '%s\n' ".cipd src/resources"
+      ;;
+    android)
+      # The sysroot is a Linux hook output. Hetzner left src/build unpacked,
+      # so Android jobs downloaded it on every run.
+      printf '%s\n' ".cipd src/resources src/build/linux/*-sysroot"
+      ;;
+    *)
+      echo "platform must be ios, macos, or android" >&2
+      return 1
+      ;;
+  esac
+}
+
+# Prints one relative path per line. Git-cache mode requires the cache.
+# ARCHIVE_MEMBERS skips an empty path and fails when nothing remains.
+# A member that contains * or ? is a glob relative to the archive root.
+cmd_list_members() {
+  local root path found=0 match rel
+  local -a requested matches
+  root="$(archive_root)"
+  if [[ -z "${ARCHIVE_MEMBERS:-}" ]]; then
+    if ! directory_has_files "${root}/.gclient-git-cache"; then
+      echo "git cache is missing or empty: ${root}/.gclient-git-cache" >&2
+      return 1
+    fi
+    printf '%s\n' .gclient-git-cache
+    return 0
+  fi
+  set -f
+  # shellcheck disable=SC2206
+  requested=(${ARCHIVE_MEMBERS})
+  set +f
+  shopt -s nullglob
+  for path in "${requested[@]}"; do
+    if [[ "$path" == *'*'* || "$path" == *'?'* ]]; then
+      # shellcheck disable=SC2206
+      matches=("${root}/"${path})
+      if [[ ${#matches[@]} -eq 0 ]]; then
+        echo "skip ${path} (missing or empty)" >&2
+        continue
+      fi
+      for match in "${matches[@]}"; do
+        rel="${match#"${root}/"}"
+        if directory_has_files "$match"; then
+          printf '%s\n' "$rel"
+          found=1
+        else
+          echo "skip ${rel} (missing or empty)" >&2
+        fi
+      done
+      continue
+    fi
+    if directory_has_files "${root}/${path}"; then
+      printf '%s\n' "$path"
+      found=1
+    else
+      echo "skip ${path} (missing or empty)" >&2
+    fi
+  done
+  shopt -u nullglob
+  if [[ "$found" -eq 0 ]]; then
+    echo "no archive members to pack under ${root}" >&2
+    return 1
   fi
 }
 
@@ -219,23 +316,38 @@ PY
     echo "extract failed" >&2
     return 2
   fi
-  if [[ -z "$(ls -A "${root}/.gclient-git-cache" 2>/dev/null || true)" ]]; then
-    echo "extract produced an empty git cache" >&2
+  if [[ -z "${ARCHIVE_MEMBERS:-}" ]]; then
+    if ! directory_has_files "${root}/.gclient-git-cache"; then
+      echo "extract produced an empty git cache" >&2
+      return 2
+    fi
+    echo "restored git cache from ${CACHE_IMAGE}:${tag}"
+    du -sh "${root}/.gclient-git-cache" || true
+    return 0
+  fi
+  local restored path
+  if ! restored="$(cmd_list_members)"; then
+    echo "extract produced no tools files" >&2
     return 2
   fi
-  echo "restored git cache from ${CACHE_IMAGE}:${tag}"
-  du -sh "${root}/.gclient-git-cache" || true
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    echo "restored ${path} from ${CACHE_IMAGE}:${tag}"
+    du -sh "${root}/${path}" || true
+  done <<< "$restored"
 }
 
 cmd_pull() {
-  local root="${CACHE_ROOT:?CACHE_ROOT is required}"
-  local requested="${CACHE_TAG:-latest}"
-  local work err rc
+  local root requested work err rc
+  root="$(archive_root)"
+  requested="${CACHE_TAG:-latest}"
   work="$(mktemp -d)"
   err="$work/err"
   # shellcheck disable=SC2064
   trap "rm -rf '${work}'" RETURN
-  mkdir -p "${root}/.gclient-git-cache"
+  if [[ -z "${ARCHIVE_MEMBERS:-}" ]]; then
+    mkdir -p "${root}/.gclient-git-cache"
+  fi
   set +e
   pull_tag "$root" "$requested" "$work" "$err"
   rc=$?
@@ -244,27 +356,25 @@ cmd_pull() {
     note_restored "$requested"
     return 0
   fi
-  if [[ "$rc" -ne 1 || "$requested" != "latest" ]]; then
-    if [[ "$rc" -eq 1 ]]; then
-      echo "no ${CACHE_IMAGE}:${requested}; starting from an empty git cache"
-      note_restored empty
-      return 0
-    fi
-    return 1
-  fi
-  set +e
-  pull_tag "$root" current "$work" "$err"
-  rc=$?
-  set -e
-  if [[ "$rc" -eq 0 ]]; then
-    echo "no ${CACHE_IMAGE}:latest; restored ${CACHE_IMAGE}:current"
-    note_restored current
-    return 0
-  fi
   if [[ "$rc" -ne 1 ]]; then
     return 1
   fi
-  echo "no ${CACHE_IMAGE}:latest; starting from an empty git cache"
+  # The git cache kept one publish under :current. Tools packages do not.
+  if [[ -z "${ARCHIVE_MEMBERS:-}" && "$requested" == latest ]]; then
+    set +e
+    pull_tag "$root" current "$work" "$err"
+    rc=$?
+    set -e
+    if [[ "$rc" -eq 0 ]]; then
+      echo "no ${CACHE_IMAGE}:latest; restored ${CACHE_IMAGE}:current"
+      note_restored current
+      return 0
+    fi
+    if [[ "$rc" -ne 1 ]]; then
+      return 1
+    fi
+  fi
+  echo "no ${CACHE_IMAGE}:${requested}; starting from an empty git cache"
   note_restored empty
 }
 
@@ -292,12 +402,11 @@ PY
 }
 
 cmd_push() {
-  local root="${CACHE_ROOT:?CACHE_ROOT is required}"
-  local tag="${CACHE_TAG:?CACHE_TAG is required}"
-  local update="${UPDATE_LATEST:?UPDATE_LATEST is required}"
-  local revision="${GIT_REVISION:?GIT_REVISION is required}"
-  local cache="${root}/.gclient-git-cache"
-  local work archive
+  local root tag update revision work members_text line
+  root="$(archive_root)"
+  tag="${CACHE_TAG:?CACHE_TAG is required}"
+  update="${UPDATE_LATEST:?UPDATE_LATEST is required}"
+  revision="${GIT_REVISION:?GIT_REVISION is required}"
   case "$update" in
     true|false) ;;
     *)
@@ -309,20 +418,21 @@ cmd_push() {
     echo "tag must not be latest; that name is the moving tag" >&2
     return 1
   fi
-  if [[ ! -d "$cache" ]] || [[ -z "$(ls -A "$cache")" ]]; then
-    echo "git cache is missing or empty: ${cache}" >&2
-    return 1
-  fi
+  members_text="$(cmd_list_members)"
+  local members=()
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    members+=("$line")
+  done <<< "$members_text"
   work="$(mktemp -d)"
-  archive="${work}/${ARCHIVE_NAME}"
   # shellcheck disable=SC2064
   trap "rm -rf '${work}'" RETURN
-  echo "packing ${cache}"
+  echo "packing ${root}/{${members[*]}}"
   # Compress on every core and publish each 512MiB chunk as soon as it
   # is closed, instead of waiting for the whole archive.
   (
     set -o pipefail
-    tar -C "$root" -cf - .gclient-git-cache \
+    tar -C "$root" -cf - "${members[@]}" \
       | zstd -T0 -3 -c -v \
       | python3 -u -c '
 import os
@@ -484,6 +594,8 @@ case "${1:-}" in
   resolve-tag) shift; cmd_resolve_tag "$@" ;;
   pull) cmd_pull ;;
   fingerprint) cmd_fingerprint ;;
+  list-members) cmd_list_members ;;
+  members-for) shift; cmd_members_for "$@" ;;
   push) cmd_push ;;
   -h|--help|help) usage ;;
   *) usage >&2; exit 1 ;;

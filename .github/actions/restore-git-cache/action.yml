@@ -56,6 +56,12 @@ runs:
             sudo apt-get install -y zstd
           fi
         fi
+        # macOS still ships Bash 3.2, which has no wait -n. The cache
+        # script downloads blobs concurrently and needs Bash 4.3+.
+        if ! bash -c 'help wait' 2>/dev/null | grep -q -- '-n'; then
+          brew install bash
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+        fi
 
     - name: Log in to GHCR
       shell: bash

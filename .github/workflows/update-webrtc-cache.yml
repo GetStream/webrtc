@@ -4,7 +4,13 @@
 # The job token is github.token (contents: read, packages: write).
 # No stored secret. A missing ghcr.io/getstream/webrtc-cache:latest
 # restores :current once, then starts empty. :latest moves only when
-# update_latest is true. An unchanged cache does not push.
+# update_latest is true. An unchanged cache does not push, and the
+# tools jobs are skipped. When the git cache is pushed, iOS, macOS,
+# and Android each sync with hooks and publish
+# ghcr.io/getstream/webrtc-tools-<platform>. Those packages carry the
+# Hetzner tarball members other than the git cache (.cipd and
+# src/resources). Android also carries the Debian sysroot under
+# src/build/linux.
 
 name: Update WebRTC Cache
 
@@ -66,6 +72,11 @@ jobs:
     name: Publish git cache
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    outputs:
+      pushed: ${{ steps.gate.outputs.pushed }}
+      tag: ${{ steps.resolved.outputs.tag }}
+      update_latest: ${{ steps.resolved.outputs.update_latest }}
+      revision: ${{ steps.src.outputs.sha }}
     steps:
       - name: Check out this workflow
         uses: actions/checkout@v7
@@ -148,15 +159,105 @@ jobs:
         name: Fingerprint the synced cache
         run: echo "fp=$(publisher/.github/scripts/webrtc-cache.sh fingerprint)" >> "$GITHUB_OUTPUT"
 
-      - name: Leave latest unchanged
-        if: steps.pull.outputs.restored_from == 'latest' && steps.before.outputs.fp == steps.after.outputs.fp
-        run: echo "cache unchanged; left ${CACHE_IMAGE}:latest in place"
+      - id: gate
+        name: Record whether the git cache changed
+        env:
+          RESTORED_FROM: ${{ steps.pull.outputs.restored_from }}
+          BEFORE: ${{ steps.before.outputs.fp }}
+          AFTER: ${{ steps.after.outputs.fp }}
+        run: |
+          set -euo pipefail
+          if [[ "${RESTORED_FROM}" == latest && "${BEFORE}" == "${AFTER}" ]]; then
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            echo "cache unchanged; left ${CACHE_IMAGE}:latest in place"
+          else
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Push git cache
-        if: steps.pull.outputs.restored_from != 'latest' || steps.before.outputs.fp != steps.after.outputs.fp
+        if: steps.gate.outputs.pushed == 'true'
         env:
           CACHE_TAG: ${{ steps.resolved.outputs.tag }}
           UPDATE_LATEST: ${{ steps.resolved.outputs.update_latest }}
           GIT_REVISION: ${{ steps.src.outputs.sha }}
           IMAGE_SOURCE: https://github.com/GetStream/webrtc
         run: publisher/.github/scripts/webrtc-cache.sh push
+
+  tools:
+    name: Publish tools (${{ matrix.platform }})
+    needs: publish
+    if: needs.publish.outputs.pushed == 'true'
+    runs-on: ${{ matrix.runs_on }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ios
+            runs_on: macos-26
+            target_os: ios
+          - platform: macos
+            runs_on: macos-26
+            target_os: mac
+          - platform: android
+            runs_on: ubuntu-latest
+            target_os: android,unix
+    steps:
+      - name: Check out this workflow
+        uses: actions/checkout@v7
+        with:
+          path: publisher
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+
+      - name: Check out WebRTC
+        uses: actions/checkout@v7
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+          fetch-depth: 1
+          fetch-tags: false
+
+      - name: Set up WebRTC checkout
+        uses: ./src/.github/actions/setup-webrtc
+        with:
+          webrtc_ref: ${{ inputs.webrtc_ref }}
+
+      - name: Restore git cache
+        uses: ./publisher/.github/actions/restore-git-cache
+        with:
+          tag: ${{ needs.publish.outputs.tag }}
+
+      - name: Sync deps and hooks
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          WEBRTC_SRC: ${{ github.workspace }}/src
+          TARGET_OS: ${{ matrix.target_os }}
+          JOBS: "8"
+          SHALLOW: "1"
+          RUN_HOOKS: "1"
+          WEBRTC_REPO: https://github.com/GetStream/webrtc.git
+        run: make deps
+
+      - name: Push tools package
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          CACHE_TAG: ${{ needs.publish.outputs.tag }}
+          UPDATE_LATEST: ${{ needs.publish.outputs.update_latest }}
+          GIT_REVISION: ${{ needs.publish.outputs.revision }}
+          IMAGE_SOURCE: https://github.com/GetStream/webrtc
+        run: |
+          set -euo pipefail
+          script="publisher/.github/scripts/webrtc-cache.sh"
+          # restore-git-cache exports the git-cache image. This step
+          # publishes the platform tools image instead.
+          export CACHE_IMAGE="ghcr.io/getstream/webrtc-tools-${PLATFORM}"
+          export ARCHIVE_ROOT="${GITHUB_WORKSPACE}"
+          export ARCHIVE_MEMBERS="$("$script" members-for "${PLATFORM}")"
+          export ARTIFACT_TYPE="application/vnd.getstream.webrtc.tools.v1"
+          export CHUNK_TYPE="application/vnd.getstream.webrtc.tools.chunk.v1"
+          echo "tools image: ${CACHE_IMAGE}"
+          echo "tools members: ${ARCHIVE_MEMBERS}"
+          "$script" push

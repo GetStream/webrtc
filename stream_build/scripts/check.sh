@@ -563,7 +563,31 @@ mkdir -p "$fp_root/.gclient-git-cache/repo"
 printf 'x' > "$fp_root/.gclient-git-cache/repo/obj"
 fp_changed="$(CACHE_ROOT="$fp_root" "$cache_sh" fingerprint)"
 [[ "$fp_empty" != "$fp_changed" ]]
+list="$(CACHE_ROOT="$fp_root" "$cache_sh" list-members)"
+[[ "$list" == ".gclient-git-cache" ]]
 rm -rf "$fp_root"
+[[ "$("$cache_sh" members-for ios)" == ".cipd src/resources" ]]
+[[ "$("$cache_sh" members-for macos)" == ".cipd src/resources" ]]
+android_members="$("$cache_sh" members-for android)"
+[[ "$android_members" == ".cipd src/resources src/build/linux/*-sysroot" ]]
+if "$cache_sh" members-for windows >/dev/null; then
+  echo "expected windows tools platform to be rejected" >&2
+  exit 1
+fi
+tools="$(mktemp -d)"
+mkdir -p \
+  "$tools/.cipd" \
+  "$tools/src/resources" \
+  "$tools/src/build/linux/debian_bullseye_amd64-sysroot/usr" \
+  "$tools/src/build/linux/debian_bullseye_i386-sysroot" \
+  "$tools/src/build/linux/sysroot_scripts"
+printf 'x' > "$tools/.cipd/pkg"
+printf 'y' > "$tools/src/resources/clip.y4m"
+printf 'z' > "$tools/src/build/linux/debian_bullseye_amd64-sysroot/usr/lib.so"
+printf 's' > "$tools/src/build/linux/sysroot_scripts/install-sysroot.py"
+tools_list="$(ARCHIVE_ROOT="$tools" ARCHIVE_MEMBERS="$android_members" "$cache_sh" list-members)"
+[[ "$tools_list" == $'.cipd\nsrc/resources\nsrc/build/linux/debian_bullseye_amd64-sysroot' ]]
+rm -rf "$tools"
 if "$cache_sh" resolve-tag 'bad tag' 1 1 20261109 >/dev/null; then
   echo "expected invalid tag to be rejected" >&2
   exit 1
@@ -596,6 +620,15 @@ grep -q 'restore-git-cache' "$cache_wf"
 grep -q 'skip_latest_pull:' "$cache_wf"
 grep -q 'skip: ${{ inputs.skip_latest_pull }}' "$cache_wf"
 grep -q 'cache unchanged; left' "$cache_wf"
+grep -q 'needs.publish.outputs.pushed' "$cache_wf"
+grep -q 'ghcr.io/getstream/webrtc-tools-' "$cache_wf"
+grep -q 'members-for' "$cache_wf"
+grep -q 'platform: android' "$cache_wf"
+grep -q 'target_os: android,unix' "$cache_wf"
+grep -q 'members-for' "$gha/actions/restore-tools/action.yml"
+grep -q 'ghcr.io/getstream/webrtc-tools-' "$gha/actions/restore-tools/action.yml"
+grep -q 'restore-tools' "$gha/actions/restore-tree/action.yml"
+grep -q 'build-android) platform=android' "$gha/actions/restore-tree/action.yml"
 grep -q 'dirname "$GITHUB_WORKSPACE"' "$gha/actions/restore-git-cache/action.yml"
 grep -q 'oras-project/setup-oras@v2$' "$gha/actions/restore-git-cache/action.yml"
 grep -q 'packages: read' "$gha/workflows/build-v2.yml"
