@@ -38,7 +38,10 @@ printf '%s\n' "$help_text" | grep -q 'make rename apple'
 printf '%s\n' "$help_text" | grep -q 'SKIP_MACCATALYST=1'
 printf '%s\n' "$help_text" | grep -q 'make package ios'
 printf '%s\n' "$help_text" | grep -q 'make package macos'
+printf '%s\n' "$help_text" | grep -q 'make migrate plan'
 ! printf '%s\n' "$help_text" | grep -q 'package apple'
+python3 "$ROOT/scripts/migration_gate.py" --selftest
+"$ROOT/scripts/migrate.sh" selftest
 
 layout="$(fake_layout)"
 layout_make=(make DEPS_ROOT="$layout" WEBRTC_SRC="$layout/src")
@@ -486,6 +489,7 @@ grep -q 'AWS_RETRY_MODE' "$gha/actions/artifact-download/action.yml"
 grep -q 'cli-read-timeout' "$gha/actions/artifact-download/action.yml"
 grep -q 'size mismatch' "$gha/actions/artifact-download/action.yml"
 grep -q 'tar xf "${tar_file}"' "$gha/actions/artifact-download/action.yml"
+grep -q 'git -C src checkout -- resources' "$gha/actions/artifact-download/action.yml"
 grep -q '.hetzner-hit-bytes' "$gha/actions/artifact-download/action.yml"
 grep -q '.hetzner-hit-bytes' "$gha/actions/artifact-put/action.yml"
 grep -q '1073741824' "$gha/actions/artifact-put/action.yml"
@@ -501,17 +505,17 @@ grep -q 'object="artifacts/\${{ github.repository }}/\${OBJECT_STEM}.tar"' \
 grep -q 'cache_key: build-ios' "$gha/workflows/_make.yml"
 grep -q 'cache_key: build-macos' "$gha/workflows/_make.yml"
 grep -q 'cache_key: build-android' "$gha/workflows/_make.yml"
-grep -q 'include-hidden-files: true' "$gha/workflows/_make.yml"
-grep -q 'compression-level: 0' "$gha/workflows/_make.yml"
+! grep -q 'name: deps-windows' "$gha/workflows/_make.yml"
+! grep -q 'uses: ./src/.github/actions/artifact-put' "$gha/workflows/_make.yml"
 grep -A5 'name: Build iOS' "$gha/workflows/_make.yml" | grep -q 'needs: \[plan\]'
 ! grep -A8 'name: Build iOS' "$gha/workflows/_make.yml" | grep -q deps
 grep -A5 'name: Test iOS' "$gha/workflows/_make.yml" | grep -q 'needs: \[plan\]'
 ! grep -A8 'name: Test iOS' "$gha/workflows/_make.yml" | grep -q deps
-grep -q 'artifact-download' "$gha/actions/restore-tree/action.yml"
+grep -q 'restore-git-cache' "$gha/actions/restore-tree/action.yml"
 grep -q 'hetzner_access_key' "$gha/actions/restore-tree/action.yml"
-grep -q 'actions/download-artifact' "$gha/actions/restore-tree/action.yml"
+! grep -q 'actions/download-artifact' "$gha/actions/restore-tree/action.yml"
 ! grep -q 'tar xf' "$gha/actions/restore-tree/action.yml"
-grep -q 'if_missing: skip' "$gha/actions/restore-tree/action.yml"
+! grep -q 'artifact-download' "$gha/actions/restore-tree/action.yml"
 grep -q 'SHALLOW: "1"' "$gha/actions/restore-tree/action.yml"
 grep -q 'RUN_HOOKS: "1"' "$gha/actions/restore-tree/action.yml"
 ! grep -q 'RUN_HOOKS: "0"' "$gha/workflows/_make.yml"
@@ -526,10 +530,12 @@ for f in workflows/_make.yml actions/restore-tree/action.yml \
 done
 grep -q 'default_git_cache_path "${GITHUB_WORKSPACE}"' "$gha/actions/setup-webrtc/action.yml"
 grep -q 'GIT_CACHE_PATH=${git_cache}' "$gha/actions/setup-webrtc/action.yml"
-grep -q 'path: ${{ env.GIT_CACHE_PATH }}' "$gha/workflows/_make.yml"
-grep -q 'dest="${GIT_CACHE_PATH:?}"' "$gha/actions/restore-tree/action.yml"
 grep -q 'mv .gclient-git-cache "${git_cache}"' "$gha/actions/artifact-download/action.yml"
 grep -q 'cache="${GIT_CACHE_PATH:?}"' "$gha/actions/artifact-put/action.yml"
+! grep -q 'GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache' \
+  "$gha/actions/restore-tree/action.yml"
+! grep -q 'GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache' \
+  "$gha/workflows/_make.yml"
 grep -q 'rewrite_git_cache_alternates' "$ROOT/scripts/deps.sh"
 grep -q -- '-C "${cache_parent}" .gclient-git-cache' "$gha/actions/artifact-put/action.yml"
 # GNU tar rejects a trailing -C with no member after it.
@@ -548,7 +554,7 @@ grep -A12 'members=()' "$gha/actions/artifact-put/action.yml" | \
 ! grep -A12 'members=()' "$gha/actions/artifact-put/action.yml" | \
   grep -q 'third_party'
 grep -q 'pack members:' "$gha/actions/artifact-put/action.yml"
-grep -q 'uses: ./src/.github/actions/artifact-put' "$gha/workflows/_make.yml"
+grep -q 'cache_key: webrtc-cache' "$gha/workflows/_make.yml"
 grep -q 'products/ios/WebRTC.xcframework.zip' "$gha/workflows/_make.yml"
 grep -q 'products/macos/WebRTC.xcframework.zip' "$gha/workflows/_make.yml"
 
@@ -883,18 +889,24 @@ grep -q 'libjingle_peerconnection_so/libstream_jingle_peerconnection_so' "$ROOT/
 grep -q 'io.getstream.webrtc' "$gha/workflows/_make.yml"
 grep -q 'products-android-repackaged' "$gha/workflows/_make.yml"
 grep -q 'final-android/libwebrtc.aar' "$gha/workflows/_make.yml"
-grep -q 'variant=repackaged' "$gha/workflows/promote-release-v2.yml"
-grep -q 'promote_from_upstream_tag' "$gha/workflows/promote-release-v2.yml"
-! grep -q 'android_namespace:' "$gha/workflows/build-v2.yml"
-! grep -q 'android_namespace:' "$gha/workflows/package-v2.yml"
-! grep -q 'android_namespace:' "$gha/workflows/release-v2.yml"
-! grep -q 'rename_webrtc_package.sh' "$gha/workflows/manual-platform-tests.yml"
-! grep -q 'rename_webrtc_package.sh' "$gha/workflows/publish.yml"
-grep -q 'pull_request:' "$gha/workflows/test-v2.yml"
-grep -q "github.event.pull_request.head.sha" "$gha/workflows/test-v2.yml"
-grep -q 'name: Build Android v2$' "$gha/workflows/_make.yml"
-! grep -q 'name: Build Android v2 (${{' "$gha/workflows/_make.yml"
+grep -q 'variant=repackaged' "$gha/workflows/promote-release.yml"
+grep -q 'promote_from_upstream_tag' "$gha/workflows/promote-release.yml"
+! grep -q 'android_namespace:' "$gha/workflows/build.yml"
+! grep -q 'android_namespace:' "$gha/workflows/package.yml"
+! grep -q 'android_namespace:' "$gha/workflows/release.yml"
+test ! -e "$gha/workflows/manual-platform-tests.yml"
+test ! -e "$gha/workflows/publish.yml"
+test ! -e "$gha/actions/prepare-apple/action.yml"
+test ! -e "$gha/actions/prepare-android/action.yml"
+test ! -e "$gha/actions/prepare-common-v2/action.yml"
+grep -q 'pull_request:' "$gha/workflows/test.yml"
+grep -q "github.event.pull_request.head.sha" "$gha/workflows/test.yml"
+grep -q 'name: Build Android$' "$gha/workflows/_make.yml"
+! grep -q 'name: Build Android (${{' "$gha/workflows/_make.yml"
 grep -q 'name: Test Android' "$gha/workflows/_make.yml"
+grep -q "(inputs.mode == 'test' || inputs.mode == 'release') && inputs.android" "$gha/workflows/_make.yml"
+grep -q 'needs: \[plan, test_ios, test_macos, test_android, test_windows\]' "$gha/workflows/_make.yml"
+grep -q 'Release is blocked: Android tests' "$gha/workflows/_make.yml"
 grep -q 'make test android' "$gha/workflows/_make.yml"
 test_jobs="$(awk '/name: Test iOS$/,/name: Tests passed$/' "$gha/workflows/_make.yml")"
 ! grep -q 'artifact-put' <<<"$test_jobs"
@@ -927,5 +939,117 @@ inside = device_rel(host, "/webrtc/src/out/android_tests")
 assert sibling == "src/resources/reference_video_640x360_30fps.y4m", sibling
 assert inside == "resources/reference_video_640x360_30fps.y4m", inside
 PY
+
+cache_sh="$gha/scripts/webrtc-cache.sh"
+cache_wf="$gha/workflows/update-webrtc-cache.yml"
+cache_daily="$gha/workflows/update-webrtc-cache-daily.yml"
+bash -n "$cache_sh"
+got="$("$cache_sh" resolve-tag automatic 42 3 20261109)"
+[[ "$got" == "20261109-42.3" ]]
+got="$("$cache_sh" resolve-tag '' 42 3 20261109)"
+[[ "$got" == "20261109-42.3" ]]
+got="$("$cache_sh" resolve-tag '  nightly_1  ' 42 3 20261109)"
+[[ "$got" == "nightly_1" ]]
+if "$cache_sh" resolve-tag current 1 1 20261109 >/dev/null; then
+  echo "expected tag current to be rejected" >&2
+  exit 1
+fi
+if "$cache_sh" resolve-tag latest 1 1 20261109 >/dev/null; then
+  echo "expected tag latest to be rejected" >&2
+  exit 1
+fi
+fp_root="$(mktemp -d)"
+fp_empty="$(CACHE_ROOT="$fp_root" "$cache_sh" fingerprint)"
+mkdir -p "$fp_root/.gclient-git-cache/repo"
+printf 'x' > "$fp_root/.gclient-git-cache/repo/obj"
+fp_changed="$(CACHE_ROOT="$fp_root" "$cache_sh" fingerprint)"
+[[ "$fp_empty" != "$fp_changed" ]]
+list="$(CACHE_ROOT="$fp_root" "$cache_sh" list-members)"
+[[ "$list" == ".gclient-git-cache" ]]
+rm -rf "$fp_root"
+[[ "$("$cache_sh" members-for ios)" == ".cipd src/resources" ]]
+[[ "$("$cache_sh" members-for macos)" == ".cipd src/resources" ]]
+android_members="$("$cache_sh" members-for android)"
+[[ "$android_members" == ".cipd src/resources src/build/linux/*-sysroot" ]]
+if "$cache_sh" members-for windows >/dev/null; then
+  echo "expected windows tools platform to be rejected" >&2
+  exit 1
+fi
+tools="$(mktemp -d)"
+mkdir -p \
+  "$tools/.cipd" \
+  "$tools/src/resources" \
+  "$tools/src/build/linux/debian_bullseye_amd64-sysroot/usr" \
+  "$tools/src/build/linux/debian_bullseye_i386-sysroot" \
+  "$tools/src/build/linux/sysroot_scripts"
+printf 'x' > "$tools/.cipd/pkg"
+printf 'y' > "$tools/src/resources/clip.y4m"
+printf 'z' > "$tools/src/build/linux/debian_bullseye_amd64-sysroot/usr/lib.so"
+printf 's' > "$tools/src/build/linux/sysroot_scripts/install-sysroot.py"
+tools_list="$(ARCHIVE_ROOT="$tools" ARCHIVE_MEMBERS="$android_members" "$cache_sh" list-members)"
+[[ "$tools_list" == $'.cipd\nsrc/resources\nsrc/build/linux/debian_bullseye_amd64-sysroot' ]]
+rm -rf "$tools"
+if "$cache_sh" resolve-tag 'bad tag' 1 1 20261109 >/dev/null; then
+  echo "expected invalid tag to be rejected" >&2
+  exit 1
+fi
+grep -q 'starting from an empty git cache' "$cache_sh"
+grep -q 'retry_oras oras blob fetch' "$cache_sh"
+grep -q 'PULL_CONCURRENCY:-3' "$cache_sh"
+grep -q 'wait -n' "$cache_sh"
+grep -q 'stitching' "$cache_sh"
+grep -q 'zstd -d -T0 -c -v' "$cache_sh"
+! grep -q 'report_extract' "$cache_sh"
+grep -q 'retry_oras oras blob push' "$cache_sh"
+grep -q 'retry_oras oras tag' "$cache_sh"
+grep -q 'chunks-done' "$cache_sh"
+grep -q 'zstd -T0 -3 -c -v' "$cache_sh"
+grep -q 'name: Update WebRTC Cache$' "$cache_wf"
+grep -q 'workflow_dispatch:' "$cache_wf"
+grep -q 'workflow_call:' "$cache_wf"
+! grep -q 'schedule:' "$cache_wf"
+grep -q 'packages: write' "$cache_wf"
+grep -q 'contents: read' "$cache_wf"
+grep -q 'github.token' "$gha/actions/restore-git-cache/action.yml"
+! grep -q 'secrets\.' "$cache_wf"
+grep -q 'ghcr.io/getstream/webrtc-cache' "$cache_wf"
+grep -q 'default: automatic' "$cache_wf"
+grep -q 'default: true' "$cache_wf"
+grep -q 'TARGET_OS: ios,mac,android,unix' "$cache_wf"
+grep -q 'RUN_HOOKS: "0"' "$cache_wf"
+grep -q 'restore-git-cache' "$cache_wf"
+grep -q 'skip_latest_pull:' "$cache_wf"
+grep -q 'skip: ${{ inputs.skip_latest_pull }}' "$cache_wf"
+grep -q 'cache unchanged; left' "$cache_wf"
+grep -q 'needs.publish.outputs.run_tools' "$cache_wf"
+grep -q 'needs.publish.outputs.git_cache_tag' "$cache_wf"
+grep -q 'tools-status' "$cache_wf"
+grep -q 'tools package missing; publishing from the current git cache' "$cache_wf"
+grep -q 'tools-status' "$cache_sh"
+grep -q 'ghcr.io/getstream/webrtc-tools-' "$cache_wf"
+grep -q 'members-for' "$cache_wf"
+grep -q 'platform: android' "$cache_wf"
+grep -q 'target_os: android,unix' "$cache_wf"
+grep -q 'members-for' "$gha/actions/restore-tools/action.yml"
+grep -q 'ghcr.io/getstream/webrtc-tools-' "$gha/actions/restore-tools/action.yml"
+grep -q 'restore-tools' "$gha/actions/restore-tree/action.yml"
+grep -q 'build-android) platform=android' "$gha/actions/restore-tree/action.yml"
+grep -q 'dirname "$GITHUB_WORKSPACE"' "$gha/actions/restore-git-cache/action.yml"
+grep -q 'oras-project/setup-oras@v2$' "$gha/actions/restore-git-cache/action.yml"
+grep -q 'packages: read' "$gha/workflows/build.yml"
+grep -q 'packages: read' "$gha/workflows/test.yml"
+! grep -q 'ORAS_SHA256' "$cache_wf"
+grep -q 'group: webrtc-cache' "$cache_wf"
+! grep -q 'concurrency:' "$cache_daily"
+grep -q 'name: Update WebRTC Cache daily' "$cache_daily"
+grep -q 'cron: "0 4 \* \* \*"' "$cache_daily"
+grep -q 'uses: \./\.github/workflows/update-webrtc-cache\.yml' "$cache_daily"
+grep -q 'packages: write' "$cache_daily"
+grep -q 'tag: automatic' "$cache_daily"
+grep -q 'update_latest: true' "$cache_daily"
+! grep -q 'update_current' "$cache_wf"
+! grep -q 'update_current' "$cache_daily"
+! grep -q 'workflow_dispatch:' "$cache_daily"
+[[ ! -e "$gha/workflows/webrtc-cache.yml" ]]
 
 echo "ok"

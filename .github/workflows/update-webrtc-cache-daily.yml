@@ -1,0 +1,23 @@
+# Call Update WebRTC Cache once a day. The schedule runs only after
+# this file is on the default branch. Tag is automatic and latest moves.
+
+name: Update WebRTC Cache daily
+
+run-name: Update WebRTC Cache daily
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Update WebRTC Cache
+    uses: ./.github/workflows/update-webrtc-cache.yml
+    with:
+      webrtc_ref: main
+      tag: automatic
+      update_latest: true

@@ -1,8 +1,8 @@
 # Promote an existing WebRTC pre-release without rebuilding its artifacts.
 
-name: Promote Release v2
+name: Promote Release
 
-run-name: Promote Release v2 ${{ inputs.version }}
+run-name: Promote Release ${{ inputs.version }}
 
 permissions:
   contents: write
@@ -25,7 +25,7 @@ on:
         default: ""
 
 concurrency:
-  group: promote-release-v2-${{ inputs.version }}
+  group: promote-release-${{ inputs.version }}
   cancel-in-progress: false
 
 jobs:
@@ -298,7 +298,7 @@ jobs:
             >> "${GITHUB_STEP_SUMMARY}"
 
   trigger_downstream_releases:
-    name: Trigger downstream WebRTC releases v2
+    name: Trigger downstream WebRTC releases
     needs: promote
     if: ${{ always() && !cancelled() && needs.promote.result == 'success' }}
     runs-on: ubuntu-latest

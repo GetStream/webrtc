@@ -1,0 +1,72 @@
+name: Restore WebRTC tools
+description: >
+  Pull ghcr.io/getstream/webrtc-tools-<platform> into the gclient root.
+  ios and macos restore .cipd and src/resources. android also restores
+  Debian sysroots under src/build/linux. A missing tag leaves those
+  paths absent so hooks can download them. The caller needs
+  contents: read and packages: read.
+
+inputs:
+  platform:
+    description: ios, macos, or android.
+    required: true
+  tag:
+    description: Tag to pull. A missing tag leaves the tools paths absent.
+    required: false
+    default: latest
+
+outputs:
+  restored_from:
+    description: latest, the requested tag, or empty.
+    value: ${{ steps.pull.outputs.restored_from }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install oras
+      uses: oras-project/setup-oras@v2
+
+    - name: Install zstd
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! command -v zstd >/dev/null; then
+          if [[ "$(uname -s)" == Darwin ]]; then
+            brew install zstd
+          else
+            sudo apt-get update
+            sudo apt-get install -y zstd
+          fi
+        fi
+        # macOS still ships Bash 3.2, which has no wait -n. The cache
+        # script downloads blobs concurrently and needs Bash 4.3+.
+        if ! bash -c 'help wait' 2>/dev/null | grep -q -- '-n'; then
+          brew install bash
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+        fi
+
+    - name: Log in to GHCR
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        echo "$GH_TOKEN" | oras login ghcr.io \
+          --username "${{ github.actor }}" \
+          --password-stdin
+
+    - id: pull
+      name: Pull tools package, or start empty
+      shell: bash
+      env:
+        PLATFORM: ${{ inputs.platform }}
+        CACHE_TAG: ${{ inputs.tag }}
+      run: |
+        set -euo pipefail
+        script="${{ github.action_path }}/../../scripts/webrtc-cache.sh"
+        export CACHE_IMAGE="ghcr.io/getstream/webrtc-tools-${PLATFORM}"
+        export ARCHIVE_ROOT="${GITHUB_WORKSPACE}"
+        export ARCHIVE_MEMBERS="$("$script" members-for "${PLATFORM}")"
+        echo "tools image: ${CACHE_IMAGE}"
+        echo "tools members: ${ARCHIVE_MEMBERS}"
+        "$script" pull

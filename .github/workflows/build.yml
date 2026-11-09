@@ -1,17 +1,18 @@
-# Manual WebRTC build (v2 Makefile DAG). Implementation:
+# Manual WebRTC build (Makefile DAG). Implementation:
 # .github/workflows/_make.yml
 # Build iOS / macOS / Android in parallel: HIT build-{ios,macos,android},
 # make deps, make build, put that host's tree + out/. No Linux Deps job.
 # No package combine or packaged products. Release configurations upload
 # the Apple build slices' dSYMs as separate artifacts.
 
-name: Build v2
+name: Build
 
 run-name: >-
-  Build v2 config:${{ inputs.config }}${{ inputs.ios == 'true' && ' iOS' || '' }}${{ inputs.macos == 'true' && (inputs.ios == 'true' && ', macOS' || ' macOS') || '' }}${{ inputs.android == 'true' && format('{0} Android{1}', (inputs.ios == 'true' || inputs.macos == 'true') && ',' || '', inputs.android_arch != '' && format(' ({0})', inputs.android_arch) || '') || '' }}${{ inputs.windows == 'true' && ((inputs.ios == 'true' || inputs.macos == 'true' || inputs.android == 'true') && ', Windows' || ' Windows') || '' }}
+  Build config:${{ inputs.config }}${{ inputs.ios == 'true' && ' iOS' || '' }}${{ inputs.macos == 'true' && (inputs.ios == 'true' && ', macOS' || ' macOS') || '' }}${{ inputs.android == 'true' && format('{0} Android{1}', (inputs.ios == 'true' || inputs.macos == 'true') && ',' || '', inputs.android_arch != '' && format(' ({0})', inputs.android_arch) || '') || '' }}${{ inputs.windows == 'true' && ((inputs.ios == 'true' || inputs.macos == 'true' || inputs.android == 'true') && ', Windows' || ' Windows') || '' }}
 
 permissions:
   contents: read
+  packages: read
 
 on:
   workflow_dispatch:
@@ -47,14 +48,10 @@ on:
         description: Optional Android ABI, for example arm64-v8a. Empty = default ABI set.
         required: false
         default: ""
-      skip_deps_cache:
-        description: Skip Hetzner deps cache (fresh gclient + ninja)
-        type: boolean
-        default: false
 
 jobs:
   build:
-    name: Build v2
+    name: Build
     uses: ./.github/workflows/_make.yml
     secrets: inherit
     with:
@@ -66,4 +63,3 @@ jobs:
       windows: ${{ inputs.windows }}
       config: ${{ inputs.config }}
       android_arch: ${{ inputs.android_arch }}
-      skip_deps_cache: ${{ inputs.skip_deps_cache }}

@@ -12,9 +12,9 @@ Due to the fork specifics, the repo's `.gitignore` has been updated to match the
 
 The fork contains a `fastlane` pipeline to produce builds for iOS. To access the pipeline you need to switch into `src/fastlane` and execute `bundle exec fastlane lanes` to see the available lanes.
 
-##### Manual CI (fan-out tests)
+##### Manual CI
 
-In the GitHub repo, use **Actions → Manual platform tests** (`.github/workflows/manual-platform-tests.yml`): pick one or more platform **checkboxes**, then one `gclient sync` via `stream-webrtc-release-pipeline`’s `deps sync` lane, then parallel jobs for the platforms you enabled.
+In the GitHub repo, use **Actions → Build** (`.github/workflows/build.yml`) or **Actions → Test** (`.github/workflows/test.yml`). Pull requests run Test for iOS, macOS, and Android.
 
 ##### Building for iOS
 
