@@ -27,6 +27,10 @@ on:
         description: Move the latest tag to this publish.
         type: boolean
         default: true
+      skip_latest_pull:
+        description: Skip pulling latest and start from an empty cache.
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       webrtc_ref:
@@ -41,6 +45,10 @@ on:
         description: Move the latest tag to this publish.
         type: boolean
         default: true
+      skip_latest_pull:
+        description: Skip pulling latest and start from an empty cache.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -107,6 +115,8 @@ jobs:
       - id: pull
         name: Restore git cache
         uses: ./publisher/.github/actions/restore-git-cache
+        with:
+          skip: ${{ inputs.skip_latest_pull }}
 
       - id: before
         name: Fingerprint the pulled cache

@@ -69,10 +69,16 @@ runs:
 
     - id: pull
       name: Pull latest cache, or start empty
-      if: ${{ inputs.skip != 'true' }}
       shell: bash
       env:
         CACHE_TAG: ${{ inputs.tag }}
+        SKIP_PULL: ${{ inputs.skip }}
       run: |
         set -euo pipefail
+        if [[ "${SKIP_PULL}" == "true" ]]; then
+          echo "skipping pull; starting from an empty git cache"
+          mkdir -p "${GIT_CACHE_PATH}"
+          echo "restored_from=empty" >> "${GITHUB_OUTPUT}"
+          exit 0
+        fi
         "${{ github.action_path }}/../../scripts/webrtc-cache.sh" pull
