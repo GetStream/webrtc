@@ -136,9 +136,10 @@ job), `src/.git`, Stream-tracked `src` files, `products/`. On the runner
 the cache lives at `GIT_CACHE_PATH`
 (`$(dirname $GITHUB_WORKSPACE)/.gclient-git-cache`, outside the gclient
 root). setup-webrtc and restore-git-cache export that path; do not
-override it in workflow or step env. `git checkout -- resources` after a
-cache hit so a cache packed from another branch cannot replace tracked
-files such as `BUILD.gn`. Do not strip git alternates; `make deps` runs
+override it in workflow or step env. `restore-tools` then runs
+`git checkout -- resources`, because that package is published from
+another branch and would replace this checkout's `BUILD.gn`. Untracked
+downloaded media stays. Do not strip git alternates; `make deps` runs
 `rewrite_git_cache_alternates` so Linux-packed cache paths retarget
 to this runner. Always `make deps` after HIT (cheap from cache).
 Build `CONFIG` is dispatch (default release); `make test` always uses debug
