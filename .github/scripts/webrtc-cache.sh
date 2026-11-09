@@ -182,10 +182,43 @@ PY
   fi
   local first
   first="$(cut -f4 "$list" | head -n 1)"
+  # Progress goes to stderr. The pipe is the archive bytes.
+  report_extract() {
+    EXTRACT_LABEL="$1" python3 -u - <<'PY'
+import os
+import sys
+import time
+
+label = os.environ["EXTRACT_LABEL"]
+read = 0
+last = time.time()
+while True:
+    buf = sys.stdin.buffer.read(8 * 1024 * 1024)
+    if not buf:
+        break
+    sys.stdout.buffer.write(buf)
+    sys.stdout.buffer.flush()
+    read += len(buf)
+    now = time.time()
+    if now - last >= 15:
+        print(f"{label} {read / (1024 ** 3):.1f} GiB", file=sys.stderr, flush=True)
+        last = now
+print(f"{label} done {read / (1024 ** 3):.1f} GiB", file=sys.stderr, flush=True)
+PY
+  }
   if [[ "$first" == chunk-* ]] || grep -q 'git-cache.chunk' "$list"; then
-    cat "$blobdir"/chunk-* | zstd -d -c | tar -C "$root" -xf -
+    local files=("$blobdir"/chunk-*)
+    local total="${#files[@]}"
+    local i=0
+    echo "stitching ${total} blobs" >&2
+    for f in "${files[@]}"; do
+      i=$((i + 1))
+      echo "stitch ${i}/${total} $(basename "$f")" >&2
+      cat "$f"
+    done | zstd -d -c | report_extract "extract" | tar -C "$root" -xf -
   else
-    zstd -d -c "${blobdir}/${first}" | tar -C "$root" -xf -
+    echo "extracting ${first}" >&2
+    zstd -d -c "${blobdir}/${first}" | report_extract "extract" | tar -C "$root" -xf -
   fi
   if [[ ! -d "${root}/.gclient-git-cache" ]]; then
     echo "archive missing .gclient-git-cache" >&2
