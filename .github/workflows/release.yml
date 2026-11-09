@@ -1,15 +1,16 @@
-# GitHub release of packaged WebRTC artifacts (v2 Makefile DAG), then
+# GitHub release of packaged WebRTC artifacts (Makefile DAG), then
 # downstream wrapper publishes. Not dispatchable until this file exists
 # on the default branch. Tests run parallel with Build (each HIT its
 # platform cache). Publish waits on Test + Package.
 
-name: Release v2
+name: Release
 
 run-name: >-
-  Release v2 config:${{ inputs.config }}${{ inputs.prerelease == 'true' && ' Pre-Release' || '' }} ${{ inputs.version }}${{ inputs.ios == 'true' && ' iOS' || '' }}${{ inputs.macos == 'true' && (inputs.ios == 'true' && ', macOS' || ' macOS') || '' }}${{ inputs.android == 'true' && format('{0} Android{1}', (inputs.ios == 'true' || inputs.macos == 'true') && ',' || '', inputs.android_arch != '' && format(' ({0})', inputs.android_arch) || '') || '' }}${{ inputs.windows == 'true' && ((inputs.ios == 'true' || inputs.macos == 'true' || inputs.android == 'true') && ', Windows' || ' Windows') || '' }}
+  Release config:${{ inputs.config }}${{ inputs.prerelease && ' Pre-Release' || '' }} ${{ inputs.version }}${{ inputs.ios && ' iOS' || '' }}${{ inputs.macos && (inputs.ios && ', macOS' || ' macOS') || '' }}${{ inputs.android && format('{0} Android{1}', (inputs.ios || inputs.macos) && ',' || '', inputs.android_arch != '' && format(' ({0})', inputs.android_arch) || '') || '' }}${{ inputs.windows && ((inputs.ios || inputs.macos || inputs.android) && ', Windows' || ' Windows') || '' }}
 
 permissions:
   contents: write
+  packages: read
 
 on:
   workflow_dispatch:
@@ -63,7 +64,7 @@ on:
 
 jobs:
   release:
-    name: Release v2
+    name: Release
     uses: ./.github/workflows/_make.yml
     secrets: inherit
     with:

@@ -1,0 +1,90 @@
+name: Restore WebRTC git cache
+description: >
+  Pull ghcr.io/getstream/webrtc-cache into GIT_CACHE_PATH next to the
+  gclient root. Other workflows call this after checkout. The caller
+  needs contents: read and packages: read.
+
+inputs:
+  image:
+    description: GHCR repository, without a tag.
+    required: false
+    default: ghcr.io/getstream/webrtc-cache
+  tag:
+    description: Tag to pull. latest falls back to current when latest is absent.
+    required: false
+    default: latest
+  skip:
+    description: Set GIT_CACHE_PATH and do not download.
+    required: false
+    default: "false"
+
+outputs:
+  restored_from:
+    description: latest, current, or empty.
+    value: ${{ steps.pull.outputs.restored_from }}
+  git_cache_path:
+    description: Directory gclient reads as GIT_CACHE_PATH.
+    value: ${{ steps.place.outputs.git_cache_path }}
+
+runs:
+  using: composite
+  steps:
+    - id: place
+      name: Place the git cache outside the gclient root
+      shell: bash
+      run: |
+        set -euo pipefail
+        cache_root="$(dirname "$GITHUB_WORKSPACE")"
+        echo "CACHE_ROOT=${cache_root}" >> "${GITHUB_ENV}"
+        echo "GIT_CACHE_PATH=${cache_root}/.gclient-git-cache" >> "${GITHUB_ENV}"
+        echo "CACHE_IMAGE=${{ inputs.image }}" >> "${GITHUB_ENV}"
+        echo "git_cache_path=${cache_root}/.gclient-git-cache" >> "${GITHUB_OUTPUT}"
+        echo "git cache: ${cache_root}/.gclient-git-cache"
+
+    - name: Install oras
+      uses: oras-project/setup-oras@v2
+
+    - name: Install zstd
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! command -v zstd >/dev/null; then
+          if [[ "$(uname -s)" == Darwin ]]; then
+            brew install zstd
+          else
+            sudo apt-get update
+            sudo apt-get install -y zstd
+          fi
+        fi
+        # macOS still ships Bash 3.2, which has no wait -n. The cache
+        # script downloads blobs concurrently and needs Bash 4.3+.
+        if ! bash -c 'help wait' 2>/dev/null | grep -q -- '-n'; then
+          brew install bash
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+        fi
+
+    - name: Log in to GHCR
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        echo "$GH_TOKEN" | oras login ghcr.io \
+          --username "${{ github.actor }}" \
+          --password-stdin
+
+    - id: pull
+      name: Pull latest cache, or start empty
+      shell: bash
+      env:
+        CACHE_TAG: ${{ inputs.tag }}
+        SKIP_PULL: ${{ inputs.skip }}
+      run: |
+        set -euo pipefail
+        if [[ "${SKIP_PULL}" == "true" ]]; then
+          echo "skipping pull; starting from an empty git cache"
+          mkdir -p "${GIT_CACHE_PATH}"
+          echo "restored_from=empty" >> "${GITHUB_OUTPUT}"
+          exit 0
+        fi
+        "${{ github.action_path }}/../../scripts/webrtc-cache.sh" pull

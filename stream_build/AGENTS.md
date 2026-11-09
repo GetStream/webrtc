@@ -40,22 +40,22 @@ Apple packaging also requires the generated dSYMs and writes
 `WebRTC.dSYMs.zip` separately for every configuration, grouped by platform.
 `CONFIG=debug` also embeds dSYMs in the XCFramework. `CONFIG=release` keeps
 them only in the separate symbol archive, outside the XCFramework.
-For `CONFIG=release`, Build v2 uploads per-slice symbols as `build-ios-dsyms`
-and `build-macos-dsyms`, without running packaging. Package/Release v2 upload
+For `CONFIG=release`, Build uploads per-slice symbols as `build-ios-dsyms`
+and `build-macos-dsyms`, without running packaging. Package and Release upload
 the per-platform ZIPs as `products-ios-dsyms` and `products-macos-dsyms`, then
-combine them into `final-apple-dsyms`. Release v2 attaches `WebRTC.dSYMs.zip`
+combine them into `final-apple-dsyms`. Release attaches `WebRTC.dSYMs.zip`
 to both stable releases and prereleases. These separate CI artifacts depend
 on the build configuration, not prerelease status; debug symbols stay embedded.
 
-Package v2 and Release v2 produce upstream artifacts: `WebRTC.xcframework`,
+Package and Release produce upstream artifacts: `WebRTC.xcframework`,
 `libwebrtc.aar`, and the applicable symbols and Windows products.
 Every Android build runs two jobs. One packages `libwebrtc.aar`. The other
 sets `ANDROID_NAMESPACE=io.getstream.webrtc`, which rewrites the Java package,
 JNI symbols, and `libjingle_peerconnection_so` before `make build android`,
 then packages `libwebrtc-repackaged.aar`. The WebRTC GitHub release keeps
-`libwebrtc.aar`. Release v2 sends `libwebrtc-repackaged.aar` to
+`libwebrtc.aar`. Release sends `libwebrtc-repackaged.aar` to
 stream-video-android-webrtc. `make rename` remains an optional local command;
-the v2 workflows do not call it.
+the workflows do not call it.
 
 ## Layout
 
@@ -128,17 +128,19 @@ Not packed: working trees (`src/third_party`, `src/build`,
 job), `src/.git`, Stream-tracked `src` files, `products/`. Restore:
 checkout `src`, extract git-cache to `GIT_CACHE_PATH`
 (`${{ github.workspace }}/.gclient-git-cache`), `src/resources`, and
-`.cipd` if present. Do not strip git alternates; `make deps` runs
+`.cipd` if present. Then `git checkout -- resources` so a cache packed
+from another branch cannot replace tracked files such as `BUILD.gn`.
+Do not strip git alternates; `make deps` runs
 `rewrite_git_cache_alternates` so Linux-packed cache paths retarget
 to this runner. Always `make deps` after HIT (cheap from cache).
 Build `CONFIG` is dispatch (default release); `make test` always uses debug
 in `out/ios_tests` / `out/webrtc_tests` / `src/out/android_tests`, so those
 subdirs do not mix with slice dirs. Android tests stay inside `src/` because
 Chromium maps data dependencies by stripping `..` from the output directory,
-and that only reaches `resources/` from an out dir under `src`. test-v2.yml HITs the same
+and that only reaches `resources/` from an out dir under `src`. test.yml HITs the same
 `build-ios` / `build-macos` / `build-android` keys. Pull requests run
-Test v2 for iOS, macOS, and Android (`rtc_unittests` on an x64 emulator).
-Manual Test v2 still picks platforms; Android defaults off there.
+Test for iOS, macOS, and Android (`rtc_unittests` on an x64 emulator).
+Manual Test still picks platforms; Android defaults off there.
 Windows Deps still uploads `deps-windows` to GitHub.
 Package/Release Build jobs also `make package` and upload `products-*`
 (GitHub). Package combine consumes `products-*` (no third ninja) and
@@ -207,29 +209,19 @@ make rename apple
 make rename android
 ```
 
-## GitHub Actions DAGs
+## GitHub Actions
 
-Two independent dispatch DAGs. Either can `workflow_dispatch` without
-the other.
-
-**v2 (Makefile / this tree)**
+Dispatch workflows. Each can `workflow_dispatch` on its own. Test also
+runs on pull requests.
 
 | UI name | File |
 |---|---|
-| Build v2 | `.github/workflows/build-v2.yml` |
-| Test v2 | `.github/workflows/test-v2.yml` |
-| Package v2 | `.github/workflows/package-v2.yml` |
-| Release v2 | `.github/workflows/release-v2.yml` |
+| Build | `.github/workflows/build.yml` |
+| Test | `.github/workflows/test.yml` |
+| Package | `.github/workflows/package.yml` |
+| Release | `.github/workflows/release.yml` |
+| Promote Release | `.github/workflows/promote-release.yml` |
 
 Reusable: `.github/workflows/_make.yml` (`name: WebRTC make`).
 Actions: `restore-tree`, `artifact-put`, `artifact-download`,
-`setup-webrtc`, `prepare-common-v2`.
-
-**main (legacy Fastlane / stream-webrtc-release-pipeline)**
-
-| UI name | File |
-|---|---|
-| Build | `.github/workflows/manual-platform-tests.yml` |
-| Publish | `.github/workflows/publish.yml` |
-
-Actions: `prepare-common`, `prepare-apple`, `prepare-android`.
+`setup-webrtc`, `prepare-common`.
