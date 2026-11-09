@@ -9,6 +9,10 @@
 #    ones linked into libjingle_peerconnection_so. jni_zero's generate-final
 #    rejects a mismatch, and a Java proxy with no linked native crashes at
 #    runtime.
+# 3. libwebrtc depends on :libwebrtc_final_jni_java, and the .so sets
+#    java_targets to :libwebrtc_java_targets. Without those lines the AAR
+#    has no GEN_JNI, or GEN_JNI misses packed classes, and
+#    PeerConnectionFactory.initialize crashes. The build still passes.
 #
 # The BUILD.gn walk is textual: it follows deps, public_deps, and java_targets
 # lists inside each target and ignores conditions. Treat a report as a lead to
@@ -111,6 +115,26 @@ for t in sorted(native_side - java_side):
     failed = True
     print(f"{t}: {SO} links its native side, but libwebrtc does not pack "
           "its Java.", file=sys.stderr)
+
+def require_dep(target, dep, message):
+    global failed
+    info = targets.get(target)
+    if not info or dep not in info["deps"]:
+        failed = True
+        print(message, file=sys.stderr)
+
+require_dep(
+    JAR,
+    "sdk/android:libwebrtc_final_jni_java",
+    f"{JAR} deps omit :libwebrtc_final_jni_java. The AAR then has no "
+    "GEN_JNI and PeerConnectionFactory.initialize crashes.",
+)
+require_dep(
+    SO,
+    "sdk/android:libwebrtc_java_targets",
+    f"{SO} java_targets omit :libwebrtc_java_targets. GEN_JNI then "
+    "misses packed proxy methods.",
+)
 
 for rel in SCANNED:
     for dirpath, _, files in os.walk(os.path.join(root, rel)):

@@ -601,7 +601,7 @@ jni_root="$(mktemp -d)"
 mkdir -p "$jni_root/sdk/android/api/org/webrtc" "$jni_root/sdk/android/src/jni"
 cat > "$jni_root/sdk/android/BUILD.gn" <<'EOF'
 dist_jar("libwebrtc") {
-  deps = [ ":foo_java", ":bar_java" ]
+  deps = [ ":foo_java", ":bar_java", ":libwebrtc_final_jni_java" ]
 }
 rtc_android_library("foo_java") {
   deps = [ ":generated_foo_jni_java" ]
@@ -611,6 +611,7 @@ rtc_android_library("bar_java") {
 }
 rtc_shared_library("libjingle_peerconnection_so") {
   deps = [ ":foo_jni", "//third_party/jni_zero" ]
+  java_targets = [ ":libwebrtc_java_targets" ]
 }
 rtc_library("foo_jni") {
   sources = [ "src/jni/foo.cc" ]
@@ -646,6 +647,22 @@ if grep -q 'bar.cc' "$jni_root/err"; then
   echo "check-android-jni.sh flagged a file that invokes DEFINE_JNI" >&2
   exit 1
 fi
+cp "$jni_root/sdk/android/BUILD.gn" "$jni_root/sdk/android/BUILD.gn.good"
+python3 - "$jni_root/sdk/android/BUILD.gn" <<'PY'
+import sys
+path = sys.argv[1]
+text = open(path).read()
+text = text.replace(', ":libwebrtc_final_jni_java"', "")
+text = text.replace('  java_targets = [ ":libwebrtc_java_targets" ]\n', "")
+open(path, "w").write(text)
+PY
+if "$ROOT/scripts/check-android-jni.sh" --src "$jni_root" 2>"$jni_root/err"; then
+  echo "expected missing GEN_JNI wiring to fail" >&2
+  exit 1
+fi
+grep -q 'deps omit :libwebrtc_final_jni_java' "$jni_root/err"
+grep -q 'java_targets omit :libwebrtc_java_targets' "$jni_root/err"
+cp "$jni_root/sdk/android/BUILD.gn.good" "$jni_root/sdk/android/BUILD.gn"
 sed -i.bak 's/deps = \[ ":foo_jni",/deps = [ ":foo_jni", ":bar_jni",/' \
   "$jni_root/sdk/android/BUILD.gn"
 printf '#include "sdk/android/generated_foo_jni/Foo_jni.h"\nDEFINE_JNI(Foo)\n' \

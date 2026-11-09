@@ -150,4 +150,4 @@ Fix a failure before you push.
 Record changes to the tools that set build rules as risks.
 
 1. `third_party/jni_zero` and `build/config/android`.
-2. The `depot_tools` revision in `DEPS` against depot_tools HEAD. CI clones HEAD.
+2. CI clones depot_tools HEAD onto `PATH`. The `DEPS` pin is a different checkout, `src/third_party/depot_tools`.
