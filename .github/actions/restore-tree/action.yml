@@ -69,39 +69,3 @@ runs:
         WEBRTC_REPO: https://github.com/GetStream/webrtc.git
       run: make deps
 
-    # Windows is still a git-cache-only GitHub artifact.
-    - name: Download same-run deps artifact
-      if: ${{ inputs.deps_artifact != '' }}
-      uses: actions/download-artifact@v8
-      with:
-        name: ${{ inputs.deps_artifact }}
-        path: ${{ runner.temp }}/deps-git-cache
-
-    - name: Install same-run gclient object cache
-      if: ${{ inputs.deps_artifact != '' }}
-      shell: bash
-      run: |
-        set -euo pipefail
-        dest="${GITHUB_WORKSPACE}/.gclient-git-cache"
-        src="${RUNNER_TEMP}/deps-git-cache"
-        if [[ -d "${src}/.gclient-git-cache" ]]; then
-          src="${src}/.gclient-git-cache"
-        fi
-        rm -rf "${dest}"
-        mv "${src}" "${dest}"
-        test -n "$(ls -A "${dest}")"
-        test -f "${GITHUB_WORKSPACE}/src/DEPS"
-        test ! -L "${GITHUB_WORKSPACE}/src"
-
-    - name: gclient sync
-      if: ${{ inputs.deps_artifact != '' }}
-      working-directory: src/stream_build
-      shell: bash
-      env:
-        DEPS_ROOT: ${{ github.workspace }}
-        WEBRTC_SRC: ${{ github.workspace }}/src
-        GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
-        TARGET_OS: ${{ inputs.target_os }}
-        JOBS: "8"
-        WEBRTC_REPO: https://github.com/GetStream/webrtc.git
-      run: make deps

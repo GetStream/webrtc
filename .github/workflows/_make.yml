@@ -2,11 +2,10 @@
 # Not listed in the Actions dispatch UI (workflow_call only).
 # Callers pass mode: build | test | package | release.
 #
-# I/O: iOS / macOS / Android jobs HIT Hetzner build-{ios,macos,android}.tar
-# (skip_deps_cache skips download), make deps, make build|test. Build jobs
-# then put git-cache + src/resources + .cipd. Test jobs do not put.
+# I/O: jobs restore the GHCR git cache (skip_deps_cache skips the pull),
+# then make deps, make build|test. Jobs do not upload that cache.
 # No shared Linux Deps job. No GitHub
-# deps-key. Windows Deps stays deps-windows on GitHub. Build mode is
+# deps-key. Build mode is
 # ninja plus release-config dSYM uploads (no packaged products).
 # Package/Release Build jobs also make package
 # and upload products-* (GitHub). Package combine consumes products-*
@@ -63,7 +62,7 @@ on:
         type: string
         default: ""
       skip_deps_cache:
-        description: Skip Hetzner build cache download (cold make deps)
+        description: Skip the GHCR git-cache pull (cold make deps)
         required: false
         type: boolean
         default: false
@@ -71,7 +70,6 @@ on:
 env:
   DEPS_ROOT: ${{ github.workspace }}
   WEBRTC_SRC: ${{ github.workspace }}/src
-  GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
   HETZNER_ACCESS_KEY_CI_ARTIFACTS: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
   HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
   HETZNER_BUCKET_CI_ARTIFACTS: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
@@ -154,53 +152,6 @@ jobs:
           platform_android: ${{ inputs.android }}
           platform_windows: ${{ inputs.windows }}
 
-  deps_windows:
-    name: Deps Windows
-    needs: plan
-    if: ${{ inputs.windows }}
-    runs-on: windows-latest
-    timeout-minutes: 360
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          path: src
-          ref: ${{ inputs.webrtc_ref }}
-      - name: Check Windows WebRTC host
-        shell: bash
-        run: |
-          set -euo pipefail
-          missing=()
-          command -v make >/dev/null || missing+=("GNU make")
-          command -v python3 >/dev/null || missing+=("python3")
-          if [[ ${#missing[@]} -gt 0 ]]; then
-            echo "::error::Windows WebRTC host is not ready on windows-latest (missing: ${missing[*]}). This job is wired for make deps windows, but the runner image cannot run it yet."
-            exit 1
-          fi
-      - name: Setup WebRTC checkout
-        uses: ./src/.github/actions/setup-webrtc
-        with:
-          webrtc_ref: ${{ inputs.webrtc_ref }}
-      - name: gclient sync (Windows)
-        working-directory: src/stream_build
-        shell: bash
-        env:
-          DEPS_ROOT: ${{ github.workspace }}
-          WEBRTC_SRC: ${{ github.workspace }}/src
-          GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
-          TARGET_OS: ${{ needs.plan.outputs.windows_target_os }}
-          JOBS: "8"
-          WEBRTC_REPO: https://github.com/GetStream/webrtc.git
-        run: make deps
-      - name: Upload deps-windows
-        uses: actions/upload-artifact@v7
-        with:
-          name: deps-windows
-          path: .gclient-git-cache
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 1
-          compression-level: 0
-
   build_ios:
     name: Build iOS v2
     needs: [plan]
@@ -239,14 +190,6 @@ jobs:
             out/catalyst-*/WebRTC.dSYM
           if-no-files-found: error
           retention-days: 7
-      - name: Upload build-ios to Hetzner
-        uses: ./src/.github/actions/artifact-put
-        with:
-          path: build-ios
-          source: ${{ github.workspace }}
-          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
       - name: Package iOS
         if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
         working-directory: src/stream_build
@@ -309,14 +252,6 @@ jobs:
           path: out/macos-*/WebRTC.dSYM
           if-no-files-found: error
           retention-days: 7
-      - name: Upload build-macos to Hetzner
-        uses: ./src/.github/actions/artifact-put
-        with:
-          path: build-macos
-          source: ${{ github.workspace }}
-          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
       - name: Package macOS
         if: ${{ inputs.mode == 'package' || inputs.mode == 'release' }}
         working-directory: src/stream_build
@@ -386,15 +321,6 @@ jobs:
             extra+=(ARCHS="${ANDROID_ARCH}")
           fi
           make build android "${extra[@]}"
-      - name: Upload build-android to Hetzner
-        if: ${{ matrix.android_namespace == 'org.webrtc' }}
-        uses: ./src/.github/actions/artifact-put
-        with:
-          path: build-android
-          source: ${{ github.workspace }}
-          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
       - name: Package Android
         working-directory: src/stream_build
         env:
@@ -503,7 +429,7 @@ jobs:
 
   test_windows:
     name: Test Windows
-    needs: [plan, deps_windows]
+    needs: [plan]
     if: ${{ (inputs.mode == 'test' || inputs.mode == 'release') && inputs.windows }}
     runs-on: windows-latest
     timeout-minutes: 360
@@ -527,7 +453,8 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.windows_target_os }}
-          deps_artifact: deps-windows
+          cache_key: webrtc-cache
+          skip_cache: ${{ inputs.skip_deps_cache }}
       - name: Test Windows
         working-directory: src/stream_build
         shell: bash
@@ -573,7 +500,7 @@ jobs:
 
   build_windows:
     name: Build Windows v2
-    needs: [plan, deps_windows]
+    needs: [plan]
     if: ${{ (inputs.mode == 'build' || inputs.mode == 'package' || inputs.mode == 'release') && inputs.windows }}
     runs-on: windows-latest
     timeout-minutes: 360
@@ -597,7 +524,8 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.windows_target_os }}
-          deps_artifact: deps-windows
+          cache_key: webrtc-cache
+          skip_cache: ${{ inputs.skip_deps_cache }}
       - name: Build Windows
         working-directory: src/stream_build
         shell: bash

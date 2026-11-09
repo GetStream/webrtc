@@ -448,23 +448,25 @@ grep -q 'object="artifacts/\${{ github.repository }}/\${OBJECT_STEM}.tar"' \
 grep -q 'cache_key: build-ios' "$gha/workflows/_make.yml"
 grep -q 'cache_key: build-macos' "$gha/workflows/_make.yml"
 grep -q 'cache_key: build-android' "$gha/workflows/_make.yml"
-grep -q 'include-hidden-files: true' "$gha/workflows/_make.yml"
-grep -q 'compression-level: 0' "$gha/workflows/_make.yml"
+! grep -q 'name: deps-windows' "$gha/workflows/_make.yml"
+! grep -q 'uses: ./src/.github/actions/artifact-put' "$gha/workflows/_make.yml"
 grep -A5 'name: Build iOS' "$gha/workflows/_make.yml" | grep -q 'needs: \[plan\]'
 ! grep -A8 'name: Build iOS' "$gha/workflows/_make.yml" | grep -q deps
 grep -A5 'name: Test iOS' "$gha/workflows/_make.yml" | grep -q 'needs: \[plan\]'
 ! grep -A8 'name: Test iOS' "$gha/workflows/_make.yml" | grep -q deps
 grep -q 'restore-git-cache' "$gha/actions/restore-tree/action.yml"
 grep -q 'hetzner_access_key' "$gha/actions/restore-tree/action.yml"
-grep -q 'actions/download-artifact' "$gha/actions/restore-tree/action.yml"
+! grep -q 'actions/download-artifact' "$gha/actions/restore-tree/action.yml"
 ! grep -q 'tar xf' "$gha/actions/restore-tree/action.yml"
 ! grep -q 'artifact-download' "$gha/actions/restore-tree/action.yml"
 grep -q 'SHALLOW: "1"' "$gha/actions/restore-tree/action.yml"
 grep -q 'RUN_HOOKS: "1"' "$gha/actions/restore-tree/action.yml"
 ! grep -q 'RUN_HOOKS: "0"' "$gha/workflows/_make.yml"
 ! grep -q 'Drop git-cache alternates' "$gha/actions/restore-tree/action.yml"
-grep -q 'GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache' \
+! grep -q 'GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache' \
   "$gha/actions/restore-tree/action.yml"
+! grep -q 'GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache' \
+  "$gha/workflows/_make.yml"
 grep -q 'rewrite_git_cache_alternates' "$ROOT/scripts/deps.sh"
 grep -q '.gclient-git-cache' "$gha/actions/artifact-put/action.yml"
 grep -q 'src/resources' "$gha/actions/artifact-put/action.yml"
@@ -479,7 +481,7 @@ grep -A12 'members=(.gclient-git-cache)' "$gha/actions/artifact-put/action.yml" 
 ! grep -A12 'members=(.gclient-git-cache)' "$gha/actions/artifact-put/action.yml" | \
   grep -q 'third_party'
 grep -q 'pack members:' "$gha/actions/artifact-put/action.yml"
-grep -q 'uses: ./src/.github/actions/artifact-put' "$gha/workflows/_make.yml"
+grep -q 'cache_key: webrtc-cache' "$gha/workflows/_make.yml"
 grep -q 'products/ios/WebRTC.xcframework.zip' "$gha/workflows/_make.yml"
 grep -q 'products/macos/WebRTC.xcframework.zip' "$gha/workflows/_make.yml"
 
