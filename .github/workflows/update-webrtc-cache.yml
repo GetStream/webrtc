@@ -4,9 +4,11 @@
 # The job token is github.token (contents: read, packages: write).
 # No stored secret. A missing ghcr.io/getstream/webrtc-cache:latest
 # restores :current once, then starts empty. :latest moves only when
-# update_latest is true. An unchanged cache does not push, and the
-# tools jobs are skipped. When the git cache is pushed, iOS, macOS,
-# and Android each sync with hooks and publish
+# update_latest is true. An unchanged cache does not push. The tools
+# jobs still run when a tools package is missing, and they pull the
+# current git cache. Once those packages exist, an unchanged git cache
+# skips them. When the git cache is pushed, iOS, macOS, and Android
+# each sync with hooks and publish
 # ghcr.io/getstream/webrtc-tools-<platform>. Those packages carry the
 # Hetzner tarball members other than the git cache (.cipd and
 # src/resources). Android also carries the Debian sysroot under
@@ -74,6 +76,8 @@ jobs:
     timeout-minutes: 360
     outputs:
       pushed: ${{ steps.gate.outputs.pushed }}
+      run_tools: ${{ steps.gate.outputs.run_tools }}
+      git_cache_tag: ${{ steps.gate.outputs.git_cache_tag }}
       tag: ${{ steps.resolved.outputs.tag }}
       update_latest: ${{ steps.resolved.outputs.update_latest }}
       revision: ${{ steps.src.outputs.sha }}
@@ -165,13 +169,25 @@ jobs:
           RESTORED_FROM: ${{ steps.pull.outputs.restored_from }}
           BEFORE: ${{ steps.before.outputs.fp }}
           AFTER: ${{ steps.after.outputs.fp }}
+          RESOLVED_TAG: ${{ steps.resolved.outputs.tag }}
         run: |
           set -euo pipefail
+          script="publisher/.github/scripts/webrtc-cache.sh"
           if [[ "${RESTORED_FROM}" == latest && "${BEFORE}" == "${AFTER}" ]]; then
             echo "pushed=false" >> "$GITHUB_OUTPUT"
+            echo "git_cache_tag=latest" >> "$GITHUB_OUTPUT"
             echo "cache unchanged; left ${CACHE_IMAGE}:latest in place"
+            status="$("$script" tools-status)"
+            if [[ "$status" == missing ]]; then
+              echo "run_tools=true" >> "$GITHUB_OUTPUT"
+              echo "tools package missing; publishing from the current git cache"
+            else
+              echo "run_tools=false" >> "$GITHUB_OUTPUT"
+            fi
           else
             echo "pushed=true" >> "$GITHUB_OUTPUT"
+            echo "run_tools=true" >> "$GITHUB_OUTPUT"
+            echo "git_cache_tag=${RESOLVED_TAG}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Push git cache
@@ -186,7 +202,7 @@ jobs:
   tools:
     name: Publish tools (${{ matrix.platform }})
     needs: publish
-    if: needs.publish.outputs.pushed == 'true'
+    if: needs.publish.outputs.run_tools == 'true'
     runs-on: ${{ matrix.runs_on }}
     timeout-minutes: 360
     strategy:
@@ -227,7 +243,7 @@ jobs:
       - name: Restore git cache
         uses: ./publisher/.github/actions/restore-git-cache
         with:
-          tag: ${{ needs.publish.outputs.tag }}
+          tag: ${{ needs.publish.outputs.git_cache_tag }}
 
       - name: Sync deps and hooks
         working-directory: src/stream_build

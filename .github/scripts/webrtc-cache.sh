@@ -15,7 +15,7 @@ CHUNK_TYPE="${CHUNK_TYPE:-application/vnd.getstream.webrtc.git-cache.chunk.v1}"
 
 usage() {
   cat <<'EOF'
-usage: webrtc-cache.sh resolve-tag|pull|fingerprint|list-members|members-for|push
+usage: webrtc-cache.sh resolve-tag|pull|fingerprint|list-members|members-for|tools-status|push
 
 resolve-tag <input> <run_id> <run_attempt> [yyyymmdd]
   Print the tag to push. input "automatic" or empty becomes
@@ -41,6 +41,10 @@ members-for <ios|macos|android>
   Print the ARCHIVE_MEMBERS for that platform. ios and macos pack
   .cipd and src/resources. android also packs Debian sysroots under
   src/build/linux.
+
+tools-status
+  Print "missing" when any webrtc-tools-<platform>:latest is absent,
+  otherwise "present". Other registry errors fail.
 
 push
   Pack the list-members paths and push $CACHE_IMAGE:$CACHE_TAG.
@@ -143,6 +147,29 @@ directory_has_files() {
   local dir="$1"
   [[ -d "$dir" ]] || return 1
   [[ -n "$(ls -A "$dir" 2>/dev/null || true)" ]]
+}
+
+cmd_tools_status() {
+  local platform image err
+  for platform in ios macos android; do
+    image="ghcr.io/getstream/webrtc-tools-${platform}"
+    err="$(mktemp)"
+    if oras manifest fetch "${image}:latest" >/dev/null 2>"$err"; then
+      rm -f "$err"
+      continue
+    fi
+    if missing_tag "$err"; then
+      rm -f "$err"
+      echo "missing ${image}:latest" >&2
+      printf '%s\n' missing
+      return 0
+    fi
+    echo "failed to read ${image}:latest" >&2
+    cat "$err" >&2
+    rm -f "$err"
+    return 1
+  done
+  printf '%s\n' present
 }
 
 cmd_members_for() {
@@ -596,6 +623,7 @@ case "${1:-}" in
   fingerprint) cmd_fingerprint ;;
   list-members) cmd_list_members ;;
   members-for) shift; cmd_members_for "$@" ;;
+  tools-status) cmd_tools_status ;;
   push) cmd_push ;;
   -h|--help|help) usage ;;
   *) usage >&2; exit 1 ;;
