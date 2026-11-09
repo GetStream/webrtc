@@ -532,6 +532,10 @@ grep -q 'mv .gclient-git-cache "${git_cache}"' "$gha/actions/artifact-download/a
 grep -q 'cache="${GIT_CACHE_PATH:?}"' "$gha/actions/artifact-put/action.yml"
 grep -q 'rewrite_git_cache_alternates' "$ROOT/scripts/deps.sh"
 grep -q -- '-C "${cache_parent}" .gclient-git-cache' "$gha/actions/artifact-put/action.yml"
+# GNU tar rejects a trailing -C with no member after it.
+grep -q 'if ((${#members\[@\]})); then' "$gha/actions/artifact-put/action.yml"
+grep -qx '          tar cf "${tar_file}" -C "${cache_parent}" .gclient-git-cache' \
+  "$gha/actions/artifact-put/action.yml"
 grep -q 'src/resources' "$gha/actions/artifact-put/action.yml"
 grep -q '.cipd' "$gha/actions/artifact-put/action.yml"
 ! grep -q 'src/third_party' "$gha/actions/artifact-put/action.yml"

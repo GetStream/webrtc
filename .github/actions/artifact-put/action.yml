@@ -95,8 +95,12 @@ runs:
         tar_file="${RUNNER_TEMP:?}/${OBJECT_STEM}.tar"
         trap 'rm -f "${tar_file}"' EXIT
         echo "packing ${cache} ${SOURCE}/{${members[*]-}} -> ${tar_file}"
-        tar cf "${tar_file}" -C "${cache_parent}" .gclient-git-cache \
-          -C "${SOURCE}" ${members[@]+"${members[@]}"}
+        if ((${#members[@]})); then
+          tar cf "${tar_file}" -C "${cache_parent}" .gclient-git-cache \
+            -C "${SOURCE}" "${members[@]}"
+        else
+          tar cf "${tar_file}" -C "${cache_parent}" .gclient-git-cache
+        fi
         if [[ "$(uname -s)" == Darwin ]]; then
           size="$(stat -f %z "${tar_file}")"
         else
