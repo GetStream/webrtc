@@ -133,12 +133,16 @@ cmd_push() {
   echo "packing ${cache}"
   tar -C "$root" -cf - .gclient-git-cache | zstd -T0 -3 -o "$archive"
   du -sh "$archive" || true
-  oras push "${CACHE_IMAGE}:${tag}" \
-    --artifact-type "$ARTIFACT_TYPE" \
-    --annotation "org.opencontainers.image.source=${IMAGE_SOURCE}" \
-    --annotation "org.opencontainers.image.revision=${revision}" \
-    --annotation "org.opencontainers.image.version=${tag}" \
-    "${archive}:application/zstd"
+  # oras rejects an absolute path. Push the archive by its basename.
+  (
+    cd "$work"
+    oras push "${CACHE_IMAGE}:${tag}" \
+      --artifact-type "$ARTIFACT_TYPE" \
+      --annotation "org.opencontainers.image.source=${IMAGE_SOURCE}" \
+      --annotation "org.opencontainers.image.revision=${revision}" \
+      --annotation "org.opencontainers.image.version=${tag}" \
+      "${ARCHIVE_NAME}:application/zstd"
+  )
   echo "pushed ${CACHE_IMAGE}:${tag}"
   if [[ "$update" == "true" ]]; then
     oras tag "${CACHE_IMAGE}:${tag}" current

@@ -556,6 +556,8 @@ if "$cache_sh" resolve-tag 'bad tag' 1 1 20261109 >/dev/null; then
   exit 1
 fi
 grep -q 'starting from an empty git cache' "$cache_sh"
+grep -q '"${ARCHIVE_NAME}:application/zstd"' "$cache_sh"
+! grep -q '"${archive}:application/zstd"' "$cache_sh"
 grep -q 'name: Update WebRTC Cache$' "$cache_wf"
 grep -q 'workflow_dispatch:' "$cache_wf"
 grep -q 'workflow_call:' "$cache_wf"
