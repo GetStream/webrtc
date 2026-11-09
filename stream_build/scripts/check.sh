@@ -682,30 +682,41 @@ if "$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/nojni.jar" \
   exit 1
 fi
 grep -q 'no generated \*Jni.class' "$jar_root/err"
-# make_so OUT SYMBOL...: an ELF64 library exporting SYMBOLs. With
-# NO_SECTIONS=1 it has no section header table, like a fully stripped file.
+# make_so OUT SYMBOL...: an ELF64 library exporting SYMBOLs. ELF32=1 writes a
+# 32-bit library (armeabi-v7a, x86). NO_SECTIONS=1 omits the section header
+# table, like a fully stripped file.
 make_so() {
   python3 - "$@" <<'PY'
 import os, struct, sys
 out, *names = sys.argv[1:]
+is32 = os.environ.get("ELF32") == "1"
+sym_fmt, sym_size = ("<IIIBBH", 16) if is32 else ("<IBBHQQ", 24)
+sh_fmt, sh_size, eh_size = ("<IIIIIIIIII", 40, 52) if is32 else (
+    "<IIQQQQIIQQ", 64, 64)
 dynstr = b"\0" + b"".join(n.encode() + b"\0" for n in names)
-syms = b"\0" * 24
+syms = b"\0" * sym_size
 pos = 1
 for n in names:
-    syms += struct.pack("<IBBHQQ", pos, 0x12, 0, 1, 0, 0)
+    syms += (struct.pack(sym_fmt, pos, 0, 0, 0x12, 0, 1) if is32
+             else struct.pack(sym_fmt, pos, 0x12, 0, 1, 0, 0))
     pos += len(n) + 1
-data_off = 64
+data_off = eh_size
 str_off = data_off + len(syms)
 sh_off = str_off + len(dynstr)
-sh = b"\0" * 64
-sh += struct.pack("<IIQQQQIIQQ", 0, 11, 2, 0, data_off, len(syms), 2, 1, 8, 24)
-sh += struct.pack("<IIQQQQIIQQ", 0, 3, 2, 0, str_off, len(dynstr), 0, 0, 1, 0)
+sh = b"\0" * sh_size
+sh += struct.pack(sh_fmt, 0, 11, 2, 0, data_off, len(syms), 2, 1, 4, sym_size)
+sh += struct.pack(sh_fmt, 0, 3, 2, 0, str_off, len(dynstr), 0, 0, 1, 0)
 shnum = 3
 if os.environ.get("NO_SECTIONS") == "1":
     sh, sh_off, shnum = b"", 0, 0
-ehdr = (b"\x7fELF\x02\x01\x01" + b"\0" * 9
-        + struct.pack("<HHIQQQIHHHHHH", 3, 183, 1, 0, 0, sh_off, 0, 64, 0, 0,
-                      64, shnum, 0))
+if is32:
+    ehdr = (b"\x7fELF\x01\x01\x01" + b"\0" * 9
+            + struct.pack("<HHIIIIIHHHHHH", 3, 40, 1, 0, 0, sh_off, 0,
+                          eh_size, 0, 0, sh_size, shnum, 0))
+else:
+    ehdr = (b"\x7fELF\x02\x01\x01" + b"\0" * 9
+            + struct.pack("<HHIQQQIHHHHHH", 3, 183, 1, 0, 0, sh_off, 0,
+                          eh_size, 0, 0, sh_size, shnum, 0))
 open(out, "wb").write(ehdr + syms + dynstr + sh)
 PY
 }
@@ -717,8 +728,21 @@ make_so "$jar_root/ok.so" Java_J_N_M0ETufK1 \
   Java_org_webrtc_EncryptionManager_nativeCreate \
   'Java_org_webrtc_EncryptionManager_nativeDispose__J' \
   Java_org_webrtc_Simulcast_1Factory_nativeCreate
+ELF32=1 make_so "$jar_root/ok32.so" Java_J_N_M0ETufK1 \
+  Java_org_webrtc_EncryptionManager_nativeCreate \
+  Java_org_webrtc_EncryptionManager_nativeDispose \
+  Java_org_webrtc_Simulcast_1Factory_nativeCreate
 "$ROOT/scripts/verify-android-natives.sh" --jar "$jar_root/natives.jar" \
-  --so "$jar_root/ok.so" >/dev/null
+  --so "$jar_root/ok.so" --so "$jar_root/ok32.so" >/dev/null
+ELF32=1 make_so "$jar_root/nodefine32.so" Java_J_N_M0ETufK1 \
+  Java_org_webrtc_EncryptionManager_nativeCreate
+if "$ROOT/scripts/verify-android-natives.sh" --jar "$jar_root/natives.jar" \
+  --so "$jar_root/nodefine32.so" 2>"$jar_root/err"; then
+  echo "expected a 32-bit library missing exports to fail" >&2
+  exit 1
+fi
+grep -q 'nodefine32.so exports no Java_\* symbol for 2 native methods' \
+  "$jar_root/err"
 make_so "$jar_root/nodefine.so" Java_J_N_M0ETufK1 \
   Java_org_webrtc_Simulcast_1Factory_nativeCreate
 if "$ROOT/scripts/verify-android-natives.sh" --jar "$jar_root/natives.jar" \
