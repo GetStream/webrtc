@@ -41,6 +41,14 @@ Stop on these paths when the two sides disagree about a version or a symbol.
 4. A public ObjC header
 5. A public JNI signature
 
+In `sdk/android/BUILD.gn`, keep `dist_jar("libwebrtc")` on `direct_deps_only = false` with `jar_excluded_patterns = stream_android_jar_excluded_patterns`.
+
+Keep the `stream_android_jar.gni` import.
+
+Do not take upstream `direct_deps_only = true`. It drops the generated jni_zero `*Jni` classes and the AAR crashes at runtime.
+
+When packaging reports a package outside the allowlist, add it to `extensions/android/stream_android_jar.gni`.
+
 For other `BUILD.gn` files, union the deps.
 
 Keep Stream-only targets.

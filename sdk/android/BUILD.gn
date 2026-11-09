@@ -11,6 +11,7 @@ if (is_android) {
   import("//build/config/android/rules.gni")
   import("//third_party/jni_zero/jni_zero.gni")
   import("../../webrtc.gni")
+  import("../../extensions/android/stream_android_jar.gni")  # STREAM-CUSTOM
 
   group("android") {
     if (!build_with_chromium && is_android) {
@@ -30,13 +31,11 @@ if (is_android) {
   dist_jar("libwebrtc") {
     _target_dir_name = get_label_info(":$target_name", "dir")
     output = "${root_out_dir}/lib.java${_target_dir_name}/${target_name}.jar"
-
-    # STREAM-CUSTOM: Proxy natives live in generated *_jni_java jars, and
-    # Dav1dDecoder lives in :dav1d_java. direct_deps_only left both out of
-    # the AAR. Recurse so those jars are packed, but keep androidx
-    # annotations out; apps already provide them.
+    # STREAM-CUSTOM: must stay false so generated jni_zero *Jni classes are
+    # packed; third-party jars it reaches are stripped. See
+    # extensions/android/stream_android_jar.gni before changing either line.
     direct_deps_only = false
-    jar_excluded_patterns = [ "androidx/*" ]
+    jar_excluded_patterns = stream_android_jar_excluded_patterns
     use_unprocessed_jars = true
     requires_android = true
 
