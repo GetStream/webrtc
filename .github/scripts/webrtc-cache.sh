@@ -153,13 +153,33 @@ PY
   local blobdir="$work/blobs"
   mkdir -p "$blobdir"
   local digest size media title
+  local max="${PULL_CONCURRENCY:-4}"
+  local running=0
+  local failfile="$work/fetch-fail"
+  rm -f "$failfile"
   while IFS=$'\t' read -r digest size media title; do
-    echo "fetch ${title} (${size} bytes)"
-    if ! retry_oras oras blob fetch "${CACHE_IMAGE}@${digest}" --output "${blobdir}/${title}"; then
-      echo "blob download failed: ${title}" >&2
-      return 2
+    if [[ -e "$failfile" ]]; then
+      break
+    fi
+    (
+      echo "fetch ${title} (${size} bytes)"
+      if ! retry_oras oras blob fetch "${CACHE_IMAGE}@${digest}" --output "${blobdir}/${title}"; then
+        echo "blob download failed: ${title}" >&2
+        touch "$failfile"
+        exit 1
+      fi
+    ) &
+    running=$((running + 1))
+    if [[ "$running" -ge "$max" ]]; then
+      wait -n || true
+      running=$((running - 1))
     fi
   done <"$list"
+  wait || true
+  if [[ -e "$failfile" ]]; then
+    echo "blob download failed" >&2
+    return 2
+  fi
   local first
   first="$(cut -f4 "$list" | head -n 1)"
   if [[ "$first" == chunk-* ]] || grep -q 'git-cache.chunk' "$list"; then
