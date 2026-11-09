@@ -1,0 +1,35 @@
+# STREAM-CUSTOM: classes kept out of sdk/android:libwebrtc (the AAR's
+# classes.jar).
+#
+# libwebrtc sets direct_deps_only = false. Since jni_zero, every class's
+# native methods live in a generated FooJni class inside a separate
+# generated_*_jni_java target, and :dav1d_java is split out too. With
+# direct_deps_only = true those jars are dropped and the app crashes at
+# runtime with NoClassDefFoundError. Recursing packs them without listing
+# each target, so upstream adding or renaming one needs no change here.
+#
+# Recursing also reaches Chromium's third-party Java deps:
+# androidx_annotation pulls in kotlin_stdlib, which pulls in JetBrains
+# annotations. WebRTC's Java code references none of them at runtime.
+# Bundled unrelocated, they break consumers: the stdlib's Kotlin metadata
+# version follows the Chromium milestone (2.5.0 at M156), which older Kotlin
+# compilers cannot read, and apps that also depend on kotlin-stdlib get
+# duplicate kotlin.* classes. Keep these excluded even after the SDK is on
+# Kotlin 2.x. If WebRTC ever needs Kotlin, declare kotlin-stdlib as a Maven
+# dependency of the published AAR instead of removing the exclusion.
+#
+# On a milestone merge, keep direct_deps_only = false and this import in
+# sdk/android/BUILD.gn. When packaging reports a new package outside the
+# allowlist in stream_build/scripts/verify-android-jar.sh, add it here unless
+# WebRTC's own classes reference it at runtime.
+stream_android_jar_excluded_patterns = [
+  "androidx/*",
+  "kotlin/*",
+  "org/chromium/build/*",
+  "org/intellij/*",
+  "org/jetbrains/*",
+  "META-INF/*.kotlin_module",
+  "META-INF/androidx/*",
+  "META-INF/maven/*",
+  "META-INF/versions/*",
+]

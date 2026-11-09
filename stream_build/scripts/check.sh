@@ -488,7 +488,43 @@ fi
 grep -q 'rewrite-android-namespace.sh' "$ROOT/Makefile"
 grep -q 'pin-android-java.sh' "$ROOT/Makefile"
 grep -q 'direct_deps_only = false' "$ROOT/../sdk/android/BUILD.gn"
-grep -q 'jar_excluded_patterns = \[ "androidx/\*" \]' "$ROOT/../sdk/android/BUILD.gn"
+grep -q 'jar_excluded_patterns = stream_android_jar_excluded_patterns' \
+  "$ROOT/../sdk/android/BUILD.gn"
+grep -q '"kotlin/\*"' "$ROOT/../extensions/android/stream_android_jar.gni"
+grep -q 'verify-android-jar.sh' "$ROOT/scripts/package-android.sh"
+jar_root="$(mktemp -d)"
+make_jar() {
+  python3 - "$@" <<'PY'
+import sys
+import zipfile
+with zipfile.ZipFile(sys.argv[1], "w") as zf:
+    for name in sys.argv[2:]:
+        zf.writestr(name, b"")
+PY
+}
+make_jar "$jar_root/ok.jar" META-INF/MANIFEST.MF \
+  org/webrtc/MediaStreamTrack.class org/webrtc/MediaStreamTrackJni.class \
+  org/jni_zero/JniZero.class
+"$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/ok.jar" >/dev/null
+make_jar "$jar_root/repackaged.jar" \
+  io/getstream/webrtc/VideoTrackJni.class org/jni_zero/JniZero.class
+"$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/repackaged.jar" >/dev/null
+make_jar "$jar_root/kotlin.jar" org/webrtc/VideoTrackJni.class \
+  kotlin/TypeAliasesKt.class META-INF/kotlin-stdlib.kotlin_module
+if "$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/kotlin.jar" \
+  2>"$jar_root/err"; then
+  echo "expected a jar with kotlin/ to fail" >&2
+  exit 1
+fi
+grep -qx '  kotlin' "$jar_root/err"
+make_jar "$jar_root/nojni.jar" org/webrtc/VideoTrack.class
+if "$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/nojni.jar" \
+  2>"$jar_root/err"; then
+  echo "expected a jar without *Jni.class to fail" >&2
+  exit 1
+fi
+grep -q 'no generated \*Jni.class' "$jar_root/err"
+rm -rf "$jar_root"
 pin_root="$(mktemp -d)"
 mkdir -p "$pin_root/build/android/gyp"
 cat > "$pin_root/build/android/gyp/compile_java.py" <<'EOF'

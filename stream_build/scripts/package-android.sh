@@ -64,6 +64,7 @@ done
 
 jar="$OUT/$first/lib.java/sdk/android/libwebrtc.jar"
 [[ -f "$jar" ]] || die "missing classes jar at $jar"
+"${SCRIPT_DIR}/verify-android-jar.sh" --jar "$jar"
 
 mkdir -p "$PRODUCTS"
 out_aar="$PRODUCTS/$aar_name"
