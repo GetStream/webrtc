@@ -75,6 +75,31 @@ target_os = $(quote_target_os "$target_os")
 EOF
 }
 
+# gclient rejects a GIT_CACHE_PATH that is the gclient root, is inside it, or
+# contains it (depot_tools 9be95df5). Keep the cache next to DEPS_ROOT. The
+# Hetzner tarball member and the alternates rewrite both rely on the
+# .gclient-git-cache basename. Makefile GIT_CACHE_PATH uses the same rule.
+default_git_cache_path() {
+  local deps_root="${1%/}"
+  printf '%s/.gclient-git-cache\n' "${deps_root%[/\\]*}"
+}
+
+# Move a cache left inside DEPS_ROOT by older layouts to GIT_CACHE_PATH.
+move_legacy_git_cache() {
+  local deps_root="$1"
+  local git_cache="$2"
+  local legacy="${deps_root%/}/.gclient-git-cache"
+  [[ -d "$legacy" && "$legacy" != "${git_cache%/}" ]] || return 0
+  if [[ -d "$git_cache" && -n "$(ls -A "$git_cache")" ]]; then
+    echo "note: $legacy is unused (git-cache is $git_cache); remove it to free space"
+    return 0
+  fi
+  rm -rf "$git_cache"
+  mkdir -p "$(dirname "$git_cache")"
+  echo "mv $legacy $git_cache"
+  mv "$legacy" "$git_cache"
+}
+
 # After git-cache moves, nested checkouts may still point
 # objects/info/alternates (and origin urls) at an old host path
 # (.gclient_deps/.gclient-git-cache or /home/runner/.../.gclient-git-cache).

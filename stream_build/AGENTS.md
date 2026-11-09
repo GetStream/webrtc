@@ -74,16 +74,23 @@ Required tree (gclient parent **must** be named `webrtc`, checkout **must**
 be named `src`):
 
 ```
+.gclient-git-cache/          # GIT_CACHE_PATH (outside the gclient root)
 webrtc/                      # DEPS_ROOT / gclient root
   Makefile                   # bootstrap copies webrtc.mk if missing
   .gclient
-  .gclient-git-cache/        # GIT_CACHE_PATH
   src/                       # this git checkout (WEBRTC_SRC)
     DEPS
     stream_build/
     third_party/             # gclient writes here
   out/                       # ninja (sibling of src)
 ```
+
+The git cache must not be the gclient root, be inside it, or contain it.
+gclient rejects such a cache since depot_tools 9be95df5, and CI always
+clones depot_tools at HEAD. `default_git_cache_path` in
+`scripts/common.sh` (and the Makefile default) puts it next to `webrtc/`.
+`make bootstrap` and `make deps` move an older `webrtc/.gclient-git-cache`
+there when the new one is missing or empty.
 
 `solutions.name = src`, `managed: False`. `src` is this worktree, not a
 symlink and not a second clone. Official DEPS stays (`src/build`,
@@ -119,10 +126,14 @@ Same-OS only (Linux tree on Mac is forbidden). Members: required
 Not packed: working trees (`src/third_party`, `src/build`,
 `src/buildtools`, `src/testing`, `src/tools`, `src/ios`), `out/`,
 `.gclient` / `.gclient_entries` (setup-webrtc writes `.gclient` every
-job), `src/.git`, Stream-tracked `src` files, `products/`. Restore:
-checkout `src`, extract git-cache to `GIT_CACHE_PATH`
-(`${{ github.workspace }}/.gclient-git-cache`), `src/resources`, and
-`.cipd` if present. Do not strip git alternates; `make deps` runs
+job), `src/.git`, Stream-tracked `src` files, `products/`. The tarball
+stores the cache as `.gclient-git-cache` at its root, but on the runner
+it lives at `GIT_CACHE_PATH` (`$(dirname $GITHUB_WORKSPACE)/.gclient-git-cache`,
+exported by setup-webrtc; do not override it in workflow or step env).
+`artifact-put` packs it from there; `artifact-download` extracts in the
+workspace, then moves it there. Restore: checkout `src`, extract
+git-cache, `src/resources`, and `.cipd` if present. Do not strip git
+alternates; `make deps` runs
 `rewrite_git_cache_alternates` so Linux-packed cache paths retarget
 to this runner. Always `make deps` after HIT (cheap from cache).
 Build `CONFIG` is dispatch (default release); `make test` always uses debug
@@ -174,7 +185,7 @@ not use `${{ secrets.* }}`. `products-*` / `final-*` stay on
 | `DEPS_ROOT` | gclient parent (`webrtc/`; `.gclient` + `src/` + `out/`) |
 | `WEBRTC_SRC` | this git checkout (`webrtc/src`; default: parent of `stream_build/`) |
 | `OUT` / `PRODUCTS` | ninja dirs / packaged output (default under `DEPS_ROOT`, sibling of `src`) |
-| `GIT_CACHE_PATH` | gclient object cache (default `DEPS_ROOT/.gclient-git-cache`) |
+| `GIT_CACHE_PATH` | gclient object cache (default `DEPS_ROOT/../.gclient-git-cache`; must be outside the gclient root) |
 | `ARCHS` | android ABI or windows cpu (`arm64-v8a`, `x64`, …) |
 | `JOBS` | ninja/gclient parallelism |
 | `SHALLOW` | `1` (default) `gclient sync --no-history --shallow`. `0` = full history. |

@@ -44,7 +44,8 @@ endif
 DEPS_ROOT     ?= $(abspath $(REPO_ROOT)/..)
 OUT           ?= $(DEPS_ROOT)/out
 PRODUCTS      ?= $(DEPS_ROOT)/products
-GIT_CACHE_PATH ?= $(DEPS_ROOT)/.gclient-git-cache
+# Outside the gclient root. See default_git_cache_path in scripts/common.sh.
+GIT_CACHE_PATH ?= $(abspath $(DEPS_ROOT)/..)/.gclient-git-cache
 TARGET        ?=
 NINJA_TARGET  ?=
 ARCHS         ?=

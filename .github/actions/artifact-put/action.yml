@@ -10,7 +10,7 @@ inputs:
     description: Object stem. Uploads artifacts/<repo>/<path>.tar
     required: true
   source:
-    description: DEPS_ROOT with .gclient-git-cache; optional src/resources and .cipd.
+    description: DEPS_ROOT with optional src/resources and .cipd. The git cache comes from GIT_CACHE_PATH.
     required: true
   hetzner_access_key:
     description: Hetzner object storage access key.
@@ -60,12 +60,20 @@ runs:
         [[ -n "${OBJECT_STEM}" ]]
         [[ -n "${SOURCE}" ]]
         test -d "${SOURCE}"
-        cache="${SOURCE}/.gclient-git-cache"
-        if [[ ! -d "${cache}" ]] || [[ -z "$(ls -A "${cache}")" ]]; then
-          echo "::error::build cache missing .gclient-git-cache"
+        # GIT_CACHE_PATH (setup-webrtc) is outside SOURCE. The tarball still
+        # stores it as .gclient-git-cache at its root; artifact-download
+        # moves it back to GIT_CACHE_PATH.
+        cache="${GIT_CACHE_PATH:?}"
+        if [[ "$(basename "${cache}")" != .gclient-git-cache ]]; then
+          echo "::error::GIT_CACHE_PATH must end in .gclient-git-cache (got ${cache})"
           exit 1
         fi
-        members=(.gclient-git-cache)
+        if [[ ! -d "${cache}" ]] || [[ -z "$(ls -A "${cache}")" ]]; then
+          echo "::error::build cache missing ${cache}"
+          exit 1
+        fi
+        cache_parent="$(dirname "${cache}")"
+        members=()
         # Reusable only. Do not pack working trees or out/ (objects
         # twice) or src/.git / Stream-tracked src files. setup-webrtc
         # rewrites .gclient every job.
@@ -77,16 +85,18 @@ runs:
             echo "skip ${p} (missing or empty)"
           fi
         done
-        echo "pack members: ${members[*]}"
-        for p in "${members[@]}"; do
+        echo "pack members: .gclient-git-cache ${members[*]-}"
+        du -sk "${cache}"
+        for p in ${members[@]+"${members[@]}"}; do
           du -sk "${SOURCE}/${p}"
         done
         BUCKET="${HETZNER_BUCKET_CI_ARTIFACTS:?}"
         object="artifacts/${{ github.repository }}/${OBJECT_STEM}.tar"
         tar_file="${RUNNER_TEMP:?}/${OBJECT_STEM}.tar"
         trap 'rm -f "${tar_file}"' EXIT
-        echo "packing ${SOURCE}/{${members[*]}} -> ${tar_file}"
-        tar cf "${tar_file}" -C "${SOURCE}" "${members[@]}"
+        echo "packing ${cache} ${SOURCE}/{${members[*]-}} -> ${tar_file}"
+        tar cf "${tar_file}" -C "${cache_parent}" .gclient-git-cache \
+          -C "${SOURCE}" ${members[@]+"${members[@]}"}
         if [[ "$(uname -s)" == Darwin ]]; then
           size="$(stat -f %z "${tar_file}")"
         else

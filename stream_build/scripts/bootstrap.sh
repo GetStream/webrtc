@@ -111,7 +111,8 @@ install_parent_makefile() {
 finish_layout() {
   local src="$1"
   local deps_root="$2"
-  local git_cache="${GIT_CACHE_PATH:-$deps_root/.gclient-git-cache}"
+  local git_cache="${GIT_CACHE_PATH:-$(default_git_cache_path "$deps_root")}"
+  move_legacy_git_cache "$deps_root" "$git_cache"
   mkdir -p "$git_cache"
   write_gclient "$deps_root"
   install_parent_makefile "$deps_root"
