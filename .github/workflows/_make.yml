@@ -2,8 +2,8 @@
 # Not listed in the Actions dispatch UI (workflow_call only).
 # Callers pass mode: build | test | package | release.
 #
-# I/O: jobs restore the GHCR git cache (skip_deps_cache skips the pull),
-# then make deps, make build|test. Jobs do not upload that cache.
+# I/O: jobs restore the GHCR git cache, then make deps, make build|test.
+# Jobs do not upload that cache.
 # No shared Linux Deps job. No GitHub
 # deps-key. Build mode is
 # ninja plus release-config dSYM uploads (no packaged products).
@@ -61,11 +61,6 @@ on:
         required: false
         type: string
         default: ""
-      skip_deps_cache:
-        description: Skip the GHCR git-cache pull (cold make deps)
-        required: false
-        type: boolean
-        default: false
 
 env:
   DEPS_ROOT: ${{ github.workspace }}
@@ -168,7 +163,6 @@ jobs:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ios
           cache_key: build-ios
-          skip_cache: ${{ inputs.skip_deps_cache }}
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
@@ -232,7 +226,6 @@ jobs:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: mac
           cache_key: build-macos
-          skip_cache: ${{ inputs.skip_deps_cache }}
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
@@ -300,7 +293,6 @@ jobs:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.android_target_os }}
           cache_key: build-android
-          skip_cache: ${{ inputs.skip_deps_cache }}
           install_android_packages: "true"
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
@@ -361,7 +353,6 @@ jobs:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ios
           cache_key: build-ios
-          skip_cache: ${{ inputs.skip_deps_cache }}
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
@@ -388,7 +379,6 @@ jobs:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: mac
           cache_key: build-macos
-          skip_cache: ${{ inputs.skip_deps_cache }}
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
@@ -415,7 +405,6 @@ jobs:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.android_target_os }}
           cache_key: build-android
-          skip_cache: ${{ inputs.skip_deps_cache }}
           install_android_packages: "true"
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
@@ -454,7 +443,6 @@ jobs:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.windows_target_os }}
           cache_key: webrtc-cache
-          skip_cache: ${{ inputs.skip_deps_cache }}
       - name: Test Windows
         working-directory: src/stream_build
         shell: bash
@@ -525,7 +513,6 @@ jobs:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ${{ needs.plan.outputs.windows_target_os }}
           cache_key: webrtc-cache
-          skip_cache: ${{ inputs.skip_deps_cache }}
       - name: Build Windows
         working-directory: src/stream_build
         shell: bash

@@ -11,11 +11,7 @@ inputs:
   cache_key:
     required: false
     default: ""
-    description: Hetzner stem (build-ios, build-macos, build-android).
-  skip_cache:
-    required: false
-    default: "false"
-    description: Skip Hetzner download (still make deps; caller uploads).
+    description: Non-empty selects the shared GHCR git cache.
   deps_artifact:
     required: false
     default: ""
@@ -52,8 +48,6 @@ runs:
     - name: Restore git cache
       if: ${{ inputs.cache_key != '' }}
       uses: ./src/.github/actions/restore-git-cache
-      with:
-        skip: ${{ inputs.skip_cache }}
 
     - name: gclient sync and hooks
       if: ${{ inputs.cache_key != '' }}
