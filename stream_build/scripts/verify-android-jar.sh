@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Fail when libwebrtc.jar packs classes outside the WebRTC namespaces, or
-# lacks the generated jni_zero proxy classes the native library calls into.
+# Fail when libwebrtc.jar packs classes outside the WebRTC namespaces, lacks
+# the generated jni_zero *Jni proxies, or lacks a GEN_JNI (and J.N) that
+# defines every proxy method those *Jni classes call.
 #
 # Runs before packaging so a third-party jar reached through
 # direct_deps_only = false fails CI here instead of reaching the SDK. Fix a
@@ -25,6 +26,7 @@ done
 [[ -f "$JAR" ]] || die "missing jar $JAR"
 
 python3 - "$JAR" <<'PY'
+import re
 import sys
 import zipfile
 
@@ -33,20 +35,29 @@ ALLOWED_PREFIXES = (
     "io/getstream/webrtc/",
     "org/jni_zero/",
 )
-ALLOWED_META_INF = (
+ALLOWED_FILES = (
     "META-INF/",
     "META-INF/MANIFEST.MF",
+    # jni_zero's hashed-name natives; GEN_JNI forwards to it.
+    "J/N.class",
 )
+GEN_JNI = "org/jni_zero/GEN_JNI.class"
+SHORT_GEN_JNI = "J/N.class"
+# Proxy method names *Jni classes call on GEN_JNI, e.g.
+# org_webrtc_PeerConnectionFactory_initializeAndroidGlobals.
+PROXY_NAME = re.compile(rb"(?<![\w/$])(?:org|io)_\w+")
 
 jar = sys.argv[1]
 with zipfile.ZipFile(jar) as zf:
     names = zf.namelist()
+    jni_classes = {n: zf.read(n) for n in names if n.endswith("Jni.class")}
+    gen_jni = zf.read(GEN_JNI) if GEN_JNI in names else None
 
 unexpected = sorted(
     n for n in names
     if not n.endswith("/")
     and not n.startswith(ALLOWED_PREFIXES)
-    and n not in ALLOWED_META_INF
+    and n not in ALLOWED_FILES
 )
 if unexpected:
     def root(name):
@@ -62,9 +73,36 @@ if unexpected:
           file=sys.stderr)
     sys.exit(1)
 
-if not any(n.endswith("Jni.class") for n in names):
+if not jni_classes:
     print(f"{jar} has no generated *Jni.class proxies; "
           "check direct_deps_only on sdk/android:libwebrtc.", file=sys.stderr)
+    sys.exit(1)
+
+if gen_jni is None:
+    print(f"{jar} has no {GEN_JNI}; *Jni classes fail with "
+          "NoClassDefFoundError. Check :libwebrtc_final_jni_java in "
+          "sdk/android/BUILD.gn.", file=sys.stderr)
+    sys.exit(1)
+
+if b"J/N" in gen_jni and SHORT_GEN_JNI not in names:
+    print(f"{jar} has {GEN_JNI} forwarding to J.N but no {SHORT_GEN_JNI}.",
+          file=sys.stderr)
+    sys.exit(1)
+
+gen_jni_names = set(PROXY_NAME.findall(gen_jni))
+missing = sorted({
+    (n, m.decode())
+    for n, data in jni_classes.items()
+    if GEN_JNI[:-len(".class")].encode() in data
+    for m in PROXY_NAME.findall(data)
+    if m not in gen_jni_names
+})
+if missing:
+    print(f"{jar}: {GEN_JNI} lacks {len(missing)} proxy methods; add their "
+          "Java targets to :libwebrtc_java_targets in sdk/android/BUILD.gn:",
+          file=sys.stderr)
+    for cls, method in missing[:20]:
+        print(f"  {cls}: {method}", file=sys.stderr)
     sys.exit(1)
 
 print(f"verified {jar}")

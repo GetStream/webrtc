@@ -570,18 +570,57 @@ make_jar() {
 import sys
 import zipfile
 with zipfile.ZipFile(sys.argv[1], "w") as zf:
-    for name in sys.argv[2:]:
-        zf.writestr(name, b"")
+    for entry in sys.argv[2:]:
+        name, _, data = entry.partition("=")
+        zf.writestr(name, data.encode())
 PY
 }
+track_jni='org/webrtc/MediaStreamTrackJni.class=org/jni_zero/GEN_JNI org_webrtc_MediaStreamTrack_getId'
 make_jar "$jar_root/ok.jar" META-INF/MANIFEST.MF \
-  org/webrtc/MediaStreamTrack.class org/webrtc/MediaStreamTrackJni.class \
-  org/jni_zero/JniZero.class
+  org/webrtc/MediaStreamTrack.class "$track_jni" \
+  'org/jni_zero/GEN_JNI.class=J/N org_webrtc_MediaStreamTrack_getId' \
+  J/N.class org/jni_zero/JniZero.class
 "$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/ok.jar" >/dev/null
 make_jar "$jar_root/repackaged.jar" \
-  io/getstream/webrtc/VideoTrackJni.class org/jni_zero/JniZero.class
+  'io/getstream/webrtc/VideoTrackJni.class=org/jni_zero/GEN_JNI io_getstream_webrtc_VideoTrack_addSink' \
+  'org/jni_zero/GEN_JNI.class=io_getstream_webrtc_VideoTrack_addSink' \
+  org/jni_zero/JniZero.class
 "$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/repackaged.jar" >/dev/null
-make_jar "$jar_root/kotlin.jar" org/webrtc/VideoTrackJni.class \
+make_jar "$jar_root/nogenjni.jar" "$track_jni"
+if "$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/nogenjni.jar" \
+  2>"$jar_root/err"; then
+  echo "expected a jar without GEN_JNI to fail" >&2
+  exit 1
+fi
+grep -q 'no org/jni_zero/GEN_JNI.class' "$jar_root/err"
+make_jar "$jar_root/nojn.jar" "$track_jni" \
+  'org/jni_zero/GEN_JNI.class=J/N org_webrtc_MediaStreamTrack_getId'
+if "$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/nojn.jar" \
+  2>"$jar_root/err"; then
+  echo "expected GEN_JNI forwarding to a missing J.N to fail" >&2
+  exit 1
+fi
+grep -q 'no J/N.class' "$jar_root/err"
+make_jar "$jar_root/partial.jar" "$track_jni" \
+  'org/webrtc/VideoTrackJni.class=org/jni_zero/GEN_JNI org_webrtc_VideoTrack_addSink' \
+  'org/jni_zero/GEN_JNI.class=org_webrtc_MediaStreamTrack_getId'
+if "$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/partial.jar" \
+  2>"$jar_root/err"; then
+  echo "expected GEN_JNI missing a proxy method to fail" >&2
+  exit 1
+fi
+grep -q 'org/webrtc/VideoTrackJni.class: org_webrtc_VideoTrack_addSink' \
+  "$jar_root/err"
+if grep -q 'MediaStreamTrack_getId' "$jar_root/err"; then
+  echo "GEN_JNI check flagged a proxy method that is present" >&2
+  exit 1
+fi
+grep -q '":libwebrtc_final_jni_java",' "$ROOT/../sdk/android/BUILD.gn"
+grep -q 'srcjar_deps = \[ ":libjingle_peerconnection_so__jni_registration" \]' \
+  "$ROOT/../sdk/android/BUILD.gn"
+grep -q 'java_targets = \[ ":libwebrtc_java_targets" \]' \
+  "$ROOT/../sdk/android/BUILD.gn"
+make_jar "$jar_root/kotlin.jar" "$track_jni" \
   kotlin/TypeAliasesKt.class META-INF/kotlin-stdlib.kotlin_module
 if "$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/kotlin.jar" \
   2>"$jar_root/err"; then

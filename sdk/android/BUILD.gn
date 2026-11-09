@@ -39,6 +39,18 @@ if (is_android) {
     use_unprocessed_jars = true
     requires_android = true
 
+    # STREAM-CUSTOM: list Java deps in libwebrtc_java_targets, not here.
+    deps = [
+      ":libwebrtc_final_jni_java",
+      ":libwebrtc_java_targets",
+    ]
+  }
+
+  # STREAM-CUSTOM: every *Jni class calls org.jni_zero.GEN_JNI (and J.N with
+  # hashed names), which jni_zero only generates for a final APK. An AAR has
+  # none, so compile libjingle_peerconnection_so's registration into the jar.
+  # The .so's java_targets points here so GEN_JNI covers every packed class.
+  group("libwebrtc_java_targets") {
     deps = [
       ":audio_api_java",
       ":base_java",
@@ -68,6 +80,12 @@ if (is_android) {
       "../../rtc_base:base_java",
       "../../third_party/jni_zero:jni_zero_java",
     ]
+  }
+
+  # STREAM-CUSTOM
+  rtc_android_library("libwebrtc_final_jni_java") {
+    srcjar_deps = [ ":libjingle_peerconnection_so__jni_registration" ]
+    deps = [ "//third_party/jni_zero:jni_zero_java" ]
   }
 
   # The native API is currently experimental and may change without notice.
@@ -164,7 +182,7 @@ if (is_android) {
     output_extension = "so"
 
     # All APKs that use this shared library must depend on this list of targets
-    java_targets = [ ":libjingle_peerconnection_metrics_default_java" ]
+    java_targets = [ ":libwebrtc_java_targets" ]  # STREAM-CUSTOM
   }
 
   #######################
