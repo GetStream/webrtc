@@ -82,6 +82,8 @@ one/path/per/line
 ## Checks
 
 Local framework build: not run.
+make check: <pass or fail>.
+check-android-jni.sh: <pass or the reports>.
 Chrome extended stable milestone: <milestone or same>.
 
 Land this PR as a merge commit.
@@ -143,3 +145,23 @@ A squash has one parent.
 If that happens, stop.
 
 Do not repair a squash with a force push.
+
+## Before the Maven publish
+
+Tell the user to hold the `maven-publish` approval until these pass.
+
+Green CI does not prove the AAR works. The instrumentation test APK generates its own JNI classes and links its own natives.
+
+1. Download `libwebrtc.aar` from the release.
+2. Run `verify-android-jar.sh` on its `classes.jar`.
+3. Run `verify-android-natives.sh` on that jar and every `jni/<abi>` library.
+4. Smoke-test the dogfooding app: create a `PeerConnectionFactory`, then join one call with E2EE on.
+
+```bash
+unzip -o libwebrtc.aar classes.jar 'jni/*' -d aar
+stream_build/scripts/verify-android-jar.sh --jar aar/classes.jar
+stream_build/scripts/verify-android-natives.sh --jar aar/classes.jar \
+  $(printf -- '--so %s ' aar/jni/*/*.so)
+```
+
+Stop and report when any step fails.

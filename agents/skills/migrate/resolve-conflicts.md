@@ -49,6 +49,12 @@ Do not take upstream `direct_deps_only = true`. It drops the generated jni_zero 
 
 When packaging reports a package outside the allowlist, add it to `extensions/android/stream_android_jar.gni`.
 
+Keep `:libwebrtc_final_jni_java` in the `libwebrtc` deps. It packs jni_zero's `GEN_JNI` and `J.N`. Without them the AAR crashes in `PeerConnectionFactory.initialize`.
+
+Keep `java_targets = [ ":libwebrtc_java_targets" ]` on `libjingle_peerconnection_so`.
+
+When a Java target joins `libwebrtc_java_targets`, link its `*_jni` target into `libjingle_peerconnection_so`.
+
 For other `BUILD.gn` files, union the deps.
 
 Keep Stream-only targets.
@@ -82,6 +88,29 @@ Keep the addition in one labeled block.
 Do not exempt an official file that upstream still checks.
 
 Record the exempt path as debt.
+
+## Silent upstream rules
+
+Some upstream changes break Stream files with no conflict and no compile error.
+
+Upstream applies them to its own files in the same roll.
+
+1. Find official commits in the merge that touch many files with the same edit.
+2. List the Stream-added files of the same kind.
+3. Apply the same edit to each one.
+4. Record each edit as a decision.
+
+M156 example: jni_zero emits Java-to-native entry points only inside `DEFINE_JNI(<Class>)`. Upstream added that line to its JNI files. `encryption_manager.cc` was Stream-only, so E2EE threw `UnsatisfiedLinkError`.
+
+Run this check after the conflicts. It needs no build.
+
+```bash
+stream_build/scripts/check-android-jni.sh --src .
+```
+
+It reports a missing `DEFINE_JNI` and a Java/native `generate_jni` mismatch.
+
+Fix each report, or record why it is safe.
 
 ## Past examples
 
