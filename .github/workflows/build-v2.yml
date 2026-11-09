@@ -12,6 +12,7 @@ run-name: >-
 
 permissions:
   contents: read
+  packages: read
 
 on:
   workflow_dispatch:

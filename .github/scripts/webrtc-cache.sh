@@ -10,6 +10,8 @@ CACHE_IMAGE="${CACHE_IMAGE:-ghcr.io/getstream/webrtc-cache}"
 IMAGE_SOURCE="${IMAGE_SOURCE:-https://github.com/GetStream/webrtc}"
 ARTIFACT_TYPE="application/vnd.getstream.webrtc.git-cache.v1"
 ARCHIVE_NAME="gclient-git-cache.tar.zst"
+CHUNK_BYTES=$((512 * 1024 * 1024))
+CHUNK_TYPE="application/vnd.getstream.webrtc.git-cache.chunk.v1"
 
 usage() {
   cat <<'EOF'
@@ -78,6 +80,36 @@ missing_tag() {
   grep -qiE 'not found|404|name unknown|manifest unknown|NAME_UNKNOWN|MANIFEST_UNKNOWN' "$err"
 }
 
+# oras retries dial timeouts and 5xx responses only. A mid-body HTTP/2
+# PROTOCOL_ERROR is not one of those, on pull or push. Start the transfer
+# again. HTTP/1.1 avoids the stream reset. oras does not resume a partial
+# blob, so each attempt begins at byte 0.
+retry_oras() {
+  local attempts=5
+  local n=1
+  local delay=20
+  local status
+  while true; do
+    set +e
+    GODEBUG=http2client=0 "$@"
+    status=$?
+    set -e
+    if [[ "$status" -eq 0 ]]; then
+      return 0
+    fi
+    if [[ "$n" -ge "$attempts" ]]; then
+      echo "oras failed after ${attempts} attempts" >&2
+      return "$status"
+    fi
+    echo "oras failed (attempt ${n}/${attempts}, exit ${status}); retrying in ${delay}s" >&2
+    sleep "$delay"
+    n=$((n + 1))
+    if [[ "$delay" -lt 60 ]]; then
+      delay=$((delay * 2))
+    fi
+  done
+}
+
 note_restored() {
   local from="$1"
   echo "restored_from=${from}"
@@ -100,13 +132,41 @@ pull_tag() {
     cat "$err" >&2
     return 2
   fi
-  rm -rf "$work/blob"
-  oras pull "${CACHE_IMAGE}:${tag}" --concurrency 4 -o "$work/blob"
-  if [[ ! -f "$work/blob/${ARCHIVE_NAME}" ]]; then
-    echo "pulled package has no ${ARCHIVE_NAME}" >&2
+  local list="$work/layers.tsv"
+  python3 - "$work/manifest" "$list" <<'PY'
+import json
+import sys
+
+manifest = json.load(open(sys.argv[1]))
+with open(sys.argv[2], "w", encoding="utf-8") as out:
+    for index, layer in enumerate(manifest.get("layers") or []):
+        annotations = layer.get("annotations") or {}
+        title = annotations.get("org.opencontainers.image.title") or f"layer-{index:05d}"
+        out.write(
+            f"{layer['digest']}\t{layer['size']}\t{layer.get('mediaType', '')}\t{title}\n"
+        )
+PY
+  if [[ ! -s "$list" ]]; then
+    echo "manifest has no layers" >&2
     return 2
   fi
-  zstd -d -c "$work/blob/${ARCHIVE_NAME}" | tar -C "$root" -xf -
+  local blobdir="$work/blobs"
+  mkdir -p "$blobdir"
+  local digest size media title
+  while IFS=$'\t' read -r digest size media title; do
+    echo "fetch ${title} (${size} bytes)"
+    if ! retry_oras oras blob fetch "${CACHE_IMAGE}@${digest}" --output "${blobdir}/${title}"; then
+      echo "blob download failed: ${title}" >&2
+      return 2
+    fi
+  done <"$list"
+  local first
+  first="$(cut -f4 "$list" | head -n 1)"
+  if [[ "$first" == chunk-* ]] || grep -q 'git-cache.chunk' "$list"; then
+    cat "$blobdir"/chunk-* | zstd -d -c | tar -C "$root" -xf -
+  else
+    zstd -d -c "${blobdir}/${first}" | tar -C "$root" -xf -
+  fi
   if [[ ! -d "${root}/.gclient-git-cache" ]]; then
     echo "archive missing .gclient-git-cache" >&2
     return 2
@@ -117,6 +177,7 @@ pull_tag() {
 
 cmd_pull() {
   local root="${CACHE_ROOT:?CACHE_ROOT is required}"
+  local requested="${CACHE_TAG:-latest}"
   local work err rc
   work="$(mktemp -d)"
   err="$work/err"
@@ -124,14 +185,19 @@ cmd_pull() {
   trap "rm -rf '${work}'" RETURN
   mkdir -p "${root}/.gclient-git-cache"
   set +e
-  pull_tag "$root" latest "$work" "$err"
+  pull_tag "$root" "$requested" "$work" "$err"
   rc=$?
   set -e
   if [[ "$rc" -eq 0 ]]; then
-    note_restored latest
+    note_restored "$requested"
     return 0
   fi
-  if [[ "$rc" -ne 1 ]]; then
+  if [[ "$rc" -ne 1 || "$requested" != "latest" ]]; then
+    if [[ "$rc" -eq 1 ]]; then
+      echo "no ${CACHE_IMAGE}:${requested}; starting from an empty git cache"
+      note_restored empty
+      return 0
+    fi
     return 1
   fi
   set +e
@@ -202,19 +268,61 @@ cmd_push() {
   echo "packing ${cache}"
   tar -C "$root" -cf - .gclient-git-cache | zstd -T0 -3 -o "$archive"
   du -sh "$archive" || true
-  # oras rejects an absolute path. Push the archive by its basename.
+  # One blob is one long GET, which GHCR's signed CDN URL cuts off.
+  # 512MiB chunks are separate blobs. A failed transfer retries that blob.
+  split -b "$CHUNK_BYTES" -d -a 5 "$archive" "$work/chunk-"
+  rm -f "$archive"
+  echo "split cache into $(find "$work" -maxdepth 1 -name 'chunk-*' | wc -l | tr -d ' ') blobs"
   (
     cd "$work"
-    oras push "${CACHE_IMAGE}:${tag}" \
-      --artifact-type "$ARTIFACT_TYPE" \
-      --annotation "org.opencontainers.image.source=${IMAGE_SOURCE}" \
-      --annotation "org.opencontainers.image.revision=${revision}" \
-      --annotation "org.opencontainers.image.version=${tag}" \
-      "${ARCHIVE_NAME}:application/zstd"
+    printf '{}' > config.json
+    retry_oras oras blob push "${CACHE_IMAGE}" config.json \
+      --media-type application/vnd.oci.empty.v1+json \
+      --descriptor > config.desc
+    for chunk in chunk-*; do
+      echo "push ${chunk}"
+      retry_oras oras blob push "${CACHE_IMAGE}" "$chunk" \
+        --media-type "$CHUNK_TYPE" \
+        --descriptor > "${chunk}.desc"
+    done
+    python3 - "$tag" "$revision" "$IMAGE_SOURCE" "$ARTIFACT_TYPE" <<'PY'
+import json
+import pathlib
+import sys
+
+tag, revision, source, artifact_type = sys.argv[1:]
+root = pathlib.Path(".")
+
+def load_desc(path):
+    text = path.read_text()
+    return json.loads(text[text.find("{") : text.rfind("}") + 1])
+
+config = load_desc(root / "config.desc")
+layers = []
+for desc_path in sorted(root.glob("chunk-*.desc")):
+    name = desc_path.name[: -len(".desc")]
+    desc = load_desc(desc_path)
+    desc["annotations"] = {"org.opencontainers.image.title": name}
+    layers.append(desc)
+manifest = {
+    "schemaVersion": 2,
+    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+    "artifactType": artifact_type,
+    "config": config,
+    "layers": layers,
+    "annotations": {
+        "org.opencontainers.image.source": source,
+        "org.opencontainers.image.revision": revision,
+        "org.opencontainers.image.version": tag,
+    },
+}
+(root / "manifest.json").write_text(json.dumps(manifest))
+PY
+    retry_oras oras manifest push "${CACHE_IMAGE}:${tag}" manifest.json
   )
   echo "pushed ${CACHE_IMAGE}:${tag}"
   if [[ "$update" == "true" ]]; then
-    oras tag "${CACHE_IMAGE}:${tag}" latest
+    retry_oras oras tag "${CACHE_IMAGE}:${tag}" latest
     echo "moved ${CACHE_IMAGE}:latest to ${tag}"
   else
     echo "left ${CACHE_IMAGE}:latest unchanged"

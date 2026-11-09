@@ -10,6 +10,7 @@ run-name: >-
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: test-v2-${{ github.event.pull_request.number || github.ref }}

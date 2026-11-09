@@ -104,40 +104,9 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
 
-      - name: Place the git cache outside the gclient root
-        run: |
-          set -euo pipefail
-          # depot_tools rejects a cache inside the gclient root.
-          # The root is GITHUB_WORKSPACE. The cache sits next to it:
-          # <parent of DEPS_ROOT>/.gclient-git-cache
-          cache_root="$(dirname "$GITHUB_WORKSPACE")"
-          echo "CACHE_ROOT=${cache_root}" >> "$GITHUB_ENV"
-          echo "GIT_CACHE_PATH=${cache_root}/.gclient-git-cache" >> "$GITHUB_ENV"
-          echo "git cache: ${cache_root}/.gclient-git-cache"
-
-      - name: Install oras
-        uses: oras-project/setup-oras@v2
-
-      - name: Install zstd
-        run: |
-          set -euo pipefail
-          if ! command -v zstd >/dev/null; then
-            sudo apt-get update
-            sudo apt-get install -y zstd
-          fi
-
-      - name: Log in to GHCR
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          echo "$GH_TOKEN" | oras login ghcr.io \
-            --username "${{ github.actor }}" \
-            --password-stdin
-
       - id: pull
-        name: Pull latest cache, or start empty
-        run: publisher/.github/scripts/webrtc-cache.sh pull
+        name: Restore git cache
+        uses: ./publisher/.github/actions/restore-git-cache
 
       - id: before
         name: Fingerprint the pulled cache
