@@ -551,6 +551,17 @@ if "$cache_sh" resolve-tag current 1 1 20261109 >/dev/null; then
   echo "expected tag current to be rejected" >&2
   exit 1
 fi
+if "$cache_sh" resolve-tag latest 1 1 20261109 >/dev/null; then
+  echo "expected tag latest to be rejected" >&2
+  exit 1
+fi
+fp_root="$(mktemp -d)"
+fp_empty="$(CACHE_ROOT="$fp_root" "$cache_sh" fingerprint)"
+mkdir -p "$fp_root/.gclient-git-cache/repo"
+printf 'x' > "$fp_root/.gclient-git-cache/repo/obj"
+fp_changed="$(CACHE_ROOT="$fp_root" "$cache_sh" fingerprint)"
+[[ "$fp_empty" != "$fp_changed" ]]
+rm -rf "$fp_root"
 if "$cache_sh" resolve-tag 'bad tag' 1 1 20261109 >/dev/null; then
   echo "expected invalid tag to be rejected" >&2
   exit 1
@@ -571,7 +582,8 @@ grep -q 'default: automatic' "$cache_wf"
 grep -q 'default: true' "$cache_wf"
 grep -q 'TARGET_OS: ios,mac,android,unix' "$cache_wf"
 grep -q 'RUN_HOOKS: "0"' "$cache_wf"
-grep -q 'Pull current cache, or start empty' "$cache_wf"
+grep -q 'Pull latest cache, or start empty' "$cache_wf"
+grep -q 'cache unchanged; left' "$cache_wf"
 grep -q 'dirname "$GITHUB_WORKSPACE"' "$cache_wf"
 ! grep -q 'GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache' "$cache_wf"
 grep -q 'oras-project/setup-oras@v2$' "$cache_wf"
@@ -583,7 +595,9 @@ grep -q 'cron: "0 4 \* \* \*"' "$cache_daily"
 grep -q 'uses: \./\.github/workflows/update-webrtc-cache\.yml' "$cache_daily"
 grep -q 'packages: write' "$cache_daily"
 grep -q 'tag: automatic' "$cache_daily"
-grep -q 'update_current: true' "$cache_daily"
+grep -q 'update_latest: true' "$cache_daily"
+! grep -q 'update_current' "$cache_wf"
+! grep -q 'update_current' "$cache_daily"
 ! grep -q 'workflow_dispatch:' "$cache_daily"
 [[ ! -e "$gha/workflows/webrtc-cache.yml" ]]
 

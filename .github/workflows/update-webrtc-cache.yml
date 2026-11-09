@@ -2,15 +2,15 @@
 # or call it from the daily workflow. Pull requests do not run it.
 #
 # The job token is github.token (contents: read, packages: write).
-# No stored secret. A missing ghcr.io/getstream/webrtc-cache:current
-# starts from an empty cache; the first successful push creates it.
-# :current moves only when update_current is true.
+# No stored secret. A missing ghcr.io/getstream/webrtc-cache:latest
+# restores :current once, then starts empty. :latest moves only when
+# update_latest is true. An unchanged cache does not push.
 
 name: Update WebRTC Cache
 
 run-name: >-
   Update WebRTC Cache ${{ inputs.tag }}
-  update_current:${{ inputs.update_current }}
+  update_latest:${{ inputs.update_latest }}
 
 on:
   workflow_dispatch:
@@ -23,8 +23,8 @@ on:
         description: Registry tag. automatic generates YYYYMMDD-<run_id>.<run_attempt>.
         type: string
         default: automatic
-      update_current:
-        description: Move the current tag to this publish.
+      update_latest:
+        description: Move the latest tag to this publish.
         type: boolean
         default: true
   workflow_call:
@@ -37,8 +37,8 @@ on:
         description: Registry tag. automatic generates YYYYMMDD-<run_id>.<run_attempt>.
         type: string
         default: automatic
-      update_current:
-        description: Move the current tag to this publish.
+      update_latest:
+        description: Move the latest tag to this publish.
         type: boolean
         default: true
 
@@ -83,19 +83,19 @@ jobs:
         name: Resolve tag
         env:
           TAG_INPUT: ${{ inputs.tag }}
-          UPDATE_CURRENT: ${{ inputs.update_current && 'true' || 'false' }}
+          UPDATE_LATEST: ${{ inputs.update_latest && 'true' || 'false' }}
         run: |
           set -euo pipefail
           tag="$(publisher/.github/scripts/webrtc-cache.sh resolve-tag \
             "$TAG_INPUT" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT")"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
-          echo "update_current=${UPDATE_CURRENT}" >> "$GITHUB_OUTPUT"
+          echo "update_latest=${UPDATE_LATEST}" >> "$GITHUB_OUTPUT"
           {
             echo "### WebRTC cache"
             echo
             echo "- image: \`${CACHE_IMAGE}\`"
             echo "- tag: \`${tag}\`"
-            echo "- update_current: ${UPDATE_CURRENT}"
+            echo "- update_latest: ${UPDATE_LATEST}"
             echo "- revision: \`${{ steps.src.outputs.sha }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -135,8 +135,13 @@ jobs:
             --username "${{ github.actor }}" \
             --password-stdin
 
-      - name: Pull current cache, or start empty
+      - id: pull
+        name: Pull latest cache, or start empty
         run: publisher/.github/scripts/webrtc-cache.sh pull
+
+      - id: before
+        name: Fingerprint the pulled cache
+        run: echo "fp=$(publisher/.github/scripts/webrtc-cache.sh fingerprint)" >> "$GITHUB_OUTPUT"
 
       - name: Sync deps into the git cache
         working-directory: src/stream_build
@@ -160,10 +165,19 @@ jobs:
           git clean -ffdx -q
           df -h "${GITHUB_WORKSPACE}" || true
 
+      - id: after
+        name: Fingerprint the synced cache
+        run: echo "fp=$(publisher/.github/scripts/webrtc-cache.sh fingerprint)" >> "$GITHUB_OUTPUT"
+
+      - name: Leave latest unchanged
+        if: steps.pull.outputs.restored_from == 'latest' && steps.before.outputs.fp == steps.after.outputs.fp
+        run: echo "cache unchanged; left ${CACHE_IMAGE}:latest in place"
+
       - name: Push git cache
+        if: steps.pull.outputs.restored_from != 'latest' || steps.before.outputs.fp != steps.after.outputs.fp
         env:
           CACHE_TAG: ${{ steps.resolved.outputs.tag }}
-          UPDATE_CURRENT: ${{ steps.resolved.outputs.update_current }}
+          UPDATE_LATEST: ${{ steps.resolved.outputs.update_latest }}
           GIT_REVISION: ${{ steps.src.outputs.sha }}
           IMAGE_SOURCE: https://github.com/GetStream/webrtc
         run: publisher/.github/scripts/webrtc-cache.sh push
