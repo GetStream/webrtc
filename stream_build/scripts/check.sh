@@ -568,7 +568,7 @@ if "$cache_sh" resolve-tag 'bad tag' 1 1 20261109 >/dev/null; then
 fi
 grep -q 'starting from an empty git cache' "$cache_sh"
 grep -q 'retry_oras oras blob fetch' "$cache_sh"
-grep -q 'PULL_CONCURRENCY:-4' "$cache_sh"
+grep -q 'PULL_CONCURRENCY:-3' "$cache_sh"
 grep -q 'wait -n' "$cache_sh"
 grep -q 'retry_oras oras blob push' "$cache_sh"
 grep -q 'retry_oras oras tag' "$cache_sh"

@@ -153,7 +153,7 @@ PY
   local blobdir="$work/blobs"
   mkdir -p "$blobdir"
   local digest size media title
-  local max="${PULL_CONCURRENCY:-4}"
+  local max="${PULL_CONCURRENCY:-3}"
   local running=0
   local failfile="$work/fetch-fail"
   rm -f "$failfile"
