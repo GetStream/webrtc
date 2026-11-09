@@ -104,6 +104,17 @@ jobs:
         with:
           webrtc_ref: ${{ inputs.webrtc_ref }}
 
+      - name: Place the git cache outside the gclient root
+        run: |
+          set -euo pipefail
+          # depot_tools rejects a cache inside the gclient root.
+          # The root is GITHUB_WORKSPACE. The cache sits next to it:
+          # <parent of DEPS_ROOT>/.gclient-git-cache
+          cache_root="$(dirname "$GITHUB_WORKSPACE")"
+          echo "CACHE_ROOT=${cache_root}" >> "$GITHUB_ENV"
+          echo "GIT_CACHE_PATH=${cache_root}/.gclient-git-cache" >> "$GITHUB_ENV"
+          echo "git cache: ${cache_root}/.gclient-git-cache"
+
       - name: Install oras
         uses: oras-project/setup-oras@v2
 
@@ -125,8 +136,6 @@ jobs:
             --password-stdin
 
       - name: Pull current cache, or start empty
-        env:
-          CACHE_ROOT: ${{ github.workspace }}
         run: publisher/.github/scripts/webrtc-cache.sh pull
 
       - name: Sync deps into the git cache
@@ -134,7 +143,6 @@ jobs:
         env:
           DEPS_ROOT: ${{ github.workspace }}
           WEBRTC_SRC: ${{ github.workspace }}/src
-          GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
           TARGET_OS: ios,mac,android,unix
           JOBS: "8"
           SHALLOW: "1"
@@ -154,7 +162,6 @@ jobs:
 
       - name: Push git cache
         env:
-          CACHE_ROOT: ${{ github.workspace }}
           CACHE_TAG: ${{ steps.resolved.outputs.tag }}
           UPDATE_CURRENT: ${{ steps.resolved.outputs.update_current }}
           GIT_REVISION: ${{ steps.src.outputs.sha }}
