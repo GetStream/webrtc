@@ -50,7 +50,7 @@ if (is_android) {
   # hashed names), which jni_zero only generates for a final APK. An AAR has
   # none, so compile libjingle_peerconnection_so's registration into the jar.
   # The .so's java_targets points here so GEN_JNI covers every packed class.
-  group("libwebrtc_java_targets") {
+  java_group("libwebrtc_java_targets") {
     deps = [
       ":audio_api_java",
       ":base_java",

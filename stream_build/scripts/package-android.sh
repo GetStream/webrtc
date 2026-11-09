@@ -61,6 +61,7 @@ for slice in $SLICES; do
     first="$slice"
   fi
 done
+[[ -n "$first" ]] || die "package-android.sh: --slices lists no slices"
 
 jar="$OUT/$first/lib.java/sdk/android/libwebrtc.jar"
 [[ -f "$jar" ]] || die "missing classes jar at $jar"

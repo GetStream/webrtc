@@ -565,25 +565,65 @@ grep -q 'jar_excluded_patterns = stream_android_jar_excluded_patterns' \
 grep -q '"kotlin/\*"' "$ROOT/../extensions/android/stream_android_jar.gni"
 grep -q 'verify-android-jar.sh' "$ROOT/scripts/package-android.sh"
 jar_root="$(mktemp -d)"
+# make_jar OUT ENTRY...: an ENTRY not ending in .class is an empty file. A
+# class ENTRY is "path.class" plus "|m=name:desc" (method), "|n=name:desc"
+# (native method), and "|r=Owner.name:desc" (method reference).
 make_jar() {
   python3 - "$@" <<'PY'
-import sys
-import zipfile
+import struct, sys, zipfile
+def cls(name, attrs):
+    pool, index = [], {}
+    def add(key, raw):
+        if key not in index:
+            pool.append(raw)
+            index[key] = len(pool)
+        return index[key]
+    def utf8(s):
+        b = s.encode()
+        return add(("u", s), b"\x01" + struct.pack(">H", len(b)) + b)
+    def klass(s):
+        return add(("c", s), b"\x07" + struct.pack(">H", utf8(s)))
+    def nat(n, d):
+        return add(("n", n, d), b"\x0c" + struct.pack(">HH", utf8(n), utf8(d)))
+    this_class, super_class = klass(name), klass("java/lang/Object")
+    methods = b""
+    count = 0
+    for attr in attrs:
+        kind, _, value = attr.partition("=")
+        if kind == "r":
+            owner_name, _, desc = value.partition(":")
+            owner, _, mname = owner_name.rpartition(".")
+            add(("r", value), b"\x0a" + struct.pack(">HH", klass(owner),
+                                                     nat(mname, desc)))
+        else:
+            mname, _, desc = value.partition(":")
+            access = 0x0108 if kind == "n" else 0x0009
+            methods += struct.pack(">HHHH", access, utf8(mname), utf8(desc), 0)
+            count += 1
+    head = b"\xca\xfe\xba\xbe" + struct.pack(">HHH", 0, 52, len(pool) + 1)
+    return (head + b"".join(pool)
+            + struct.pack(">HHHHH", 0x21, this_class, super_class, 0, 0)
+            + struct.pack(">H", count) + methods + struct.pack(">H", 0))
 with zipfile.ZipFile(sys.argv[1], "w") as zf:
     for entry in sys.argv[2:]:
-        name, _, data = entry.partition("=")
-        zf.writestr(name, data.encode())
+        path, *attrs = entry.split("|")
+        if path.endswith(".class"):
+            zf.writestr(path, cls(path[:-len(".class")], attrs))
+        else:
+            zf.writestr(path, b"")
 PY
 }
-track_jni='org/webrtc/MediaStreamTrackJni.class=org/jni_zero/GEN_JNI org_webrtc_MediaStreamTrack_getId'
+gen='org/jni_zero/GEN_JNI'
+track_jni="org/webrtc/MediaStreamTrackJni.class|r=$gen.org_webrtc_MediaStreamTrack_getId:(J)Ljava/lang/String;"
+track_gen="$gen.class|m=org_webrtc_MediaStreamTrack_getId:(J)Ljava/lang/String;"
 make_jar "$jar_root/ok.jar" META-INF/MANIFEST.MF \
   org/webrtc/MediaStreamTrack.class "$track_jni" \
-  'org/jni_zero/GEN_JNI.class=J/N org_webrtc_MediaStreamTrack_getId' \
-  J/N.class org/jni_zero/JniZero.class
+  "$track_gen|r=J/N.M0ETufK1:(J)Ljava/lang/String;" \
+  'J/N.class|n=M0ETufK1:(J)Ljava/lang/String;' org/jni_zero/JniZero.class
 "$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/ok.jar" >/dev/null
 make_jar "$jar_root/repackaged.jar" \
-  'io/getstream/webrtc/VideoTrackJni.class=org/jni_zero/GEN_JNI io_getstream_webrtc_VideoTrack_addSink' \
-  'org/jni_zero/GEN_JNI.class=io_getstream_webrtc_VideoTrack_addSink' \
+  "io/getstream/webrtc/VideoTrackJni.class|r=$gen.io_getstream_webrtc_VideoTrack_addSink:(JJ)V" \
+  "$gen.class|m=io_getstream_webrtc_VideoTrack_addSink:(JJ)V" \
   org/jni_zero/JniZero.class
 "$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/repackaged.jar" >/dev/null
 make_jar "$jar_root/nogenjni.jar" "$track_jni"
@@ -594,22 +634,27 @@ if "$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/nogenjni.jar" \
 fi
 grep -q 'no org/jni_zero/GEN_JNI.class' "$jar_root/err"
 make_jar "$jar_root/nojn.jar" "$track_jni" \
-  'org/jni_zero/GEN_JNI.class=J/N org_webrtc_MediaStreamTrack_getId'
+  "$track_gen|r=J/N.M0ETufK1:(J)Ljava/lang/String;"
 if "$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/nojn.jar" \
   2>"$jar_root/err"; then
   echo "expected GEN_JNI forwarding to a missing J.N to fail" >&2
   exit 1
 fi
 grep -q 'no J/N.class' "$jar_root/err"
+# The 57-character name has length byte 0x39 ("9"), which a byte-pattern
+# scan of the constant pool skips.
+init='org_webrtc_PeerConnectionFactory_initializeAndroidGlobals'
 make_jar "$jar_root/partial.jar" "$track_jni" \
-  'org/webrtc/VideoTrackJni.class=org/jni_zero/GEN_JNI org_webrtc_VideoTrack_addSink' \
-  'org/jni_zero/GEN_JNI.class=org_webrtc_MediaStreamTrack_getId'
+  "org/webrtc/PeerConnectionFactoryJni.class|r=$gen.$init:()V" \
+  "org/webrtc/VideoTrackJni.class|r=$gen.org_webrtc_VideoTrack_addSink:(JJ)V" \
+  "$track_gen|m=org_webrtc_VideoTrack_addSink:(J)V"
 if "$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/partial.jar" \
   2>"$jar_root/err"; then
   echo "expected GEN_JNI missing a proxy method to fail" >&2
   exit 1
 fi
-grep -q 'org/webrtc/VideoTrackJni.class: org_webrtc_VideoTrack_addSink' \
+grep -q "org/webrtc/PeerConnectionFactoryJni: $init()V" "$jar_root/err"
+grep -q 'org/webrtc/VideoTrackJni: org_webrtc_VideoTrack_addSink(JJ)V' \
   "$jar_root/err"
 if grep -q 'MediaStreamTrack_getId' "$jar_root/err"; then
   echo "GEN_JNI check flagged a proxy method that is present" >&2
@@ -620,7 +665,9 @@ grep -q 'srcjar_deps = \[ ":libjingle_peerconnection_so__jni_registration" \]' \
   "$ROOT/../sdk/android/BUILD.gn"
 grep -q 'java_targets = \[ ":libwebrtc_java_targets" \]' \
   "$ROOT/../sdk/android/BUILD.gn"
-make_jar "$jar_root/kotlin.jar" "$track_jni" \
+grep -q '^  java_group("libwebrtc_java_targets") {' \
+  "$ROOT/../sdk/android/BUILD.gn"
+make_jar "$jar_root/kotlin.jar" "$track_jni" "$track_gen" \
   kotlin/TypeAliasesKt.class META-INF/kotlin-stdlib.kotlin_module
 if "$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/kotlin.jar" \
   2>"$jar_root/err"; then
@@ -635,37 +682,11 @@ if "$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/nojni.jar" \
   exit 1
 fi
 grep -q 'no generated \*Jni.class' "$jar_root/err"
-# Fixtures for verify-android-natives.sh: a jar whose classes declare native
-# methods, and an ELF64 library exporting the given dynamic symbols.
-make_native_jar() {
-  python3 - "$@" <<'PY'
-import struct, sys, zipfile
-def cls(name, methods):
-    pool = []
-    def utf8(s):
-        pool.append(b"\x01" + struct.pack(">H", len(s)) + s.encode())
-        return len(pool)
-    this = utf8(name); pool.append(b"\x07" + struct.pack(">H", this))
-    this_class = len(pool)
-    sup = utf8("java/lang/Object"); pool.append(b"\x07" + struct.pack(">H", sup))
-    super_class = len(pool)
-    body = b""
-    for m in methods:
-        mname, desc = m.split(":")
-        body += struct.pack(">HHHH", 0x0108, utf8(mname), utf8(desc), 0)
-    head = b"\xca\xfe\xba\xbe" + struct.pack(">HHH", 0, 52, len(pool) + 1)
-    return (head + b"".join(pool)
-            + struct.pack(">HHHHH", 0x21, this_class, super_class, 0, 0)
-            + struct.pack(">H", len(methods)) + body + struct.pack(">H", 0))
-with zipfile.ZipFile(sys.argv[1], "w") as zf:
-    for spec in sys.argv[2:]:
-        name, *methods = spec.split(",")
-        zf.writestr(name + ".class", cls(name, methods))
-PY
-}
+# make_so OUT SYMBOL...: an ELF64 library exporting SYMBOLs. With
+# NO_SECTIONS=1 it has no section header table, like a fully stripped file.
 make_so() {
   python3 - "$@" <<'PY'
-import struct, sys
+import os, struct, sys
 out, *names = sys.argv[1:]
 dynstr = b"\0" + b"".join(n.encode() + b"\0" for n in names)
 syms = b"\0" * 24
@@ -679,16 +700,19 @@ sh_off = str_off + len(dynstr)
 sh = b"\0" * 64
 sh += struct.pack("<IIQQQQIIQQ", 0, 11, 2, 0, data_off, len(syms), 2, 1, 8, 24)
 sh += struct.pack("<IIQQQQIIQQ", 0, 3, 2, 0, str_off, len(dynstr), 0, 0, 1, 0)
+shnum = 3
+if os.environ.get("NO_SECTIONS") == "1":
+    sh, sh_off, shnum = b"", 0, 0
 ehdr = (b"\x7fELF\x02\x01\x01" + b"\0" * 9
         + struct.pack("<HHIQQQIHHHHHH", 3, 183, 1, 0, 0, sh_off, 0, 64, 0, 0,
-                      64, 3, 0))
+                      64, shnum, 0))
 open(out, "wb").write(ehdr + syms + dynstr + sh)
 PY
 }
-make_native_jar "$jar_root/natives.jar" \
-  'J/N,M0ETufK1:(J)V' \
-  'org/webrtc/EncryptionManager,nativeCreate:(Ljava/lang/String;I)J,nativeDispose:(J)V' \
-  'org/webrtc/Simulcast_Factory,nativeCreate:(J)J'
+make_jar "$jar_root/natives.jar" \
+  'J/N.class|n=M0ETufK1:(J)V' \
+  'org/webrtc/EncryptionManager.class|n=nativeCreate:(Ljava/lang/String;I)J|n=nativeDispose:(J)V|m=isEnabled:()Z' \
+  'org/webrtc/Simulcast_Factory.class|n=nativeCreate:(J)J'
 make_so "$jar_root/ok.so" Java_J_N_M0ETufK1 \
   Java_org_webrtc_EncryptionManager_nativeCreate \
   'Java_org_webrtc_EncryptionManager_nativeDispose__J' \
@@ -706,11 +730,28 @@ grep -q 'nodefine.so exports no Java_\* symbol for 2 native methods' \
   "$jar_root/err"
 grep -q '  org/webrtc/EncryptionManager.nativeCreate(Ljava/lang/String;I)J' \
   "$jar_root/err"
-if grep -q 'ok.so' "$jar_root/err"; then
-  echo "verify-android-natives.sh flagged a library that exports everything" >&2
+if grep -q 'ok.so\|isEnabled' "$jar_root/err"; then
+  echo "verify-android-natives.sh flagged a library or a non-native method" >&2
   exit 1
 fi
+NO_SECTIONS=1 make_so "$jar_root/stripped.so" Java_J_N_M0ETufK1
+if "$ROOT/scripts/verify-android-natives.sh" --jar "$jar_root/natives.jar" \
+  --so "$jar_root/stripped.so" 2>"$jar_root/err"; then
+  echo "expected a library without section headers to fail" >&2
+  exit 1
+fi
+grep -q 'stripped.so has no ELF section headers' "$jar_root/err"
+python3 - "$ROOT/scripts" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+from jvm_classfile import _modified_utf8, jni_mangle
+# U+1F600 as modified UTF-8: two 3-byte surrogates. JNI escapes each
+# UTF-16 unit.
+name = _modified_utf8(b"a\xed\xa0\xbd\xed\xb8\x80_b\xc0\x80")
+assert jni_mangle(name) == "a_0d83d_0de00_1b_00000", jni_mangle(name)
+PY
 grep -q 'verify-android-natives.sh' "$ROOT/scripts/package-android.sh"
+grep -q -- '--slices lists no slices' "$ROOT/scripts/package-android.sh"
 grep -q '^DEFINE_JNI(EncryptionManager)$' \
   "$ROOT/../sdk/android/src/jni/pc/encryption_manager.cc"
 rm -rf "$jar_root"

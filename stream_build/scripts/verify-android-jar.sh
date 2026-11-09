@@ -25,10 +25,12 @@ done
 [[ -n "$JAR" ]] || die "verify-android-jar.sh requires --jar"
 [[ -f "$JAR" ]] || die "missing jar $JAR"
 
-python3 - "$JAR" <<'PY'
-import re
+python3 - "$SCRIPT_DIR" "$JAR" <<'PY'
 import sys
 import zipfile
+
+sys.path.insert(0, sys.argv[1])
+from jvm_classfile import ClassFile
 
 ALLOWED_PREFIXES = (
     "org/webrtc/",
@@ -41,17 +43,16 @@ ALLOWED_FILES = (
     # jni_zero's hashed-name natives; GEN_JNI forwards to it.
     "J/N.class",
 )
-GEN_JNI = "org/jni_zero/GEN_JNI.class"
-SHORT_GEN_JNI = "J/N.class"
-# Proxy method names *Jni classes call on GEN_JNI, e.g.
-# org_webrtc_PeerConnectionFactory_initializeAndroidGlobals.
-PROXY_NAME = re.compile(rb"(?<![\w/$])(?:org|io)_\w+")
+GEN_JNI = "org/jni_zero/GEN_JNI"
+SHORT_GEN_JNI = "J/N"
 
-jar = sys.argv[1]
+jar = sys.argv[2]
 with zipfile.ZipFile(jar) as zf:
     names = zf.namelist()
-    jni_classes = {n: zf.read(n) for n in names if n.endswith("Jni.class")}
-    gen_jni = zf.read(GEN_JNI) if GEN_JNI in names else None
+    jni_classes = [ClassFile(zf.read(n)) for n in names
+                   if n.endswith("Jni.class")]
+    gen_jni = (ClassFile(zf.read(GEN_JNI + ".class"))
+               if GEN_JNI + ".class" in names else None)
 
 unexpected = sorted(
     n for n in names
@@ -79,28 +80,28 @@ if not jni_classes:
     sys.exit(1)
 
 if gen_jni is None:
-    print(f"{jar} has no {GEN_JNI}; *Jni classes fail with "
+    print(f"{jar} has no {GEN_JNI}.class; *Jni classes fail with "
           "NoClassDefFoundError. Check :libwebrtc_final_jni_java in "
           "sdk/android/BUILD.gn.", file=sys.stderr)
     sys.exit(1)
 
-if b"J/N" in gen_jni and SHORT_GEN_JNI not in names:
-    print(f"{jar} has {GEN_JNI} forwarding to J.N but no {SHORT_GEN_JNI}.",
-          file=sys.stderr)
+if (any(cls == SHORT_GEN_JNI for cls, _, _ in gen_jni.method_refs)
+        and SHORT_GEN_JNI + ".class" not in names):
+    print(f"{jar} has {GEN_JNI}.class forwarding to J.N but no "
+          f"{SHORT_GEN_JNI}.class.", file=sys.stderr)
     sys.exit(1)
 
-gen_jni_names = set(PROXY_NAME.findall(gen_jni))
+declared = {(name, desc) for _, name, desc in gen_jni.methods}
 missing = sorted({
-    (n, m.decode())
-    for n, data in jni_classes.items()
-    if GEN_JNI[:-len(".class")].encode() in data
-    for m in PROXY_NAME.findall(data)
-    if m not in gen_jni_names
+    (c.name, name + desc)
+    for c in jni_classes
+    for cls, name, desc in c.method_refs
+    if cls == GEN_JNI and (name, desc) not in declared
 })
 if missing:
-    print(f"{jar}: {GEN_JNI} lacks {len(missing)} proxy methods; add their "
-          "Java targets to :libwebrtc_java_targets in sdk/android/BUILD.gn:",
-          file=sys.stderr)
+    print(f"{jar}: {GEN_JNI}.class lacks {len(missing)} proxy methods "
+          "(name and descriptor); add their Java targets to "
+          ":libwebrtc_java_targets in sdk/android/BUILD.gn:", file=sys.stderr)
     for cls, method in missing[:20]:
         print(f"  {cls}: {method}", file=sys.stderr)
     sys.exit(1)
