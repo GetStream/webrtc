@@ -635,6 +635,84 @@ if "$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/nojni.jar" \
   exit 1
 fi
 grep -q 'no generated \*Jni.class' "$jar_root/err"
+# Fixtures for verify-android-natives.sh: a jar whose classes declare native
+# methods, and an ELF64 library exporting the given dynamic symbols.
+make_native_jar() {
+  python3 - "$@" <<'PY'
+import struct, sys, zipfile
+def cls(name, methods):
+    pool = []
+    def utf8(s):
+        pool.append(b"\x01" + struct.pack(">H", len(s)) + s.encode())
+        return len(pool)
+    this = utf8(name); pool.append(b"\x07" + struct.pack(">H", this))
+    this_class = len(pool)
+    sup = utf8("java/lang/Object"); pool.append(b"\x07" + struct.pack(">H", sup))
+    super_class = len(pool)
+    body = b""
+    for m in methods:
+        mname, desc = m.split(":")
+        body += struct.pack(">HHHH", 0x0108, utf8(mname), utf8(desc), 0)
+    head = b"\xca\xfe\xba\xbe" + struct.pack(">HHH", 0, 52, len(pool) + 1)
+    return (head + b"".join(pool)
+            + struct.pack(">HHHHH", 0x21, this_class, super_class, 0, 0)
+            + struct.pack(">H", len(methods)) + body + struct.pack(">H", 0))
+with zipfile.ZipFile(sys.argv[1], "w") as zf:
+    for spec in sys.argv[2:]:
+        name, *methods = spec.split(",")
+        zf.writestr(name + ".class", cls(name, methods))
+PY
+}
+make_so() {
+  python3 - "$@" <<'PY'
+import struct, sys
+out, *names = sys.argv[1:]
+dynstr = b"\0" + b"".join(n.encode() + b"\0" for n in names)
+syms = b"\0" * 24
+pos = 1
+for n in names:
+    syms += struct.pack("<IBBHQQ", pos, 0x12, 0, 1, 0, 0)
+    pos += len(n) + 1
+data_off = 64
+str_off = data_off + len(syms)
+sh_off = str_off + len(dynstr)
+sh = b"\0" * 64
+sh += struct.pack("<IIQQQQIIQQ", 0, 11, 2, 0, data_off, len(syms), 2, 1, 8, 24)
+sh += struct.pack("<IIQQQQIIQQ", 0, 3, 2, 0, str_off, len(dynstr), 0, 0, 1, 0)
+ehdr = (b"\x7fELF\x02\x01\x01" + b"\0" * 9
+        + struct.pack("<HHIQQQIHHHHHH", 3, 183, 1, 0, 0, sh_off, 0, 64, 0, 0,
+                      64, 3, 0))
+open(out, "wb").write(ehdr + syms + dynstr + sh)
+PY
+}
+make_native_jar "$jar_root/natives.jar" \
+  'J/N,M0ETufK1:(J)V' \
+  'org/webrtc/EncryptionManager,nativeCreate:(Ljava/lang/String;I)J,nativeDispose:(J)V' \
+  'org/webrtc/Simulcast_Factory,nativeCreate:(J)J'
+make_so "$jar_root/ok.so" Java_J_N_M0ETufK1 \
+  Java_org_webrtc_EncryptionManager_nativeCreate \
+  'Java_org_webrtc_EncryptionManager_nativeDispose__J' \
+  Java_org_webrtc_Simulcast_1Factory_nativeCreate
+"$ROOT/scripts/verify-android-natives.sh" --jar "$jar_root/natives.jar" \
+  --so "$jar_root/ok.so" >/dev/null
+make_so "$jar_root/nodefine.so" Java_J_N_M0ETufK1 \
+  Java_org_webrtc_Simulcast_1Factory_nativeCreate
+if "$ROOT/scripts/verify-android-natives.sh" --jar "$jar_root/natives.jar" \
+  --so "$jar_root/ok.so" --so "$jar_root/nodefine.so" 2>"$jar_root/err"; then
+  echo "expected natives without exports to fail" >&2
+  exit 1
+fi
+grep -q 'nodefine.so exports no Java_\* symbol for 2 native methods' \
+  "$jar_root/err"
+grep -q '  org/webrtc/EncryptionManager.nativeCreate(Ljava/lang/String;I)J' \
+  "$jar_root/err"
+if grep -q 'ok.so' "$jar_root/err"; then
+  echo "verify-android-natives.sh flagged a library that exports everything" >&2
+  exit 1
+fi
+grep -q 'verify-android-natives.sh' "$ROOT/scripts/package-android.sh"
+grep -q '^DEFINE_JNI(EncryptionManager)$' \
+  "$ROOT/../sdk/android/src/jni/pc/encryption_manager.cc"
 rm -rf "$jar_root"
 pin_root="$(mktemp -d)"
 mkdir -p "$pin_root/build/android/gyp"

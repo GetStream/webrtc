@@ -66,6 +66,16 @@ jar="$OUT/$first/lib.java/sdk/android/libwebrtc.jar"
 [[ -f "$jar" ]] || die "missing classes jar at $jar"
 "${SCRIPT_DIR}/verify-android-jar.sh" --jar "$jar"
 
+so_args=()
+# shellcheck disable=SC2086
+for slice in $SLICES; do
+  so="$OUT/$slice/$so_name"
+  [[ -f "$so" ]] || so="$OUT/$slice/lib.unstripped/$so_name"
+  [[ -f "$so" ]] || die "missing $so_name in $OUT/$slice"
+  so_args+=(--so "$so")
+done
+"${SCRIPT_DIR}/verify-android-natives.sh" --jar "$jar" "${so_args[@]}"
+
 mkdir -p "$PRODUCTS"
 out_aar="$PRODUCTS/$aar_name"
 rm -f "$out_aar"

@@ -353,3 +353,5 @@ static void JNI_EncryptionManager_Dispose(JNIEnv* env, jlong native_manager) {
 
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(EncryptionManager)

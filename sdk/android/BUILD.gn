@@ -167,6 +167,7 @@ if (is_android) {
     deps = [
       ":dav1d_av1_jni",
       ":internal_jni",
+      ":libaom_av1_encoder_jni",  # STREAM-CUSTOM: libwebrtc packs LibaomAv1Encoder
       ":libjingle_peerconnection_jni",
       ":libjingle_peerconnection_metrics_default_jni",
       ":native_api_jni",
