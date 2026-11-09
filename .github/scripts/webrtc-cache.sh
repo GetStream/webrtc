@@ -318,25 +318,124 @@ cmd_push() {
   # shellcheck disable=SC2064
   trap "rm -rf '${work}'" RETURN
   echo "packing ${cache}"
-  tar -C "$root" -cf - .gclient-git-cache | zstd -T0 -3 -o "$archive"
-  du -sh "$archive" || true
-  # One blob is one long GET, which GHCR's signed CDN URL cuts off.
-  # 512MiB chunks are separate blobs. A failed transfer retries that blob.
-  split -b "$CHUNK_BYTES" -d -a 5 "$archive" "$work/chunk-"
-  rm -f "$archive"
-  echo "split cache into $(find "$work" -maxdepth 1 -name 'chunk-*' | wc -l | tr -d ' ') blobs"
+  # Compress on every core and publish each 512MiB chunk as soon as it
+  # is closed, instead of waiting for the whole archive.
+  (
+    set -o pipefail
+    tar -C "$root" -cf - .gclient-git-cache \
+      | zstd -T0 -3 -c -v \
+      | python3 -u -c '
+import os
+import sys
+
+chunk_bytes = int(sys.argv[1])
+out_dir = sys.argv[2]
+index = 0
+remaining = chunk_bytes
+path = os.path.join(out_dir, f"chunk-{index:05d}.partial")
+handle = open(path, "wb")
+
+def rotate():
+    global handle, index, remaining, path
+    handle.close()
+    final = os.path.join(out_dir, f"chunk-{index:05d}")
+    os.rename(path, final)
+    print(f"compressed chunk-{index:05d}", file=sys.stderr, flush=True)
+    index += 1
+    remaining = chunk_bytes
+    path = os.path.join(out_dir, f"chunk-{index:05d}.partial")
+    handle = open(path, "wb")
+
+while True:
+    buf = sys.stdin.buffer.read(8 * 1024 * 1024)
+    if not buf:
+        break
+    view = memoryview(buf)
+    while len(view):
+        take = min(len(view), remaining)
+        handle.write(view[:take])
+        view = view[take:]
+        remaining -= take
+        if remaining == 0:
+            rotate()
+handle.close()
+if os.path.getsize(path) == 0:
+    os.remove(path)
+    count = index
+else:
+    final = os.path.join(out_dir, f"chunk-{index:05d}")
+    os.rename(path, final)
+    print(f"compressed chunk-{index:05d}", file=sys.stderr, flush=True)
+    count = index + 1
+with open(os.path.join(out_dir, "chunks-done"), "w", encoding="utf-8") as done:
+    done.write(str(count) + "\n")
+' "$CHUNK_BYTES" "$work"
+  ) &
+  local compress_pid=$!
+  (
+    set +e
+    index=0
+    max="${PUSH_CONCURRENCY:-3}"
+    running=0
+    while true; do
+      if [[ -e "$work/compress-fail" ]]; then
+        touch "$work/push-fail"
+        exit 1
+      fi
+      name="$(printf 'chunk-%05d' "$index")"
+      ready="$work/$name"
+      if [[ -f "$ready" ]]; then
+        (
+          cd "$work"
+          echo "push ${name}"
+          if ! retry_oras oras blob push "${CACHE_IMAGE}" "$name" \
+            --media-type "$CHUNK_TYPE" \
+            --descriptor > "${name}.desc"; then
+            echo "blob upload failed: ${name}" >&2
+            touch "$work/push-fail"
+            exit 1
+          fi
+        ) &
+        running=$((running + 1))
+        index=$((index + 1))
+        if [[ "$running" -ge "$max" ]]; then
+          wait -n || true
+          running=$((running - 1))
+        fi
+        continue
+      fi
+      if [[ -f "$work/chunks-done" ]]; then
+        break
+      fi
+      sleep 0.2
+    done
+    wait || true
+    if [[ -e "$work/push-fail" ]]; then
+      exit 1
+    fi
+  ) &
+  local upload_pid=$!
+  local compress_rc=0 upload_rc=0
+  set +e
+  wait "$compress_pid"
+  compress_rc=$?
+  if [[ "$compress_rc" -ne 0 ]]; then
+    touch "$work/compress-fail"
+  fi
+  wait "$upload_pid"
+  upload_rc=$?
+  set -e
+  if [[ "$compress_rc" -ne 0 || "$upload_rc" -ne 0 || -e "$work/push-fail" ]]; then
+    echo "pack failed" >&2
+    return 1
+  fi
+  echo "split cache into $(tr -d '[:space:]' < "$work/chunks-done") blobs"
   (
     cd "$work"
     printf '{}' > config.json
     retry_oras oras blob push "${CACHE_IMAGE}" config.json \
       --media-type application/vnd.oci.empty.v1+json \
       --descriptor > config.desc
-    for chunk in chunk-*; do
-      echo "push ${chunk}"
-      retry_oras oras blob push "${CACHE_IMAGE}" "$chunk" \
-        --media-type "$CHUNK_TYPE" \
-        --descriptor > "${chunk}.desc"
-    done
     python3 - "$tag" "$revision" "$IMAGE_SOURCE" "$ARTIFACT_TYPE" <<'PY'
 import json
 import pathlib
