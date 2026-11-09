@@ -291,12 +291,17 @@ rm -rf "$ni_parent"
 
 deps_tmp="$(mktemp -d)"
 fake_bin="$deps_tmp/bin"
-mkdir -p "$fake_bin" "$deps_tmp/webrtc/src" "$deps_tmp/webrtc/.gclient-git-cache"
+mkdir -p "$fake_bin" "$deps_tmp/webrtc/src" "$deps_tmp/.gclient-git-cache"
 init_git_tree "$deps_tmp/webrtc/src"
 cat > "$fake_bin/gclient" <<'FAKE'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${FAKE_GCLIENT_LOG}"
 if [[ "${1:-}" == sync ]]; then
+  # depot_tools 9be95df5: the git cache must not overlap the gclient root.
+  root="$(pwd -P)"
+  cache="$(cd "${GIT_CACHE_PATH:?}" && pwd -P)"
+  case "$cache/" in "$root"/*) echo "git cache inside gclient root" >&2; exit 1 ;; esac
+  case "$root/" in "$cache"/*) echo "git cache contains gclient root" >&2; exit 1 ;; esac
   printf '%s\n' "$*" > "${FAKE_GCLIENT_SYNC_ARGS}"
   printf '%s\n' "${GIT_CACHE_PATH-<unset>}" > "${FAKE_GCLIENT_CACHE}"
 fi
@@ -311,7 +316,7 @@ deps_out="$(
   PATH="$fake_bin:$PATH" \
     DEPS_ROOT="$deps_tmp/webrtc" \
     WEBRTC_SRC="$deps_tmp/webrtc/src" \
-    GIT_CACHE_PATH="$deps_tmp/webrtc/.gclient-git-cache" \
+    GIT_CACHE_PATH="$deps_tmp/.gclient-git-cache" \
     RUN_HOOKS=0 JOBS=2 \
     "$ROOT/scripts/deps.sh" sync
 )"
@@ -322,7 +327,7 @@ grep -q '"managed": False' "$deps_tmp/webrtc/.gclient"
 ! grep -q '"revision"' "$deps_tmp/webrtc/.gclient"
 grep -q 'sync -j2 --no-history --shallow --nohooks' "$deps_tmp/sync_args"
 ! grep -q -- '--revision' "$deps_tmp/sync_args"
-grep -q "$deps_tmp/webrtc/.gclient-git-cache" "$deps_tmp/cache_env"
+grep -q "$deps_tmp/.gclient-git-cache" "$deps_tmp/cache_env"
 mkdir -p "$deps_tmp/webrtc/src/third_party/.git/objects/info"
 printf '%s\n' \
   "$deps_tmp/webrtc/.gclient_deps/.gclient-git-cache/fake-repo/objects" \
@@ -330,10 +335,10 @@ printf '%s\n' \
 PATH="$fake_bin:$PATH" \
   DEPS_ROOT="$deps_tmp/webrtc" \
   WEBRTC_SRC="$deps_tmp/webrtc/src" \
-  GIT_CACHE_PATH="$deps_tmp/webrtc/.gclient-git-cache" \
+  GIT_CACHE_PATH="$deps_tmp/.gclient-git-cache" \
   RUN_HOOKS=0 JOBS=2 \
   "$ROOT/scripts/deps.sh" sync >/dev/null
-grep -qx "$deps_tmp/webrtc/.gclient-git-cache/fake-repo/objects" \
+grep -qx "$deps_tmp/.gclient-git-cache/fake-repo/objects" \
   "$deps_tmp/webrtc/src/third_party/.git/objects/info/alternates"
 ! grep -q '.gclient_deps/.gclient-git-cache' \
   "$deps_tmp/webrtc/src/third_party/.git/objects/info/alternates"
@@ -343,22 +348,73 @@ printf '%s\n' \
 PATH="$fake_bin:$PATH" \
   DEPS_ROOT="$deps_tmp/webrtc" \
   WEBRTC_SRC="$deps_tmp/webrtc/src" \
-  GIT_CACHE_PATH="$deps_tmp/webrtc/.gclient-git-cache" \
+  GIT_CACHE_PATH="$deps_tmp/.gclient-git-cache" \
   RUN_HOOKS=0 JOBS=2 \
   "$ROOT/scripts/deps.sh" sync >/dev/null
-grep -qx "$deps_tmp/webrtc/.gclient-git-cache/fake-repo/objects" \
+grep -qx "$deps_tmp/.gclient-git-cache/fake-repo/objects" \
   "$deps_tmp/webrtc/src/third_party/.git/objects/info/alternates"
 ! grep -q '/home/runner/work' \
   "$deps_tmp/webrtc/src/third_party/.git/objects/info/alternates"
 PATH="$fake_bin:$PATH" \
   DEPS_ROOT="$deps_tmp/webrtc" \
   WEBRTC_SRC="$deps_tmp/webrtc/src" \
-  GIT_CACHE_PATH="$deps_tmp/webrtc/.gclient-git-cache" \
+  GIT_CACHE_PATH="$deps_tmp/.gclient-git-cache" \
   RUN_HOOKS=0 JOBS=2 SHALLOW=0 \
   "$ROOT/scripts/deps.sh" sync >/dev/null
 grep -q 'sync -j2 --nohooks' "$deps_tmp/sync_args"
 ! grep -q -- '--no-history' "$deps_tmp/sync_args"
 ! grep -q -- '--shallow' "$deps_tmp/sync_args"
+if PATH="$fake_bin:$PATH" \
+  DEPS_ROOT="$deps_tmp/webrtc" \
+  WEBRTC_SRC="$deps_tmp/webrtc/src" \
+  GIT_CACHE_PATH="$deps_tmp/webrtc/.gclient-git-cache" \
+  RUN_HOOKS=0 JOBS=2 \
+  "$ROOT/scripts/deps.sh" sync >/dev/null 2>"$deps_tmp/overlap_err"; then
+  echo "expected the fake gclient to reject a git cache inside the root" >&2
+  exit 1
+fi
+grep -q 'git cache inside gclient root' "$deps_tmp/overlap_err"
+rm -rf "$deps_tmp/webrtc/.gclient-git-cache" "$deps_tmp/.gclient-git-cache"
+mkdir -p "$deps_tmp/webrtc/.gclient-git-cache/fake-repo/objects"
+printf '%s\n' \
+  "$deps_tmp/webrtc/.gclient-git-cache/fake-repo/objects" \
+  > "$deps_tmp/webrtc/src/third_party/.git/objects/info/alternates"
+legacy_out="$(
+  env -u GIT_CACHE_PATH PATH="$fake_bin:$PATH" \
+    DEPS_ROOT="$deps_tmp/webrtc" \
+    WEBRTC_SRC="$deps_tmp/webrtc/src" \
+    RUN_HOOKS=0 JOBS=2 \
+    "$ROOT/scripts/deps.sh" sync
+)"
+printf '%s\n' "$legacy_out" | grep -q "mv $deps_tmp/webrtc/.gclient-git-cache"
+[[ ! -e "$deps_tmp/webrtc/.gclient-git-cache" ]]
+[[ -d "$deps_tmp/.gclient-git-cache/fake-repo/objects" ]]
+grep -qx "$deps_tmp/.gclient-git-cache" "$deps_tmp/cache_env"
+grep -qx "$deps_tmp/.gclient-git-cache/fake-repo/objects" \
+  "$deps_tmp/webrtc/src/third_party/.git/objects/info/alternates"
+mkdir -p "$deps_tmp/webrtc/.gclient-git-cache"
+touch "$deps_tmp/webrtc/.gclient-git-cache/stale"
+legacy_out="$(
+  env -u GIT_CACHE_PATH PATH="$fake_bin:$PATH" \
+    DEPS_ROOT="$deps_tmp/webrtc" \
+    WEBRTC_SRC="$deps_tmp/webrtc/src" \
+    RUN_HOOKS=0 JOBS=2 \
+    "$ROOT/scripts/deps.sh" sync
+)"
+printf '%s\n' "$legacy_out" | grep -q "note: $deps_tmp/webrtc/.gclient-git-cache is unused"
+[[ -f "$deps_tmp/webrtc/.gclient-git-cache/stale" ]]
+[[ -d "$deps_tmp/.gclient-git-cache/fake-repo/objects" ]]
+rm -rf "$deps_tmp/webrtc/.gclient-git-cache"
+(
+  # shellcheck source=common.sh
+  source "$ROOT/scripts/common.sh"
+  [[ "$(default_git_cache_path /a/webrtc)" == /a/.gclient-git-cache ]]
+  [[ "$(default_git_cache_path /a/webrtc/)" == /a/.gclient-git-cache ]]
+  [[ "$(default_git_cache_path 'D:\a\webrtc\webrtc')" == 'D:\a\webrtc/.gclient-git-cache' ]]
+)
+printf 'print-git-cache:\n\t@echo $(GIT_CACHE_PATH)\n' > "$deps_tmp/print.mk"
+[[ "$(env -u GIT_CACHE_PATH make -s -C "$ROOT" -f Makefile -f "$deps_tmp/print.mk" \
+  print-git-cache DEPS_ROOT=/a/webrtc)" == /a/.gclient-git-cache ]]
 [[ ! -L "$deps_tmp/webrtc/src" ]]
 [[ -f "$deps_tmp/webrtc/src/DEPS" ]]
 wt_after="$(git -C "$deps_tmp/webrtc/src" worktree list | wc -l | tr -d ' ')"
@@ -460,20 +516,36 @@ grep -q 'SHALLOW: "1"' "$gha/actions/restore-tree/action.yml"
 grep -q 'RUN_HOOKS: "1"' "$gha/actions/restore-tree/action.yml"
 ! grep -q 'RUN_HOOKS: "0"' "$gha/workflows/_make.yml"
 ! grep -q 'Drop git-cache alternates' "$gha/actions/restore-tree/action.yml"
-grep -q 'GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache' \
-  "$gha/actions/restore-tree/action.yml"
+for f in workflows/_make.yml actions/restore-tree/action.yml \
+  actions/setup-webrtc/action.yml actions/artifact-put/action.yml; do
+  if grep -nE '(workspace }}|GITHUB_WORKSPACE})/\.gclient-git-cache|^[[:space:]]*GIT_CACHE_PATH:' \
+    "$gha/$f"; then
+    echo "$f: git cache inside the gclient root, or GIT_CACHE_PATH overridden" >&2
+    exit 1
+  fi
+done
+grep -q 'default_git_cache_path "${GITHUB_WORKSPACE}"' "$gha/actions/setup-webrtc/action.yml"
+grep -q 'GIT_CACHE_PATH=${git_cache}' "$gha/actions/setup-webrtc/action.yml"
+grep -q 'path: ${{ env.GIT_CACHE_PATH }}' "$gha/workflows/_make.yml"
+grep -q 'dest="${GIT_CACHE_PATH:?}"' "$gha/actions/restore-tree/action.yml"
+grep -q 'mv .gclient-git-cache "${git_cache}"' "$gha/actions/artifact-download/action.yml"
+grep -q 'cache="${GIT_CACHE_PATH:?}"' "$gha/actions/artifact-put/action.yml"
 grep -q 'rewrite_git_cache_alternates' "$ROOT/scripts/deps.sh"
-grep -q '.gclient-git-cache' "$gha/actions/artifact-put/action.yml"
+grep -q -- '-C "${cache_parent}" .gclient-git-cache' "$gha/actions/artifact-put/action.yml"
+# GNU tar rejects a trailing -C with no member after it.
+grep -q 'if ((${#members\[@\]})); then' "$gha/actions/artifact-put/action.yml"
+grep -qx '          tar cf "${tar_file}" -C "${cache_parent}" .gclient-git-cache' \
+  "$gha/actions/artifact-put/action.yml"
 grep -q 'src/resources' "$gha/actions/artifact-put/action.yml"
 grep -q '.cipd' "$gha/actions/artifact-put/action.yml"
 ! grep -q 'src/third_party' "$gha/actions/artifact-put/action.yml"
 ! grep -q 'src/third_party' "$gha/actions/artifact-download/action.yml"
 ! grep -q 'src/third_party' "$gha/actions/restore-tree/action.yml"
-grep -A12 'members=(.gclient-git-cache)' "$gha/actions/artifact-put/action.yml" | \
+grep -A12 'members=()' "$gha/actions/artifact-put/action.yml" | \
   grep -q 'src/resources'
-grep -A12 'members=(.gclient-git-cache)' "$gha/actions/artifact-put/action.yml" | \
+grep -A12 'members=()' "$gha/actions/artifact-put/action.yml" | \
   grep -q '.cipd'
-! grep -A12 'members=(.gclient-git-cache)' "$gha/actions/artifact-put/action.yml" | \
+! grep -A12 'members=()' "$gha/actions/artifact-put/action.yml" | \
   grep -q 'third_party'
 grep -q 'pack members:' "$gha/actions/artifact-put/action.yml"
 grep -q 'uses: ./src/.github/actions/artifact-put' "$gha/workflows/_make.yml"

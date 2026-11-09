@@ -71,7 +71,7 @@ on:
 env:
   DEPS_ROOT: ${{ github.workspace }}
   WEBRTC_SRC: ${{ github.workspace }}/src
-  GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
+  # GIT_CACHE_PATH is set by setup-webrtc, outside the gclient root.
   HETZNER_ACCESS_KEY_CI_ARTIFACTS: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
   HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
   HETZNER_BUCKET_CI_ARTIFACTS: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
@@ -186,7 +186,6 @@ jobs:
         env:
           DEPS_ROOT: ${{ github.workspace }}
           WEBRTC_SRC: ${{ github.workspace }}/src
-          GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache
           TARGET_OS: ${{ needs.plan.outputs.windows_target_os }}
           JOBS: "8"
           WEBRTC_REPO: https://github.com/GetStream/webrtc.git
@@ -195,7 +194,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: deps-windows
-          path: .gclient-git-cache
+          path: ${{ env.GIT_CACHE_PATH }}
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1

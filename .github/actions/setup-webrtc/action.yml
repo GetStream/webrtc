@@ -59,12 +59,18 @@ runs:
         echo "WEBRTC_SRC=${GITHUB_WORKSPACE}/src" >> "${GITHUB_ENV}"
         echo "WEBRTC_REPO=https://github.com/GetStream/webrtc.git" >> "${GITHUB_ENV}"
 
+    # GIT_CACHE_PATH sits next to the gclient root (GITHUB_WORKSPACE), not in
+    # it; gclient rejects a cache inside the root. Later steps read it from
+    # GITHUB_ENV; do not set it again in workflow or step env.
     - name: Ensure git-cache directory
       shell: bash
       run: |
         set -euo pipefail
-        mkdir -p "${GITHUB_WORKSPACE}/.gclient-git-cache"
-        echo "GIT_CACHE_PATH=${GITHUB_WORKSPACE}/.gclient-git-cache" >> "${GITHUB_ENV}"
+        # shellcheck source=/dev/null
+        source "${GITHUB_WORKSPACE}/src/stream_build/scripts/common.sh"
+        git_cache="$(default_git_cache_path "${GITHUB_WORKSPACE}")"
+        mkdir -p "${git_cache}"
+        echo "GIT_CACHE_PATH=${git_cache}" >> "${GITHUB_ENV}"
         test -f "${GITHUB_WORKSPACE}/src/DEPS"
         test -f "${GITHUB_WORKSPACE}/src/stream_build/Makefile"
         test ! -L "${GITHUB_WORKSPACE}/src"

@@ -209,6 +209,17 @@ runs:
         echo "extracting ${tar_file} -> ${GITHUB_WORKSPACE}"
         tar xf "${tar_file}"
         rm -f "${tar_file}"
+        # The tarball keeps .gclient-git-cache at its root. GIT_CACHE_PATH
+        # (setup-webrtc) is outside the gclient root, so rename it there.
+        if [[ -d .gclient-git-cache ]]; then
+          git_cache="${GIT_CACHE_PATH:?}"
+          if [[ "${git_cache}" == "${GITHUB_WORKSPACE}/.gclient-git-cache" ]]; then
+            echo "::error::GIT_CACHE_PATH must be outside the gclient root ${GITHUB_WORKSPACE}"
+            exit 1
+          fi
+          rm -rf "${git_cache}"
+          mv .gclient-git-cache "${git_cache}"
+        fi
         test -d src/.git
         test -f src/DEPS
         test ! -L src
