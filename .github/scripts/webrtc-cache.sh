@@ -182,14 +182,14 @@ PY
   fi
   local first
   first="$(cut -f4 "$list" | head -n 1)"
-  # Progress goes to stderr. The pipe is the archive bytes.
+  # The archive bytes stay on stdin. The program text must not be a heredoc,
+  # or Python reads the script instead of the decompressed cache.
   report_extract() {
-    EXTRACT_LABEL="$1" python3 -u - <<'PY'
-import os
+    python3 -u -c '
 import sys
 import time
 
-label = os.environ["EXTRACT_LABEL"]
+label = sys.argv[1]
 read = 0
 last = time.time()
 while True:
@@ -203,25 +203,36 @@ while True:
     if now - last >= 15:
         print(f"{label} {read / (1024 ** 3):.1f} GiB", file=sys.stderr, flush=True)
         last = now
+if read == 0:
+    print(f"{label} read nothing", file=sys.stderr, flush=True)
+    sys.exit(1)
 print(f"{label} done {read / (1024 ** 3):.1f} GiB", file=sys.stderr, flush=True)
-PY
+' "$1"
   }
   if [[ "$first" == chunk-* ]] || grep -q 'git-cache.chunk' "$list"; then
     local files=("$blobdir"/chunk-*)
     local total="${#files[@]}"
     local i=0
     echo "stitching ${total} blobs" >&2
-    for f in "${files[@]}"; do
-      i=$((i + 1))
-      echo "stitch ${i}/${total} $(basename "$f")" >&2
-      cat "$f"
-    done | zstd -d -c | report_extract "extract" | tar -C "$root" -xf -
+    if ! {
+      for f in "${files[@]}"; do
+        i=$((i + 1))
+        echo "stitch ${i}/${total} $(basename "$f")" >&2
+        cat "$f"
+      done | zstd -d -c | report_extract "extract" | tar -C "$root" -xf -
+    }; then
+      echo "extract failed" >&2
+      return 2
+    fi
   else
     echo "extracting ${first}" >&2
-    zstd -d -c "${blobdir}/${first}" | report_extract "extract" | tar -C "$root" -xf -
+    if ! zstd -d -c "${blobdir}/${first}" | report_extract "extract" | tar -C "$root" -xf -; then
+      echo "extract failed" >&2
+      return 2
+    fi
   fi
-  if [[ ! -d "${root}/.gclient-git-cache" ]]; then
-    echo "archive missing .gclient-git-cache" >&2
+  if [[ -z "$(ls -A "${root}/.gclient-git-cache" 2>/dev/null || true)" ]]; then
+    echo "extract produced an empty git cache" >&2
     return 2
   fi
   echo "restored git cache from ${CACHE_IMAGE}:${tag}"
