@@ -98,6 +98,7 @@ export GN_ARGS EXTRA_GN_ARGS ALL_GN_ARGS GIT_CACHE_PATH CONFIRM BOOTSTRAP_SRC
 	migrate plan prepare open issue \
 	$(PLATFORMS) $(VERBS) \
 	build-ios build-macos build-android build-windows \
+	compile-tests-ios compile-tests-macos compile-tests-android \
 	test-ios test-macos test-android test-windows \
 	package-ios package-macos package-android package-windows \
 	$(addprefix build-slice-,$(IOS_SLICES) $(MACOS_SLICES) $(ANDROID_SLICES) $(WINDOWS_SLICES))
@@ -364,7 +365,8 @@ package-windows: require-windows require-src
 		--slices "$(windows_slices)" \
 		$(if $(filter 1,$(ZIP)),--zip,)
 
-test-ios: require-darwin maybe-deps require-src
+# Compile the debug test binaries. make test runs these, then the tests.
+compile-tests-ios: require-darwin maybe-deps require-src
 	@$(SCRIPTS)/gn-gen.sh \
 		--src "$(WEBRTC_SRC)" \
 		--out "$(OUT)/ios_tests" \
@@ -375,6 +377,8 @@ test-ios: require-darwin maybe-deps require-src
 	 targets="$(if $(TEST_TARGETS),$(TEST_TARGETS),$(IOS_TEST_TARGETS))"; \
 	 echo "$$ninja_bin -C $(OUT)/ios_tests $$targets"; \
 	 "$$ninja_bin" -C "$(OUT)/ios_tests" $$targets -j"$(JOBS)"
+
+test-ios: compile-tests-ios
 	@$(SCRIPTS)/run-ios-tests.sh \
 		--build-dir "$(OUT)/ios_tests" \
 		--targets "$(if $(TEST_TARGETS),$(TEST_TARGETS),$(IOS_TEST_TARGETS))" \
@@ -382,7 +386,7 @@ test-ios: require-darwin maybe-deps require-src
 		$(if $(SIMULATOR_VERSION),--version "$(SIMULATOR_VERSION)",) \
 		$(if $(EXTRA_ARGS),--extra "$(EXTRA_ARGS)",)
 
-test-macos: require-darwin maybe-deps require-src
+compile-tests-macos: require-darwin maybe-deps require-src
 	@$(SCRIPTS)/gn-gen.sh \
 		--src "$(WEBRTC_SRC)" \
 		--out "$(OUT)/webrtc_tests" \
@@ -392,14 +396,17 @@ test-macos: require-darwin maybe-deps require-src
 	@ninja_bin="$$($(SCRIPTS)/common.sh ninja "$(WEBRTC_SRC)")"; \
 	 targets="$(if $(TEST_TARGETS),$(TEST_TARGETS),$(MACOS_TEST_TARGETS))"; \
 	 echo "$$ninja_bin -C $(OUT)/webrtc_tests $$targets"; \
-	 "$$ninja_bin" -C "$(OUT)/webrtc_tests" $$targets -j"$(JOBS)"; \
+	 "$$ninja_bin" -C "$(OUT)/webrtc_tests" $$targets -j"$(JOBS)"
+
+test-macos: compile-tests-macos
+	@targets="$(if $(TEST_TARGETS),$(TEST_TARGETS),$(MACOS_TEST_TARGETS))"; \
 	 filter="$$(tr -d '\n' < "$(SCRIPTS)/macos-gtest-filter.txt")"; \
 	 for target in $$targets; do \
 	   echo "$(OUT)/webrtc_tests/$$target"; \
 	   "$(OUT)/webrtc_tests/$$target" --gtest_filter="-$$filter" $(EXTRA_ARGS); \
 	 done
 
-test-android: require-linux maybe-deps require-src
+compile-tests-android: require-linux maybe-deps require-src
 	@$(SCRIPTS)/gn-gen.sh \
 		--src "$(WEBRTC_SRC)" \
 		--out "$(ANDROID_TEST_OUT)" \
@@ -410,6 +417,8 @@ test-android: require-linux maybe-deps require-src
 	 targets="$(if $(TEST_TARGETS),$(TEST_TARGETS),$(ANDROID_TEST_TARGETS))"; \
 	 echo "$$ninja_bin -C $(ANDROID_TEST_OUT) $$targets"; \
 	 "$$ninja_bin" -C "$(ANDROID_TEST_OUT)" $$targets -j"$(JOBS)"
+
+test-android: compile-tests-android
 	@$(SCRIPTS)/run-android-tests.sh \
 		--build-dir "$(ANDROID_TEST_OUT)" \
 		--targets "$(if $(TEST_TARGETS),$(TEST_TARGETS),$(ANDROID_TEST_TARGETS))" \

@@ -658,4 +658,69 @@ grep -q 'update_latest: true' "$cache_daily"
 ! grep -q 'workflow_dispatch:' "$cache_daily"
 [[ ! -e "$gha/workflows/webrtc-cache.yml" ]]
 
+[[ "$("$cache_sh" build-members-for ios)" == "out/ios-* out/catalyst-*" ]]
+[[ "$("$cache_sh" build-members-for ios production)" == "out/ios-* out/catalyst-*" ]]
+[[ "$("$cache_sh" build-members-for macos)" == "out/macos-*" ]]
+[[ "$("$cache_sh" build-members-for android production)" == "out/android-*" ]]
+[[ "$("$cache_sh" build-members-for ios test)" == "out/ios_tests" ]]
+[[ "$("$cache_sh" build-members-for macos test)" == "out/webrtc_tests" ]]
+[[ "$("$cache_sh" build-members-for android test)" == "src/out/android_tests" ]]
+if "$cache_sh" build-members-for windows >/dev/null; then
+  echo "expected windows build-cache platform to be rejected" >&2
+  exit 1
+fi
+if "$cache_sh" build-members-for ios other >/dev/null; then
+  echo "expected unknown build-cache kind to be rejected" >&2
+  exit 1
+fi
+[[ "$("$cache_sh" build-image-for ios release production)" == "ghcr.io/getstream/webrtc-build-cache-release-ios" ]]
+[[ "$("$cache_sh" build-image-for android debug test)" == "ghcr.io/getstream/webrtc-test-cache-android" ]]
+if "$cache_sh" build-image-for ios release test >/dev/null; then
+  echo "expected release test cache to be rejected" >&2
+  exit 1
+fi
+build_root="$(mktemp -d)"
+mkdir -p "$build_root/out/ios-arm64-device" "$build_root/out/catalyst-arm64"
+printf 'o' > "$build_root/out/ios-arm64-device/obj.o"
+printf 'c' > "$build_root/out/catalyst-arm64/obj.o"
+ios_members="$("$cache_sh" build-members-for ios production)"
+ios_list="$(ARCHIVE_ROOT="$build_root" ARCHIVE_MEMBERS="$ios_members" "$cache_sh" list-members)"
+[[ "$ios_list" == $'out/ios-arm64-device\nout/catalyst-arm64' ]]
+rm -rf "$build_root"
+
+build_wf="$gha/workflows/update-webrtc-build-cache.yml"
+grep -q 'name: Update WebRTC Build Cache$' "$build_wf"
+grep -q 'workflow_dispatch:' "$build_wf"
+grep -q 'workflow_call:' "$build_wf"
+! grep -q 'schedule:' "$build_wf"
+! grep -q 'secrets\.' "$build_wf"
+grep -q 'default: main' "$build_wf"
+grep -q 'default: release' "$build_wf"
+grep -q 'default: production' "$build_wf"
+grep -q '"kind": "test"' "$build_wf"
+grep -q '"configuration": "debug", "kind": "test"' "$build_wf"
+grep -q 'webrtc-test-cache-' "$build_wf"
+! grep -q 'release-test' "$build_wf"
+grep -q 'uses: \./publisher/\.github/actions/push-build-cache' "$build_wf"
+grep -q 'uses: \./publisher/\.github/actions/pull-build-cache' "$build_wf"
+grep -q 'group: webrtc-build-cache' "$build_wf"
+grep -q 'uses: \./\.github/workflows/update-webrtc-build-cache\.yml' "$cache_wf"
+! grep -q 'build-image-for' "$cache_wf"
+! grep -q 'make build' "$cache_wf"
+grep -q "needs.tools.result == 'success' || needs.tools.result == 'skipped'" "$cache_wf"
+grep -q 'configuration: release' "$cache_wf"
+grep -q 'targets: production' "$cache_wf"
+grep -q 'build-image-for' "$gha/actions/pull-build-cache/action.yml"
+grep -q 'build-members-for' "$gha/actions/pull-build-cache/action.yml"
+grep -q 'DEPS changed since the cached build' "$gha/actions/pull-build-cache/action.yml"
+grep -q "\-path 'src/out' -prune" "$gha/actions/pull-build-cache/action.yml"
+grep -q 'build-image-for' "$gha/actions/push-build-cache/action.yml"
+grep -q 'build-members-for' "$gha/actions/push-build-cache/action.yml"
+grep -q '"$script" push' "$gha/actions/push-build-cache/action.yml"
+grep -q 'kind: production' "$gha/workflows/_make.yml"
+grep -q 'kind: test' "$gha/workflows/_make.yml"
+grep -q 'configuration: debug' "$gha/workflows/_make.yml"
+grep -q 'compile-tests-ios: require-darwin' "$ROOT/Makefile"
+grep -q 'test-ios: compile-tests-ios' "$ROOT/Makefile"
+
 echo "ok"

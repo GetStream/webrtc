@@ -15,7 +15,7 @@ CHUNK_TYPE="${CHUNK_TYPE:-application/vnd.getstream.webrtc.git-cache.chunk.v1}"
 
 usage() {
   cat <<'EOF'
-usage: webrtc-cache.sh resolve-tag|pull|fingerprint|list-members|members-for|tools-status|push
+usage: webrtc-cache.sh resolve-tag|pull|fingerprint|list-members|members-for|build-members-for|build-image-for|tools-status|push
 
 resolve-tag <input> <run_id> <run_attempt> [yyyymmdd]
   Print the tag to push. input "automatic" or empty becomes
@@ -41,6 +41,17 @@ members-for <ios|macos|android>
   Print the ARCHIVE_MEMBERS for that platform. ios and macos pack
   .cipd and src/resources. android also packs Debian sysroots under
   src/build/linux.
+
+build-members-for <ios|macos|android> [production|test]
+  Print the ARCHIVE_MEMBERS for that build. production is the default.
+  production packs the slice directories. test packs the debug test
+  output directory.
+
+build-image-for <ios|macos|android> <debug|release> <production|test>
+  Print the GHCR image. production is
+  webrtc-build-cache-<configuration>-<platform>.
+  test is webrtc-test-cache-<platform>.
+  Test caches are debug only. release combined with test is rejected.
 
 tools-status
   Print "missing" when any webrtc-tools-<platform>:latest is absent,
@@ -135,6 +146,14 @@ note_restored() {
   fi
 }
 
+note_revision() {
+  local revision="$1"
+  echo "restored_revision=${revision}"
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    echo "restored_revision=${revision}" >> "$GITHUB_OUTPUT"
+  fi
+}
+
 archive_root() {
   if [[ -n "${ARCHIVE_MEMBERS:-}" ]]; then
     printf '%s\n' "${ARCHIVE_ROOT:?ARCHIVE_ROOT is required}"
@@ -187,6 +206,75 @@ cmd_members_for() {
       return 1
       ;;
   esac
+}
+
+cmd_build_members_for() {
+  local platform="${1:-}"
+  local kind="${2:-production}"
+  case "$kind" in
+    production)
+      case "$platform" in
+        ios) printf '%s\n' "out/ios-* out/catalyst-*" ;;
+        macos) printf '%s\n' "out/macos-*" ;;
+        android) printf '%s\n' "out/android-*" ;;
+        *)
+          echo "platform must be ios, macos, or android" >&2
+          return 1
+          ;;
+      esac
+      ;;
+    test)
+      case "$platform" in
+        ios) printf '%s\n' "out/ios_tests" ;;
+        macos) printf '%s\n' "out/webrtc_tests" ;;
+        android) printf '%s\n' "src/out/android_tests" ;;
+        *)
+          echo "platform must be ios, macos, or android" >&2
+          return 1
+          ;;
+      esac
+      ;;
+    *)
+      echo "kind must be production or test" >&2
+      return 1
+      ;;
+  esac
+}
+
+cmd_build_image_for() {
+  local platform="${1:-}"
+  local configuration="${2:-}"
+  local kind="${3:-}"
+  case "$platform" in
+    ios|macos|android) ;;
+    *)
+      echo "platform must be ios, macos, or android" >&2
+      return 1
+      ;;
+  esac
+  case "$configuration" in
+    debug|release) ;;
+    *)
+      echo "configuration must be debug or release" >&2
+      return 1
+      ;;
+  esac
+  case "$kind" in
+    production|test) ;;
+    *)
+      echo "kind must be production or test" >&2
+      return 1
+      ;;
+  esac
+  if [[ "$kind" == test && "$configuration" != debug ]]; then
+    echo "test caches are debug only" >&2
+    return 1
+  fi
+  if [[ "$kind" == test ]]; then
+    printf '%s\n' "ghcr.io/getstream/webrtc-test-cache-${platform}"
+    return 0
+  fi
+  printf '%s\n' "ghcr.io/getstream/webrtc-build-cache-${configuration}-${platform}"
 }
 
 # Prints one relative path per line. Git-cache mode requires the cache.
@@ -274,6 +362,16 @@ PY
     echo "manifest has no layers" >&2
     return 2
   fi
+  local revision
+  revision="$(python3 - "$work/manifest" <<'PY'
+import json
+import sys
+
+manifest = json.load(open(sys.argv[1]))
+annotations = manifest.get("annotations") or {}
+sys.stdout.write(annotations.get("org.opencontainers.image.revision", ""))
+PY
+)"
   local blobdir="$work/blobs"
   mkdir -p "$blobdir"
   local failfile="$work/fetch-fail"
@@ -350,6 +448,7 @@ PY
     fi
     echo "restored git cache from ${CACHE_IMAGE}:${tag}"
     du -sh "${root}/.gclient-git-cache" || true
+    note_revision "$revision"
     return 0
   fi
   local restored path
@@ -362,6 +461,7 @@ PY
     echo "restored ${path} from ${CACHE_IMAGE}:${tag}"
     du -sh "${root}/${path}" || true
   done <<< "$restored"
+  note_revision "$revision"
 }
 
 cmd_pull() {
@@ -623,6 +723,8 @@ case "${1:-}" in
   fingerprint) cmd_fingerprint ;;
   list-members) cmd_list_members ;;
   members-for) shift; cmd_members_for "$@" ;;
+  build-members-for) shift; cmd_build_members_for "$@" ;;
+  build-image-for) shift; cmd_build_image_for "$@" ;;
   tools-status) cmd_tools_status ;;
   push) cmd_push ;;
   -h|--help|help) usage ;;

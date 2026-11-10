@@ -3,6 +3,11 @@
 # Callers pass mode: build | test | package | release.
 #
 # I/O: jobs restore the GHCR git cache, then make deps, make build|test.
+# Builds restore webrtc-build-cache-<configuration>-<platform>.
+# Tests restore webrtc-test-cache-<platform>. Tests are debug, so that
+# name has no configuration. The name matches the package Update Build
+# Cache pushes for that configuration and kind.
+# A missing package leaves the output directory empty.
 # Jobs do not upload that cache.
 # No shared Linux Deps job. No GitHub
 # deps-key. Build mode is
@@ -166,6 +171,12 @@ jobs:
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+      - name: Pull build cache
+        uses: ./src/.github/actions/pull-build-cache
+        with:
+          platform: ios
+          configuration: ${{ inputs.config }}
+          kind: production
       - name: Build iOS
         working-directory: src/stream_build
         env:
@@ -229,6 +240,12 @@ jobs:
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+      - name: Pull build cache
+        uses: ./src/.github/actions/pull-build-cache
+        with:
+          platform: macos
+          configuration: ${{ inputs.config }}
+          kind: production
       - name: Build macOS
         working-directory: src/stream_build
         env:
@@ -297,6 +314,12 @@ jobs:
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+      - name: Pull build cache
+        uses: ./src/.github/actions/pull-build-cache
+        with:
+          platform: android
+          configuration: ${{ inputs.config }}
+          kind: production
       - name: Build Android
         working-directory: src/stream_build
         env:
@@ -356,6 +379,12 @@ jobs:
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+      - name: Pull build cache
+        uses: ./src/.github/actions/pull-build-cache
+        with:
+          platform: ios
+          configuration: debug
+          kind: test
       - name: Test iOS
         working-directory: src/stream_build
         env:
@@ -382,6 +411,12 @@ jobs:
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+      - name: Pull build cache
+        uses: ./src/.github/actions/pull-build-cache
+        with:
+          platform: macos
+          configuration: debug
+          kind: test
       - name: Test macOS
         working-directory: src/stream_build
         env:
@@ -409,6 +444,12 @@ jobs:
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+      - name: Pull build cache
+        uses: ./src/.github/actions/pull-build-cache
+        with:
+          platform: android
+          configuration: debug
+          kind: test
       - name: Test Android
         working-directory: src/stream_build
         env:
