@@ -82,8 +82,12 @@ if (is_android) {
     ]
   }
 
-  # STREAM-CUSTOM
-  rtc_android_library("libwebrtc_final_jni_java") {
+  # STREAM-CUSTOM: android_library deletes */*GEN_JNI.class when a srcjar
+  # dep name contains "jni". java_library keeps that class in the AAR.
+  # supports_android and requires_android supply the Android classpath.
+  java_library("libwebrtc_final_jni_java") {
+    supports_android = true
+    requires_android = true
     srcjar_deps = [ ":libjingle_peerconnection_so__jni_registration" ]
     deps = [ "//third_party/jni_zero:jni_zero_java" ]
   }

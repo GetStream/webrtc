@@ -49,7 +49,7 @@ Do not take upstream `direct_deps_only = true`. It drops the generated jni_zero 
 
 When packaging reports a package outside the allowlist, add it to `extensions/android/stream_android_jar.gni`.
 
-Keep `:libwebrtc_final_jni_java` in the `libwebrtc` deps. It packs jni_zero's `GEN_JNI` and `J.N`. Without them the AAR crashes in `PeerConnectionFactory.initialize`.
+Keep `:libwebrtc_final_jni_java` in the `libwebrtc` deps, declared as `java_library` with `supports_android` and `requires_android`. It packs jni_zero's `GEN_JNI` and `J.N`. `rtc_android_library` strips `GEN_JNI.class` because the srcjar dep name contains `jni`. Without `GEN_JNI` the AAR crashes in `PeerConnectionFactory.initialize`.
 
 Keep `java_targets = [ ":libwebrtc_java_targets" ]` on `libjingle_peerconnection_so`.
 
