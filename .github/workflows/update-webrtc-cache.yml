@@ -12,7 +12,11 @@
 # ghcr.io/getstream/webrtc-tools-<platform>. Those packages carry the
 # Hetzner tarball members other than the git cache (.cipd and
 # src/resources). Android also carries the Debian sysroot under
-# src/build/linux.
+# src/build/linux. After the tools job finishes, this workflow calls
+# Update WebRTC Build Cache. That call runs when the tools job succeeded and
+# when it was skipped because the packages were already present. A
+# failed tools job does not start it. The git cache can move without
+# the tools packages changing, so the call does not wait on a tools push.
 
 name: Update WebRTC Cache
 
@@ -277,3 +281,20 @@ jobs:
           echo "tools image: ${CACHE_IMAGE}"
           echo "tools members: ${ARCHIVE_MEMBERS}"
           "$script" push
+
+  update_build_cache:
+    name: Update WebRTC Build Cache
+    needs: [publish, tools]
+    if: >-
+      ${{ always() && !cancelled()
+          && needs.publish.result == 'success'
+          && (needs.tools.result == 'success' || needs.tools.result == 'skipped') }}
+    uses: ./.github/workflows/update-webrtc-build-cache.yml
+    with:
+      webrtc_ref: ${{ inputs.webrtc_ref }}
+      tag: ${{ needs.publish.outputs.tag }}
+      update_latest: ${{ needs.publish.outputs.update_latest == 'true' }}
+      configuration: release
+      targets: production
+      git_cache_tag: ${{ needs.publish.outputs.git_cache_tag }}
+      tools_tag: ${{ needs.publish.outputs.run_tools == 'true' && needs.publish.outputs.tag || 'latest' }}

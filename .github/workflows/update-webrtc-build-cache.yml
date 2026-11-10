@@ -1,0 +1,284 @@
+# Publish ninja outputs to GHCR. Run this from the Actions tab, or let
+# Update WebRTC Cache call it after the tools job finishes. Each run
+# builds and uploads the selected variants. It does not skip a variant
+# that was already published.
+#
+# Production images are
+# ghcr.io/getstream/webrtc-build-cache-<configuration>-<platform>.
+# Test images are ghcr.io/getstream/webrtc-test-cache-<platform>.
+# Tests are always debug, including when configuration is release or
+# both. The same name is pulled before the build and pushed after it.
+#
+# The job token is github.token (contents: read, packages: write).
+# No stored secret.
+
+name: Update WebRTC Build Cache
+
+run-name: >-
+  Update WebRTC Build Cache ${{ inputs.configuration }} ${{ inputs.targets }}
+  ${{ inputs.tag }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      webrtc_ref:
+        description: Branch, tag, or SHA to build.
+        type: string
+        default: main
+      tag:
+        description: Registry tag. automatic generates YYYYMMDD-<run_id>.<run_attempt>.
+        type: string
+        default: automatic
+      update_latest:
+        description: Move the latest tag to this publish.
+        type: boolean
+        default: true
+      configuration:
+        description: Production configs to build. Test builds stay debug.
+        type: choice
+        options:
+          - release
+          - debug
+          - both
+        default: release
+      targets:
+        description: production, tests, or both.
+        type: choice
+        options:
+          - production
+          - tests
+          - both
+        default: production
+      git_cache_tag:
+        description: webrtc-cache tag to restore.
+        type: string
+        default: latest
+      tools_tag:
+        description: webrtc-tools tag to restore.
+        type: string
+        default: latest
+  workflow_call:
+    inputs:
+      webrtc_ref:
+        description: Branch, tag, or SHA to build.
+        type: string
+        default: main
+      tag:
+        description: Registry tag. automatic generates YYYYMMDD-<run_id>.<run_attempt>.
+        type: string
+        default: automatic
+      update_latest:
+        description: Move the latest tag to this publish.
+        type: boolean
+        default: true
+      configuration:
+        description: Production configs to build. Test builds stay debug.
+        type: string
+        default: release
+      targets:
+        description: production, tests, or both.
+        type: string
+        default: production
+      git_cache_tag:
+        description: webrtc-cache tag to restore.
+        type: string
+        default: latest
+      tools_tag:
+        description: webrtc-tools tag to restore.
+        type: string
+        default: latest
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: webrtc-build-cache
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Plan build cache
+    runs-on: ubuntu-latest
+    outputs:
+      include: ${{ steps.matrix.outputs.include }}
+    steps:
+      - id: matrix
+        name: Select variants
+        env:
+          CONFIGURATION: ${{ inputs.configuration }}
+          TARGETS: ${{ inputs.targets }}
+        run: |
+          set -euo pipefail
+          include="$(python3 - "$CONFIGURATION" "$TARGETS" <<'PY'
+          import textwrap
+          exec(textwrap.dedent("""
+              import json
+              import sys
+
+              configuration, targets = sys.argv[1:]
+              if configuration not in ("debug", "release", "both"):
+                  sys.exit(
+                      "configuration must be debug, release, or both "
+                      f"(got {configuration!r})"
+                  )
+              if targets not in ("production", "tests", "both"):
+                  sys.exit(
+                      "targets must be production, tests, or both "
+                      f"(got {targets!r})"
+                  )
+
+              platforms = [
+                  {
+                      "platform": "ios",
+                      "runs_on": "macos-26",
+                      "target_os": "ios",
+                      "install_android_packages": "false",
+                  },
+                  {
+                      "platform": "macos",
+                      "runs_on": "macos-26",
+                      "target_os": "mac",
+                      "install_android_packages": "false",
+                  },
+                  {
+                      "platform": "android",
+                      "runs_on": "ubuntu-latest",
+                      "target_os": "android,unix",
+                      "install_android_packages": "true",
+                  },
+              ]
+              variants = []
+              if targets in ("production", "both"):
+                  configs = {
+                      "release": ["release"],
+                      "debug": ["debug"],
+                      "both": ["release", "debug"],
+                  }[configuration]
+                  for config in configs:
+                      variants.append({"configuration": config, "kind": "production"})
+              if targets in ("tests", "both"):
+                  variants.append({"configuration": "debug", "kind": "test"})
+              if not variants:
+                  sys.exit("no build-cache variants selected")
+
+              include = []
+              for platform in platforms:
+                  for variant in variants:
+                      include.append({**platform, **variant})
+              json.dump(include, sys.stdout)
+          """))
+          PY
+          )"
+          {
+            echo "include<<EOF"
+            printf '%s\n' "$include"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "variants: ${include}"
+
+  publish:
+    name: Publish ${{ matrix.kind }} ${{ matrix.configuration }} (${{ matrix.platform }})
+    needs: plan
+    runs-on: ${{ matrix.runs_on }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.plan.outputs.include) }}
+    steps:
+      - name: Check out this workflow
+        uses: actions/checkout@v7
+        with:
+          path: publisher
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+
+      - name: Check out WebRTC
+        uses: actions/checkout@v7
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+          fetch-depth: 1
+          fetch-tags: false
+
+      - id: src
+        name: Record revision
+        run: echo "sha=$(git -C src rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - id: resolved
+        name: Resolve tag
+        env:
+          TAG_INPUT: ${{ inputs.tag }}
+          UPDATE_LATEST: ${{ inputs.update_latest && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          tag="$(publisher/.github/scripts/webrtc-cache.sh resolve-tag \
+            "$TAG_INPUT" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT")"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "update_latest=${UPDATE_LATEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up WebRTC checkout
+        uses: ./src/.github/actions/setup-webrtc
+        with:
+          webrtc_ref: ${{ inputs.webrtc_ref }}
+          install_android_packages: ${{ matrix.install_android_packages }}
+
+      - name: Restore git cache
+        uses: ./publisher/.github/actions/restore-git-cache
+        with:
+          tag: ${{ inputs.git_cache_tag }}
+
+      - name: Restore tools
+        uses: ./publisher/.github/actions/restore-tools
+        with:
+          platform: ${{ matrix.platform }}
+          tag: ${{ inputs.tools_tag }}
+
+      - name: Sync deps and hooks
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          WEBRTC_SRC: ${{ github.workspace }}/src
+          TARGET_OS: ${{ matrix.target_os }}
+          JOBS: "8"
+          SHALLOW: "1"
+          RUN_HOOKS: "1"
+          WEBRTC_REPO: https://github.com/GetStream/webrtc.git
+        run: make deps
+
+      - name: Pull build cache
+        uses: ./publisher/.github/actions/pull-build-cache
+        with:
+          platform: ${{ matrix.platform }}
+          configuration: ${{ matrix.configuration }}
+          kind: ${{ matrix.kind }}
+
+      - name: Build
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          WEBRTC_SRC: ${{ github.workspace }}/src
+          CONFIG: ${{ matrix.configuration }}
+          SKIP_DEPS: "1"
+          KIND: ${{ matrix.kind }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          df -h "${GITHUB_WORKSPACE}" || true
+          if [[ "$KIND" == test ]]; then
+            make "compile-tests-${PLATFORM}"
+          else
+            make build "$PLATFORM"
+          fi
+
+      - name: Push build cache
+        uses: ./publisher/.github/actions/push-build-cache
+        with:
+          platform: ${{ matrix.platform }}
+          configuration: ${{ matrix.configuration }}
+          kind: ${{ matrix.kind }}
+          tag: ${{ steps.resolved.outputs.tag }}
+          update_latest: ${{ steps.resolved.outputs.update_latest }}
+          revision: ${{ steps.src.outputs.sha }}
