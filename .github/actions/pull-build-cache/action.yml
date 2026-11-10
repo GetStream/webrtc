@@ -88,7 +88,9 @@ runs:
     # cached revision. A DEPS change leaves timestamps alone so ninja
     # rebuilds against the new hooks and headers. Skip src/out: Android
     # tests compile there, and aging those objects matches the source
-    # timestamps, so ninja rebuilds every test target.
+    # timestamps, so ninja rebuilds every test target. touch -h updates
+    # a symlink and does not follow it. GNU touch otherwise fails when
+    # the link target's parent directory is missing, as with the NDK.
     - name: Align source timestamps with the cached build
       shell: bash
       env:
@@ -117,14 +119,14 @@ runs:
         find src \
           -path '*/.git' -prune -o \
           -path 'src/out' -prune -o \
-          -print0 | xargs -0 touch -t 200001010000
+          -print0 | xargs -0 touch -h -t 200001010000
         head="$(git -C src rev-parse HEAD)"
         if [[ "${head}" == "${CACHED_REV}" ]]; then
           echo "source matches cached revision ${CACHED_REV}"
           exit 0
         fi
         while IFS= read -r path; do
-          [[ -n "${path}" && -e "src/${path}" ]] || continue
-          touch "src/${path}"
+          [[ -n "${path}" && ( -e "src/${path}" || -L "src/${path}" ) ]] || continue
+          touch -h "src/${path}"
         done < <(git -C src diff --name-only "${CACHED_REV}" HEAD)
         echo "aged unchanged sources; refreshed files that differ from ${CACHED_REV}"
