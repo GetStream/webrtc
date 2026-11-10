@@ -12,7 +12,13 @@
 # ghcr.io/getstream/webrtc-tools-<platform>. Those packages carry the
 # Hetzner tarball members other than the git cache (.cipd and
 # src/resources). Android also carries the Debian sysroot under
-# src/build/linux.
+# src/build/linux. After those packages are published, each platform
+# builds release slices and publishes
+# ghcr.io/getstream/webrtc-build-cache-<platform> (the ninja out
+# directories). A later release build restores that package before
+# ninja. An unchanged git cache skips the builds once the build
+# caches exist. A missing build cache publishes from the current
+# git cache and tools.
 
 name: Update WebRTC Cache
 
@@ -77,6 +83,7 @@ jobs:
     outputs:
       pushed: ${{ steps.gate.outputs.pushed }}
       run_tools: ${{ steps.gate.outputs.run_tools }}
+      run_builds: ${{ steps.gate.outputs.run_builds }}
       git_cache_tag: ${{ steps.gate.outputs.git_cache_tag }}
       tag: ${{ steps.resolved.outputs.tag }}
       update_latest: ${{ steps.resolved.outputs.update_latest }}
@@ -173,21 +180,32 @@ jobs:
         run: |
           set -euo pipefail
           script="publisher/.github/scripts/webrtc-cache.sh"
+          run_tools=false
           if [[ "${RESTORED_FROM}" == latest && "${BEFORE}" == "${AFTER}" ]]; then
             echo "pushed=false" >> "$GITHUB_OUTPUT"
             echo "git_cache_tag=latest" >> "$GITHUB_OUTPUT"
             echo "cache unchanged; left ${CACHE_IMAGE}:latest in place"
             status="$("$script" tools-status)"
             if [[ "$status" == missing ]]; then
-              echo "run_tools=true" >> "$GITHUB_OUTPUT"
+              run_tools=true
               echo "tools package missing; publishing from the current git cache"
-            else
-              echo "run_tools=false" >> "$GITHUB_OUTPUT"
             fi
           else
             echo "pushed=true" >> "$GITHUB_OUTPUT"
-            echo "run_tools=true" >> "$GITHUB_OUTPUT"
+            run_tools=true
             echo "git_cache_tag=${RESOLVED_TAG}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "run_tools=${run_tools}" >> "$GITHUB_OUTPUT"
+          if [[ "$run_tools" == true ]]; then
+            echo "run_builds=true" >> "$GITHUB_OUTPUT"
+          else
+            build_status="$("$script" build-status)"
+            if [[ "$build_status" == missing ]]; then
+              echo "run_builds=true" >> "$GITHUB_OUTPUT"
+              echo "build cache missing; publishing from the current git cache and tools"
+            else
+              echo "run_builds=false" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
       - name: Push git cache
@@ -276,4 +294,113 @@ jobs:
           export CHUNK_TYPE="application/vnd.getstream.webrtc.tools.chunk.v1"
           echo "tools image: ${CACHE_IMAGE}"
           echo "tools members: ${ARCHIVE_MEMBERS}"
+          "$script" push
+
+  builds:
+    name: Publish build cache (${{ matrix.platform }})
+    needs: [publish, tools]
+    if: >-
+      ${{ always() && !cancelled()
+          && needs.publish.result == 'success'
+          && needs.publish.outputs.run_builds == 'true'
+          && (needs.tools.result == 'success' || needs.tools.result == 'skipped') }}
+    runs-on: ${{ matrix.runs_on }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ios
+            runs_on: macos-26
+            target_os: ios
+            install_android_packages: "false"
+          - platform: macos
+            runs_on: macos-26
+            target_os: mac
+            install_android_packages: "false"
+          - platform: android
+            runs_on: ubuntu-latest
+            target_os: android,unix
+            install_android_packages: "true"
+    steps:
+      - name: Check out this workflow
+        uses: actions/checkout@v7
+        with:
+          path: publisher
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          fetch-tags: false
+
+      - name: Check out WebRTC
+        uses: actions/checkout@v7
+        with:
+          path: src
+          ref: ${{ inputs.webrtc_ref }}
+          fetch-depth: 1
+          fetch-tags: false
+
+      - name: Set up WebRTC checkout
+        uses: ./src/.github/actions/setup-webrtc
+        with:
+          webrtc_ref: ${{ inputs.webrtc_ref }}
+          install_android_packages: ${{ matrix.install_android_packages }}
+
+      - name: Restore git cache
+        uses: ./publisher/.github/actions/restore-git-cache
+        with:
+          tag: ${{ needs.publish.outputs.git_cache_tag }}
+
+      - name: Restore tools
+        uses: ./publisher/.github/actions/restore-tools
+        with:
+          platform: ${{ matrix.platform }}
+          tag: ${{ needs.publish.outputs.run_tools == 'true' && needs.publish.outputs.tag || 'latest' }}
+
+      - name: Sync deps and hooks
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          WEBRTC_SRC: ${{ github.workspace }}/src
+          TARGET_OS: ${{ matrix.target_os }}
+          JOBS: "8"
+          SHALLOW: "1"
+          RUN_HOOKS: "1"
+          WEBRTC_REPO: https://github.com/GetStream/webrtc.git
+        run: make deps
+
+      - name: Restore previous build cache
+        uses: ./publisher/.github/actions/restore-build-cache
+        with:
+          platform: ${{ matrix.platform }}
+
+      - name: Build release slices
+        working-directory: src/stream_build
+        env:
+          DEPS_ROOT: ${{ github.workspace }}
+          WEBRTC_SRC: ${{ github.workspace }}/src
+          CONFIG: release
+          SKIP_DEPS: "1"
+        run: |
+          set -euo pipefail
+          df -h "${GITHUB_WORKSPACE}" || true
+          make build ${{ matrix.platform }}
+
+      - name: Push build cache
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          CACHE_TAG: ${{ needs.publish.outputs.tag }}
+          UPDATE_LATEST: ${{ needs.publish.outputs.update_latest }}
+          GIT_REVISION: ${{ needs.publish.outputs.revision }}
+          IMAGE_SOURCE: https://github.com/GetStream/webrtc
+        run: |
+          set -euo pipefail
+          script="publisher/.github/scripts/webrtc-cache.sh"
+          export CACHE_IMAGE="ghcr.io/getstream/webrtc-build-cache-${PLATFORM}"
+          export ARCHIVE_ROOT="${GITHUB_WORKSPACE}"
+          export ARCHIVE_MEMBERS="$("$script" build-members-for "${PLATFORM}")"
+          export ARTIFACT_TYPE="application/vnd.getstream.webrtc.build-cache.v1"
+          export CHUNK_TYPE="application/vnd.getstream.webrtc.build-cache.chunk.v1"
+          echo "build cache image: ${CACHE_IMAGE}"
+          echo "build cache members: ${ARCHIVE_MEMBERS}"
+          df -h "${GITHUB_WORKSPACE}" || true
           "$script" push

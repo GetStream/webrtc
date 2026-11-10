@@ -3,6 +3,8 @@
 # Callers pass mode: build | test | package | release.
 #
 # I/O: jobs restore the GHCR git cache, then make deps, make build|test.
+# Release-config builds also restore webrtc-build-cache-<platform>
+# into out/ before ninja. A missing package leaves out empty.
 # Jobs do not upload that cache.
 # No shared Linux Deps job. No GitHub
 # deps-key. Build mode is
@@ -167,6 +169,11 @@ jobs:
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+      - name: Restore build cache
+        if: inputs.config == 'release'
+        uses: ./src/.github/actions/restore-build-cache
+        with:
+          platform: ios
       - name: Build iOS
         working-directory: src/stream_build
         env:
@@ -230,6 +237,11 @@ jobs:
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+      - name: Restore build cache
+        if: inputs.config == 'release'
+        uses: ./src/.github/actions/restore-build-cache
+        with:
+          platform: macos
       - name: Build macOS
         working-directory: src/stream_build
         env:
@@ -298,6 +310,11 @@ jobs:
           hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
           hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
+      - name: Restore build cache
+        if: inputs.config == 'release'
+        uses: ./src/.github/actions/restore-build-cache
+        with:
+          platform: android
       - name: Build Android
         working-directory: src/stream_build
         env:

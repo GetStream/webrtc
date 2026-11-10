@@ -1009,6 +1009,25 @@ if "$cache_sh" members-for windows >/dev/null; then
   echo "expected windows tools platform to be rejected" >&2
   exit 1
 fi
+[[ "$("$cache_sh" build-members-for ios)" == "out/ios-* out/catalyst-*" ]]
+[[ "$("$cache_sh" build-members-for macos)" == "out/macos-*" ]]
+[[ "$("$cache_sh" build-members-for android)" == "out/android-*" ]]
+if "$cache_sh" build-members-for windows >/dev/null; then
+  echo "expected windows build-cache platform to be rejected" >&2
+  exit 1
+fi
+build_root="$(mktemp -d)"
+mkdir -p \
+  "$build_root/out/ios-arm64-device" \
+  "$build_root/out/catalyst-arm64" \
+  "$build_root/out/macos-arm64"
+printf 'o' > "$build_root/out/ios-arm64-device/obj.o"
+printf 'c' > "$build_root/out/catalyst-arm64/obj.o"
+printf 'm' > "$build_root/out/macos-arm64/obj.o"
+ios_members="$("$cache_sh" build-members-for ios)"
+ios_list="$(ARCHIVE_ROOT="$build_root" ARCHIVE_MEMBERS="$ios_members" "$cache_sh" list-members)"
+[[ "$ios_list" == $'out/ios-arm64-device\nout/catalyst-arm64' ]]
+rm -rf "$build_root"
 tools="$(mktemp -d)"
 mkdir -p \
   "$tools/.cipd" \
@@ -1056,16 +1075,29 @@ grep -q 'skip_latest_pull:' "$cache_wf"
 grep -q 'skip: ${{ inputs.skip_latest_pull }}' "$cache_wf"
 grep -q 'cache unchanged; left' "$cache_wf"
 grep -q 'needs.publish.outputs.run_tools' "$cache_wf"
+grep -q 'needs.publish.outputs.run_builds' "$cache_wf"
+grep -q 'build-status' "$cache_wf"
+grep -q 'build cache missing; publishing from the current git cache and tools' "$cache_wf"
+grep -q 'ghcr.io/getstream/webrtc-build-cache-' "$cache_wf"
+grep -q 'build-members-for' "$cache_wf"
 grep -q 'needs.publish.outputs.git_cache_tag' "$cache_wf"
 grep -q 'tools-status' "$cache_wf"
 grep -q 'tools package missing; publishing from the current git cache' "$cache_wf"
 grep -q 'tools-status' "$cache_sh"
+grep -q 'build-status' "$cache_sh"
+grep -q 'build-members-for' "$cache_sh"
+grep -q 'restored_revision=' "$cache_sh"
 grep -q 'ghcr.io/getstream/webrtc-tools-' "$cache_wf"
 grep -q 'members-for' "$cache_wf"
 grep -q 'platform: android' "$cache_wf"
 grep -q 'target_os: android,unix' "$cache_wf"
 grep -q 'members-for' "$gha/actions/restore-tools/action.yml"
 grep -q 'ghcr.io/getstream/webrtc-tools-' "$gha/actions/restore-tools/action.yml"
+grep -q 'ghcr.io/getstream/webrtc-build-cache-' "$gha/actions/restore-build-cache/action.yml"
+grep -q 'build-members-for' "$gha/actions/restore-build-cache/action.yml"
+grep -q 'DEPS changed since the cached build' "$gha/actions/restore-build-cache/action.yml"
+grep -q 'restore-build-cache' "$gha/workflows/_make.yml"
+grep -q "inputs.config == 'release'" "$gha/workflows/_make.yml"
 grep -q 'restore-tools' "$gha/actions/restore-tree/action.yml"
 grep -q 'build-android) platform=android' "$gha/actions/restore-tree/action.yml"
 grep -q 'dirname "$GITHUB_WORKSPACE"' "$gha/actions/restore-git-cache/action.yml"

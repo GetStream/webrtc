@@ -15,7 +15,7 @@ CHUNK_TYPE="${CHUNK_TYPE:-application/vnd.getstream.webrtc.git-cache.chunk.v1}"
 
 usage() {
   cat <<'EOF'
-usage: webrtc-cache.sh resolve-tag|pull|fingerprint|list-members|members-for|tools-status|push
+usage: webrtc-cache.sh resolve-tag|pull|fingerprint|list-members|members-for|build-members-for|tools-status|build-status|push
 
 resolve-tag <input> <run_id> <run_attempt> [yyyymmdd]
   Print the tag to push. input "automatic" or empty becomes
@@ -42,9 +42,18 @@ members-for <ios|macos|android>
   .cipd and src/resources. android also packs Debian sysroots under
   src/build/linux.
 
+build-members-for <ios|macos|android>
+  Print the ARCHIVE_MEMBERS for that platform's ninja output.
+  ios packs out/ios-* and out/catalyst-*. macos packs out/macos-*.
+  android packs out/android-*.
+
 tools-status
   Print "missing" when any webrtc-tools-<platform>:latest is absent,
   otherwise "present". Other registry errors fail.
+
+build-status
+  Print "missing" when any webrtc-build-cache-<platform>:latest is
+  absent, otherwise "present". Other registry errors fail.
 
 push
   Pack the list-members paths and push $CACHE_IMAGE:$CACHE_TAG.
@@ -135,6 +144,14 @@ note_restored() {
   fi
 }
 
+note_revision() {
+  local revision="$1"
+  echo "restored_revision=${revision}"
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    echo "restored_revision=${revision}" >> "$GITHUB_OUTPUT"
+  fi
+}
+
 archive_root() {
   if [[ -n "${ARCHIVE_MEMBERS:-}" ]]; then
     printf '%s\n' "${ARCHIVE_ROOT:?ARCHIVE_ROOT is required}"
@@ -149,10 +166,11 @@ directory_has_files() {
   [[ -n "$(ls -A "$dir" 2>/dev/null || true)" ]]
 }
 
-cmd_tools_status() {
+registry_status() {
+  local prefix="$1"
   local platform image err
   for platform in ios macos android; do
-    image="ghcr.io/getstream/webrtc-tools-${platform}"
+    image="ghcr.io/getstream/${prefix}-${platform}"
     err="$(mktemp)"
     if oras manifest fetch "${image}:latest" >/dev/null 2>"$err"; then
       rm -f "$err"
@@ -172,6 +190,14 @@ cmd_tools_status() {
   printf '%s\n' present
 }
 
+cmd_tools_status() {
+  registry_status webrtc-tools
+}
+
+cmd_build_status() {
+  registry_status webrtc-build-cache
+}
+
 cmd_members_for() {
   case "${1:-}" in
     ios|macos)
@@ -181,6 +207,24 @@ cmd_members_for() {
       # The sysroot is a Linux hook output. Hetzner left src/build unpacked,
       # so Android jobs downloaded it on every run.
       printf '%s\n' ".cipd src/resources src/build/linux/*-sysroot"
+      ;;
+    *)
+      echo "platform must be ios, macos, or android" >&2
+      return 1
+      ;;
+  esac
+}
+
+cmd_build_members_for() {
+  case "${1:-}" in
+    ios)
+      printf '%s\n' "out/ios-* out/catalyst-*"
+      ;;
+    macos)
+      printf '%s\n' "out/macos-*"
+      ;;
+    android)
+      printf '%s\n' "out/android-*"
       ;;
     *)
       echo "platform must be ios, macos, or android" >&2
@@ -274,6 +318,16 @@ PY
     echo "manifest has no layers" >&2
     return 2
   fi
+  local revision
+  revision="$(python3 - "$work/manifest" <<'PY'
+import json
+import sys
+
+manifest = json.load(open(sys.argv[1]))
+annotations = manifest.get("annotations") or {}
+sys.stdout.write(annotations.get("org.opencontainers.image.revision", ""))
+PY
+)"
   local blobdir="$work/blobs"
   mkdir -p "$blobdir"
   local failfile="$work/fetch-fail"
@@ -350,6 +404,7 @@ PY
     fi
     echo "restored git cache from ${CACHE_IMAGE}:${tag}"
     du -sh "${root}/.gclient-git-cache" || true
+    note_revision "$revision"
     return 0
   fi
   local restored path
@@ -362,6 +417,7 @@ PY
     echo "restored ${path} from ${CACHE_IMAGE}:${tag}"
     du -sh "${root}/${path}" || true
   done <<< "$restored"
+  note_revision "$revision"
 }
 
 cmd_pull() {
@@ -623,7 +679,9 @@ case "${1:-}" in
   fingerprint) cmd_fingerprint ;;
   list-members) cmd_list_members ;;
   members-for) shift; cmd_members_for "$@" ;;
+  build-members-for) shift; cmd_build_members_for "$@" ;;
   tools-status) cmd_tools_status ;;
+  build-status) cmd_build_status ;;
   push) cmd_push ;;
   -h|--help|help) usage ;;
   *) usage >&2; exit 1 ;;
