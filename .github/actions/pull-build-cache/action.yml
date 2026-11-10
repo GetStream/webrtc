@@ -75,9 +75,13 @@ runs:
       run: |
         set -euo pipefail
         script="${{ github.action_path }}/../../scripts/webrtc-cache.sh"
-        export CACHE_IMAGE="$("$script" build-image-for "$PLATFORM" "$CONFIGURATION" "$KIND")"
-        export ARCHIVE_ROOT="${GITHUB_WORKSPACE}"
-        export ARCHIVE_MEMBERS="$("$script" build-members-for "$PLATFORM" "$KIND")"
+        # Assign before export. export VAR="$(...)" returns the status of
+        # export, so a failed build-image-for would leave CACHE_IMAGE empty
+        # and pull the git cache instead.
+        CACHE_IMAGE="$("$script" build-image-for "$PLATFORM" "$CONFIGURATION" "$KIND")"
+        ARCHIVE_MEMBERS="$("$script" build-members-for "$PLATFORM" "$KIND")"
+        ARCHIVE_ROOT="${GITHUB_WORKSPACE}"
+        export CACHE_IMAGE ARCHIVE_ROOT ARCHIVE_MEMBERS
         echo "build cache image: ${CACHE_IMAGE}"
         echo "build cache members: ${ARCHIVE_MEMBERS}"
         "$script" pull
