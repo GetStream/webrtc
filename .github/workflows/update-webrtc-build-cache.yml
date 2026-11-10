@@ -1,7 +1,11 @@
-# Publish ninja outputs to GHCR. Run this from the Actions tab, or let
-# Update WebRTC Cache call it after the tools job finishes. Each run
+# Publish ninja outputs to GHCR. Run this from the Actions tab, let
+# Update WebRTC Cache call it after the tools job finishes, or let a
+# push to main publish release production for that commit. Each run
 # builds and uploads the selected variants. It does not skip a variant
 # that was already published.
+#
+# A newer run cancels the one in progress and replaces a queued one.
+# A burst of merges on main therefore publishes only the latest commit.
 #
 # Production images are
 # ghcr.io/getstream/webrtc-build-cache-<configuration>-<platform>.
@@ -15,10 +19,13 @@
 name: Update WebRTC Build Cache
 
 run-name: >-
-  Update WebRTC Build Cache ${{ inputs.configuration }} ${{ inputs.targets }}
-  ${{ inputs.tag }}
+  Update WebRTC Build Cache ${{ inputs.configuration || 'release' }} ${{ inputs.targets || 'production' }}
+  ${{ github.event_name == 'push' && github.sha || inputs.tag || 'automatic' }}
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       webrtc_ref:
@@ -94,7 +101,7 @@ permissions:
 
 concurrency:
   group: webrtc-build-cache
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   plan:
@@ -106,8 +113,8 @@ jobs:
       - id: matrix
         name: Select variants
         env:
-          CONFIGURATION: ${{ inputs.configuration }}
-          TARGETS: ${{ inputs.targets }}
+          CONFIGURATION: ${{ inputs.configuration || 'release' }}
+          TARGETS: ${{ inputs.targets || 'production' }}
         run: |
           set -euo pipefail
           include="$(python3 - "$CONFIGURATION" "$TARGETS" <<'PY'
@@ -199,7 +206,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           path: src
-          ref: ${{ inputs.webrtc_ref }}
+          ref: ${{ github.event_name == 'push' && github.sha || inputs.webrtc_ref || 'main' }}
           fetch-depth: 1
           fetch-tags: false
 
@@ -210,8 +217,8 @@ jobs:
       - id: resolved
         name: Resolve tag
         env:
-          TAG_INPUT: ${{ inputs.tag }}
-          UPDATE_LATEST: ${{ inputs.update_latest && 'true' || 'false' }}
+          TAG_INPUT: ${{ inputs.tag || 'automatic' }}
+          UPDATE_LATEST: ${{ (github.event_name == 'push' || inputs.update_latest) && 'true' || 'false' }}
         run: |
           set -euo pipefail
           tag="$(publisher/.github/scripts/webrtc-cache.sh resolve-tag \
@@ -222,19 +229,19 @@ jobs:
       - name: Set up WebRTC checkout
         uses: ./src/.github/actions/setup-webrtc
         with:
-          webrtc_ref: ${{ inputs.webrtc_ref }}
+          webrtc_ref: ${{ github.event_name == 'push' && github.sha || inputs.webrtc_ref || 'main' }}
           install_android_packages: ${{ matrix.install_android_packages }}
 
       - name: Restore git cache
         uses: ./publisher/.github/actions/restore-git-cache
         with:
-          tag: ${{ inputs.git_cache_tag }}
+          tag: ${{ inputs.git_cache_tag || 'latest' }}
 
       - name: Restore tools
         uses: ./publisher/.github/actions/restore-tools
         with:
           platform: ${{ matrix.platform }}
-          tag: ${{ inputs.tools_tag }}
+          tag: ${{ inputs.tools_tag || 'latest' }}
 
       - name: Sync deps and hooks
         working-directory: src/stream_build
