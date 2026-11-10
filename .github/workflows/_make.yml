@@ -711,12 +711,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ inputs.version }}
-          RELEASE_REF: ${{ inputs.webrtc_ref }}
           IS_PRERELEASE: ${{ inputs.prerelease }}
           RELEASE_NOTES: ${{ inputs.release_notes }}
         run: |
           set -euo pipefail
           shopt -s nullglob
+          # Tag the checked-out commit. webrtc_ref is passed through as
+          # typed, and a leading space makes target_commitish invalid.
+          release_ref="$(git -C src rev-parse HEAD)"
           assets=(release-assets/*)
           if [[ ${#assets[@]} -eq 0 ]]; then
             echo "::error::No finalised artifacts to attach."
@@ -732,7 +734,7 @@ jobs:
             "${RELEASE_VERSION}"
             "${assets[@]}"
             --repo "${{ github.repository }}"
-            --target "${RELEASE_REF}"
+            --target "${release_ref}"
             --title "${RELEASE_VERSION}"
             --notes-file "${notes_file}"
           )
