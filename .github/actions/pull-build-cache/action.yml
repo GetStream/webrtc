@@ -86,7 +86,9 @@ runs:
     # newer than objects packed earlier. Ninja would then rebuild the
     # tree. Age the tree and refresh only files that differ from the
     # cached revision. A DEPS change leaves timestamps alone so ninja
-    # rebuilds against the new hooks and headers.
+    # rebuilds against the new hooks and headers. Skip src/out: Android
+    # tests compile there, and aging those objects matches the source
+    # timestamps, so ninja rebuilds every test target.
     - name: Align source timestamps with the cached build
       shell: bash
       env:
@@ -112,7 +114,10 @@ runs:
           echo "DEPS changed since the cached build; ninja will rebuild"
           exit 0
         fi
-        find src -path '*/.git' -prune -o -print0 | xargs -0 touch -t 200001010000
+        find src \
+          -path '*/.git' -prune -o \
+          -path 'src/out' -prune -o \
+          -print0 | xargs -0 touch -t 200001010000
         head="$(git -C src rev-parse HEAD)"
         if [[ "${head}" == "${CACHED_REV}" ]]; then
           echo "source matches cached revision ${CACHED_REV}"
