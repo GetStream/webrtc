@@ -811,14 +811,16 @@ rtc_library("bar_jni") {
   deps = [ ":generated_bar_jni" ]
 }
 generate_jni("generated_foo_jni") {
-  sources = [ "api/org/webrtc/Foo.java" ]
+  sources = [ "api/org/webrtc/Foo.java", "api/org/webrtc/Old.java" ]
 }
 generate_jni("generated_bar_jni") {
   sources = [ "api/org/webrtc/Bar.java" ]
 }
 EOF
-printf 'class Foo { private static native long nativeCreate(); }\n' \
+printf 'class Foo { @NativeMethods interface Natives { long create(); } }\n' \
   > "$jni_root/sdk/android/api/org/webrtc/Foo.java"
+printf 'class Old {\n  // a native call\n  private static native long nativeCreate();\n}\n' \
+  > "$jni_root/sdk/android/api/org/webrtc/Old.java"
 printf 'class Bar { @NativeMethods interface Natives { long create(); } }\n' \
   > "$jni_root/sdk/android/api/org/webrtc/Bar.java"
 printf '#include "sdk/android/generated_foo_jni/Foo_jni.h"\n' \
@@ -832,7 +834,8 @@ fi
 grep -q 'generated_bar_jni: libwebrtc packs its Java, but' "$jni_root/err"
 grep -q 'foo.cc: includes Foo_jni.h but never invokes DEFINE_JNI(Foo)' \
   "$jni_root/err"
-if grep -q 'bar.cc' "$jni_root/err"; then
+grep -q 'Old.java:3: plain `native` method' "$jni_root/err"
+if grep -q 'bar.cc\|Bar.java\|Foo.java' "$jni_root/err"; then
   echo "check-android-jni.sh flagged a file that invokes DEFINE_JNI" >&2
   exit 1
 fi
@@ -856,6 +859,8 @@ sed -i.bak 's/deps = \[ ":foo_jni",/deps = [ ":foo_jni", ":bar_jni",/' \
   "$jni_root/sdk/android/BUILD.gn"
 printf '#include "sdk/android/generated_foo_jni/Foo_jni.h"\nDEFINE_JNI(Foo)\n' \
   > "$jni_root/sdk/android/src/jni/foo.cc"
+printf 'class Old { @NativeMethods interface Natives { long create(); } }\n' \
+  > "$jni_root/sdk/android/api/org/webrtc/Old.java"
 "$ROOT/scripts/check-android-jni.sh" --src "$jni_root" >/dev/null
 grep -q 'check-android-jni.sh' "$ROOT/../agents/skills/migrate/resolve-conflicts.md"
 rm -rf "$jni_root"

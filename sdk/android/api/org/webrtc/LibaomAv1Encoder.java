@@ -19,19 +19,19 @@ public class LibaomAv1Encoder extends WrappedNativeVideoEncoder {
     return LibaomAv1EncoderJni.get().create(webrtcEnvRef);
   }
 
-  @NativeMethods
-  interface Natives {
-    long create(long webrtcEnvRef);
-  }
-
   @Override
   public boolean isHardwareEncoder() {
     return false;
   }
 
   static List<String> scalabilityModes() {
-    return nativeGetSupportedScalabilityModes();
+    return LibaomAv1EncoderJni.get().getSupportedScalabilityModes();
   }
 
-  static native List<String> nativeGetSupportedScalabilityModes();
+  @NativeMethods
+  interface Natives {
+    long create(long webrtcEnvRef);
+
+    List<String> getSupportedScalabilityModes();
+  }
 }
