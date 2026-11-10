@@ -369,6 +369,7 @@ package-windows: require-windows require-src
 		$(if $(filter 1,$(ZIP)),--zip,)
 
 test-ios: require-darwin maybe-deps require-src
+	@$(SCRIPTS)/pin-ios-simulator-boot.sh --src "$(WEBRTC_SRC)"
 	@$(SCRIPTS)/gn-gen.sh \
 		--src "$(WEBRTC_SRC)" \
 		--out "$(OUT)/ios_tests" \

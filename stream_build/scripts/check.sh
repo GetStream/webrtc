@@ -566,6 +566,7 @@ if grep -qE 'make rename |final-(apple|android)-renamed|StreamWebRTC\.xcframewor
 fi
 grep -q 'rewrite-android-namespace.sh' "$ROOT/Makefile"
 grep -q 'pin-android-java.sh' "$ROOT/Makefile"
+grep -q 'pin-ios-simulator-boot.sh' "$ROOT/Makefile"
 grep -q 'direct_deps_only = false' "$ROOT/../sdk/android/BUILD.gn"
 grep -q 'jar_excluded_patterns = stream_android_jar_excluded_patterns' \
   "$ROOT/../sdk/android/BUILD.gn"
@@ -890,6 +891,30 @@ grep -q 'Java release pin not found' "$pin_root/err" || {
   exit 1
 }
 rm -rf "$pin_root"
+boot_root="$(mktemp -d)"
+mkdir -p "$boot_root/ios/build/bots/scripts"
+cat > "$boot_root/ios/build/bots/scripts/iossim_util.py" <<'EOF'
+      subprocess.check_call(cmd, timeout=120)
+      return True
+    except subprocess.TimeoutExpired as e:
+      msg = f"Manually booting simulator timed out after 120 seconds."
+EOF
+"$ROOT/scripts/pin-ios-simulator-boot.sh" --src "$boot_root"
+grep -q 'timeout=240' "$boot_root/ios/build/bots/scripts/iossim_util.py"
+grep -q 'after 240 seconds' "$boot_root/ios/build/bots/scripts/iossim_util.py"
+"$ROOT/scripts/pin-ios-simulator-boot.sh" --src "$boot_root"
+printf '%s\n' 'subprocess.check_call(cmd, timeout=120)' \
+  > "$boot_root/ios/build/bots/scripts/iossim_util.py"
+if "$ROOT/scripts/pin-ios-simulator-boot.sh" --src "$boot_root" 2>"$boot_root/err"; then
+  echo "expected a moved simulator boot timeout to fail" >&2
+  exit 1
+fi
+grep -q 'simulator boot timeout not found' "$boot_root/err" || {
+  echo "unexpected simulator boot pin failure:" >&2
+  cat "$boot_root/err" >&2
+  exit 1
+}
+rm -rf "$boot_root"
 grep -q 'env -u TARGET' "$ROOT/Makefile"
 grep -q 'libjingle_peerconnection_so/libstream_jingle_peerconnection_so' "$ROOT/Makefile"
 grep -q 'io.getstream.webrtc' "$gha/workflows/_make.yml"
