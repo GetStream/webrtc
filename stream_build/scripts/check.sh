@@ -717,7 +717,13 @@ grep -q 'uses: \./publisher/\.github/actions/push-build-cache' "$build_wf"
 grep -q 'uses: \./publisher/\.github/actions/pull-build-cache' "$build_wf"
 grep -q 'group: webrtc-build-cache' "$build_wf"
 grep -q 'cancel-in-progress: true' "$build_wf"
-grep -q $'push:\n    branches:\n      - main' "$build_wf"
+# grep treats a newline in the pattern as another alternative, so a
+# bare "push:" would pass. Require the branch list as one block.
+push_block=$'push:\n    branches:\n      - main'
+if [[ "$(<"$build_wf")" != *"$push_block"* ]]; then
+  echo "update-webrtc-build-cache.yml must push main" >&2
+  exit 1
+fi
 grep -q "github.event_name == 'push' && github.sha" "$build_wf"
 grep -q 'build-fingerprint' "$build_wf"
 grep -q 'build outputs unchanged' "$build_wf"
