@@ -665,6 +665,18 @@ grep -q 'update_latest: true' "$cache_daily"
 [[ "$("$cache_sh" build-members-for ios test)" == "out/ios_tests" ]]
 [[ "$("$cache_sh" build-members-for macos test)" == "out/webrtc_tests" ]]
 [[ "$("$cache_sh" build-members-for android test)" == "src/out/android_tests" ]]
+bf_root="$(mktemp -d)"
+bf_empty="$(ARCHIVE_ROOT="$bf_root" ARCHIVE_MEMBERS="out/android-*" "$cache_sh" build-fingerprint)"
+mkdir -p "$bf_root/out/android-arm64"
+printf 'abc' > "$bf_root/out/android-arm64/obj.o"
+bf_changed="$(ARCHIVE_ROOT="$bf_root" ARCHIVE_MEMBERS="out/android-*" "$cache_sh" build-fingerprint)"
+bf_again="$(ARCHIVE_ROOT="$bf_root" ARCHIVE_MEMBERS="out/android-*" "$cache_sh" build-fingerprint)"
+[[ "$bf_empty" != "$bf_changed" ]]
+[[ "$bf_changed" == "$bf_again" ]]
+printf 'xyz' > "$bf_root/out/android-arm64/obj.o"
+bf_same_size="$(ARCHIVE_ROOT="$bf_root" ARCHIVE_MEMBERS="out/android-*" "$cache_sh" build-fingerprint)"
+[[ "$bf_same_size" == "$bf_changed" ]]
+rm -rf "$bf_root"
 if "$cache_sh" build-members-for windows >/dev/null; then
   echo "expected windows build-cache platform to be rejected" >&2
   exit 1
@@ -707,6 +719,9 @@ grep -q 'group: webrtc-build-cache' "$build_wf"
 grep -q 'cancel-in-progress: true' "$build_wf"
 grep -q $'push:\n    branches:\n      - main' "$build_wf"
 grep -q "github.event_name == 'push' && github.sha" "$build_wf"
+grep -q 'build-fingerprint' "$build_wf"
+grep -q 'build outputs unchanged' "$build_wf"
+grep -q "steps.cache.outputs.restored_from == 'empty' || steps.before.outputs.fp != steps.after.outputs.fp" "$build_wf"
 grep -q 'uses: \./\.github/workflows/update-webrtc-build-cache\.yml' "$cache_wf"
 ! grep -q 'build-image-for' "$cache_wf"
 ! grep -q 'make build' "$cache_wf"

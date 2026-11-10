@@ -15,7 +15,7 @@ CHUNK_TYPE="${CHUNK_TYPE:-application/vnd.getstream.webrtc.git-cache.chunk.v1}"
 
 usage() {
   cat <<'EOF'
-usage: webrtc-cache.sh resolve-tag|pull|fingerprint|list-members|members-for|build-members-for|build-image-for|tools-status|push
+usage: webrtc-cache.sh resolve-tag|pull|fingerprint|list-members|members-for|build-members-for|build-image-for|build-fingerprint|tools-status|push
 
 resolve-tag <input> <run_id> <run_attempt> [yyyymmdd]
   Print the tag to push. input "automatic" or empty becomes
@@ -52,6 +52,11 @@ build-image-for <ios|macos|android> <debug|release> <production|test>
   webrtc-build-cache-<configuration>-<platform>.
   test is webrtc-test-cache-<platform>.
   Test caches are debug only. release combined with test is rejected.
+
+build-fingerprint
+  Print a sha256 of file sizes and paths under $ARCHIVE_MEMBERS in
+  $ARCHIVE_ROOT. A missing member hashes as empty. The same digest
+  before and after a build means the outputs did not change.
 
 tools-status
   Print "missing" when any webrtc-tools-<platform>:latest is absent,
@@ -528,6 +533,38 @@ sys.stdout.write(digest.hexdigest() + "\n")
 PY
 }
 
+cmd_build_fingerprint() {
+  local root="${ARCHIVE_ROOT:?ARCHIVE_ROOT is required}"
+  local members="${ARCHIVE_MEMBERS:?ARCHIVE_MEMBERS is required}"
+  python3 - "$root" "$members" <<'PY'
+import glob
+import hashlib
+import os
+import sys
+
+root, members = sys.argv[1:]
+digest = hashlib.sha256()
+paths = []
+for pattern in members.split():
+    matched = sorted(glob.glob(os.path.join(root, pattern)))
+    if not matched and not any(char in pattern for char in "*?"):
+        matched = [os.path.join(root, pattern)]
+    paths.extend(matched)
+for member in paths:
+    if not os.path.isdir(member):
+        continue
+    for dirpath, dirnames, filenames in os.walk(member):
+        dirnames.sort()
+        for name in sorted(filenames):
+            path = os.path.join(dirpath, name)
+            if not os.path.isfile(path) or os.path.islink(path):
+                continue
+            rel = os.path.relpath(path, root)
+            digest.update(f"{os.path.getsize(path)} {rel}\n".encode())
+sys.stdout.write(digest.hexdigest() + "\n")
+PY
+}
+
 cmd_push() {
   local root tag update revision work members_text line
   root="$(archive_root)"
@@ -725,6 +762,7 @@ case "${1:-}" in
   members-for) shift; cmd_members_for "$@" ;;
   build-members-for) shift; cmd_build_members_for "$@" ;;
   build-image-for) shift; cmd_build_image_for "$@" ;;
+  build-fingerprint) cmd_build_fingerprint ;;
   tools-status) cmd_tools_status ;;
   push) cmd_push ;;
   -h|--help|help) usage ;;

@@ -6,6 +6,8 @@
 #
 # A newer run cancels the one in progress and replaces a queued one.
 # A burst of merges on main therefore publishes only the latest commit.
+# A build whose output paths and sizes match the pulled cache is not
+# uploaded.
 #
 # Production images are
 # ghcr.io/getstream/webrtc-build-cache-<configuration>-<platform>.
@@ -255,12 +257,25 @@ jobs:
           WEBRTC_REPO: https://github.com/GetStream/webrtc.git
         run: make deps
 
-      - name: Pull build cache
+      - id: cache
+        name: Pull build cache
         uses: ./publisher/.github/actions/pull-build-cache
         with:
           platform: ${{ matrix.platform }}
           configuration: ${{ matrix.configuration }}
           kind: ${{ matrix.kind }}
+
+      - id: before
+        name: Fingerprint pulled build outputs
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          KIND: ${{ matrix.kind }}
+        run: |
+          set -euo pipefail
+          script="publisher/.github/scripts/webrtc-cache.sh"
+          export ARCHIVE_ROOT="${GITHUB_WORKSPACE}"
+          export ARCHIVE_MEMBERS="$("$script" build-members-for "$PLATFORM" "$KIND")"
+          echo "fp=$("$script" build-fingerprint)" >> "$GITHUB_OUTPUT"
 
       - name: Build
         working-directory: src/stream_build
@@ -280,7 +295,24 @@ jobs:
             make build "$PLATFORM"
           fi
 
+      - id: after
+        name: Fingerprint built outputs
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          KIND: ${{ matrix.kind }}
+        run: |
+          set -euo pipefail
+          script="publisher/.github/scripts/webrtc-cache.sh"
+          export ARCHIVE_ROOT="${GITHUB_WORKSPACE}"
+          export ARCHIVE_MEMBERS="$("$script" build-members-for "$PLATFORM" "$KIND")"
+          echo "fp=$("$script" build-fingerprint)" >> "$GITHUB_OUTPUT"
+
+      - name: Skip unchanged build cache
+        if: steps.cache.outputs.restored_from != 'empty' && steps.before.outputs.fp == steps.after.outputs.fp
+        run: echo "build outputs unchanged; left the cache in place"
+
       - name: Push build cache
+        if: steps.cache.outputs.restored_from == 'empty' || steps.before.outputs.fp != steps.after.outputs.fp
         uses: ./publisher/.github/actions/push-build-cache
         with:
           platform: ${{ matrix.platform }}
