@@ -13,6 +13,10 @@
 #    java_targets to :libwebrtc_java_targets. Without those lines the AAR
 #    has no GEN_JNI, or GEN_JNI misses packed classes, and
 #    PeerConnectionFactory.initialize crashes. The build still passes.
+# 4. Java sources of generate_jni targets declare natives only through
+#    @NativeMethods interfaces. jni_zero ignores plain `native` methods in
+#    .java sources, so they compile, link, and then throw
+#    UnsatisfiedLinkError.
 #
 # The BUILD.gn walk is textual: it follows deps, public_deps, and java_targets
 # lists inside each target and ignores conditions. Treat a report as a lead to
@@ -142,6 +146,8 @@ for rel in SCANNED:
             if f.endswith(".gn"):
                 parse(os.path.relpath(dirpath, root))
 
+legacy_native = re.compile(r"^\s*(?:\w+\s+)*native\s+[\w<>\[\], .]+\s+\w+\s*\(",
+                           re.M)
 java_with_natives = set()
 for t, info in targets.items():
     if info["type"] != "generate_jni":
@@ -149,10 +155,17 @@ for t, info in targets.items():
     base = t.split(":")[0]
     for src in info["java"]:
         path = os.path.join(root, base, src)
-        if os.path.exists(path) and re.search(
-                r"@NativeMethods|\bnative\s+[\w<>\[\], .]+\s+\w+\s*\(",
-                open(path).read()):
+        if not os.path.exists(path):
+            continue
+        text = open(path).read()
+        if "@NativeMethods" in text:
             java_with_natives.add(os.path.basename(src)[:-len(".java")])
+        for m in legacy_native.finditer(text):
+            failed = True
+            line = text.count("\n", 0, m.start()) + 1
+            print(f"{os.path.join(base, src)}:{line}: plain `native` method in "
+                  f"a {t} source. jni_zero only binds @NativeMethods "
+                  "interfaces, so this gets no Java_* export.", file=sys.stderr)
 
 include = re.compile(r'#include\s+"[^"]*/([A-Za-z0-9_$]+)_jni\.h"')
 for rel in SCANNED:

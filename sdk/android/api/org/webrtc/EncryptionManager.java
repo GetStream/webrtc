@@ -20,6 +20,7 @@ import androidx.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import org.jni_zero.NativeMethods;
 
 /**
  * JS {@code EncryptionManager}: one object holds keys and attaches
@@ -224,7 +225,7 @@ public class EncryptionManager implements E2EEManager {
     if (algorithm == null) {
       throw new NullPointerException("algorithm");
     }
-    long nativeManager = nativeCreate(userId, algorithm.getValue());
+    long nativeManager = EncryptionManagerJni.get().create(userId, algorithm.getValue());
     if (nativeManager == 0) {
       throw new IllegalStateException("Failed to create EncryptionManager");
     }
@@ -249,7 +250,7 @@ public class EncryptionManager implements E2EEManager {
     checkUsable();
     validateKeyIndex(keyIndex);
     validateKey(rawKey);
-    if (!nativeSetKey(nativeManager, userId, keyIndex, rawKey)) {
+    if (!EncryptionManagerJni.get().setKey(nativeManager, userId, keyIndex, rawKey)) {
       throw new IllegalStateException("setKey failed");
     }
   }
@@ -258,7 +259,7 @@ public class EncryptionManager implements E2EEManager {
     checkUsable();
     validateKeyIndex(keyIndex);
     validateKey(rawKey);
-    if (!nativeSetSharedKey(nativeManager, keyIndex, rawKey)) {
+    if (!EncryptionManagerJni.get().setSharedKey(nativeManager, keyIndex, rawKey)) {
       throw new IllegalStateException("setSharedKey failed");
     }
   }
@@ -266,18 +267,18 @@ public class EncryptionManager implements E2EEManager {
   public void removeKey(String userId, int keyIndex) {
     checkUsable();
     validateKeyIndex(keyIndex);
-    nativeRemoveKey(nativeManager, userId, keyIndex);
+    EncryptionManagerJni.get().removeKey(nativeManager, userId, keyIndex);
   }
 
   public void removeAllKeys(String userId) {
     checkUsable();
-    nativeRemoveAllKeys(nativeManager, userId);
+    EncryptionManagerJni.get().removeAllKeys(nativeManager, userId);
   }
 
   public void removeSharedKey(int keyIndex) {
     checkUsable();
     validateKeyIndex(keyIndex);
-    nativeRemoveSharedKey(nativeManager, keyIndex);
+    EncryptionManagerJni.get().removeSharedKey(nativeManager, keyIndex);
   }
 
   public void encrypt(RtpSender sender) {
@@ -294,7 +295,8 @@ public class EncryptionManager implements E2EEManager {
     // -1 tells JNI to pick audio vs video from the sender's media type.
     // Screenshare must still be passed so replay stays on its own window.
     int track = trackType == null ? -1 : trackType.getValue();
-    if (!nativeEncrypt(nativeManager, sender.getNativeRtpSender(), codec, track)) {
+    if (!EncryptionManagerJni.get().encrypt(
+            nativeManager, sender.getNativeRtpSender(), codec, track)) {
       throw new IllegalStateException("failed to attach encrypt transform");
     }
   }
@@ -314,26 +316,27 @@ public class EncryptionManager implements E2EEManager {
     }
     // Same sentinel as encrypt: omitted trackType → audio vs video from RTP.
     int track = trackType == null ? -1 : trackType.getValue();
-    if (!nativeDecrypt(nativeManager, receiver.getNativeRtpReceiver(), userId, track)) {
+    if (!EncryptionManagerJni.get().decrypt(
+            nativeManager, receiver.getNativeRtpReceiver(), userId, track)) {
       throw new IllegalStateException("failed to attach decrypt transform");
     }
   }
 
   public void enablePerformanceReporting(boolean enabled) {
     checkUsable();
-    if (!nativeEnablePerformanceReporting(nativeManager, enabled)) {
+    if (!EncryptionManagerJni.get().enablePerformanceReporting(nativeManager, enabled)) {
       throw new IllegalStateException("enablePerformanceReporting failed");
     }
   }
 
   public void requestKeyState() {
     checkUsable();
-    nativeRequestKeyState(nativeManager);
+    EncryptionManagerJni.get().requestKeyState(nativeManager);
   }
 
   public void setObserver(@Nullable Observer observer) {
     checkUsable();
-    long newPtr = nativeSetObserver(nativeManager, observer);
+    long newPtr = EncryptionManagerJni.get().setObserver(nativeManager, observer);
     if (observerPtr != 0) {
       JniCommon.nativeReleaseRef(observerPtr);
     }
@@ -344,7 +347,7 @@ public class EncryptionManager implements E2EEManager {
     if (nativeManager == 0) {
       return;
     }
-    nativeDispose(nativeManager);
+    EncryptionManagerJni.get().dispose(nativeManager);
     nativeManager = 0;
     if (observerPtr != 0) {
       JniCommon.nativeReleaseRef(observerPtr);
@@ -376,21 +379,19 @@ public class EncryptionManager implements E2EEManager {
     }
   }
 
-  private static native long nativeCreate(String userId, int algorithm);
-  private static native boolean nativeSetKey(
-      long managerPointer, String userId, int keyIndex, byte[] rawKey);
-  private static native boolean nativeSetSharedKey(
-      long managerPointer, int keyIndex, byte[] rawKey);
-  private static native void nativeRemoveKey(long managerPointer, String userId, int keyIndex);
-  private static native void nativeRemoveAllKeys(long managerPointer, String userId);
-  private static native void nativeRemoveSharedKey(long managerPointer, int keyIndex);
-  private static native boolean nativeEncrypt(
-      long managerPointer, long senderPointer, String codec, int trackType);
-  private static native boolean nativeDecrypt(
-      long managerPointer, long receiverPointer, String userId, int trackType);
-  private static native boolean nativeEnablePerformanceReporting(
-      long managerPointer, boolean enabled);
-  private static native void nativeRequestKeyState(long managerPointer);
-  private static native long nativeSetObserver(long managerPointer, Observer observer);
-  private static native void nativeDispose(long managerPointer);
+  @NativeMethods
+  interface Natives {
+    long create(String userId, int algorithm);
+    boolean setKey(long managerPointer, String userId, int keyIndex, byte[] rawKey);
+    boolean setSharedKey(long managerPointer, int keyIndex, byte[] rawKey);
+    void removeKey(long managerPointer, String userId, int keyIndex);
+    void removeAllKeys(long managerPointer, String userId);
+    void removeSharedKey(long managerPointer, int keyIndex);
+    boolean encrypt(long managerPointer, long senderPointer, String codec, int trackType);
+    boolean decrypt(long managerPointer, long receiverPointer, String userId, int trackType);
+    boolean enablePerformanceReporting(long managerPointer, boolean enabled);
+    void requestKeyState(long managerPointer);
+    long setObserver(long managerPointer, Observer observer);
+    void dispose(long managerPointer);
+  }
 }

@@ -100,7 +100,7 @@ Upstream applies them to its own files in the same roll.
 3. Apply the same edit to each one.
 4. Record each edit as a decision.
 
-M156 example: jni_zero emits Java-to-native entry points only inside `DEFINE_JNI(<Class>)`. Upstream added that line to its JNI files. `encryption_manager.cc` was Stream-only, so E2EE threw `UnsatisfiedLinkError`.
+M156 example: jni_zero emits Java-to-native entry points only inside `DEFINE_JNI(<Class>)`, and only for `@NativeMethods` interfaces. Upstream added `DEFINE_JNI` to its JNI files and moved its plain `native` methods into `@NativeMethods` interfaces. `EncryptionManager` and `LibaomAv1Encoder` were Stream-only, so their plain `native` methods compiled and linked with no `Java_*` export, and E2EE and AV1 threw `UnsatisfiedLinkError`.
 
 Run this check after the conflicts. It needs no build.
 
@@ -108,7 +108,7 @@ Run this check after the conflicts. It needs no build.
 stream_build/scripts/check-android-jni.sh --src .
 ```
 
-It reports a missing `DEFINE_JNI` and a Java/native `generate_jni` mismatch.
+It reports a missing `DEFINE_JNI`, a plain `native` method in a `generate_jni` source, and a Java/native `generate_jni` mismatch.
 
 Fix each report, or record why it is safe.
 
