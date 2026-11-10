@@ -73,9 +73,13 @@ runs:
       run: |
         set -euo pipefail
         script="${{ github.action_path }}/../../scripts/webrtc-cache.sh"
-        export CACHE_IMAGE="$("$script" build-image-for "$PLATFORM" "$CONFIGURATION" "$KIND")"
-        export ARCHIVE_ROOT="${GITHUB_WORKSPACE}"
-        export ARCHIVE_MEMBERS="$("$script" build-members-for "$PLATFORM" "$KIND")"
+        # Assign before export. export VAR="$(...)" returns the status of
+        # export, so a failed build-image-for would push the git cache and
+        # could move its latest tag.
+        CACHE_IMAGE="$("$script" build-image-for "$PLATFORM" "$CONFIGURATION" "$KIND")"
+        ARCHIVE_MEMBERS="$("$script" build-members-for "$PLATFORM" "$KIND")"
+        ARCHIVE_ROOT="${GITHUB_WORKSPACE}"
+        export CACHE_IMAGE ARCHIVE_ROOT ARCHIVE_MEMBERS
         export ARTIFACT_TYPE="application/vnd.getstream.webrtc.build-cache.v1"
         export CHUNK_TYPE="application/vnd.getstream.webrtc.build-cache.chunk.v1"
         echo "build cache image: ${CACHE_IMAGE}"
