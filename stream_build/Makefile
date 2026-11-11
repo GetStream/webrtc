@@ -99,7 +99,7 @@ export ANDROID_NAMESPACE ARCH ADB_SERVER STREAM_ANDROID_IN_DOCKER
 	announce require-layout require-gclient require-src require-darwin \
 	require-linux require-windows maybe-deps validate-android-test-args \
 	combine apple rename rename-apple rename-android rewrite-android-namespace \
-	migrate plan prepare open issue \
+	migrate plan prepare open issue docker-cleanup \
 	$(PLATFORMS) $(VERBS) \
 	build-ios build-macos build-android build-windows \
 	compile-tests-ios compile-tests-macos compile-tests-android \
@@ -119,6 +119,7 @@ help:
 	@echo "make combine"
 	@echo "make rename apple|android"
 	@echo "make migrate plan|prepare|open"
+	@echo "make docker-cleanup"
 	@echo
 	@echo "  bootstrap  wrap this checkout as webrtc/src (CONFIRM=1 in CI)"
 	@echo "  build    gn gen + ninja"
@@ -129,6 +130,7 @@ help:
 	@echo "  migrate plan      print whether extended stable is ahead of the fork"
 	@echo "  migrate prepare   fetch that milestone; then run the migrate skill"
 	@echo "  migrate open      check the merge and open the pull request"
+	@echo "  docker-cleanup   stop Android containers and sysroot disks for this repo"
 	@echo "  FORCE=1           plan again when a pull request for this milestone exists"
 	@echo
 	@echo "  CONFIG=release (default, is_debug=false) or CONFIG=debug"
@@ -288,6 +290,9 @@ build test package:
 	@$(MAKE) --no-print-directory require-gclient
 	@$(MAKE) --no-print-directory announce VERB=$@ PLATFORM="$(PLATFORM)"
 	@$(MAKE) --no-print-directory $@-$(PLATFORM)
+
+docker-cleanup:
+	@$(SCRIPTS)/android-docker.sh cleanup
 
 validate-android-test-args:
 	@$(SCRIPTS)/run-android-tests.sh --check-args --arch "$(if $(ARCH),$(ARCH),x64)" $(if $(ADB_SERVER),--adb-server "$(ADB_SERVER)",)

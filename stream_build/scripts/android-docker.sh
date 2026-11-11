@@ -56,6 +56,34 @@ path_is_under() {
   [[ "$path" == "$root" || "$path" == "$root"/* ]]
 }
 
+short_hash() {
+  if command -v shasum >/dev/null 2>&1; then
+    printf '%s' "$1" | shasum -a 256 | awk '{print substr($1,1,12)}'
+  else
+    printf '%s' "$1" | sha256sum | awk '{print substr($1,1,12)}'
+  fi
+}
+
+host_checkout() {
+  if [[ -n "${WEBRTC_SRC:-}" ]]; then
+    printf '%s\n' "$WEBRTC_SRC"
+    return
+  fi
+  (cd "${SCRIPT_DIR}/../.." && pwd)
+}
+
+sysroot_volume_name() {
+  printf 'stream-webrtc-sysroot-%s\n' "$(short_hash "$1")"
+}
+
+container_name_for() {
+  local host_src="$1"
+  local sysroot="$2"
+  local uid="$3"
+  printf 'stream-webrtc-android-%s\n' \
+    "$(short_hash "${host_src}|${sysroot}|${uid}|layout-v2")"
+}
+
 require_docker() {
   if ! command -v docker >/dev/null 2>&1; then
     die "Android builds on $(uname -s) run in Docker so the Linux toolchain can run. Install Docker Desktop, start it, and rerun the same make command."
@@ -104,6 +132,9 @@ main() {
   local container_src="${CONTAINER_ROOT}/src"
   local container_out="${CONTAINER_ROOT}/out"
   local container_products="${CONTAINER_ROOT}/products"
+  local git_dir git_common
+  git_dir="$(absolute_git_path --git-dir)"
+  git_common="$(absolute_git_path --git-common-dir)"
 
   # Inside the container, gclient's host is Linux, so it unpacks the Debian
   # sysroot under src/build/linux. That archive has headers that differ only
@@ -111,18 +142,14 @@ main() {
   # stays on Docker's own disk when the host filesystem is case-insensitive.
   local sysroot_volume=""
   if ! filesystem_is_case_sensitive "$host_src"; then
-    local sysroot_key
-    if command -v shasum >/dev/null 2>&1; then
-      sysroot_key="$(printf '%s' "$host_src" | shasum -a 256 | awk '{print substr($1,1,12)}')"
-    else
-      sysroot_key="$(printf '%s' "$host_src" | sha256sum | awk '{print substr($1,1,12)}')"
+    sysroot_volume="$(sysroot_volume_name "$host_src")"
+    if ! docker volume inspect "$sysroot_volume" >/dev/null 2>&1; then
+      docker volume create \
+        --label "stream.webrtc.checkout=${host_src}" \
+        --label "stream.webrtc.git_common=${git_common}" \
+        "$sysroot_volume" >/dev/null
     fi
-    sysroot_volume="stream-webrtc-sysroot-${sysroot_key}"
   fi
-
-  local git_dir git_common
-  git_dir="$(absolute_git_path --git-dir)"
-  git_common="$(absolute_git_path --git-common-dir)"
 
   mkdir -p \
     "$state" \
@@ -141,13 +168,8 @@ main() {
   tag="${IMAGE_NAME}:u${uid}"
   ensure_image "$tag"
 
-  local material name
-  material="${host_src}|${sysroot_volume}|${uid}|layout-v2"
-  if command -v shasum >/dev/null 2>&1; then
-    name="stream-webrtc-android-$(printf '%s' "$material" | shasum -a 256 | awk '{print substr($1,1,12)}')"
-  else
-    name="stream-webrtc-android-$(printf '%s' "$material" | sha256sum | awk '{print substr($1,1,12)}')"
-  fi
+  local name
+  name="$(container_name_for "$host_src" "$sysroot_volume" "$uid")"
 
   local image_id container_image
   image_id="$(docker image inspect -f '{{.Id}}' "$tag")"
@@ -159,6 +181,8 @@ main() {
 
   if [[ -z "$container_image" ]]; then
     local -a run=(docker run -d --name "$name" --platform linux/amd64 --init
+      --label "stream.webrtc.checkout=${host_src}"
+      --label "stream.webrtc.git_common=${git_common}"
       --user "${uid}:${gid}"
       --add-host host.docker.internal:host-gateway
       -v "${state}:${CONTAINER_ROOT}"
@@ -226,6 +250,60 @@ main() {
   exec "${exec_cmd[@]}"
 }
 
+cmd_cleanup() {
+  if [[ -z "${WEBRTC_SRC:-}" ]]; then
+    WEBRTC_SRC="$(host_checkout)"
+  fi
+  [[ -f "${WEBRTC_SRC}/DEPS" ]] || die "No WebRTC checkout at ${WEBRTC_SRC} (missing DEPS)"
+  require_docker
+
+  local host_src git_common sysroot name uid removed
+  host_src="$WEBRTC_SRC"
+  git_common="$(absolute_git_path --git-common-dir)"
+  sysroot="$(sysroot_volume_name "$host_src")"
+  uid="$(id -u)"
+  name="$(container_name_for "$host_src" "$sysroot" "$uid")"
+  removed=0
+
+  local id
+  if docker container inspect "$name" >/dev/null 2>&1; then
+    docker rm -f "$name" >/dev/null
+    echo "removed container ${name}"
+    removed=1
+  fi
+  while IFS= read -r id; do
+    [[ -n "$id" ]] || continue
+    local cname
+    cname="$(docker inspect -f '{{.Name}}' "$id")"
+    cname="${cname#/}"
+    [[ "$cname" == "$name" ]] && continue
+    docker rm -f "$id" >/dev/null
+    echo "removed container ${cname}"
+    removed=1
+  done < <(docker ps -aq --filter "label=stream.webrtc.git_common=${git_common}")
+
+  if docker volume inspect "$sysroot" >/dev/null 2>&1; then
+    docker volume rm "$sysroot" >/dev/null
+    echo "removed sysroot ${sysroot}"
+    removed=1
+  fi
+  while IFS= read -r id; do
+    [[ -n "$id" ]] || continue
+    [[ "$id" == "$sysroot" ]] && continue
+    docker volume rm "$id" >/dev/null
+    echo "removed sysroot ${id}"
+    removed=1
+  done < <(docker volume ls -q --filter "label=stream.webrtc.git_common=${git_common}")
+
+  if [[ "$removed" -eq 0 ]]; then
+    echo "no Android containers or sysroot disks for ${git_common}"
+  fi
+}
+
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-  main "$@"
+  if [[ "${1:-}" == cleanup ]]; then
+    cmd_cleanup
+  else
+    main "$@"
+  fi
 fi

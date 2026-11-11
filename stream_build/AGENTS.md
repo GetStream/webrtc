@@ -9,6 +9,7 @@ make build|test|package ios|android|macos|windows [VAR=value ...]
 make combine
 make rename apple|android
 make migrate plan|prepare|open
+make docker-cleanup
 ```
 
 `make migrate plan` prints whether Chromium extended stable is ahead of the fork.
