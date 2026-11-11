@@ -238,6 +238,7 @@ main() {
     -e "TARGET_OS=${target_os}"
     -e "CONFIG=${CONFIG:-release}"
     -e "JOBS=${JOBS:-8}"
+    -e "SYNC_JOBS=${SYNC_JOBS:-4}"
     -e "SHALLOW=${SHALLOW:-1}"
     -e "RUN_HOOKS=${RUN_HOOKS:-1}"
     -e "SKIP_DEPS=${SKIP_DEPS:-0}"

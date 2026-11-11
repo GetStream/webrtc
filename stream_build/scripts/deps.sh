@@ -67,7 +67,10 @@ cmd_sync() {
   (
     cd "$DEPS_ROOT"
     gclient root >/dev/null || true
-    local sync=(gclient sync -j"${JOBS}")
+    # googlesource answers 429 when a laptop opens one fetch per core.
+    # SYNC_JOBS caps that fan-out. Ninja still uses JOBS.
+    local sync_jobs="${SYNC_JOBS:-$JOBS}"
+    local sync=(gclient sync -j"${sync_jobs}")
     if [[ "$SHALLOW" == "1" || "$SHALLOW" == "true" ]]; then
       sync+=(--no-history --shallow)
     fi
