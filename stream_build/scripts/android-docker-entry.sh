@@ -23,6 +23,9 @@ if [[ ! -x "${DEPS_ROOT}/.depot_tools/gclient" ]]; then
 fi
 export PATH="${DEPS_ROOT}/.depot_tools:${PATH}"
 
+# virtiofs reports mode bits that do not match the index. gclient then
+# refuses to update a dependency it thinks has local edits.
+git config --global core.filemode false
 git config --global --add safe.directory "${WEBRTC_SRC}" || true
 git config --global --add safe.directory "${DEPS_ROOT}" || true
 git config --global --add safe.directory "${HOST_CHECKOUT}" || true
