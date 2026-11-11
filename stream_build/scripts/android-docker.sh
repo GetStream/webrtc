@@ -65,30 +65,6 @@ require_docker() {
   fi
 }
 
-prepare_case_volume() {
-  local volume="$1"
-  [[ -d "$volume" ]] || die "ANDROID_CASE_VOLUME=${volume} does not exist. Create a case-sensitive volume and rerun."
-  if ! filesystem_is_case_sensitive "$volume"; then
-    die "ANDROID_CASE_VOLUME=${volume} is case-insensitive. Android's Debian sysroot needs a case-sensitive volume."
-  fi
-  local name
-  for name in build third_party buildtools tools testing src-out out; do
-    mkdir -p "${volume}/${name}"
-  done
-}
-
-case_volume_mounts() {
-  local volume="$1"
-  printf '%s\n' \
-    "${volume}/build:${WEBRTC_SRC}/build" \
-    "${volume}/third_party:${WEBRTC_SRC}/third_party" \
-    "${volume}/buildtools:${WEBRTC_SRC}/buildtools" \
-    "${volume}/tools:${WEBRTC_SRC}/tools" \
-    "${volume}/testing:${WEBRTC_SRC}/testing" \
-    "${volume}/src-out:${WEBRTC_SRC}/out" \
-    "${volume}/out:${OUT}"
-}
-
 ensure_image() {
   local tag="$1"
   local stamp="${DEPS_ROOT}/.android-docker-image-stamp"
@@ -115,17 +91,19 @@ main() {
 
   require_docker
 
-  if filesystem_is_case_sensitive "$DEPS_ROOT"; then
-    :
-  elif [[ -z "${ANDROID_CASE_VOLUME:-}" ]]; then
-    cat >&2 <<EOF
-error: ${DEPS_ROOT} is on a case-insensitive filesystem.
-gclient extracts a Debian sysroot under src/build/linux, and that tree contains paths that differ only by case, so the sync cannot be stored here.
-Create a case-sensitive volume and pass it as ANDROID_CASE_VOLUME. gclient trees and out/ go there (still on this machine). products/ stays in ${PRODUCTS:-${DEPS_ROOT}/products}.
-EOF
-    exit 1
-  else
-    prepare_case_volume "$ANDROID_CASE_VOLUME"
+  # Inside the container, gclient's host is Linux, so it unpacks the Debian
+  # sysroot under src/build/linux. That archive has headers that differ only
+  # by case. The checkout and products stay on the host disk. The sysroot
+  # stays on Docker's own disk when the host filesystem is case-insensitive.
+  local sysroot_volume=""
+  if ! filesystem_is_case_sensitive "$DEPS_ROOT"; then
+    local sysroot_key
+    if command -v shasum >/dev/null 2>&1; then
+      sysroot_key="$(printf '%s' "$DEPS_ROOT" | shasum -a 256 | awk '{print substr($1,1,12)}')"
+    else
+      sysroot_key="$(printf '%s' "$DEPS_ROOT" | sha256sum | awk '{print substr($1,1,12)}')"
+    fi
+    sysroot_volume="stream-webrtc-sysroot-${sysroot_key}"
   fi
 
   local git_dir git_common
@@ -148,7 +126,7 @@ EOF
   ensure_image "$tag"
 
   local material name
-  material="${DEPS_ROOT}|${ANDROID_CASE_VOLUME:-}|${uid}"
+  material="${DEPS_ROOT}|${sysroot_volume}|${uid}"
   if command -v shasum >/dev/null 2>&1; then
     name="stream-webrtc-android-$(printf '%s' "$material" | shasum -a 256 | awk '{print substr($1,1,12)}')"
   else
@@ -171,11 +149,8 @@ EOF
       -e "DEPS_ROOT=${DEPS_ROOT}"
       -e "WEBRTC_SRC=${WEBRTC_SRC}"
       -e "OUT=${OUT}")
-    if [[ -n "${ANDROID_CASE_VOLUME:-}" ]] && ! filesystem_is_case_sensitive "$DEPS_ROOT"; then
-      local mount
-      while IFS= read -r mount; do
-        run+=(-v "$mount")
-      done < <(case_volume_mounts "$ANDROID_CASE_VOLUME")
+    if [[ -n "$sysroot_volume" ]]; then
+      run+=(-v "${sysroot_volume}:${WEBRTC_SRC}/build/linux")
     fi
     if ! path_is_under "$git_dir" "$DEPS_ROOT"; then
       run+=(-v "${git_dir}:${git_dir}")
