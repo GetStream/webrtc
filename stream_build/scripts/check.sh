@@ -308,7 +308,9 @@ rm -rf "$parent" "$(dirname "$symlink_parent")" "$(dirname "$real_src")" \
 ni_parent="$(mktemp -d)"
 ni_repo="$ni_parent/webrtc"
 init_git_tree "$ni_repo"
-ni_out="$(BOOTSTRAP_SRC="$ni_repo" "$ROOT/scripts/bootstrap.sh" 2>&1 || true)"
+# stdin must not be the terminal. ask() reads it when make check itself
+# is interactive, and the prompt is captured, so the run sits with no output.
+ni_out="$(BOOTSTRAP_SRC="$ni_repo" "$ROOT/scripts/bootstrap.sh" </dev/null 2>&1 || true)"
 printf '%s\n' "$ni_out" | grep -q 'CONFIRM=1'
 printf '%s\n' "$ni_out" | grep -q "mv $ni_repo"
 [[ -d "$ni_repo/.git" ]]
