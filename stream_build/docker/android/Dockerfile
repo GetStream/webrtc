@@ -1,6 +1,6 @@
 # Linux amd64 userspace for Android builds. The emulator binary published
 # for Linux is x86_64, and so are Chromium's host tools (gn, clang).
-FROM debian:bookworm
+FROM --platform=linux/amd64 debian:bookworm
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     bzip2 \
@@ -32,6 +32,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     libxrandr2 \
     libxrender1 \
     libxtst6 \
+    make \
     openjdk-17-jdk-headless \
     pkg-config \
     python-is-python3 \
