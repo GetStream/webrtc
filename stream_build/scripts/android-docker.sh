@@ -268,7 +268,7 @@ main() {
     -e "EXTRA_GN_ARGS=${EXTRA_GN_ARGS:-}"
     -e "WEBRTC_REPO=${WEBRTC_REPO:-}"
     "$name"
-    "${container_src}/stream_build/scripts/android-docker-entry.sh"
+    "${host_src}/stream_build/scripts/android-docker-entry.sh"
     "$goal" "$platform")
   echo "android: linux via docker (${tag}), sources on ${host_src}"
   exec "${exec_cmd[@]}"
