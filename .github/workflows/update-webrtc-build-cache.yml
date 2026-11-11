@@ -1,6 +1,8 @@
 # Publish ninja outputs to GHCR. Run this from the Actions tab, let
 # Update WebRTC Cache call it after the tools job finishes, or let a
-# push to main publish release production for that commit. Each run
+# push to main publish every cache for that commit: release and debug
+# production, plus the debug test caches. A manual run and a call from
+# Update WebRTC Cache keep the inputs they pass. Each run
 # builds and uploads the selected variants. It does not skip a variant
 # that was already published.
 #
@@ -21,7 +23,7 @@
 name: Update WebRTC Build Cache
 
 run-name: >-
-  Update WebRTC Build Cache ${{ inputs.configuration || 'release' }} ${{ inputs.targets || 'production' }}
+  Update WebRTC Build Cache ${{ github.event_name == 'push' && 'both' || inputs.configuration || 'release' }} ${{ github.event_name == 'push' && 'both' || inputs.targets || 'production' }}
   ${{ github.event_name == 'push' && github.sha || inputs.tag || 'automatic' }}
 
 on:
@@ -115,8 +117,8 @@ jobs:
       - id: matrix
         name: Select variants
         env:
-          CONFIGURATION: ${{ inputs.configuration || 'release' }}
-          TARGETS: ${{ inputs.targets || 'production' }}
+          CONFIGURATION: ${{ github.event_name == 'push' && 'both' || inputs.configuration || 'release' }}
+          TARGETS: ${{ github.event_name == 'push' && 'both' || inputs.targets || 'production' }}
         run: |
           set -euo pipefail
           include="$(python3 - "$CONFIGURATION" "$TARGETS" <<'PY'
