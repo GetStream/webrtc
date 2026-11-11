@@ -32,6 +32,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     libxrandr2 \
     libxrender1 \
     libxtst6 \
+    lsb-release \
     make \
     openjdk-17-jdk-headless \
     pkg-config \
