@@ -116,16 +116,15 @@ ensure_image() {
 CONTAINER_ROOT="/webrtc"
 
 launch_container() {
-  local mount_sysroots="$1"
   local image_id container_image mounts
   image_id="$(docker image inspect -f '{{.Id}}' "$tag")"
   if docker container inspect "$name" >/dev/null 2>&1; then
     container_image="$(docker inspect -f '{{.Image}}' "$name")"
     mounts="$(docker inspect -f '{{range .Mounts}}{{.Destination}}{{"\n"}}{{end}}' "$name")"
+    # A mount anywhere under src/build stops gclient from replacing that
+    # checkout. Drop containers left from that experiment.
     if [[ "$container_image" != "$image_id" ]] \
-      || grep -qx "${container_src}/build/linux" <<<"$mounts" \
-      || { [[ "$mount_sysroots" == 1 ]] && ! grep -q 'debian_bullseye_amd64-sysroot' <<<"$mounts"; } \
-      || { [[ "$mount_sysroots" == 0 ]] && grep -q 'debian_bullseye_amd64-sysroot' <<<"$mounts"; }; then
+      || grep -q "${container_src}/build/" <<<"$mounts"; then
       docker rm -f "$name" >/dev/null
     fi
   fi
@@ -149,20 +148,6 @@ launch_container() {
     -e "DEPS_ROOT=${CONTAINER_ROOT}"
     -e "WEBRTC_SRC=${container_src}"
     -e "OUT=${container_out}")
-  if [[ "$mount_sysroots" == 1 ]]; then
-    local arch vol dest
-    for arch in amd64 i386; do
-      vol="${sysroot_volume}-${arch}"
-      dest="${container_src}/build/linux/debian_bullseye_${arch}-sysroot"
-      if ! docker volume inspect "$vol" >/dev/null 2>&1; then
-        docker volume create \
-          --label "stream.webrtc.checkout=${host_src}" \
-          --label "stream.webrtc.git_common=${git_common}" \
-          "$vol" >/dev/null
-      fi
-      run+=(-v "${vol}:${dest}")
-    done
-  fi
   if ! path_is_under "$git_dir" "$host_src"; then
     run+=(-v "${git_dir}:${git_dir}")
   fi
@@ -197,13 +182,6 @@ main() {
   git_dir="$(absolute_git_path --git-dir)"
   git_common="$(absolute_git_path --git-common-dir)"
 
-  # src/build/linux is part of the Chromium build checkout. The case-sensitive
-  # archive is only the extracted debian_*_sysroot directories, mounted later.
-  local sysroot_volume=""
-  if ! filesystem_is_case_sensitive "$host_src"; then
-    sysroot_volume="$(sysroot_volume_name "$host_src")"
-  fi
-
   mkdir -p \
     "$state" \
     "${state}/.depot_tools" \
@@ -214,12 +192,6 @@ main() {
     "${host_src}/out" \
     "${host_src}/products"
   write_gclient "$state" "${WEBRTC_REPO:-git@github.com:GetStream/webrtc.git}" "android,unix"
-  # A previous run mounted a disk on build/linux and git could not check out
-  # that directory. Drop the incomplete checkout so sync can clone it.
-  if [[ -d "${host_src}/build/.git" && ! -f "${host_src}/build/linux/sysroot_scripts/install-sysroot.py" ]]; then
-    echo "removing incomplete src/build left by a failed sync"
-    rm -rf "${host_src}/build" "${state}/_bad_scm"
-  fi
 
   local uid gid tag
   uid="$(id -u)"
@@ -228,28 +200,22 @@ main() {
   ensure_image "$tag"
 
   local name
-  name="$(container_name_for "$host_src" "$sysroot_volume" "$uid")"
-
-  launch_container 0
-  if [[ -n "$sysroot_volume" && ! -f "${host_src}/build/linux/sysroot_scripts/install-sysroot.py" ]]; then
-    echo "fetching src/build before mounting the Debian sysroot"
-    docker exec --user "${uid}:${gid}" \
-      -e "DEPS_ROOT=${CONTAINER_ROOT}" \
-      -e "WEBRTC_SRC=${container_src}" \
-      -e "GIT_CACHE_PATH=${CONTAINER_ROOT}/.gclient-git-cache" \
-      "$name" \
-      "${container_src}/stream_build/scripts/android-docker-entry.sh" \
-      sync-nohooks
-    docker rm -f "$name" >/dev/null
-    launch_container 1
-  elif [[ -n "$sysroot_volume" ]]; then
-    local mounts
-    mounts="$(docker inspect -f '{{range .Mounts}}{{.Destination}}{{"\n"}}{{end}}' "$name")"
-    if ! grep -q 'debian_bullseye_amd64-sysroot' <<<"$mounts"; then
-      docker rm -f "$name" >/dev/null
-      launch_container 1
-    fi
+  name="$(container_name_for "$host_src" "" "$uid")"
+  # gclient deletes src/build when its HEAD does not resolve. A mount inside
+  # that directory makes the delete fail with "Device or resource busy".
+  if [[ -d "${host_src}/build/.git" ]] \
+    && ! git -C "${host_src}/build" rev-parse --verify HEAD >/dev/null 2>&1; then
+    echo "removing src/build whose git HEAD does not resolve"
+    docker rm -f "$name" >/dev/null 2>&1 || true
+    local id
+    while IFS= read -r id; do
+      [[ -n "$id" ]] || continue
+      docker rm -f "$id" >/dev/null
+    done < <(docker ps -aq --filter "label=stream.webrtc.git_common=${git_common}")
+    rm -rf "${host_src}/build" "${state}/_bad_scm"
   fi
+
+  launch_container
 
   local adb_server="${ADB_SERVER:-}"
   if [[ -n "$adb_server" ]]; then
