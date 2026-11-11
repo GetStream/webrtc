@@ -1,0 +1,88 @@
+name: Push WebRTC build cache
+description: >
+  Push the build cache for this platform, configuration, and kind.
+  production is webrtc-build-cache-<configuration>-<platform>.
+  test is webrtc-test-cache-<platform> and only accepts configuration
+  debug. The caller needs contents: read and packages: write.
+
+inputs:
+  platform:
+    description: ios, macos, or android.
+    required: true
+  configuration:
+    description: debug or release. Test pushes are debug only.
+    required: true
+  kind:
+    description: production or test.
+    required: true
+  tag:
+    description: Immutable registry tag. latest is rejected.
+    required: true
+  update_latest:
+    description: Move the latest tag to this publish. true or false.
+    required: true
+  revision:
+    description: Git revision stored on the manifest.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install oras
+      uses: oras-project/setup-oras@v2
+
+    - name: Install zstd
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! command -v zstd >/dev/null; then
+          if [[ "$(uname -s)" == Darwin ]]; then
+            brew install zstd
+          else
+            sudo apt-get update
+            sudo apt-get install -y zstd
+          fi
+        fi
+        # macOS still ships Bash 3.2, which has no wait -n. The cache
+        # script uploads blobs concurrently and needs Bash 4.3+.
+        if ! bash -c 'help wait' 2>/dev/null | grep -q -- '-n'; then
+          brew install bash
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+        fi
+
+    - name: Log in to GHCR
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        echo "$GH_TOKEN" | oras login ghcr.io \
+          --username "${{ github.actor }}" \
+          --password-stdin
+
+    - name: Push build cache
+      shell: bash
+      env:
+        PLATFORM: ${{ inputs.platform }}
+        CONFIGURATION: ${{ inputs.configuration }}
+        KIND: ${{ inputs.kind }}
+        CACHE_TAG: ${{ inputs.tag }}
+        UPDATE_LATEST: ${{ inputs.update_latest }}
+        GIT_REVISION: ${{ inputs.revision }}
+        IMAGE_SOURCE: https://github.com/GetStream/webrtc
+      run: |
+        set -euo pipefail
+        script="${{ github.action_path }}/../../scripts/webrtc-cache.sh"
+        # Assign before export. export VAR="$(...)" returns the status of
+        # export, so a failed build-image-for would push the git cache and
+        # could move its latest tag.
+        CACHE_IMAGE="$("$script" build-image-for "$PLATFORM" "$CONFIGURATION" "$KIND")"
+        ARCHIVE_MEMBERS="$("$script" build-members-for "$PLATFORM" "$KIND")"
+        ARCHIVE_ROOT="${GITHUB_WORKSPACE}"
+        export CACHE_IMAGE ARCHIVE_ROOT ARCHIVE_MEMBERS
+        export ARTIFACT_TYPE="application/vnd.getstream.webrtc.build-cache.v1"
+        export CHUNK_TYPE="application/vnd.getstream.webrtc.build-cache.chunk.v1"
+        echo "build cache image: ${CACHE_IMAGE}"
+        echo "build cache members: ${ARCHIVE_MEMBERS}"
+        df -h "${GITHUB_WORKSPACE}" || true
+        "$script" push

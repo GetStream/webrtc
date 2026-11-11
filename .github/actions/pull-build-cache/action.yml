@@ -1,0 +1,136 @@
+name: Pull WebRTC build cache
+description: >
+  Pull the build cache for this platform, configuration, and kind.
+  production is webrtc-build-cache-<configuration>-<platform>.
+  test is webrtc-test-cache-<platform> and only accepts configuration
+  debug. A missing tag leaves those paths absent. The caller needs
+  contents: read and packages: read.
+
+inputs:
+  platform:
+    description: ios, macos, or android.
+    required: true
+  configuration:
+    description: debug or release. Test restores are debug only.
+    required: true
+  kind:
+    description: production or test.
+    required: true
+  tag:
+    description: Tag to pull. A missing tag leaves the build outputs absent.
+    required: false
+    default: latest
+
+outputs:
+  restored_from:
+    description: latest, the requested tag, or empty.
+    value: ${{ steps.pull.outputs.restored_from }}
+  restored_revision:
+    description: Git revision stored on the manifest, or empty.
+    value: ${{ steps.pull.outputs.restored_revision }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install oras
+      uses: oras-project/setup-oras@v2
+
+    - name: Install zstd
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! command -v zstd >/dev/null; then
+          if [[ "$(uname -s)" == Darwin ]]; then
+            brew install zstd
+          else
+            sudo apt-get update
+            sudo apt-get install -y zstd
+          fi
+        fi
+        # macOS still ships Bash 3.2, which has no wait -n. The cache
+        # script downloads blobs concurrently and needs Bash 4.3+.
+        if ! bash -c 'help wait' 2>/dev/null | grep -q -- '-n'; then
+          brew install bash
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+        fi
+
+    - name: Log in to GHCR
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        echo "$GH_TOKEN" | oras login ghcr.io \
+          --username "${{ github.actor }}" \
+          --password-stdin
+
+    - id: pull
+      name: Pull build cache, or start empty
+      shell: bash
+      env:
+        PLATFORM: ${{ inputs.platform }}
+        CONFIGURATION: ${{ inputs.configuration }}
+        KIND: ${{ inputs.kind }}
+        CACHE_TAG: ${{ inputs.tag }}
+      run: |
+        set -euo pipefail
+        script="${{ github.action_path }}/../../scripts/webrtc-cache.sh"
+        # Assign before export. export VAR="$(...)" returns the status of
+        # export, so a failed build-image-for would leave CACHE_IMAGE empty
+        # and pull the git cache instead.
+        CACHE_IMAGE="$("$script" build-image-for "$PLATFORM" "$CONFIGURATION" "$KIND")"
+        ARCHIVE_MEMBERS="$("$script" build-members-for "$PLATFORM" "$KIND")"
+        ARCHIVE_ROOT="${GITHUB_WORKSPACE}"
+        export CACHE_IMAGE ARCHIVE_ROOT ARCHIVE_MEMBERS
+        echo "build cache image: ${CACHE_IMAGE}"
+        echo "build cache members: ${ARCHIVE_MEMBERS}"
+        "$script" pull
+
+    # Checkout stamps every source file with the current time, which is
+    # newer than objects packed earlier. Ninja would then rebuild the
+    # tree. Age the tree and refresh only files that differ from the
+    # cached revision. A DEPS change leaves timestamps alone so ninja
+    # rebuilds against the new hooks and headers. Skip src/out: Android
+    # tests compile there, and aging those objects matches the source
+    # timestamps, so ninja rebuilds every test target. touch -h updates
+    # a symlink and does not follow it. GNU touch otherwise fails when
+    # the link target's parent directory is missing, as with the NDK.
+    - name: Align source timestamps with the cached build
+      shell: bash
+      env:
+        RESTORED_FROM: ${{ steps.pull.outputs.restored_from }}
+        CACHED_REV: ${{ steps.pull.outputs.restored_revision }}
+      run: |
+        set -euo pipefail
+        if [[ "${RESTORED_FROM}" == empty || -z "${CACHED_REV}" ]]; then
+          exit 0
+        fi
+        if [[ ! -d src/.git ]]; then
+          echo "no src checkout; leaving timestamps unchanged"
+          exit 0
+        fi
+        if ! git -C src cat-file -e "${CACHED_REV}^{commit}" 2>/dev/null; then
+          if ! git -C src fetch --depth=1 origin "${CACHED_REV}"; then
+            echo "could not fetch cached revision ${CACHED_REV}; ninja will rebuild"
+            exit 0
+          fi
+          CACHED_REV="$(git -C src rev-parse FETCH_HEAD)"
+        fi
+        if [[ -n "$(git -C src diff --name-only "${CACHED_REV}" HEAD -- DEPS)" ]]; then
+          echo "DEPS changed since the cached build; ninja will rebuild"
+          exit 0
+        fi
+        find src \
+          -path '*/.git' -prune -o \
+          -path 'src/out' -prune -o \
+          -print0 | xargs -0 touch -h -t 200001010000
+        head="$(git -C src rev-parse HEAD)"
+        if [[ "${head}" == "${CACHED_REV}" ]]; then
+          echo "source matches cached revision ${CACHED_REV}"
+          exit 0
+        fi
+        while IFS= read -r path; do
+          [[ -n "${path}" && ( -e "src/${path}" || -L "src/${path}" ) ]] || continue
+          touch -h "src/${path}"
+        done < <(git -C src diff --name-only "${CACHED_REV}" HEAD)
+        echo "aged unchanged sources; refreshed files that differ from ${CACHED_REV}"

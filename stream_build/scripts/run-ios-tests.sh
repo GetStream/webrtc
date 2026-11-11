@@ -127,6 +127,12 @@ if [[ -z "$SIMULATOR_PLATFORM" ]]; then
 fi
 echo "using simulator: ${SIMULATOR_PLATFORM} (iOS ${SIMULATOR_VERSION})"
 
+# GTestLogParser only treats `[  PASSED  ] N tests.` as a finished run.
+# XCTest prints `** TEST EXECUTE SUCCEEDED **`, so launch() otherwise shuts
+# the simulator down and boots it for a second pass. A missing success line
+# is still a crash, and the runner still retries that case.
+export PYTHONPATH="${SCRIPT_DIR}/ios_xctest_completion${PYTHONPATH:+:${PYTHONPATH}}"
+
 xcode_build_version="$(xcodebuild -version | awk '/Build version/{print $3; exit}')"
 xcode_build_version="${xcode_build_version:-local}"
 xcode_app="$(selected_xcode_app)"
