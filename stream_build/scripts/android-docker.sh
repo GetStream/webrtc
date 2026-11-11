@@ -93,6 +93,30 @@ require_docker() {
   fi
 }
 
+# Colima registers Rosetta with binfmt's F flag, which pins the interpreter
+# file descriptor. After the VM refreshes that mount the fd is stale and every
+# new x86_64 exec returns ENOENT. Python reports that as "No such file or
+# directory: 'git'" even though git is installed in the container.
+refresh_colima_rosetta() {
+  command -v colima >/dev/null 2>&1 || return 1
+  colima ssh -- sudo sh -c 'if [ -f /proc/sys/fs/binfmt_misc/rosetta ]; then echo -1 > /proc/sys/fs/binfmt_misc/rosetta; fi; printf "%b\n" ":rosetta:M::\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x3e\x00:\xff\xff\xff\xff\xff\xfe\xfe\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:/mnt/lima-rosetta/rosetta:OCF" > /proc/sys/fs/binfmt_misc/register'
+}
+
+amd64_container_runs() {
+  docker run --rm --platform linux/amd64 --entrypoint /bin/true debian:bookworm >/dev/null 2>&1
+}
+
+ensure_amd64_exec() {
+  if amd64_container_runs; then
+    return 0
+  fi
+  if refresh_colima_rosetta && amd64_container_runs; then
+    echo "refreshed Colima Rosetta so x86_64 binaries can run again"
+    return 0
+  fi
+  die "This Docker VM cannot run x86_64 binaries, so the Android build stops with 'No such file or directory: git' even though git is installed. On Colima, run: colima stop && colima start --vm-type vz --vz-rosetta Then rerun the same make command."
+}
+
 ensure_image() {
   local tag="$1"
   local stamp="${ANDROID_DOCKER_STATE:?}/.android-docker-image-stamp"
@@ -172,6 +196,7 @@ main() {
   [[ -f "${WEBRTC_SRC}/DEPS" ]] || die "No WebRTC checkout at ${WEBRTC_SRC} (missing DEPS)"
 
   require_docker
+  ensure_amd64_exec
 
   local host_src="$WEBRTC_SRC"
   local host_parent
