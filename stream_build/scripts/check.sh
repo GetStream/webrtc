@@ -752,5 +752,7 @@ grep -q 'kind: test' "$gha/workflows/_make.yml"
 grep -q 'configuration: debug' "$gha/workflows/_make.yml"
 grep -q 'compile-tests-ios: require-darwin' "$ROOT/Makefile"
 grep -q 'test-ios: compile-tests-ios' "$ROOT/Makefile"
+python3 "$ROOT/scripts/ios_xctest_completion/sitecustomize.py" --selftest
+grep -q 'ios_xctest_completion' "$ROOT/scripts/run-ios-tests.sh"
 
 echo "ok"
