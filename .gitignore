@@ -93,4 +93,5 @@ out_macos_libs
 # Leftover in-repo gclient parent (pre-webrtc/src bootstrap).
 .gclient_deps/
 .gclient-git-cache
+.android-gclient/
 .idea

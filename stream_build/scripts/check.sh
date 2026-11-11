@@ -38,7 +38,9 @@ printf '%s\n' "$help_text" | grep -q 'make rename apple'
 printf '%s\n' "$help_text" | grep -q 'SKIP_MACCATALYST=1'
 printf '%s\n' "$help_text" | grep -q 'make package ios'
 printf '%s\n' "$help_text" | grep -q 'make package macos'
+printf '%s\n' "$help_text" | grep -q 'ADB_SERVER=host:port'
 printf '%s\n' "$help_text" | grep -q 'make migrate plan'
+printf '%s\n' "$help_text" | grep -q 'make docker-cleanup'
 ! printf '%s\n' "$help_text" | grep -q 'package apple'
 python3 "$ROOT/scripts/migration_gate.py" --selftest
 "$ROOT/scripts/migrate.sh" selftest
@@ -70,6 +72,48 @@ printf '%s\n' "$debug" | grep -q 'rtc_use_h264 = false'
 android="$("${layout_make[@]}" -s print-gn-args TARGET=android-arm64-v8a)"
 printf '%s\n' "$android" | grep -q 'target_os = "android"'
 printf '%s\n' "$android" | grep -q 'target_cpu = "arm64"'
+
+bad_arch="$("$ROOT/scripts/run-android-tests.sh" --check-args --arch ppc 2>&1 || true)"
+printf '%s\n' "$bad_arch" | grep -q 'ARCH must be x64 or arm64'
+printf '%s\n' "$bad_arch" | grep -q 'arm64-v8a'
+bad_adb="$("$ROOT/scripts/run-android-tests.sh" --check-args --arch x64 --adb-server notes 2>&1 || true)"
+printf '%s\n' "$bad_adb" | grep -q 'host:port'
+"$ROOT/scripts/run-android-tests.sh" --check-args --arch arm64 --adb-server 127.0.0.1:5037
+bad_make="$(make -C "$ROOT" validate-android-test-args ARCH=ppc 2>&1 || true)"
+printf '%s\n' "$bad_make" | grep -q 'ARCH must be x64 or arm64'
+make -C "$ROOT" validate-android-test-args ARCH=arm64 ADB_SERVER=10.0.0.8:5037
+# shellcheck source=android-docker.sh
+source "$ROOT/scripts/android-docker.sh"
+[[ "$(rewrite_adb_server_for_container 127.0.0.1:5037)" == "host.docker.internal:5037" ]]
+[[ "$(rewrite_adb_server_for_container localhost:5037)" == "host.docker.internal:5037" ]]
+[[ "$(rewrite_adb_server_for_container 10.1.2.3:5037)" == "10.1.2.3:5037" ]]
+# shellcheck source=android-docker-bin/cipd
+source "$ROOT/scripts/android-docker-bin/cipd"
+cipd_in="$(mktemp)"
+cipd_out="$(mktemp)"
+cat >"$cipd_in" <<'EOF'
+$ParanoidMode CheckPresence
+$OverrideInstallMode copy
+
+@Subdir src/buildtools/linux64
+gn/gn/linux-amd64 version
+
+@Subdir src
+pkg version
+EOF
+rewrite_cipd_ensure_file "$cipd_in" "$cipd_out"
+grep -q '@Subdir buildtools/linux64' "$cipd_out"
+grep -qx '@Subdir .' "$cipd_out"
+printf '%s\n' '@Subdir other/place' >"$cipd_in"
+bad_cipd="$(rewrite_cipd_ensure_file "$cipd_in" "$cipd_out" 2>&1 || true)"
+printf '%s\n' "$bad_cipd" | grep -q 'outside src'
+rm -f "$cipd_in" "$cipd_out"
+android_test_banner="$(make -C "$ROOT" --no-print-directory announce VERB=test PLATFORM=android ARCH=arm64 ADB_SERVER=127.0.0.1:5037)"
+printf '%s\n' "$android_test_banner" | grep -q 'arch:       arm64'
+printf '%s\n' "$android_test_banner" | grep -q 'adb_server: 127.0.0.1:5037'
+android_local_banner="$(make -C "$ROOT" --no-print-directory announce VERB=test PLATFORM=android)"
+printf '%s\n' "$android_local_banner" | grep -q 'arch:       x64'
+printf '%s\n' "$android_local_banner" | grep -q 'emulator:   local'
 
 ninja_target="$("$ROOT/scripts/gn-gen.sh" --ninja-target ios-arm64-device)"
 [[ "$ninja_target" == framework_objc ]]
@@ -286,7 +330,9 @@ rm -rf "$parent" "$(dirname "$symlink_parent")" "$(dirname "$real_src")" \
 ni_parent="$(mktemp -d)"
 ni_repo="$ni_parent/webrtc"
 init_git_tree "$ni_repo"
-ni_out="$(BOOTSTRAP_SRC="$ni_repo" "$ROOT/scripts/bootstrap.sh" 2>&1 || true)"
+# stdin must not be the terminal. ask() reads it when make check itself
+# is interactive, and the prompt is captured, so the run sits with no output.
+ni_out="$(BOOTSTRAP_SRC="$ni_repo" "$ROOT/scripts/bootstrap.sh" </dev/null 2>&1 || true)"
 printf '%s\n' "$ni_out" | grep -q 'CONFIRM=1'
 printf '%s\n' "$ni_out" | grep -q "mv $ni_repo"
 [[ -d "$ni_repo/.git" ]]
@@ -330,6 +376,16 @@ grep -q '"managed": False' "$deps_tmp/webrtc/.gclient"
 ! grep -q '"revision"' "$deps_tmp/webrtc/.gclient"
 grep -q 'sync -j2 --no-history --shallow --nohooks' "$deps_tmp/sync_args"
 ! grep -q -- '--revision' "$deps_tmp/sync_args"
+grep -q "$deps_tmp/.gclient-git-cache" "$deps_tmp/cache_env"
+docker_deps_out="$(
+  PATH="$fake_bin:$PATH" \
+    DEPS_ROOT="$deps_tmp/webrtc" \
+    WEBRTC_SRC="$deps_tmp/webrtc/src" \
+    GIT_CACHE_PATH="$deps_tmp/.gclient-git-cache" \
+    RUN_HOOKS=0 JOBS=2 STREAM_ANDROID_IN_DOCKER=1 \
+    "$ROOT/scripts/deps.sh" sync
+)"
+printf '%s\n' "$docker_deps_out" | grep -q 'running: gclient sync -j2 --force --no-history --shallow --nohooks'
 grep -q "$deps_tmp/.gclient-git-cache" "$deps_tmp/cache_env"
 mkdir -p "$deps_tmp/webrtc/src/third_party/.git/objects/info"
 printf '%s\n' \

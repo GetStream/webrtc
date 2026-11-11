@@ -9,6 +9,7 @@ make build|test|package ios|android|macos|windows [VAR=value ...]
 make combine
 make rename apple|android
 make migrate plan|prepare|open
+make docker-cleanup
 ```
 
 `make migrate plan` prints whether Chromium extended stable is ahead of the fork.
@@ -178,7 +179,7 @@ not use `${{ secrets.* }}`. `products-*` / `final-*` stay on
 
 - bootstrap: any host (writes layout + `.gclient`; no depot_tools)
 - ios / macos / combine / rename apple: Darwin
-- android / rename android: Linux for build/package/test; rename android is a file copy on any host
+- android / rename android: Linux runs build/package/test directly. macOS and Windows re-exec the same `make` inside a local `linux/amd64` container (`stream_build/scripts/android-docker.sh`). The checkout is mounted at `/webrtc/src` in the container, so a git worktree does not have to be renamed. `out/` and `products/` stay in the checkout. The Debian sysroot is extracted into the checkout with the rest of `src/build`. Nothing is mounted inside that directory, because gclient has to be able to replace it. rename android is a file copy on any host. `make test android ARCH=x64|arm64`. `ADB_SERVER=host:port` uses the first emulator on that server whose ABI matches `ARCH`. Omit `ADB_SERVER` to boot an API 34 emulator in the Linux environment (`-accel off` when `/dev/kvm` is missing).
 - windows: Windows
 - deps / runhooks: any host with depot_tools
 
@@ -193,6 +194,8 @@ not use `${{ secrets.* }}`. `products-*` / `final-*` stay on
 | `OUT` / `PRODUCTS` | ninja dirs / packaged output (default under `DEPS_ROOT`, sibling of `src`) |
 | `GIT_CACHE_PATH` | gclient object cache (default `DEPS_ROOT/../.gclient-git-cache`; must be outside the gclient root) |
 | `ARCHS` | android ABI or windows cpu (`arm64-v8a`, `x64`, …) |
+| `ARCH` | Android test CPU: `x64` (default, CI emulator) or `arm64`. Output is `src/out/android_tests` or `src/out/android_tests_arm64`. |
+| `ADB_SERVER` | `host:port` of an adb server. Before the test compile, the first emulator whose ABI matches `ARCH` is selected; a non-emulator device is used only when no emulator matches. Loopback is rewritten to `host.docker.internal` inside the container. Omit it to boot an emulator in the Linux environment. |
 | `JOBS` | ninja/gclient parallelism |
 | `SHALLOW` | `1` (default) `gclient sync --no-history --shallow`. `0` = full history. |
 | `ZIP` | Defaults to `1` for Apple package commands (`0` opts out); `0` for combine/Windows (`1` opts in). |

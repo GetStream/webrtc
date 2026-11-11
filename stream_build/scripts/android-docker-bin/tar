@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# GNU tar creates symlink members as mode-000 files on virtiofs, then fails
+# with "Cannot open: Permission denied". install-sysroot.py invokes
+# `tar mxf ARCHIVE -C DEST`. Extract that shape with Python, which calls
+# symlink(2) directly. Every other tar invocation is the system tar.
+set -euo pipefail
+
+if [[ "${1:-}" == "mxf" && "${3:-}" == "-C" && -n "${2:-}" && -n "${4:-}" ]]; then
+  exec /usr/bin/python3 - "${2}" "${4}" <<'PY'
+import os
+import sys
+import tarfile
+
+archive, dest = sys.argv[1], sys.argv[2]
+os.makedirs(dest, exist_ok=True)
+with tarfile.open(archive, "r:*") as tar:
+    for member in tar:
+        name = member.name
+        if name.startswith("/"):
+            raise SystemExit(f"refusing absolute tar member {name}")
+        target = os.path.join(dest, name)
+        parent = os.path.dirname(target)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        if member.issym():
+            if os.path.lexists(target):
+                os.unlink(target)
+            os.symlink(member.linkname, target)
+            continue
+        if member.islnk():
+            if os.path.lexists(target):
+                os.unlink(target)
+            os.link(os.path.join(dest, member.linkname), target)
+            continue
+        tar.extract(member, dest, set_attrs=False)
+PY
+fi
+
+exec /usr/bin/tar "$@"
