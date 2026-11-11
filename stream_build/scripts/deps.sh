@@ -67,7 +67,15 @@ cmd_sync() {
   (
     cd "$DEPS_ROOT"
     gclient root >/dev/null || true
-    local sync=(gclient sync -j"${JOBS}")
+    # googlesource answers 429 when a laptop opens one fetch per core.
+    # SYNC_JOBS caps that fan-out. Ninja still uses JOBS.
+    local sync_jobs="${SYNC_JOBS:-$JOBS}"
+    local sync=(gclient sync -j"${sync_jobs}")
+    # virtiofs marks dependency checkouts dirty (mode bits, racy stat).
+    # The top-level solution stays unmanaged, so this does not reset it.
+    if [[ "${STREAM_ANDROID_IN_DOCKER:-}" == "1" ]]; then
+      sync+=(--force)
+    fi
     if [[ "$SHALLOW" == "1" || "$SHALLOW" == "true" ]]; then
       sync+=(--no-history --shallow)
     fi

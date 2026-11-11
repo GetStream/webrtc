@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# virtiofs returns EXDEV when cipd renames a package from the gclient root's
+# .cipd directory into the bind-mounted checkout. ensure is retargeted at the
+# checkout path, and the leading src/ is removed, so both sides of that
+# rename are the checkout mount.
+set -euo pipefail
+
+rewrite_cipd_ensure_file() {
+  local src="$1"
+  local dest="$2"
+  local line rest
+  : >"$dest"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      "@Subdir src")
+        printf '@Subdir .\n' >>"$dest"
+        ;;
+      "@Subdir src/"*)
+        rest="${line#@Subdir src/}"
+        printf '@Subdir %s\n' "$rest" >>"$dest"
+        ;;
+      "@Subdir "*)
+        echo "error: cipd package path ${line#@Subdir } is outside src, so it cannot be installed onto the checkout" >&2
+        return 1
+        ;;
+      *)
+        printf '%s\n' "$line" >>"$dest"
+        ;;
+    esac
+  done <"$src"
+}
+
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+  return 0
+fi
+
+real="${DEPS_ROOT:-}/.depot_tools/cipd"
+if [[ ! -x "$real" ]]; then
+  echo "error: cipd wrapper could not find ${real}" >&2
+  exit 1
+fi
+
+if [[ "${1:-}" != "ensure" || -z "${HOST_CHECKOUT:-}" || -z "${DEPS_ROOT:-}" ]]; then
+  exec "$real" "$@"
+fi
+
+root=""
+ensure=""
+prev=""
+for arg in "$@"; do
+  if [[ "$prev" == "-root" ]]; then
+    root="$arg"
+  elif [[ "$prev" == "-ensure-file" ]]; then
+    ensure="$arg"
+  fi
+  prev="$arg"
+done
+
+if [[ "$root" != "$DEPS_ROOT" || -z "$ensure" ]]; then
+  exec "$real" "$@"
+fi
+
+# Left in place for the exec'd cipd process, which reads it immediately.
+rewritten="$(mktemp "${TMPDIR:-/tmp}/cipd-ensure.XXXXXX")"
+rewrite_cipd_ensure_file "$ensure" "$rewritten"
+
+args=()
+prev=""
+for arg in "$@"; do
+  if [[ "$prev" == "-root" ]]; then
+    args+=("$HOST_CHECKOUT")
+  elif [[ "$prev" == "-ensure-file" ]]; then
+    args+=("$rewritten")
+  else
+    args+=("$arg")
+  fi
+  prev="$arg"
+done
+exec "$real" "${args[@]}"
