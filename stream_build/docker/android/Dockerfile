@@ -6,6 +6,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     bzip2 \
     ca-certificates \
     curl \
+    file \
     git \
     libasound2 \
     libc6 \
@@ -43,7 +44,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     unzip \
     xz-utils \
     zip \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /var/lib/apt/lists/* \
+  && ln -sf /usr/bin/bash /sbin/init
 
 ARG UID=1000
 ARG GID=1000
