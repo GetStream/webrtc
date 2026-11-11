@@ -725,6 +725,8 @@ if [[ "$(<"$build_wf")" != *"$push_block"* ]]; then
   exit 1
 fi
 grep -q "github.event_name == 'push' && github.sha" "$build_wf"
+grep -q "github.event_name == 'push' && 'both' || inputs.configuration || 'release'" "$build_wf"
+grep -q "github.event_name == 'push' && 'both' || inputs.targets || 'production'" "$build_wf"
 grep -q 'build-fingerprint' "$build_wf"
 grep -q 'build outputs unchanged' "$build_wf"
 grep -q "steps.cache.outputs.restored_from == 'empty' || steps.before.outputs.fp != steps.after.outputs.fp" "$build_wf"
