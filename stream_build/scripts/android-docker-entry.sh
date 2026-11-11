@@ -23,21 +23,27 @@ if [[ ! -x "${DEPS_ROOT}/.depot_tools/gclient" ]]; then
 fi
 export PATH="${DEPS_ROOT}/.depot_tools:${PATH}"
 
-# virtiofs reports mode bits that do not match the index. gclient then
-# refuses to update a dependency it thinks has local edits.
-git config --global core.filemode false
+# virtiofs reports mode bits that do not match the index. A cloned repo
+# stores core.filemode=true locally, which overrides the global value, so
+# gclient refuses the dependency as dirty. These override every git config.
+export GIT_CONFIG_COUNT=1
+export GIT_CONFIG_KEY_0=core.filemode
+export GIT_CONFIG_VALUE_0=false
 git config --global --add safe.directory "${WEBRTC_SRC}" || true
 git config --global --add safe.directory "${DEPS_ROOT}" || true
 git config --global --add safe.directory "${HOST_CHECKOUT}" || true
 
-# gclient root and the checkout must be one filesystem so cipd can rename
-# unpacked packages into place. The checkout is bind-mounted here.
+# gclient requires a real directory named src inside the deps root. The
+# worktree keeps its own name, so it is bind-mounted there. virtiofs still
+# rejects rename across that bind; android-docker-bin/cipd avoids it.
 if ! grep -qs " ${WEBRTC_SRC} " /proc/mounts; then
   mkdir -p "${WEBRTC_SRC}"
   sudo mount --bind "${HOST_CHECKOUT}" "${WEBRTC_SRC}"
 fi
 
 pipeline="${WEBRTC_SRC}/stream_build"
+# Ahead of depot_tools so `cipd ensure` hits the same-mount wrapper.
+export PATH="${pipeline}/scripts/android-docker-bin:${PATH}"
 deps_script="${WEBRTC_SRC}/build/install-build-deps.sh"
 # Stamp lives in the container, not on the host mount. A new container
 # installs packages again; the same container does not.

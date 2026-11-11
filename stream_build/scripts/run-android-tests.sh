@@ -16,6 +16,7 @@ EXTRA_ARGS="${EXTRA_ARGS:-}"
 ARCH_ARG="x64"
 ADB_SERVER_ARG=""
 CHECK_ARGS=0
+CHECK_DEVICE=0
 EMU_PID=""
 
 while [[ $# -gt 0 ]]; do
@@ -26,6 +27,7 @@ while [[ $# -gt 0 ]]; do
     --arch) ARCH_ARG="$2"; shift 2 ;;
     --adb-server) ADB_SERVER_ARG="$2"; shift 2 ;;
     --check-args) CHECK_ARGS=1; shift ;;
+    --check-device) CHECK_DEVICE=1; shift ;;
     *) die "run-android-tests.sh: unknown flag $1" ;;
   esac
 done
@@ -42,33 +44,41 @@ fi
 if [[ "$CHECK_ARGS" == 1 ]]; then
   exit 0
 fi
+# Device probe does not compile. With no ADB_SERVER the emulator is booted
+# after the build, so there is nothing to check yet.
+if [[ "$CHECK_DEVICE" == 1 && -z "$ADB_SERVER_ARG" ]]; then
+  exit 0
+fi
+# --check-device only queries adb. It must run on the Mac before Docker
+# starts, so it cannot require Linux or a built test tree.
+if [[ "$CHECK_DEVICE" != 1 ]]; then
+  require_linux
+  require_cmd python3
+  require_cmd vpython3
 
-require_linux
-require_cmd python3
-require_cmd vpython3
+  # Generated wrappers are `#!/usr/bin/env vpython3` and probe upward for
+  # .vpython3. out/ is a sibling of src/, so point vpython at the spec.
+  vpython_spec="${WEBRTC_SRC:-$(cd "${PIPELINE_DIR}/.." && pwd)}/.vpython3"
+  [[ -f "$vpython_spec" ]] || die "missing vpython spec: ${vpython_spec}"
 
-# Generated wrappers are `#!/usr/bin/env vpython3` and probe upward for
-# .vpython3. out/ is a sibling of src/, so point vpython at the spec.
-vpython_spec="${WEBRTC_SRC:-$(cd "${PIPELINE_DIR}/.." && pwd)}/.vpython3"
-[[ -f "$vpython_spec" ]] || die "missing vpython spec: ${vpython_spec}"
+  case "$ARCH_ARG" in
+    x64)
+      IMAGE="system-images;android-34;google_apis;x86_64"
+      IMAGE_DIR_ABI="x86_64"
+      ;;
+    arm64)
+      IMAGE="system-images;android-34;google_apis;arm64-v8a"
+      IMAGE_DIR_ABI="arm64-v8a"
+      ;;
+  esac
+  AVD_NAME="webrtc-test-${ARCH_ARG}"
 
-case "$ARCH_ARG" in
-  x64)
-    IMAGE="system-images;android-34;google_apis;x86_64"
-    IMAGE_DIR_ABI="x86_64"
-    ;;
-  arm64)
-    IMAGE="system-images;android-34;google_apis;arm64-v8a"
-    IMAGE_DIR_ABI="arm64-v8a"
-    ;;
-esac
-AVD_NAME="webrtc-test-${ARCH_ARG}"
+  [[ -n "$BUILD_DIR" && -n "$TARGETS" ]] || die "run-android-tests.sh requires --build-dir and --targets"
 
-[[ -n "$BUILD_DIR" && -n "$TARGETS" ]] || die "run-android-tests.sh requires --build-dir and --targets"
-
-webrtc_src="${WEBRTC_SRC:-$(cd "${PIPELINE_DIR}/.." && pwd)}"
-webrtc_sdk="${webrtc_src}/third_party/android_sdk/public"
-[[ -d "$webrtc_sdk" ]] || die "Android SDK missing at ${webrtc_sdk} (make deps with an android target_os)"
+  webrtc_src="${WEBRTC_SRC:-$(cd "${PIPELINE_DIR}/.." && pwd)}"
+  webrtc_sdk="${webrtc_src}/third_party/android_sdk/public"
+  [[ -d "$webrtc_sdk" ]] || die "Android SDK missing at ${webrtc_sdk} (make deps with an android target_os)"
+fi
 
 cleanup() {
   if [[ -n "${EMU_PID}" ]]; then
@@ -181,24 +191,38 @@ Omit ADB_SERVER to boot an emulator in this environment instead.
 EOF
     exit 1
   fi
-  if [[ "${#serials[@]}" -gt 1 ]]; then
+  # Prefer the first emulator-* whose ABI matches ARCH. A phone or other
+  # device is used only when no emulator matches, so extra devices can stay
+  # attached to the same adb server.
+  local serial abi want
+  local -a emu_serial=() emu_abi=() other_serial=() other_abi=() seen=()
+  for serial in "${serials[@]}"; do
+    abi="$(adb -s "$serial" shell getprop ro.product.cpu.abi 2>/dev/null | tr -d '\r')"
+    seen+=("${serial} ${abi:-unknown}")
+    want="$(arch_for_abi "$abi")"
+    [[ "$want" == "$ARCH_ARG" ]] || continue
+    if [[ "$serial" == emulator-* ]]; then
+      emu_serial+=("$serial")
+      emu_abi+=("$abi")
+    else
+      other_serial+=("$serial")
+      other_abi+=("$abi")
+    fi
+  done
+  if [[ "${#emu_serial[@]}" -gt 0 ]]; then
+    serial="${emu_serial[0]}"
+    abi="${emu_abi[0]}"
+  elif [[ "${#other_serial[@]}" -gt 0 ]]; then
+    serial="${other_serial[0]}"
+    abi="${other_abi[0]}"
+  else
     cat >&2 <<EOF
-error: adb server ${ADB_SERVER_ARG} has more than one device: ${serials[*]}.
-Leave one emulator running so the test binary is pushed to the device you expect, then rerun:
-  make test android ARCH=${ARCH_ARG} ADB_SERVER=${ADB_SERVER_ARG}
+error: adb server ${ADB_SERVER_ARG} has no ${ARCH_ARG} device.
+$(printf '  %s\n' "${seen[@]}")
+ARCH=arm64 needs arm64-v8a. ARCH=x64 needs x86_64.
+Rerun: make test android ARCH=${ARCH_ARG} ADB_SERVER=${ADB_SERVER_ARG}
 EOF
     exit 1
-  fi
-
-  local serial="${serials[0]}"
-  local abi want
-  abi="$(adb -s "$serial" shell getprop ro.product.cpu.abi | tr -d '\r')"
-  want="$(arch_for_abi "$abi")"
-  if [[ "$want" != "$ARCH_ARG" ]]; then
-    if [[ -n "$want" ]]; then
-      die "Device ${serial} on ${ADB_SERVER_ARG} is ${abi}. ARCH=${ARCH_ARG} builds a different test binary. Rerun: make test android ARCH=${want} ADB_SERVER=${ADB_SERVER_ARG}"
-    fi
-    die "Device ${serial} on ${ADB_SERVER_ARG} reports ABI '${abi}'. ARCH=${ARCH_ARG} needs arm64-v8a (ARCH=arm64) or x86_64 (ARCH=x64)."
   fi
   export ANDROID_SERIAL="$serial"
   echo "using ${serial} (${abi}) on adb server ${ADB_SERVER_ARG}"
@@ -323,6 +347,17 @@ run_target() {
   echo "running ${wrapper} ${args[*]}"
   vpython3 -vpython-spec "$vpython_spec" "$wrapper" "${args[@]}"
 }
+
+if [[ "$CHECK_DEVICE" == 1 ]]; then
+  webrtc_src="${WEBRTC_SRC:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
+  webrtc_sdk="${webrtc_src}/third_party/android_sdk/public"
+  if [[ -x "${webrtc_sdk}/platform-tools/adb" ]] \
+    && "${webrtc_sdk}/platform-tools/adb" version >/dev/null 2>&1; then
+    export PATH="${webrtc_sdk}/platform-tools:${PATH}"
+  fi
+  use_host_adb_server
+  exit 0
+fi
 
 ensure_device
 # shellcheck disable=SC2086

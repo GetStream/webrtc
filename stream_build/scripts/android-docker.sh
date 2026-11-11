@@ -159,8 +159,8 @@ launch_container() {
     return 0
   fi
 
-  # One mount for the worktree and the gclient root. cipd renames
-  # packages from <root>/.cipd into <root>/src, which fails across mounts.
+  # One mount for the worktree and the gclient root. cipd still renames
+  # across the checkout bind; android-docker-bin/cipd retargets ensure.
   local -a run=(docker run -d --name "$name" --platform linux/amd64 --init
     --privileged
     --label "stream.webrtc.checkout=${host_src}"
@@ -277,6 +277,9 @@ main() {
     -e "GIT_CACHE_PATH=${state}/.gclient-git-cache"
     -e "HOST_CHECKOUT=${host_src}"
     -e "STREAM_ANDROID_IN_DOCKER=1"
+    -e "GIT_CONFIG_COUNT=1"
+    -e "GIT_CONFIG_KEY_0=core.filemode"
+    -e "GIT_CONFIG_VALUE_0=false"
     -e "TARGET_OS=${target_os}"
     -e "CONFIG=${CONFIG:-release}"
     -e "JOBS=${JOBS:-8}"

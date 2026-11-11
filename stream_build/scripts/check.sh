@@ -87,6 +87,27 @@ source "$ROOT/scripts/android-docker.sh"
 [[ "$(rewrite_adb_server_for_container 127.0.0.1:5037)" == "host.docker.internal:5037" ]]
 [[ "$(rewrite_adb_server_for_container localhost:5037)" == "host.docker.internal:5037" ]]
 [[ "$(rewrite_adb_server_for_container 10.1.2.3:5037)" == "10.1.2.3:5037" ]]
+# shellcheck source=android-docker-bin/cipd
+source "$ROOT/scripts/android-docker-bin/cipd"
+cipd_in="$(mktemp)"
+cipd_out="$(mktemp)"
+cat >"$cipd_in" <<'EOF'
+$ParanoidMode CheckPresence
+$OverrideInstallMode copy
+
+@Subdir src/buildtools/linux64
+gn/gn/linux-amd64 version
+
+@Subdir src
+pkg version
+EOF
+rewrite_cipd_ensure_file "$cipd_in" "$cipd_out"
+grep -q '@Subdir buildtools/linux64' "$cipd_out"
+grep -qx '@Subdir .' "$cipd_out"
+printf '%s\n' '@Subdir other/place' >"$cipd_in"
+bad_cipd="$(rewrite_cipd_ensure_file "$cipd_in" "$cipd_out" 2>&1 || true)"
+printf '%s\n' "$bad_cipd" | grep -q 'outside src'
+rm -f "$cipd_in" "$cipd_out"
 android_test_banner="$(make -C "$ROOT" --no-print-directory announce VERB=test PLATFORM=android ARCH=arm64 ADB_SERVER=127.0.0.1:5037)"
 printf '%s\n' "$android_test_banner" | grep -q 'arch:       arm64'
 printf '%s\n' "$android_test_banner" | grep -q 'adb_server: 127.0.0.1:5037'
@@ -350,6 +371,15 @@ grep -q '"managed": False' "$deps_tmp/webrtc/.gclient"
 ! grep -q '"revision"' "$deps_tmp/webrtc/.gclient"
 grep -q 'sync -j2 --no-history --shallow --nohooks' "$deps_tmp/sync_args"
 ! grep -q -- '--revision' "$deps_tmp/sync_args"
+docker_deps_out="$(
+  PATH="$fake_bin:$PATH" \
+    DEPS_ROOT="$deps_tmp/webrtc" \
+    WEBRTC_SRC="$deps_tmp/webrtc/src" \
+    GIT_CACHE_PATH="$deps_tmp/webrtc/.gclient-git-cache" \
+    RUN_HOOKS=0 JOBS=2 STREAM_ANDROID_IN_DOCKER=1 \
+    "$ROOT/scripts/deps.sh" sync
+)"
+printf '%s\n' "$docker_deps_out" | grep -q 'running: gclient sync -j2 --force --no-history --shallow --nohooks'
 grep -q "$deps_tmp/webrtc/.gclient-git-cache" "$deps_tmp/cache_env"
 mkdir -p "$deps_tmp/webrtc/src/third_party/.git/objects/info"
 printf '%s\n' \

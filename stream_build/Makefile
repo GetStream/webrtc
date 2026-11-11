@@ -150,7 +150,7 @@ help:
 	@echo "  make build package ios     compile then pack"
 	@echo "  make build android ARCHS=arm64-v8a"
 	@echo "  make test android ARCH=x64|arm64"
-	@echo "  ADB_SERVER=host:port uses that adb server's emulator (127.0.0.1:5037)"
+	@echo "  ADB_SERVER=host:port uses the first matching emulator (checked before the test build)"
 	@echo "  omit ADB_SERVER to boot an emulator here (no /dev/kvm uses -accel off)"
 	@echo "  ANDROID_NAMESPACE=org.webrtc (default) or io.getstream.webrtc"
 	@echo "  make build ios GN_ARGS='rtc_use_h264=false' CONFIG=debug"
@@ -284,12 +284,15 @@ build test package:
 	if [[ "$(PLATFORM)" == android && "$$(uname -s)" != Linux && "$(STREAM_ANDROID_IN_DOCKER)" != 1 ]]; then \
 	  if [[ "$@" == test ]]; then \
 	    "$(SCRIPTS)/run-android-tests.sh" --check-args --arch "$(if $(ARCH),$(ARCH),x64)" $(if $(ADB_SERVER),--adb-server "$(ADB_SERVER)",); \
+	    if [[ -n "$(ADB_SERVER)" ]] && command -v adb >/dev/null 2>&1; then \
+	      "$(SCRIPTS)/run-android-tests.sh" --check-device --arch "$(if $(ARCH),$(ARCH),x64)" --adb-server "$(ADB_SERVER)"; \
+	    fi; \
 	  fi; \
 	  exec "$(SCRIPTS)/android-docker.sh" $@ $(PLATFORM); \
-	fi
-	@$(MAKE) --no-print-directory require-gclient
-	@$(MAKE) --no-print-directory announce VERB=$@ PLATFORM="$(PLATFORM)"
-	@$(MAKE) --no-print-directory $@-$(PLATFORM)
+	fi; \
+	$(MAKE) --no-print-directory require-gclient; \
+	$(MAKE) --no-print-directory announce VERB=$@ PLATFORM="$(PLATFORM)"; \
+	$(MAKE) --no-print-directory $@-$(PLATFORM)
 
 docker-cleanup:
 	@$(SCRIPTS)/android-docker.sh cleanup
@@ -437,6 +440,11 @@ test-macos: compile-tests-macos
 	 done
 
 compile-tests-android: validate-android-test-args require-linux maybe-deps require-src
+	# After deps, so platform-tools/adb exists. Skipped when ADB_SERVER is
+	# empty, which is how Linux CI boots its own emulator.
+	@if [[ -n "$(ADB_SERVER)" ]]; then \
+	  "$(SCRIPTS)/run-android-tests.sh" --check-device --arch "$(android_test_cpu)" --adb-server "$(ADB_SERVER)"; \
+	fi
 	@$(SCRIPTS)/gn-gen.sh \
 		--src "$(WEBRTC_SRC)" \
 		--out "$(ANDROID_TEST_OUT)" \
