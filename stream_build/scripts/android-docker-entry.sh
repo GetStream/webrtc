@@ -27,6 +27,21 @@ git config --global --add safe.directory "${WEBRTC_SRC}" || true
 git config --global --add safe.directory "${DEPS_ROOT}" || true
 
 pipeline="${WEBRTC_SRC}/stream_build"
+if [[ "${1:-}" == sync-nohooks ]]; then
+  make -C "$pipeline" deps TARGET_OS=android,unix RUN_HOOKS=0
+  exit 0
+fi
+
+linux_dir="${WEBRTC_SRC}/build/linux"
+if [[ -d "$linux_dir" ]]; then
+  sysroot_name=""
+  for sysroot_name in debian_bullseye_amd64-sysroot debian_bullseye_i386-sysroot; do
+    if [[ -d "${linux_dir}/${sysroot_name}" ]]; then
+      sudo chown "$(id -u):$(id -g)" "${linux_dir}/${sysroot_name}"
+    fi
+  done
+fi
+
 deps_script="${WEBRTC_SRC}/build/install-build-deps.sh"
 # Stamp lives in the container, not on the host mount. A new container
 # installs packages again; the same container does not.
