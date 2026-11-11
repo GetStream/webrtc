@@ -136,7 +136,7 @@ TEST(FrameCryptoCodec, RbspEscapeRoundTripAndSeed) {
   ArrayView<const uint8_t> data(raw);
   EXPECT_EQ(RbspEscapedLength(data, 0), 5u);
   std::vector<uint8_t> escaped(5);
-  RbspEscapeInto(escaped.data(), data, 0);
+  RbspEscapeInto(escaped, data, 0);
   const uint8_t want[] = {0, 0, 3, 1, 2};
   EXPECT_EQ(escaped, std::vector<uint8_t>(want, want + 5));
   EXPECT_EQ(RbspUnescape(escaped, 0), std::vector<uint8_t>(raw, raw + 4));
@@ -147,7 +147,7 @@ TEST(FrameCryptoCodec, RbspEscapeRoundTripAndSeed) {
   const uint8_t next[] = {1};
   EXPECT_EQ(RbspEscapedLength(next, 2), 2u);
   std::vector<uint8_t> seeded(2);
-  RbspEscapeInto(seeded.data(), next, 2);
+  RbspEscapeInto(seeded, next, 2);
   EXPECT_EQ(seeded, (std::vector<uint8_t>{3, 1}));
   EXPECT_EQ(RbspUnescape(seeded, 2), std::vector<uint8_t>(next, next + 1));
 }

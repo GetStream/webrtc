@@ -198,8 +198,11 @@ uint8_t LegacyUnencryptedBytes(const FrameCryptoInput& in) {
   if (*in.video_codec == kVideoCodecH264) {
     std::vector<H264::NaluIndex> nalu_indices = H264::FindNaluIndices(in.data);
     for (const auto& index : nalu_indices) {
-      const uint8_t* slice = in.data.data() + index.payload_start_offset;
-      H264::NaluType nalu_type = H264::ParseNaluType(slice[0]);
+      if (index.payload_start_offset >= in.data.size()) {
+        continue;
+      }
+      H264::NaluType nalu_type =
+          H264::ParseNaluType(in.data[index.payload_start_offset]);
       if (nalu_type == H264::NaluType::kIdr ||
           nalu_type == H264::NaluType::kSlice) {
         return static_cast<uint8_t>(index.payload_start_offset + 2);
@@ -210,8 +213,11 @@ uint8_t LegacyUnencryptedBytes(const FrameCryptoInput& in) {
   if (*in.video_codec == kVideoCodecH265) {
     std::vector<H265::NaluIndex> nalu_indices = H265::FindNaluIndices(in.data);
     for (const auto& index : nalu_indices) {
-      const uint8_t* slice = in.data.data() + index.payload_start_offset;
-      H265::NaluType nalu_type = H265::ParseNaluType(slice[0]);
+      if (index.payload_start_offset >= in.data.size()) {
+        continue;
+      }
+      H265::NaluType nalu_type =
+          H265::ParseNaluType(in.data[index.payload_start_offset]);
       if (IsH265SliceNalu(nalu_type)) {
         return static_cast<uint8_t>(index.payload_start_offset +
                                     H265::kNaluHeaderSize);
@@ -223,13 +229,12 @@ uint8_t LegacyUnencryptedBytes(const FrameCryptoInput& in) {
 }
 
 // LiveKit path: cheap scan for 00 00 03 before calling ParseRbsp.
-bool NeedsRbspUnescaping(const uint8_t* frame_data, size_t frame_size) {
-  if (frame_size < 3) {
+bool NeedsRbspUnescaping(ArrayView<const uint8_t> frame) {
+  if (frame.size() < 3) {
     return false;
   }
-  for (size_t i = 0; i < frame_size - 3; ++i) {
-    if (frame_data[i] == 0 && frame_data[i + 1] == 0 &&
-        frame_data[i + 2] == 3) {
+  for (size_t i = 0; i + 2 < frame.size(); ++i) {
+    if (frame[i] == 0 && frame[i + 1] == 0 && frame[i + 2] == 3) {
       return true;
     }
   }
@@ -902,8 +907,7 @@ bool DefaultEncryptionManager::EncryptFramed(const FrameCryptoInput& in,
   // AAD is the clear header, same as decode. SFU/RTP can read it; GCM
   // still authenticates it so a truncated header fails the tag.
   Buffer frame_header(local.data.data(), clear_bytes);
-  ArrayView<const uint8_t> payload(local.data.data() + clear_bytes,
-                                   local.data.size() - clear_bytes);
+  ArrayView<const uint8_t> payload = local.data.subspan(clear_bytes);
   std::vector<uint8_t> ciphertext;
   if (AesGcmCrypt(EncryptOrDecrypt::kEncrypt, material.key, payload, iv,
                   frame_header, &ciphertext) != kSuccess) {
@@ -925,10 +929,10 @@ bool DefaultEncryptionManager::EncryptFramed(const FrameCryptoInput& in,
     std::vector<uint8_t> unit;
     unit.reserve(ciphertext.size() + kFrameTrailerLen);
     unit.insert(unit.end(), ciphertext.begin(), ciphertext.end());
-    unit.insert(unit.end(), trailer_bytes, trailer_bytes + kFrameTrailerLen);
+    unit.insert(unit.end(), std::begin(trailer_bytes), std::end(trailer_bytes));
     const int seed = BoundarySeedZeros(frame_header);
     std::vector<uint8_t> escaped(RbspEscapedLength(unit, seed));
-    RbspEscapeInto(escaped.data(), unit, seed);
+    RbspEscapeInto(escaped, unit, seed);
     out.AppendData(escaped.data(), escaped.size());
   } else {
     out.AppendData(ciphertext.data(), ciphertext.size());
@@ -1001,8 +1005,9 @@ bool DefaultEncryptionManager::DecryptFramed(const FrameCryptoInput& in,
   } else {
     // Unescaped path: ciphertext is everything between the clear header and
     // the 20-byte trailer, including the 16-byte GCM tag.
-    ciphertext.assign(in.data.data() + clear_bytes,
-                      in.data.data() + in.data.size() - kFrameTrailerLen);
+    const size_t cipher_end = in.data.size() - kFrameTrailerLen;
+    auto cipher = in.data.subspan(clear_bytes, cipher_end - clear_bytes);
+    ciphertext.assign(cipher.begin(), cipher.end());
   }
 
   auto material = GetDecryptKey(std::string(in.participant_id), key_index);
@@ -1137,8 +1142,8 @@ bool DefaultEncryptionManager::EncryptLegacy(const FrameCryptoInput& in,
   frame_trailer[0] = LegacyIvSize();
   frame_trailer[1] = static_cast<uint8_t>(in.key_index);
   Buffer iv = MakeLegacyIv(in.ssrc, in.rtp_timestamp);
-  Buffer payload(in.data.data() + unencrypted_bytes,
-                 in.data.size() - unencrypted_bytes);
+  auto payload_bytes = in.data.subspan(unencrypted_bytes);
+  Buffer payload(payload_bytes.data(), payload_bytes.size());
   std::vector<uint8_t> buffer;
   if (AesGcmCrypt(EncryptOrDecrypt::kEncrypt, key_set->encryption_key, payload,
                   iv, frame_header, &buffer) != kSuccess) {
@@ -1215,15 +1220,16 @@ bool DefaultEncryptionManager::DecryptLegacy(const FrameCryptoInput& in,
   for (size_t i = 0; i < iv_length; i++) {
     iv[i] = in.data[in.data.size() - 2 - iv_length + i];
   }
-  Buffer encrypted_buffer(in.data.data() + unencrypted_bytes,
-                          in.data.size() - unencrypted_bytes);
+  auto encrypted_view = in.data.subspan(unencrypted_bytes);
+  Buffer encrypted_buffer(encrypted_view.data(), encrypted_view.size());
   if (in.video_codec && *in.video_codec == kVideoCodecH264 &&
-      NeedsRbspUnescaping(encrypted_buffer.data(), encrypted_buffer.size())) {
+      NeedsRbspUnescaping(ArrayView<const uint8_t>(encrypted_buffer.data(),
+                                                   encrypted_buffer.size()))) {
     encrypted_buffer.SetData(
         H264::ParseRbsp(encrypted_buffer.data(), encrypted_buffer.size()));
   } else if (in.video_codec && *in.video_codec == kVideoCodecH265 &&
-             NeedsRbspUnescaping(encrypted_buffer.data(),
-                                 encrypted_buffer.size())) {
+             NeedsRbspUnescaping(ArrayView<const uint8_t>(
+                 encrypted_buffer.data(), encrypted_buffer.size()))) {
     encrypted_buffer.SetData(
         H265::ParseRbsp(encrypted_buffer.data(), encrypted_buffer.size()));
   }

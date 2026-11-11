@@ -64,7 +64,7 @@ std::optional<FrameTrailer> ReadFrameTrailer(ArrayView<const uint8_t> src);
 std::optional<FrameTrailer> ReadUnescapedTrailerFields(
     ArrayView<const uint8_t> unit);
 
-void WriteFrameTrailer(uint8_t* dst,
+void WriteFrameTrailer(ArrayView<uint8_t> dst,
                        uint32_t counter,
                        ArrayView<const uint8_t> iv_prefix,
                        uint8_t key_index,
@@ -73,7 +73,7 @@ void WriteFrameTrailer(uint8_t* dst,
 
 // IV = 8-byte per-import prefix || 4-byte big-endian counter. Prefix is what
 // keeps two senders under a shared key from reusing the same GCM nonce.
-void FillFrameIv(uint8_t iv[12],
+void FillFrameIv(ArrayView<uint8_t> iv,
                  ArrayView<const uint8_t> prefix,
                  uint32_t counter);
 

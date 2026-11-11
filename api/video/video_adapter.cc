@@ -45,9 +45,12 @@ struct Fraction {
 
   // Determines number of output pixels if both width and height of an input of
   // `input_pixels` pixels is scaled with the fraction numerator / denominator.
+  // Multiply in int64. An int product overflows before the old cast widened it.
   int scale_pixel_count(int input_pixels) {
-    return (numerator * numerator * static_cast<int64_t>(input_pixels)) /
-           (denominator * denominator);
+    const int64_t scaled_pixels =
+        (static_cast<int64_t>(numerator) * numerator * input_pixels) /
+        (static_cast<int64_t>(denominator) * denominator);
+    return static_cast<int>(scaled_pixels);
   }
 };
 

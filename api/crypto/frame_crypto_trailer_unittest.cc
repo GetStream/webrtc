@@ -16,9 +16,9 @@
 
 #include "api/crypto/frame_crypto_trailer.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
-#include <cstring>
 #include <vector>
 
 #include "test/gtest.h"
@@ -33,7 +33,8 @@ std::array<uint8_t, 8> Prefix() {
 TEST(FrameCryptoTrailer, WriteThenReadRoundTrip) {
   // Parser requires clear_bytes <= payload before the 20-byte trailer.
   std::vector<uint8_t> frame(12 + kFrameTrailerLen);
-  WriteFrameTrailer(frame.data() + 12, 0x01020304, Prefix(), 9, 12, true);
+  WriteFrameTrailer(ArrayView<uint8_t>(frame).subspan(12), 0x01020304, Prefix(),
+                    9, 12, true);
   auto t = ReadFrameTrailer(frame);
   ASSERT_TRUE(t);
   EXPECT_EQ(t->frame_counter, 0x01020304u);
@@ -46,7 +47,8 @@ TEST(FrameCryptoTrailer, WriteThenReadRoundTrip) {
 
 TEST(FrameCryptoTrailer, RbspFlagOffWhenNotH264) {
   std::vector<uint8_t> frame(3 + kFrameTrailerLen);
-  WriteFrameTrailer(frame.data() + 3, 1, Prefix(), 0, 3, false);
+  WriteFrameTrailer(ArrayView<uint8_t>(frame).subspan(3), 1, Prefix(), 0, 3,
+                    false);
   auto t = ReadFrameTrailer(frame);
   ASSERT_TRUE(t);
   EXPECT_FALSE(t->is_rbsp);
@@ -57,7 +59,8 @@ std::vector<uint8_t> Framed(size_t body,
                             uint16_t clear_bytes,
                             uint8_t version = kFrameTrailerVersion) {
   std::vector<uint8_t> frame(body + kFrameTrailerLen, 0x99);
-  WriteFrameTrailer(frame.data() + body, 1, Prefix(), 0, clear_bytes, false);
+  WriteFrameTrailer(ArrayView<uint8_t>(frame).subspan(body), 1, Prefix(), 0,
+                    clear_bytes, false);
   frame[frame.size() - 5] = version;
   return frame;
 }
@@ -108,7 +111,8 @@ TEST(FrameCryptoTrailer, OversizeClearBytesIsNotATrailerButVersionStillReads) {
 
   // Same with the RBSP flag set: suffix is independent of that high bit.
   std::vector<uint8_t> rbsp(5 + kFrameTrailerLen, 0x99);
-  WriteFrameTrailer(rbsp.data() + 5, 1, Prefix(), 0, 6, true);
+  WriteFrameTrailer(ArrayView<uint8_t>(rbsp).subspan(5), 1, Prefix(), 0, 6,
+                    true);
   EXPECT_FALSE(ReadFrameTrailer(rbsp));
   EXPECT_EQ(ReadFramingVersion(rbsp), kFrameTrailerVersion);
 }
@@ -131,8 +135,11 @@ TEST(FrameCryptoTrailer, GrownFutureTrailerStillReadsSuffixFromEnd) {
   // Simulate a v2 trailer with 4 extra bytes ahead of the frozen suffix.
   auto src = Framed(5, 0);
   std::vector<uint8_t> grown(src.size() + 4, 0);
-  memcpy(grown.data(), src.data(), src.size() - 5);
-  memcpy(grown.data() + grown.size() - 5, src.data() + src.size() - 5, 5);
+  std::copy(src.begin(), src.end() - 5, grown.begin());
+  const ArrayView<const uint8_t> suffix =
+      ArrayView<const uint8_t>(src).subspan(src.size() - 5);
+  std::copy(suffix.begin(), suffix.end(),
+            ArrayView<uint8_t>(grown).subspan(grown.size() - 5).begin());
   grown[grown.size() - 5] = 2;
   EXPECT_EQ(ReadFramingVersion(grown), 2);
   EXPECT_FALSE(ReadFrameTrailer(grown));
@@ -158,7 +165,8 @@ TEST(FrameCryptoTrailer, FillFrameIvIsPrefixThenBigEndianCounter) {
 
 TEST(FrameCryptoTrailer, UnescapedFieldsRereadCounterPrefixKeyIndex) {
   std::vector<uint8_t> unit(4 + kFrameTrailerLen, 0xaa);
-  WriteFrameTrailer(unit.data() + 4, 42, Prefix(), 7, 0, false);
+  WriteFrameTrailer(ArrayView<uint8_t>(unit).subspan(4), 42, Prefix(), 7, 0,
+                    false);
   auto fields = ReadUnescapedTrailerFields(unit);
   ASSERT_TRUE(fields);
   EXPECT_EQ(fields->frame_counter, 42u);

@@ -870,7 +870,8 @@ std::vector<uint8_t> DummyFramedPayload(size_t body,
                                         uint8_t version = kFrameTrailerVersion,
                                         bool is_rbsp = false) {
   std::vector<uint8_t> frame(body + kFrameTrailerLen, 0x99);
-  WriteFrameTrailer(frame.data() + body, 1, kJsPrefix, 0, clear_bytes, is_rbsp);
+  WriteFrameTrailer(ArrayView<uint8_t>(frame).subspan(body), 1, kJsPrefix, 0,
+                    clear_bytes, is_rbsp);
   frame[frame.size() - 5] = version;
   return frame;
 }
