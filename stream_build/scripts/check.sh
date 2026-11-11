@@ -38,6 +38,7 @@ printf '%s\n' "$help_text" | grep -q 'make rename apple'
 printf '%s\n' "$help_text" | grep -q 'SKIP_MACCATALYST=1'
 printf '%s\n' "$help_text" | grep -q 'make package ios'
 printf '%s\n' "$help_text" | grep -q 'make package macos'
+printf '%s\n' "$help_text" | grep -q 'ADB_SERVER=host:port'
 printf '%s\n' "$help_text" | grep -q 'make migrate plan'
 ! printf '%s\n' "$help_text" | grep -q 'package apple'
 python3 "$ROOT/scripts/migration_gate.py" --selftest
@@ -70,6 +71,27 @@ printf '%s\n' "$debug" | grep -q 'rtc_use_h264 = false'
 android="$("${layout_make[@]}" -s print-gn-args TARGET=android-arm64-v8a)"
 printf '%s\n' "$android" | grep -q 'target_os = "android"'
 printf '%s\n' "$android" | grep -q 'target_cpu = "arm64"'
+
+bad_arch="$("$ROOT/scripts/run-android-tests.sh" --check-args --arch ppc 2>&1 || true)"
+printf '%s\n' "$bad_arch" | grep -q 'ARCH must be x64 or arm64'
+printf '%s\n' "$bad_arch" | grep -q 'arm64-v8a'
+bad_adb="$("$ROOT/scripts/run-android-tests.sh" --check-args --arch x64 --adb-server notes 2>&1 || true)"
+printf '%s\n' "$bad_adb" | grep -q 'host:port'
+"$ROOT/scripts/run-android-tests.sh" --check-args --arch arm64 --adb-server 127.0.0.1:5037
+bad_make="$(make -C "$ROOT" validate-android-test-args ARCH=ppc 2>&1 || true)"
+printf '%s\n' "$bad_make" | grep -q 'ARCH must be x64 or arm64'
+make -C "$ROOT" validate-android-test-args ARCH=arm64 ADB_SERVER=10.0.0.8:5037
+# shellcheck source=android-docker.sh
+source "$ROOT/scripts/android-docker.sh"
+[[ "$(rewrite_adb_server_for_container 127.0.0.1:5037)" == "host.docker.internal:5037" ]]
+[[ "$(rewrite_adb_server_for_container localhost:5037)" == "host.docker.internal:5037" ]]
+[[ "$(rewrite_adb_server_for_container 10.1.2.3:5037)" == "10.1.2.3:5037" ]]
+android_test_banner="$(make -C "$ROOT" --no-print-directory announce VERB=test PLATFORM=android ARCH=arm64 ADB_SERVER=127.0.0.1:5037)"
+printf '%s\n' "$android_test_banner" | grep -q 'arch:       arm64'
+printf '%s\n' "$android_test_banner" | grep -q 'adb_server: 127.0.0.1:5037'
+android_local_banner="$(make -C "$ROOT" --no-print-directory announce VERB=test PLATFORM=android)"
+printf '%s\n' "$android_local_banner" | grep -q 'arch:       x64'
+printf '%s\n' "$android_local_banner" | grep -q 'emulator:   local'
 
 ninja_target="$("$ROOT/scripts/gn-gen.sh" --ninja-target ios-arm64-device)"
 [[ "$ninja_target" == framework_objc ]]

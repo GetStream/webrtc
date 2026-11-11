@@ -1,13 +1,47 @@
 #!/usr/bin/env bash
-# Run Android gtests on an adb device. Starts an x64 emulator when none is connected.
-# System image is API 34 google_apis x86_64, downloaded into the
-# WebRTC SDK tree on each cold run (third_party is not in the Hetzner cache).
-# Upgrade path: bake that image into the runner or the build-android cache.
+# Run Android gtests on an adb device.
+# ADB_SERVER (host:port) uses an emulator already on that server.
+# With no server, this environment boots an API 34 google_apis image
+# for ARCH (x64 or arm64). The image is stored in the WebRTC SDK tree.
+# No /dev/kvm starts that emulator with -accel off.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
 source "${SCRIPT_DIR}/common.sh"
+
+BUILD_DIR=""
+TARGETS=""
+EXTRA_ARGS="${EXTRA_ARGS:-}"
+ARCH_ARG="x64"
+ADB_SERVER_ARG=""
+CHECK_ARGS=0
+EMU_PID=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --build-dir) BUILD_DIR="$2"; shift 2 ;;
+    --targets) TARGETS="$2"; shift 2 ;;
+    --extra) EXTRA_ARGS="${2:-}"; shift 2 ;;
+    --arch) ARCH_ARG="$2"; shift 2 ;;
+    --adb-server) ADB_SERVER_ARG="$2"; shift 2 ;;
+    --check-args) CHECK_ARGS=1; shift ;;
+    *) die "run-android-tests.sh: unknown flag $1" ;;
+  esac
+done
+
+case "$ARCH_ARG" in
+  x64|arm64) ;;
+  *)
+    die "ARCH must be x64 or arm64 (got '${ARCH_ARG}'). x64 matches the Linux CI emulator. arm64 matches an arm64-v8a emulator."
+    ;;
+esac
+if [[ -n "$ADB_SERVER_ARG" && ! "$ADB_SERVER_ARG" =~ ^[A-Za-z0-9._-]+:[0-9]+$ ]]; then
+  die "ADB_SERVER must be host:port, for example 127.0.0.1:5037 (got '${ADB_SERVER_ARG}')."
+fi
+if [[ "$CHECK_ARGS" == 1 ]]; then
+  exit 0
+fi
 
 require_linux
 require_cmd python3
@@ -18,21 +52,17 @@ require_cmd vpython3
 vpython_spec="${WEBRTC_SRC:-$(cd "${PIPELINE_DIR}/.." && pwd)}/.vpython3"
 [[ -f "$vpython_spec" ]] || die "missing vpython spec: ${vpython_spec}"
 
-BUILD_DIR=""
-TARGETS=""
-EXTRA_ARGS="${EXTRA_ARGS:-}"
-IMAGE="system-images;android-34;google_apis;x86_64"
-AVD_NAME="webrtc-test"
-EMU_PID=""
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --build-dir) BUILD_DIR="$2"; shift 2 ;;
-    --targets) TARGETS="$2"; shift 2 ;;
-    --extra) EXTRA_ARGS="${2:-}"; shift 2 ;;
-    *) die "run-android-tests.sh: unknown flag $1" ;;
-  esac
-done
+case "$ARCH_ARG" in
+  x64)
+    IMAGE="system-images;android-34;google_apis;x86_64"
+    IMAGE_DIR_ABI="x86_64"
+    ;;
+  arm64)
+    IMAGE="system-images;android-34;google_apis;arm64-v8a"
+    IMAGE_DIR_ABI="arm64-v8a"
+    ;;
+esac
+AVD_NAME="webrtc-test-${ARCH_ARG}"
 
 [[ -n "$BUILD_DIR" && -n "$TARGETS" ]] || die "run-android-tests.sh requires --build-dir and --targets"
 
@@ -101,40 +131,109 @@ install_emulator() {
     export JAVA_HOME="$jdk"
     export PATH="${JAVA_HOME}/bin:${PATH}"
   fi
-  echo "installing ${IMAGE} into ${webrtc_sdk}"
+  echo "installing ${IMAGE} into ${webrtc_sdk} (kept on the host; the next run reuses it)"
   yes | "$sdkmanager" --sdk_root="$webrtc_sdk" --licenses >/dev/null || true
   "$sdkmanager" --sdk_root="$webrtc_sdk" \
     "cmdline-tools;latest" "platform-tools" "emulator" "$IMAGE"
 }
 
-ensure_device() {
-  export ANDROID_SDK_ROOT="$webrtc_sdk"
-  export ANDROID_HOME="$webrtc_sdk"
-  export PATH="${webrtc_sdk}/platform-tools:${PATH}"
+arch_for_abi() {
+  case "$1" in
+    arm64-v8a) printf 'arm64\n' ;;
+    x86_64) printf 'x64\n' ;;
+    *) printf '\n' ;;
+  esac
+}
 
-  if device_ready; then
-    echo "using connected adb device"
-    return 0
+use_host_adb_server() {
+  local host="${ADB_SERVER_ARG%:*}"
+  local port="${ADB_SERVER_ARG##*:}"
+  export ADB_SERVER_SOCKET="tcp:${host}:${port}"
+  unset ANDROID_ADB_SERVER_PORT || true
+  command -v adb >/dev/null 2>&1 || die "adb is not in ${webrtc_sdk}/platform-tools. Run make deps with TARGET_OS=android,unix so the Linux adb client is on the host tree."
+
+  local listing
+  listing="$(adb devices 2>&1 || true)"
+  if grep -Eq 'failed to connect|cannot connect|Connection refused|No such file' <<<"$listing"; then
+    cat >&2 <<EOF
+error: cannot reach adb server at ${ADB_SERVER_ARG} from this environment ($(uname -s)).
+${listing}
+A server started as plain adb listens only on 127.0.0.1, so a container cannot use the host's localhost.
+Restart it so it listens beyond localhost, then rerun the same command:
+  adb -a -P ${port} nodaemon server
+  make test android ARCH=${ARCH_ARG} ADB_SERVER=${ADB_SERVER_ARG}
+EOF
+    exit 1
   fi
 
-  local emulator_bin image_dir
+  local serials=()
+  while IFS= read -r serial; do
+    [[ -n "$serial" ]] && serials+=("$serial")
+  done < <(printf '%s\n' "$listing" | awk 'NR>1 && $2=="device" { print $1 }')
+
+  if [[ "${#serials[@]}" -eq 0 ]]; then
+    cat >&2 <<EOF
+error: adb server ${ADB_SERVER_ARG} has no device in state device.
+${listing}
+Start one emulator on that server and rerun:
+  make test android ARCH=${ARCH_ARG} ADB_SERVER=${ADB_SERVER_ARG}
+Omit ADB_SERVER to boot an emulator in this environment instead.
+EOF
+    exit 1
+  fi
+  if [[ "${#serials[@]}" -gt 1 ]]; then
+    cat >&2 <<EOF
+error: adb server ${ADB_SERVER_ARG} has more than one device: ${serials[*]}.
+Leave one emulator running so the test binary is pushed to the device you expect, then rerun:
+  make test android ARCH=${ARCH_ARG} ADB_SERVER=${ADB_SERVER_ARG}
+EOF
+    exit 1
+  fi
+
+  local serial="${serials[0]}"
+  local abi want
+  abi="$(adb -s "$serial" shell getprop ro.product.cpu.abi | tr -d '\r')"
+  want="$(arch_for_abi "$abi")"
+  if [[ "$want" != "$ARCH_ARG" ]]; then
+    if [[ -n "$want" ]]; then
+      die "Device ${serial} on ${ADB_SERVER_ARG} is ${abi}. ARCH=${ARCH_ARG} builds a different test binary. Rerun: make test android ARCH=${want} ADB_SERVER=${ADB_SERVER_ARG}"
+    fi
+    die "Device ${serial} on ${ADB_SERVER_ARG} reports ABI '${abi}'. ARCH=${ARCH_ARG} needs arm64-v8a (ARCH=arm64) or x86_64 (ARCH=x64)."
+  fi
+  export ANDROID_SERIAL="$serial"
+  echo "using ${serial} (${abi}) on adb server ${ADB_SERVER_ARG}"
+}
+
+boot_local_emulator() {
+  unset ADB_SERVER_SOCKET || true
+  unset ANDROID_ADB_SERVER_PORT || true
+  unset ANDROID_ADB_SERVER_ADDRESS || true
+  unset ANDROID_SERIAL || true
+
+  local emulator_bin image_dir accel wait_iters
   emulator_bin="${webrtc_sdk}/emulator/emulator"
-  image_dir="${webrtc_sdk}/system-images/android-34/google_apis/x86_64"
+  image_dir="${webrtc_sdk}/system-images/android-34/google_apis/${IMAGE_DIR_ABI}"
   if [[ ! -x "$emulator_bin" || ! -d "$image_dir" ]]; then
     install_emulator
   fi
-  [[ -x "$emulator_bin" && -d "$image_dir" ]] || die "emulator or ${IMAGE} still missing under ${webrtc_sdk}"
-  export PATH="${webrtc_sdk}/platform-tools:${PATH}"
-  command -v adb >/dev/null 2>&1 || die "adb missing after emulator install"
+  [[ -x "$emulator_bin" && -d "$image_dir" ]] || die "emulator or ${IMAGE} still missing under ${webrtc_sdk}. sdkmanager writes that tree on the host; rerun make test android ARCH=${ARCH_ARG}."
+  command -v adb >/dev/null 2>&1 || die "adb missing after emulator install under ${webrtc_sdk}/platform-tools"
 
   if [[ -c /dev/kvm && ! -w /dev/kvm ]]; then
-    sudo chmod 666 /dev/kvm || die "/dev/kvm is not writable"
+    sudo chmod 666 /dev/kvm || die "/dev/kvm exists but is not writable, so the emulator cannot use hardware acceleration."
   fi
-  [[ -w /dev/kvm ]] || die "Android emulator needs /dev/kvm or an already connected adb device"
+  if [[ -w /dev/kvm ]]; then
+    accel="on"
+    wait_iters=150
+  else
+    accel="off"
+    wait_iters=450
+    echo "No /dev/kvm in this environment. Starting the emulator with -accel off (software CPU). Boot is much slower than Linux CI."
+  fi
 
   local avdmanager
   avdmanager="$(find_sdk_bin avdmanager "$webrtc_sdk" "${RUNNER_SDK_ROOTS[@]+"${RUNNER_SDK_ROOTS[@]}"}" || true)"
-  [[ -n "$avdmanager" ]] || die "avdmanager not found after installing cmdline-tools"
+  [[ -n "$avdmanager" ]] || die "avdmanager not found under ${webrtc_sdk}. cmdline-tools are installed with the system image; rerun make deps with TARGET_OS=android,unix."
 
   export ANDROID_AVD_HOME="${BUILD_DIR}/avd"
   export ANDROID_EMULATOR_HOME="${BUILD_DIR}/emulator-home"
@@ -143,26 +242,61 @@ ensure_device() {
 no
 EOF
 
-  echo "starting emulator ${AVD_NAME}"
+  echo "starting emulator ${AVD_NAME} (-accel ${accel})"
   "$emulator_bin" -avd "$AVD_NAME" -no-window -no-audio -no-boot-anim \
-    -gpu swiftshader_indirect -no-snapshot -accel on \
+    -gpu swiftshader_indirect -no-snapshot -accel "$accel" \
     >"${BUILD_DIR}/emulator.log" 2>&1 &
   EMU_PID=$!
 
-  adb wait-for-device
-  local _ boot
-  for _ in $(seq 1 150); do
+  adb wait-for-device &
+  local wait_pid=$! _ boot
+  for _ in $(seq 1 "$wait_iters"); do
+    if ! kill -0 "$EMU_PID" 2>/dev/null; then
+      kill "$wait_pid" 2>/dev/null || true
+      wait "$wait_pid" 2>/dev/null || true
+      die "emulator exited early (-accel ${accel}); see ${BUILD_DIR}/emulator.log"
+    fi
+    if ! kill -0 "$wait_pid" 2>/dev/null; then
+      break
+    fi
+    sleep 2
+  done
+  if kill -0 "$wait_pid" 2>/dev/null; then
+    kill "$wait_pid" 2>/dev/null || true
+    wait "$wait_pid" 2>/dev/null || true
+    die "emulator did not open an adb port within $((wait_iters * 2))s (-accel ${accel}); see ${BUILD_DIR}/emulator.log"
+  fi
+  for _ in $(seq 1 "$wait_iters"); do
     boot="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
     if [[ "$boot" == "1" ]]; then
       echo "emulator booted"
       return 0
     fi
     if ! kill -0 "$EMU_PID" 2>/dev/null; then
-      die "emulator exited early; see ${BUILD_DIR}/emulator.log"
+      die "emulator exited early (-accel ${accel}); see ${BUILD_DIR}/emulator.log"
     fi
     sleep 2
   done
-  die "emulator did not finish booting; see ${BUILD_DIR}/emulator.log"
+  die "emulator did not finish booting within $((wait_iters * 2))s (-accel ${accel}); see ${BUILD_DIR}/emulator.log"
+}
+
+ensure_device() {
+  export ANDROID_SDK_ROOT="$webrtc_sdk"
+  export ANDROID_HOME="$webrtc_sdk"
+  export PATH="${webrtc_sdk}/platform-tools:${PATH}"
+
+  if [[ -n "$ADB_SERVER_ARG" ]]; then
+    use_host_adb_server
+    return 0
+  fi
+  unset ADB_SERVER_SOCKET || true
+  unset ANDROID_ADB_SERVER_PORT || true
+  unset ANDROID_ADB_SERVER_ADDRESS || true
+  if device_ready; then
+    echo "using connected adb device"
+    return 0
+  fi
+  boot_local_emulator
 }
 
 run_target() {

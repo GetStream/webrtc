@@ -169,7 +169,7 @@ not use `${{ secrets.* }}`. `products-*` / `final-*` stay on
 
 - bootstrap: any host (writes layout + `.gclient`; no depot_tools)
 - ios / macos / combine / rename apple: Darwin
-- android / rename android: Linux for build/package/test; rename android is a file copy on any host
+- android / rename android: Linux runs build/package/test directly. macOS and Windows re-exec the same `make` inside a local `linux/amd64` container (`stream_build/scripts/android-docker.sh`); sources, deps, `out/`, and `products/` stay on the host. A case-insensitive checkout needs `ANDROID_CASE_VOLUME`. rename android is a file copy on any host. `make test android ARCH=x64|arm64`. `ADB_SERVER=host:port` uses that server's emulator. Omit `ADB_SERVER` to boot an API 34 emulator in the Linux environment (`-accel off` when `/dev/kvm` is missing).
 - windows: Windows
 - deps / runhooks: any host with depot_tools
 
@@ -184,6 +184,9 @@ not use `${{ secrets.* }}`. `products-*` / `final-*` stay on
 | `OUT` / `PRODUCTS` | ninja dirs / packaged output (default under `DEPS_ROOT`, sibling of `src`) |
 | `GIT_CACHE_PATH` | gclient object cache (default `DEPS_ROOT/.gclient-git-cache`) |
 | `ARCHS` | android ABI or windows cpu (`arm64-v8a`, `x64`, …) |
+| `ARCH` | Android test CPU: `x64` (default, CI emulator) or `arm64`. Output is `src/out/android_tests` or `src/out/android_tests_arm64`. |
+| `ADB_SERVER` | `host:port` of an adb server that already has one emulator. Loopback is rewritten to `host.docker.internal` inside the container. Omit it to boot an emulator in the Linux environment. |
+| `ANDROID_CASE_VOLUME` | Case-sensitive host directory used for gclient trees and `out/` when `DEPS_ROOT` is case-insensitive. |
 | `JOBS` | ninja/gclient parallelism |
 | `SHALLOW` | `1` (default) `gclient sync --no-history --shallow`. `0` = full history. |
 | `ZIP` | Defaults to `1` for Apple package commands (`0` opts out); `0` for combine/Windows (`1` opts in). |

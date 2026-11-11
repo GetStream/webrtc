@@ -71,11 +71,14 @@ IOS_TEST_TARGETS   ?= sdk_unittests sdk_framework_unittests
 MACOS_TEST_TARGETS ?= rtc_unittests rtc_pc_unittests rtc_stats_unittests
 WINDOWS_TEST_TARGETS ?= rtc_unittests rtc_pc_unittests rtc_stats_unittests
 ANDROID_TEST_TARGETS ?= rtc_unittests
+# ARCH selects the Android test ABI. Empty and x64 keep the CI output path.
+android_test_cpu = $(if $(filter arm64,$(ARCH)),arm64,x64)
 # Chromium's Android runner drops leading ".." from data-dep paths. That
 # lands on resources/ only when the output directory is inside src.
 # webrtc/out/android_tests pushes to src/resources/..., and tests open
 # /sdcard/chromium_tests_root/resources/...
-ANDROID_TEST_OUT := $(WEBRTC_SRC)/out/android_tests
+ANDROID_TEST_OUT := $(WEBRTC_SRC)/out/android_tests$(if $(filter arm64,$(android_test_cpu)),_arm64,)
+ADB_SERVER ?=
 
 ios_slices      = $(if $(filter 1,$(SKIP_MACCATALYST)),$(filter-out $(CATALYST_SLICES),$(IOS_SLICES)),$(IOS_SLICES))
 android_slices  = $(if $(ARCHS),$(addprefix android-,$(ARCHS)),$(ANDROID_SLICES))
@@ -88,12 +91,13 @@ PLATFORM  := $(firstword $(filter $(PLATFORMS),$(MAKECMDGOALS)))
 export DEPS_ROOT WEBRTC_SRC WEBRTC_ROOT WEBRTC_REPO WEBRTC_REVISION WEBRTC_REF
 export TARGET_OS JOBS SHALLOW RUN_HOOKS CONFIG OUT PRODUCTS ARCHS SKIP_LICENSES
 export GN_ARGS EXTRA_GN_ARGS ALL_GN_ARGS GIT_CACHE_PATH CONFIRM BOOTSTRAP_SRC
+export ANDROID_NAMESPACE ARCH ADB_SERVER ANDROID_CASE_VOLUME STREAM_ANDROID_IN_DOCKER
 
 .DEFAULT_GOAL := help
 
 .PHONY: help check bootstrap deps runhooks gen ninja slice clean print-gn-args \
 	announce require-layout require-gclient require-src require-darwin \
-	require-linux require-windows maybe-deps \
+	require-linux require-windows maybe-deps validate-android-test-args \
 	combine apple rename rename-apple rename-android rewrite-android-namespace \
 	migrate plan prepare open issue \
 	$(PLATFORMS) $(VERBS) \
@@ -143,13 +147,16 @@ help:
 	@echo "  make rename android AAR=path/to/libwebrtc.aar"
 	@echo "  make build package ios     compile then pack"
 	@echo "  make build android ARCHS=arm64-v8a"
+	@echo "  make test android ARCH=x64|arm64"
+	@echo "  ADB_SERVER=host:port uses that adb server's emulator (127.0.0.1:5037)"
+	@echo "  omit ADB_SERVER to boot an emulator here (no /dev/kvm uses -accel off)"
 	@echo "  ANDROID_NAMESPACE=org.webrtc (default) or io.getstream.webrtc"
 	@echo "  make build ios GN_ARGS='rtc_use_h264=false' CONFIG=debug"
 	@echo "  make bootstrap CONFIRM=1"
 	@echo "  make build ios SKIP_MACCATALYST=1"
 	@echo
 	@echo "Also: deps runhooks check clean print-gn-args TARGET=slice"
-	@echo "Vars: DEPS_ROOT WEBRTC_SRC OUT PRODUCTS GIT_CACHE_PATH CONFIG GN_ARGS JOBS SHALLOW ARCHS ZIP XCFRAMEWORK AAR RENAMED ANDROID_NAMESPACE SKIP_DEPS SKIP_LICENSES SKIP_MACCATALYST CONFIRM"
+	@echo "Vars: DEPS_ROOT WEBRTC_SRC OUT PRODUCTS GIT_CACHE_PATH CONFIG GN_ARGS JOBS SHALLOW ARCHS ARCH ADB_SERVER ANDROID_CASE_VOLUME ZIP XCFRAMEWORK AAR RENAMED ANDROID_NAMESPACE SKIP_DEPS SKIP_LICENSES SKIP_MACCATALYST CONFIRM"
 	@echo "OUT defaults to DEPS_ROOT/out (sibling of src)."
 
 check:
@@ -243,7 +250,14 @@ announce:
 	   case "$(PLATFORM)" in \
 	     ios) echo "    tests:      $(if $(TEST_TARGETS),$(TEST_TARGETS),$(IOS_TEST_TARGETS))" ;; \
 	     macos) echo "    tests:      $(if $(TEST_TARGETS),$(TEST_TARGETS),$(MACOS_TEST_TARGETS))" ;; \
-	     android) echo "    tests:      $(if $(TEST_TARGETS),$(TEST_TARGETS),$(ANDROID_TEST_TARGETS))" ;; \
+	     android) \
+	       echo "    tests:      $(if $(TEST_TARGETS),$(TEST_TARGETS),$(ANDROID_TEST_TARGETS))"; \
+	       echo "    arch:       $(android_test_cpu)"; \
+	       if [[ -n "$(ADB_SERVER)" ]]; then \
+	         echo "    adb_server: $(ADB_SERVER)"; \
+	       else \
+	         echo "    emulator:   local"; \
+	       fi ;; \
 	     windows) echo "    tests:      $(if $(TEST_TARGETS),$(TEST_TARGETS),$(WINDOWS_TEST_TARGETS))" ;; \
 	   esac; \
 	 fi; \
@@ -264,8 +278,18 @@ announce:
 
 build test package: require-gclient
 	@test -n "$(PLATFORM)" || { echo "usage: make $@ ios|android|macos|windows"; exit 1; }
+	@set -euo pipefail; \
+	if [[ "$(PLATFORM)" == android && "$$(uname -s)" != Linux && "$(STREAM_ANDROID_IN_DOCKER)" != 1 ]]; then \
+	  if [[ "$@" == test ]]; then \
+	    "$(SCRIPTS)/run-android-tests.sh" --check-args --arch "$(if $(ARCH),$(ARCH),x64)" $(if $(ADB_SERVER),--adb-server "$(ADB_SERVER)",); \
+	  fi; \
+	  exec "$(SCRIPTS)/android-docker.sh" $@ $(PLATFORM); \
+	fi
 	@$(MAKE) --no-print-directory announce VERB=$@ PLATFORM="$(PLATFORM)"
 	@$(MAKE) --no-print-directory $@-$(PLATFORM)
+
+validate-android-test-args:
+	@$(SCRIPTS)/run-android-tests.sh --check-args --arch "$(if $(ARCH),$(ARCH),x64)" $(if $(ADB_SERVER),--adb-server "$(ADB_SERVER)",)
 
 combine: require-darwin require-src
 	@$(MAKE) --no-print-directory announce VERB=combine PLATFORM=
@@ -406,13 +430,13 @@ test-macos: compile-tests-macos
 	   "$(OUT)/webrtc_tests/$$target" --gtest_filter="-$$filter" $(EXTRA_ARGS); \
 	 done
 
-compile-tests-android: require-linux maybe-deps require-src
+compile-tests-android: validate-android-test-args require-linux maybe-deps require-src
 	@$(SCRIPTS)/gn-gen.sh \
 		--src "$(WEBRTC_SRC)" \
 		--out "$(ANDROID_TEST_OUT)" \
 		--config debug \
 		--overlay android-test \
-		--extra "$(ALL_GN_ARGS)"
+		--extra "$(strip $(ALL_GN_ARGS) target_cpu=\"$(android_test_cpu)\")"
 	@ninja_bin="$$($(SCRIPTS)/common.sh ninja "$(WEBRTC_SRC)")"; \
 	 targets="$(if $(TEST_TARGETS),$(TEST_TARGETS),$(ANDROID_TEST_TARGETS))"; \
 	 echo "$$ninja_bin -C $(ANDROID_TEST_OUT) $$targets"; \
@@ -422,6 +446,8 @@ test-android: compile-tests-android
 	@$(SCRIPTS)/run-android-tests.sh \
 		--build-dir "$(ANDROID_TEST_OUT)" \
 		--targets "$(if $(TEST_TARGETS),$(TEST_TARGETS),$(ANDROID_TEST_TARGETS))" \
+		--arch "$(android_test_cpu)" \
+		$(if $(ADB_SERVER),--adb-server "$(ADB_SERVER)",) \
 		$(if $(EXTRA_ARGS),--extra "$(EXTRA_ARGS)",)
 
 test-windows: require-windows maybe-deps require-src
