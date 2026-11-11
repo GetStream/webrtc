@@ -169,7 +169,7 @@ not use `${{ secrets.* }}`. `products-*` / `final-*` stay on
 
 - bootstrap: any host (writes layout + `.gclient`; no depot_tools)
 - ios / macos / combine / rename apple: Darwin
-- android / rename android: Linux runs build/package/test directly. macOS and Windows re-exec the same `make` inside a local `linux/amd64` container (`stream_build/scripts/android-docker.sh`); sources, deps, `out/`, and `products/` stay on the host. On a case-insensitive host, the Debian sysroot (`src/build/linux`) stays on Docker's disk because that archive has paths that differ only by case. rename android is a file copy on any host. `make test android ARCH=x64|arm64`. `ADB_SERVER=host:port` uses that server's emulator. Omit `ADB_SERVER` to boot an API 34 emulator in the Linux environment (`-accel off` when `/dev/kvm` is missing).
+- android / rename android: Linux runs build/package/test directly. macOS and Windows re-exec the same `make` inside a local `linux/amd64` container (`stream_build/scripts/android-docker.sh`). The checkout is mounted at `/webrtc/src` in the container, so a git worktree does not have to be renamed. `out/` and `products/` stay in the checkout. On a case-insensitive host, the Debian sysroot (`src/build/linux`) stays on Docker's disk because that archive has paths that differ only by case. rename android is a file copy on any host. `make test android ARCH=x64|arm64`. `ADB_SERVER=host:port` uses that server's emulator. Omit `ADB_SERVER` to boot an API 34 emulator in the Linux environment (`-accel off` when `/dev/kvm` is missing).
 - windows: Windows
 - deps / runhooks: any host with depot_tools
 

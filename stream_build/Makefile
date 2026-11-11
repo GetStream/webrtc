@@ -276,7 +276,7 @@ announce:
 	   echo "    developer:  $${DEVELOPER_DIR:-$$(xcode-select -p 2>/dev/null)}"; \
 	 fi
 
-build test package: require-gclient
+build test package:
 	@test -n "$(PLATFORM)" || { echo "usage: make $@ ios|android|macos|windows"; exit 1; }
 	@set -euo pipefail; \
 	if [[ "$(PLATFORM)" == android && "$$(uname -s)" != Linux && "$(STREAM_ANDROID_IN_DOCKER)" != 1 ]]; then \
@@ -285,6 +285,7 @@ build test package: require-gclient
 	  fi; \
 	  exec "$(SCRIPTS)/android-docker.sh" $@ $(PLATFORM); \
 	fi
+	@$(MAKE) --no-print-directory require-gclient
 	@$(MAKE) --no-print-directory announce VERB=$@ PLATFORM="$(PLATFORM)"
 	@$(MAKE) --no-print-directory $@-$(PLATFORM)
 

@@ -67,7 +67,7 @@ require_docker() {
 
 ensure_image() {
   local tag="$1"
-  local stamp="${DEPS_ROOT}/.android-docker-image-stamp"
+  local stamp="${WEBRTC_SRC}/.android-gclient/.android-docker-image-stamp"
   if docker image inspect "$tag" >/dev/null 2>&1 \
     && [[ -f "$stamp" && "$stamp" -nt "$DOCKERFILE" ]]; then
     return 0
@@ -82,26 +82,40 @@ ensure_image() {
   touch "$stamp"
 }
 
+# gclient requires the checkout to be a real directory named src whose parent
+# is named webrtc. A worktree keeps its own folder name. Inside the container
+# the worktree is mounted at this path, so the host directory does not move.
+CONTAINER_ROOT="/webrtc"
+
 main() {
   local goal="${1:-}"
   local platform="${2:-}"
   [[ "$goal" == build || "$goal" == test || "$goal" == package ]] || die "android-docker.sh: expected build|test|package, got '${goal}'"
   [[ "$platform" == android ]] || die "android-docker.sh: expected android, got '${platform}'"
-  [[ -n "${DEPS_ROOT:-}" && -n "${WEBRTC_SRC:-}" && -n "${OUT:-}" ]] || die "DEPS_ROOT, WEBRTC_SRC, and OUT are required"
+  if [[ -z "${WEBRTC_SRC:-}" ]]; then
+    WEBRTC_SRC="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+  fi
+  [[ -f "${WEBRTC_SRC}/DEPS" ]] || die "No WebRTC checkout at ${WEBRTC_SRC} (missing DEPS)"
 
   require_docker
+
+  local host_src="$WEBRTC_SRC"
+  local state="${host_src}/.android-gclient"
+  local container_src="${CONTAINER_ROOT}/src"
+  local container_out="${CONTAINER_ROOT}/out"
+  local container_products="${CONTAINER_ROOT}/products"
 
   # Inside the container, gclient's host is Linux, so it unpacks the Debian
   # sysroot under src/build/linux. That archive has headers that differ only
   # by case. The checkout and products stay on the host disk. The sysroot
   # stays on Docker's own disk when the host filesystem is case-insensitive.
   local sysroot_volume=""
-  if ! filesystem_is_case_sensitive "$DEPS_ROOT"; then
+  if ! filesystem_is_case_sensitive "$host_src"; then
     local sysroot_key
     if command -v shasum >/dev/null 2>&1; then
-      sysroot_key="$(printf '%s' "$DEPS_ROOT" | shasum -a 256 | awk '{print substr($1,1,12)}')"
+      sysroot_key="$(printf '%s' "$host_src" | shasum -a 256 | awk '{print substr($1,1,12)}')"
     else
-      sysroot_key="$(printf '%s' "$DEPS_ROOT" | sha256sum | awk '{print substr($1,1,12)}')"
+      sysroot_key="$(printf '%s' "$host_src" | sha256sum | awk '{print substr($1,1,12)}')"
     fi
     sysroot_volume="stream-webrtc-sysroot-${sysroot_key}"
   fi
@@ -111,13 +125,15 @@ main() {
   git_common="$(absolute_git_path --git-common-dir)"
 
   mkdir -p \
-    "${DEPS_ROOT}/.depot_tools" \
-    "${DEPS_ROOT}/.cipd-cache" \
-    "${DEPS_ROOT}/.vpython" \
-    "${DEPS_ROOT}/.android-docker-home" \
-    "${DEPS_ROOT}/.gclient-git-cache" \
-    "$OUT" \
-    "${WEBRTC_SRC}/out"
+    "$state" \
+    "${state}/.depot_tools" \
+    "${state}/.cipd-cache" \
+    "${state}/.vpython" \
+    "${state}/.android-docker-home" \
+    "${state}/.gclient-git-cache" \
+    "${host_src}/out" \
+    "${host_src}/products"
+  write_gclient "$state" "${WEBRTC_REPO:-git@github.com:GetStream/webrtc.git}" "android,unix"
 
   local uid gid tag
   uid="$(id -u)"
@@ -126,7 +142,7 @@ main() {
   ensure_image "$tag"
 
   local material name
-  material="${DEPS_ROOT}|${sysroot_volume}|${uid}"
+  material="${host_src}|${sysroot_volume}|${uid}|layout-v2"
   if command -v shasum >/dev/null 2>&1; then
     name="stream-webrtc-android-$(printf '%s' "$material" | shasum -a 256 | awk '{print substr($1,1,12)}')"
   else
@@ -145,17 +161,21 @@ main() {
     local -a run=(docker run -d --name "$name" --platform linux/amd64 --init
       --user "${uid}:${gid}"
       --add-host host.docker.internal:host-gateway
-      -v "${DEPS_ROOT}:${DEPS_ROOT}"
-      -e "DEPS_ROOT=${DEPS_ROOT}"
-      -e "WEBRTC_SRC=${WEBRTC_SRC}"
-      -e "OUT=${OUT}")
+      -v "${state}:${CONTAINER_ROOT}"
+      -v "${host_src}:${container_src}"
+      -v "${host_src}/out:${container_out}"
+      -v "${host_src}/products:${container_products}"
+      -v "${host_src}:${host_src}"
+      -e "DEPS_ROOT=${CONTAINER_ROOT}"
+      -e "WEBRTC_SRC=${container_src}"
+      -e "OUT=${container_out}")
     if [[ -n "$sysroot_volume" ]]; then
-      run+=(-v "${sysroot_volume}:${WEBRTC_SRC}/build/linux")
+      run+=(-v "${sysroot_volume}:${container_src}/build/linux")
     fi
-    if ! path_is_under "$git_dir" "$DEPS_ROOT"; then
+    if ! path_is_under "$git_dir" "$host_src"; then
       run+=(-v "${git_dir}:${git_dir}")
     fi
-    if [[ "$git_common" != "$git_dir" ]] && ! path_is_under "$git_common" "$DEPS_ROOT"; then
+    if [[ "$git_common" != "$git_dir" ]] && ! path_is_under "$git_common" "$host_src"; then
       run+=(-v "${git_common}:${git_common}")
     fi
     if [[ -n "${SSH_AUTH_SOCK:-}" && -S "${SSH_AUTH_SOCK}" ]]; then
@@ -179,11 +199,11 @@ main() {
 
   local -a exec_cmd=(docker exec
     --user "${uid}:${gid}"
-    -e "DEPS_ROOT=${DEPS_ROOT}"
-    -e "WEBRTC_SRC=${WEBRTC_SRC}"
-    -e "OUT=${OUT}"
-    -e "PRODUCTS=${PRODUCTS:-${DEPS_ROOT}/products}"
-    -e "GIT_CACHE_PATH=${GIT_CACHE_PATH:-${DEPS_ROOT}/.gclient-git-cache}"
+    -e "DEPS_ROOT=${CONTAINER_ROOT}"
+    -e "WEBRTC_SRC=${container_src}"
+    -e "OUT=${container_out}"
+    -e "PRODUCTS=${container_products}"
+    -e "GIT_CACHE_PATH=${CONTAINER_ROOT}/.gclient-git-cache"
     -e "STREAM_ANDROID_IN_DOCKER=1"
     -e "TARGET_OS=${target_os}"
     -e "CONFIG=${CONFIG:-release}"
@@ -200,9 +220,9 @@ main() {
     -e "EXTRA_GN_ARGS=${EXTRA_GN_ARGS:-}"
     -e "WEBRTC_REPO=${WEBRTC_REPO:-}"
     "$name"
-    "${WEBRTC_SRC}/stream_build/scripts/android-docker-entry.sh"
+    "${container_src}/stream_build/scripts/android-docker-entry.sh"
     "$goal" "$platform")
-  echo "android: linux via docker (${tag}), sources on ${DEPS_ROOT}"
+  echo "android: linux via docker (${tag}), sources on ${host_src}"
   exec "${exec_cmd[@]}"
 }
 
