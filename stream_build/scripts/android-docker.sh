@@ -81,7 +81,7 @@ container_name_for() {
   local sysroot="$2"
   local uid="$3"
   printf 'stream-webrtc-android-%s\n' \
-    "$(short_hash "${host_src}|${sysroot}|${uid}|layout-v3")"
+    "$(short_hash "${host_src}|${sysroot}|${uid}|layout-v4")"
 }
 
 require_docker() {
@@ -95,7 +95,7 @@ require_docker() {
 
 ensure_image() {
   local tag="$1"
-  local stamp="${WEBRTC_SRC}/.android-gclient/.android-docker-image-stamp"
+  local stamp="${ANDROID_DOCKER_STATE:?}/.android-docker-image-stamp"
   if docker image inspect "$tag" >/dev/null 2>&1 \
     && [[ -f "$stamp" && "$stamp" -nt "$DOCKERFILE" ]]; then
     return 0
@@ -135,19 +135,19 @@ launch_container() {
     return 0
   fi
 
+  # One mount for the worktree and the gclient root. cipd renames
+  # packages from <root>/.cipd into <root>/src, which fails across mounts.
   local -a run=(docker run -d --name "$name" --platform linux/amd64 --init
+    --privileged
     --label "stream.webrtc.checkout=${host_src}"
     --label "stream.webrtc.git_common=${git_common}"
     --user "${uid}:${gid}"
     --add-host host.docker.internal:host-gateway
-    -v "${state}:${CONTAINER_ROOT}"
-    -v "${host_src}:${container_src}"
-    -v "${host_src}/out:${container_out}"
-    -v "${host_src}/products:${container_products}"
-    -v "${host_src}:${host_src}"
-    -e "DEPS_ROOT=${CONTAINER_ROOT}"
+    -v "${host_parent}:${host_parent}"
+    -e "DEPS_ROOT=${state}"
     -e "WEBRTC_SRC=${container_src}"
-    -e "OUT=${container_out}")
+    -e "OUT=${container_out}"
+    -e "HOST_CHECKOUT=${host_src}")
   if ! path_is_under "$git_dir" "$host_src"; then
     run+=(-v "${git_dir}:${git_dir}")
   fi
@@ -174,23 +174,39 @@ main() {
   require_docker
 
   local host_src="$WEBRTC_SRC"
-  local state="${host_src}/.android-gclient"
-  local container_src="${CONTAINER_ROOT}/src"
-  local container_out="${CONTAINER_ROOT}/out"
-  local container_products="${CONTAINER_ROOT}/products"
+  local host_parent
+  host_parent="$(dirname "$host_src")"
+  # Sibling of the worktree, on the same filesystem, so cipd can rename
+  # into the checkout. Not inside the worktree: binding the worktree onto
+  # a directory inside itself loops.
+  local state="${host_parent}/.android-gclient-$(short_hash "$host_src")"
+  local container_src="${state}/src"
+  local container_out="${container_src}/out"
+  local container_products="${container_src}/products"
+  ANDROID_DOCKER_STATE="$state"
   local git_dir git_common
   git_dir="$(absolute_git_path --git-dir)"
   git_common="$(absolute_git_path --git-common-dir)"
 
   mkdir -p \
     "$state" \
-    "${state}/.depot_tools" \
     "${state}/.cipd-cache" \
     "${state}/.vpython" \
     "${state}/.android-docker-home" \
-    "${state}/.gclient-git-cache" \
     "${host_src}/out" \
     "${host_src}/products"
+  # Reuse the cache and depot_tools already downloaded into this worktree.
+  local previous="${host_src}/.android-gclient"
+  if [[ -d "${previous}/.depot_tools" && ! -e "${state}/.depot_tools" ]]; then
+    ln -s "${previous}/.depot_tools" "${state}/.depot_tools"
+  else
+    mkdir -p "${state}/.depot_tools"
+  fi
+  if [[ -d "${previous}/.gclient-git-cache" && ! -e "${state}/.gclient-git-cache" ]]; then
+    ln -s "${previous}/.gclient-git-cache" "${state}/.gclient-git-cache"
+  else
+    mkdir -p "${state}/.gclient-git-cache"
+  fi
   write_gclient "$state" "${WEBRTC_REPO:-git@github.com:GetStream/webrtc.git}" "android,unix"
 
   local uid gid tag
@@ -229,11 +245,12 @@ main() {
 
   local -a exec_cmd=(docker exec
     --user "${uid}:${gid}"
-    -e "DEPS_ROOT=${CONTAINER_ROOT}"
+    -e "DEPS_ROOT=${state}"
     -e "WEBRTC_SRC=${container_src}"
     -e "OUT=${container_out}"
     -e "PRODUCTS=${container_products}"
-    -e "GIT_CACHE_PATH=${CONTAINER_ROOT}/.gclient-git-cache"
+    -e "GIT_CACHE_PATH=${state}/.gclient-git-cache"
+    -e "HOST_CHECKOUT=${host_src}"
     -e "STREAM_ANDROID_IN_DOCKER=1"
     -e "TARGET_OS=${target_os}"
     -e "CONFIG=${CONFIG:-release}"

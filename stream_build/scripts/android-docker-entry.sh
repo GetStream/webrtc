@@ -25,6 +25,14 @@ export PATH="${DEPS_ROOT}/.depot_tools:${PATH}"
 
 git config --global --add safe.directory "${WEBRTC_SRC}" || true
 git config --global --add safe.directory "${DEPS_ROOT}" || true
+git config --global --add safe.directory "${HOST_CHECKOUT}" || true
+
+# gclient root and the checkout must be one filesystem so cipd can rename
+# unpacked packages into place. The checkout is bind-mounted here.
+if ! grep -qs " ${WEBRTC_SRC} " /proc/mounts; then
+  mkdir -p "${WEBRTC_SRC}"
+  sudo mount --bind "${HOST_CHECKOUT}" "${WEBRTC_SRC}"
+fi
 
 pipeline="${WEBRTC_SRC}/stream_build"
 deps_script="${WEBRTC_SRC}/build/install-build-deps.sh"

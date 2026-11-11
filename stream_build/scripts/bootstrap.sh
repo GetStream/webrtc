@@ -74,7 +74,9 @@ layout_check() {
     layout_fail
     return 1
   fi
-  if [[ "$(basename "$deps_root")" != "webrtc" ]]; then
+  # The Android container uses a gclient root next to a worktree. gclient
+  # does not care about that directory's name. Host builds still use webrtc/.
+  if [[ "$(basename "$deps_root")" != "webrtc" && "${STREAM_ANDROID_IN_DOCKER:-}" != 1 ]]; then
     layout_fail
     return 1
   fi
