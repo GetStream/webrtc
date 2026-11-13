@@ -10,11 +10,11 @@
 
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <vector>
 
-#include "api/array_view.h"
 #include "api/environment/environment.h"
-#include "api/environment/environment_factory.h"
+#include "api/rtp_header_extension_id.h"
 #include "api/rtp_headers.h"
 #include "api/rtp_parameters.h"
 #include "api/task_queue/task_queue_base.h"
@@ -37,6 +37,7 @@
 #include "rtc_base/thread.h"
 #include "rtc_base/thread_annotations.h"
 #include "test/call_test.h"
+#include "test/create_test_environment.h"
 #include "test/fake_encoder.h"
 #include "test/gtest.h"
 #include "test/rtcp_packet_parser.h"
@@ -47,11 +48,9 @@
 
 namespace webrtc {
 namespace {
-enum : int {  // The first valid value is 1.
-  kAbsSendTimeExtensionId = 1,
-  kTransportSequenceNumberId,
-};
-}  // namespace
+constexpr RtpHeaderExtensionId kAbsSendTimeExtensionId(1);
+constexpr RtpHeaderExtensionId kTransportSequenceNumberId(2);
+constexpr int kMaxBitrateBps = 3000000;
 
 class BandwidthEndToEndTest : public test::CallTest {
  public:
@@ -72,7 +71,7 @@ TEST_F(BandwidthEndToEndTest, ReceiveStreamSendsRemb) {
           RtpExtension(RtpExtension::kAbsSendTimeUri, kAbsSendTimeExtensionId));
     }
 
-    Action OnReceiveRtcp(ArrayView<const uint8_t> packet) override {
+    Action OnReceiveRtcp(std::span<const uint8_t> packet) override {
       test::RtcpPacketParser parser;
       EXPECT_TRUE(parser.Parse(packet));
 
@@ -141,7 +140,7 @@ class BandwidthStatsTest : public test::EndToEndTest {
   }
 
   // Called on the pacer thread.
-  Action OnSendRtp(ArrayView<const uint8_t> packet) override {
+  Action OnSendRtp(std::span<const uint8_t> packet) override {
     // Stats need to be fetched on the thread where the caller objects were
     // constructed.
     task_queue_->PostTask([this]() {
@@ -181,7 +180,6 @@ class BandwidthStatsTest : public test::EndToEndTest {
   }
 
  private:
-  static const int kMaxBitrateBps = 3000000;
   Call* sender_call_;
   Call* receiver_call_;
   bool has_seen_pacer_delay_;
@@ -210,7 +208,7 @@ TEST_F(BandwidthEndToEndTest, RembWithSendSideBwe) {
     explicit BweObserver(TaskQueueBase* task_queue)
         : EndToEndTest(test::VideoTestConstants::kDefaultTimeout),
           sender_call_(nullptr),
-          env_(CreateEnvironment()),
+          env_(CreateTestEnvironment()),
           sender_ssrc_(0),
           remb_bitrate_bps_(1000000),
           state_(kWaitForFirstRampUp),
@@ -235,7 +233,6 @@ TEST_F(BandwidthEndToEndTest, RembWithSendSideBwe) {
       encoder_config->max_bitrate_bps = 2000000;
 
       ASSERT_EQ(1u, receive_configs->size());
-      remb_sender_local_ssrc_ = (*receive_configs)[0].rtp.local_ssrc;
       remb_sender_remote_ssrc_ = (*receive_configs)[0].rtp.remote_ssrc;
     }
 
@@ -254,11 +251,11 @@ TEST_F(BandwidthEndToEndTest, RembWithSendSideBwe) {
       config.receiver_only = true;
       config.outgoing_transport = to_sender;
       config.retransmission_rate_limiter = &retransmission_rate_limiter_;
-      config.local_media_ssrc = remb_sender_local_ssrc_;
+      config.rtcp_mode = RtcpMode::kReducedSize;
+      config.remote_ssrc = remb_sender_remote_ssrc_;
 
-      rtp_rtcp_ = std::make_unique<ModuleRtpRtcpImpl2>(env_, config);
-      rtp_rtcp_->SetRemoteSSRC(remb_sender_remote_ssrc_);
-      rtp_rtcp_->SetRTCPStatus(RtcpMode::kReducedSize);
+      rtp_rtcp_ = ModuleRtpRtcpImpl2::CreateReceiveModule(
+          env_, config, [&] { return kFallbackRtcpSsrcForVideo; });
     }
 
     void PollStats() {
@@ -309,7 +306,6 @@ TEST_F(BandwidthEndToEndTest, RembWithSendSideBwe) {
     Call* sender_call_;
     const Environment env_;
     uint32_t sender_ssrc_;
-    uint32_t remb_sender_local_ssrc_ = 0;
     uint32_t remb_sender_remote_ssrc_ = 0;
     int remb_bitrate_bps_;
     std::unique_ptr<ModuleRtpRtcpImpl2> rtp_rtcp_;
@@ -414,4 +410,5 @@ TEST_F(BandwidthEndToEndTest, ReportsSetEncoderRates) {
 
   RunBaseTest(&test);
 }
+}  // namespace
 }  // namespace webrtc

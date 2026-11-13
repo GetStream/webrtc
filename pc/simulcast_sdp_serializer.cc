@@ -11,6 +11,7 @@
 #include "pc/simulcast_sdp_serializer.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <map>
 #include <optional>
 #include <string>
@@ -19,6 +20,7 @@
 
 #include "absl/algorithm/container.h"
 #include "absl/strings/string_view.h"
+#include "api/payload_type.h"
 #include "api/rtc_error.h"
 #include "api/rtp_parameters.h"
 #include "media/base/codec.h"
@@ -116,6 +118,7 @@ RTCErrorOr<SimulcastLayerList> ParseSimulcastLayerList(const std::string& str) {
   }
 
   SimulcastLayerList result;
+  size_t total_rids = 0;
   for (const absl::string_view& token : tokens) {
     if (token.empty()) {
       return ParseError("Simulcast alternative layer list is empty.");
@@ -126,6 +129,11 @@ RTCErrorOr<SimulcastLayerList> ParseSimulcastLayerList(const std::string& str) {
 
     if (rid_tokens.empty()) {
       return ParseError("Simulcast alternative layer list is malformed.");
+    }
+
+    total_rids += rid_tokens.size();
+    if (total_rids > kMaxSimulcastRids) {
+      return ParseError("Simulcast description contains too many RIDs.");
     }
 
     std::vector<SimulcastLayer> layers;
@@ -302,7 +310,7 @@ std::string SimulcastSdpSerializer::SerializeRidDescription(
     if (it == media_desc.codecs().end()) {
       break;
     }
-    if (it->id == Codec::kIdNotSet) {
+    if (it->id == PayloadType::NotSet()) {
       RTC_DCHECK_NOTREACHED();
       break;
     }

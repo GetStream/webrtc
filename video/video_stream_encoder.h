@@ -17,6 +17,7 @@
 #include <deque>
 #include <memory>
 #include <optional>
+#include <utility>
 #include <vector>
 
 #include "absl/container/inlined_vector.h"
@@ -82,31 +83,39 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
                            private EncodedImageCallback,
                            public VideoSourceRestrictionsListener {
  public:
-  // TODO(bugs.webrtc.org/12000): Reporting of VideoBitrateAllocation is being
-  // deprecated. Instead VideoLayersAllocation should be reported.
   enum class BitrateAllocationCallbackType {
-    kVideoBitrateAllocation,
-    kVideoBitrateAllocationWhenScreenSharing,
+    kNone,
     kVideoLayersAllocation
   };
+
+  // Adaptation resources and constraints to register while constructing the
+  // encoder. Only used by tests; production code leaves this empty.
+  // TODO(eshr): Move all adaptation tests out of VideoStreamEncoder tests.
+  struct AdaptationInjectionsForTest {
+    std::vector<std::pair<scoped_refptr<Resource>, VideoAdaptationReason>>
+        resources;
+    std::vector<AdaptationConstraint*> constraints;
+  };
+
   VideoStreamEncoder(
       const Environment& env,
       uint32_t number_of_cores,
       VideoStreamEncoderObserver* encoder_stats_observer,
-      const VideoStreamEncoderSettings& settings,
+      VideoStreamEncoderSettings settings,
       std::unique_ptr<OveruseFrameDetector> overuse_detector,
       std::unique_ptr<FrameCadenceAdapterInterface> frame_cadence_adapter,
       std::unique_ptr<TaskQueueBase, TaskQueueDeleter> encoder_queue,
       BitrateAllocationCallbackType allocation_cb_type,
-      VideoEncoderFactory::EncoderSelectorInterface* encoder_selector =
-          nullptr);
+      scoped_refptr<VideoEncoderFactory::EncoderSelectorInterface>
+          encoder_selector = nullptr,
+      EncoderSwitchRequestCallback encoder_switch_request_callback = nullptr,
+      AdaptationInjectionsForTest adaptation_injections_for_test = {});
   ~VideoStreamEncoder() override;
 
   VideoStreamEncoder(const VideoStreamEncoder&) = delete;
   VideoStreamEncoder& operator=(const VideoStreamEncoder&) = delete;
 
   void AddAdaptationResource(scoped_refptr<Resource> resource) override;
-  std::vector<scoped_refptr<Resource>> GetAdaptationResources() override;
 
   void SetSource(VideoSourceInterface<VideoFrame>* source,
                  const DegradationPreference& degradation_preference) override;
@@ -144,30 +153,17 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
                                double cwnd_reduce_ratio);
 
   void OnFramePrepared(size_t frame_identifier);
+  void OnFramePreparedOnEncoderQueue(size_t frame_identifier)
+      RTC_RUN_ON(encoder_queue_);
 
  protected:
   friend class VideoStreamEncoderFrameCadenceRestrictionTest;
-
-  // Used for testing. For example the `ScalingObserverInterface` methods must
-  // be called on `encoder_queue_`.
-  TaskQueueBase* encoder_queue() { return encoder_queue_.get(); }
 
   void OnVideoSourceRestrictionsUpdated(
       VideoSourceRestrictions restrictions,
       const VideoAdaptationCounters& adaptation_counters,
       scoped_refptr<Resource> reason,
       const VideoSourceRestrictions& unfiltered_restrictions) override;
-
-  // Used for injected test resources.
-  // TODO(eshr): Move all adaptation tests out of VideoStreamEncoder tests.
-  void InjectAdaptationResource(scoped_refptr<Resource> resource,
-                                VideoAdaptationReason reason);
-  void InjectAdaptationConstraint(AdaptationConstraint* adaptation_constraint);
-
-  void AddRestrictionsListenerForTesting(
-      VideoSourceRestrictionsListener* restrictions_listener);
-  void RemoveRestrictionsListenerForTesting(
-      VideoSourceRestrictionsListener* restrictions_listener);
 
  private:
   class CadenceCallback : public FrameCadenceAdapterInterface::Callback {
@@ -262,7 +258,9 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
       const EncodedImage& encoded_image,
       const CodecSpecificInfo* codec_specific_info) override;
 
-  void OnDroppedFrame(EncodedImageCallback::DropReason reason) override;
+  void OnFrameDropped(uint32_t rtp_timestamp,
+                      int spatial_id,
+                      bool is_end_of_temporal_unit) override;
 
   bool EncoderPaused() const;
   void TraceFrameDropStart();
@@ -307,16 +305,14 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
 
   EncoderSink* sink_ = nullptr;
   const VideoStreamEncoderSettings settings_;
+  EncoderSwitchRequestCallback encoder_switch_request_callback_;
   const BitrateAllocationCallbackType allocation_cb_type_;
   const RateControlSettings rate_control_settings_;
 
-  VideoEncoderFactory::EncoderSelectorInterface* const
-      encoder_selector_from_constructor_;
-  std::unique_ptr<VideoEncoderFactory::EncoderSelectorInterface> const
-      encoder_selector_from_factory_;
-  // Pointing to either encoder_selector_from_constructor_ or
-  // encoder_selector_from_factory_ but can be nullptr.
-  VideoEncoderFactory::EncoderSelectorInterface* const encoder_selector_;
+  // Pointing to either encoder_selector from constructor or
+  // encoder_selector from_factory_ but can be nullptr.
+  const scoped_refptr<VideoEncoderFactory::EncoderSelectorInterface>
+      encoder_selector_;
 
   VideoStreamEncoderObserver* const encoder_stats_observer_;
   // Adapter that avoids public inheritance of the cadence adapter's callback
@@ -449,9 +445,6 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
   VideoSourceSinkController video_source_sink_controller_
       RTC_GUARDED_BY(worker_queue_);
 
-  // Default bitrate limits in EncoderInfoSettings allowed.
-  const bool default_limits_allowed_;
-
   // QP parser is used to extract QP value from encoded frame when that is not
   // provided by encoder.
   QpParser qp_parser_;
@@ -481,7 +474,7 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
       RTC_GUARDED_BY(encoder_queue_);
 
   // Used to cancel any potentially pending tasks to the worker thread.
-  // Refrenced by tasks running on `encoder_queue_` so need to be destroyed
+  // Referenced by tasks running on `encoder_queue_` so need to be destroyed
   // after stopping that queue. Must be created and destroyed on
   // `worker_queue_`.
   ScopedTaskSafety task_safety_;
@@ -504,6 +497,8 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
   };
 
   std::deque<PreparingFrame> pending_mapped_frames_;
+
+  std::atomic<bool> is_stopped_ = false;
 };
 
 }  // namespace webrtc

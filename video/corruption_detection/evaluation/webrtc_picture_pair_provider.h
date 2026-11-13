@@ -48,6 +48,13 @@ class WebRtcEncoderDecoderPicturePairProvider : public PicturePairProvider,
                                                 public DecodedImageCallback {
  public:
   WebRtcEncoderDecoderPicturePairProvider(
+      const Environment& env,
+      VideoCodecType type,
+      std::unique_ptr<VideoEncoderFactory> encoder_factory,
+      std::unique_ptr<VideoDecoderFactory> decoder_factory);
+
+  // Needed for downstream usage that does not construct Environment.
+  WebRtcEncoderDecoderPicturePairProvider(
       VideoCodecType type,
       std::unique_ptr<VideoEncoderFactory> encoder_factory,
       std::unique_ptr<VideoDecoderFactory> decoder_factory);
@@ -69,7 +76,9 @@ class WebRtcEncoderDecoderPicturePairProvider : public PicturePairProvider,
   // Overridden from EncodedImageCallback.
   Result OnEncodedImage(const EncodedImage& encoded_image,
                         const CodecSpecificInfo*) override;
-  void OnDroppedFrame(DropReason reason) override;
+  void OnFrameDropped(uint32_t rtp_timestamp,
+                      int spatial_id,
+                      bool is_end_of_temporal_unit) override;
 
   // Overridden from DecodedImageCallback.
   int32_t Decoded(VideoFrame& decoded_image) override;

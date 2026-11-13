@@ -14,10 +14,10 @@
 #include <limits>
 #include <memory>
 #include <ostream>
+#include <span>
 #include <utility>
 #include <vector>
 
-#include "api/array_view.h"
 #include "api/video/video_codec_type.h"
 #include "api/video/video_frame_type.h"
 #include "common_video/h264/h264_common.h"
@@ -48,13 +48,13 @@ void IgnoreResult(PacketBuffer::InsertResult /*result*/) {}
 // Validates frame boundaries are valid and returns first sequence_number for
 // each frame.
 std::vector<uint16_t> StartSeqNums(
-    ArrayView<const std::unique_ptr<PacketBuffer::Packet>> packets) {
+    std::span<const std::unique_ptr<PacketBuffer::Packet>> packets) {
   std::vector<uint16_t> result;
   bool frame_boundary = true;
   for (const auto& packet : packets) {
     EXPECT_EQ(frame_boundary, packet->is_first_packet_in_frame());
     if (packet->is_first_packet_in_frame()) {
-      result.push_back(packet->seq_num());
+      result.push_back(static_cast<uint16_t>(packet->seq_num()));
     }
     frame_boundary = packet->is_last_packet_in_frame();
   }
@@ -117,7 +117,7 @@ class PacketBufferTest : public ::testing::Test {
                                   IsKeyFrame keyframe,  // is keyframe
                                   IsFirst first,  // is first packet of frame
                                   IsLast last,    // is last packet of frame
-                                  ArrayView<const uint8_t> data = {},
+                                  std::span<const uint8_t> data = {},
                                   uint32_t timestamp = 123u) {  // rtp timestamp
     auto packet = std::make_unique<PacketBuffer::Packet>();
     packet->video_header.codec = kVideoCodecGeneric;
@@ -421,7 +421,7 @@ class PacketBufferH264Test : public PacketBufferTest {
       IsFirst first,        // is first packet of frame
       IsLast last,          // is last packet of frame
       uint32_t timestamp,   // rtp timestamp
-      ArrayView<const uint8_t> data = {},
+      std::span<const uint8_t> data = {},
       uint32_t width = 0,      // width of frame (SPS/IDR)
       uint32_t height = 0,     // height of frame (SPS/IDR)
       bool generic = false) {  // has generic descriptor
@@ -459,7 +459,7 @@ class PacketBufferH264Test : public PacketBufferTest {
       IsFirst first,        // is first packet of frame
       IsLast last,          // is last packet of frame
       uint32_t timestamp,   // rtp timestamp
-      ArrayView<const uint8_t> data = {},
+      std::span<const uint8_t> data = {},
       uint32_t width = 0,     // width of frame (SPS/IDR)
       uint32_t height = 0) {  // height of frame (SPS/IDR)
     auto packet = std::make_unique<PacketBuffer::Packet>();
@@ -709,6 +709,14 @@ TEST_P(PacketBufferH264ParameterizedTest, InsertTooOldPackets) {
   InsertH264(4662, kKeyFrame, kFirst, kLast, 1000);
 }
 
+TEST_P(PacketBufferH264ParameterizedTest, InsertMisOrderedPackets) {
+  InsertH264(4660, kKeyFrame, kFirst, kNotLast, 1000);
+  // packet (4661 + kStartSize) can use the same buffer slot as packet 4661,
+  // PacketBuffer need to be careful to detect they are not the same packet.
+  InsertH264(4661 + kStartSize, kDeltaFrame, kFirst, kNotLast, 1000);
+  InsertH264(4662, kKeyFrame, kFirst, kLast, 1000);
+}
+
 TEST_P(PacketBufferH264ParameterizedTest, ClearMissingPacketsOnKeyframe) {
   InsertH264(0, kKeyFrame, kFirst, kLast, 1000);
   InsertH264(2, kKeyFrame, kFirst, kLast, 3000);
@@ -862,9 +870,9 @@ TEST_F(PacketBufferH264FrameGap,
 
 TEST_F(PacketBufferH264FrameGap, DoesntCrashWhenTryToClearBefore1stPacket) {
   // Test scenario copied from the https://issues.chromium.org/370689424
-  InsertH264(41087, kKeyFrame, kNotFirst, kNotLast, 123, nullptr, 0, false);
+  InsertH264(41087, kKeyFrame, kNotFirst, kNotLast, 123, {}, 0, false);
   packet_buffer_.ClearTo(30896);
-  InsertH264(32896, kKeyFrame, kFirst, kLast, 123, nullptr, 0, false);
+  InsertH264(32896, kKeyFrame, kFirst, kLast, 123, {}, 0, false);
 }
 
 }  // namespace

@@ -20,6 +20,8 @@
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
 #include "modules/congestion_controller/scream/delay_based_congestion_control.h"
+#include "modules/congestion_controller/scream/loss_estimator.h"
+#include "modules/congestion_controller/scream/scream_feedback.h"
 #include "modules/congestion_controller/scream/scream_v2_parameters.h"
 
 namespace webrtc {
@@ -37,8 +39,7 @@ class ScreamV2 {
   explicit ScreamV2(const Environment& env);
   ~ScreamV2() = default;
 
-  void SetTargetBitrateConstraints(DataRate min, DataRate max);
-  void SetFirstTargetRate(DataRate target_rate) { target_rate_ = target_rate; }
+  void SetTargetBitrateConstraints(DataRate min, DataRate max, DataRate start);
 
   void OnPacketSent(DataSize data_in_flight);
   void OnTransportPacketsFeedback(const TransportPacketsFeedback& msg);
@@ -47,8 +48,14 @@ class ScreamV2 {
     return std::min(max_target_bitrate_, target_rate_);
   }
   DataRate pacing_rate() const {
-    return target_rate_ * params_.pacing_factor.Get();
+    if (received_rate_.IsFinite()) {
+      return std::max(
+          target_rate() * params_.pacing_factor.Get(),
+          params_.pacing_rate_received_factor.Get() * received_rate_);
+    }
+    return target_rate() * params_.pacing_factor.Get();
   }
+
   TimeDelta rtt() const { return delay_based_congestion_control_.rtt(); }
 
   // Max data in flight before the send window is full.
@@ -61,8 +68,26 @@ class ScreamV2 {
   // Last inflection point where ref_window started to decrease.
   DataSize ref_window_i() const { return ref_window_i_; }
 
+  // Returns the maximum allowed reference window based on data in flight during
+  // the last RTT.
+  DataSize max_allowed_ref_window() const;
+
+  DataRate received_rate() const { return received_rate_; }
+
   // Returns the average fraction of ECN-CE marked data units per RTT.
   double l4s_alpha() const { return l4s_alpha_; }
+
+  double loss_congestion_level() const {
+    return loss_estimator_.congestion_level();
+  }
+
+  Timestamp last_reference_window_decrease_time() const {
+    return last_ref_window_decrease_time_;
+  }
+
+  Timestamp last_reaction_to_congestion_time() const {
+    return last_reaction_to_congestion_time_;
+  }
 
   // Exposed for easier logging.
   const DelayBasedCongestionControl& delay_based_congestion_control() const {
@@ -72,15 +97,13 @@ class ScreamV2 {
   // Average time feedback is delayed in the receiver.
   TimeDelta feedback_hold_time() const { return feedback_hold_time_; }
 
- private:
-  void UpdateL4SAlpha(const TransportPacketsFeedback& msg);
-  void UpdateRefWindow(const TransportPacketsFeedback& msg);
-  void UpdateFeedbackHoldTime(const TransportPacketsFeedback& msg);
-  void UpdateTargetRate(const TransportPacketsFeedback& msg);
-
   // Ratio between `max_segment_size` and `ref_window_`.
   double ref_window_mss_ratio() const {
-    return params_.max_segment_size.Get() / ref_window_;
+    return std::min(1.0, params_.max_segment_size.Get() / ref_window_);
+  }
+
+  double last_ref_window_increase_scale_factor() const {
+    return last_ref_window_increase_scale_factor_;
   }
 
   // Scaling factor for reference window adjustment
@@ -103,6 +126,15 @@ class ScreamV2 {
                      params_.max_segment_size.Get();
   }
 
+  bool is_application_limited() const { return is_application_limited_; }
+
+ private:
+  void UpdateL4SAlpha(const ScreamFeedback& parsed);
+  void UpdateRefWindow(const ScreamFeedback& parsed);
+  void UpdateFeedbackHoldTime(TimeDelta feedback_hold_time);
+  void UpdateTargetRate(const ScreamFeedback& parsed);
+  void UpdateReceiveRate(const ScreamFeedback& parsed);
+
   const Environment env_;
   const ScreamV2Parameters params_;
 
@@ -121,10 +153,14 @@ class ScreamV2 {
   // since `ref_window_i_` was last set.
   bool allow_ref_window_i_update_ = true;
 
+  double last_ref_window_increase_scale_factor_ = 1.0;
+
   // `l4s_alpha_` tracks the average fraction of ECN-CE marked data units per
   // Round-Trip Time.
   double l4s_alpha_ = 0.0;
   Timestamp last_ce_mark_detected_time_ = Timestamp::MinusInfinity();
+
+  LossEstimator loss_estimator_;
 
   TimeDelta feedback_hold_time_ = TimeDelta::Zero();
 
@@ -132,16 +168,29 @@ class ScreamV2 {
   Timestamp last_data_in_flight_update_ = Timestamp::MinusInfinity();
   DataSize max_data_in_flight_this_rtt_ = DataSize::Zero();
   DataSize max_data_in_flight_prev_rtt_ = DataSize::Zero();
+  DataRate received_rate_ = DataRate::Zero();
+  DataSize accumulated_received_bytes_ = DataSize::Zero();
+  Timestamp last_window_receive_time_ = Timestamp::MinusInfinity();
 
   // `last_reaction_to_congestion_time` is called
   // `last_congestion_detected_time` in 4.2.2. Reference Window Update.
   // Last received feedback that contained a congestion event that may have
   // caused a reaction.
   Timestamp last_reaction_to_congestion_time_ = Timestamp::MinusInfinity();
+  // Last time the reference window decreased. This is not the same
+  // as `last_reaction_to_congestion_time_` since a single CE mark does not
+  // necessarily cause a reference window decrease.
+  Timestamp last_ref_window_decrease_time_ = Timestamp::MinusInfinity();
 
   Timestamp drain_queue_start_ = Timestamp::MinusInfinity();
 
   DelayBasedCongestionControl delay_based_congestion_control_;
+  bool first_feedback_processed_ = false;
+
+  // Tracks if the send rate is less than the network path can currently
+  // support. This is done by checking if max_allowed_ref_window() <
+  // ref_window_.
+  bool is_application_limited_ = false;
 };
 
 }  // namespace webrtc

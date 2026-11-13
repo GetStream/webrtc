@@ -12,7 +12,8 @@ export DEPOT_TOOLS_UPDATE=0
 export HOME="${DEPS_ROOT}/.android-docker-home"
 export CIPD_CACHE_DIR="${DEPS_ROOT}/.cipd-cache"
 export VPYTHON_VIRTUALENV_ROOT="${DEPS_ROOT}/.vpython"
-export GIT_CACHE_PATH="${GIT_CACHE_PATH:-${DEPS_ROOT}/.gclient-git-cache}"
+# Sibling of DEPS_ROOT. gclient rejects a cache inside the gclient root.
+export GIT_CACHE_PATH="${GIT_CACHE_PATH:-$(dirname "$DEPS_ROOT")/.android-git-cache/.gclient-git-cache}"
 mkdir -p "$HOME" "$CIPD_CACHE_DIR" "$VPYTHON_VIRTUALENV_ROOT" "$GIT_CACHE_PATH"
 
 if [[ ! -x "${DEPS_ROOT}/.depot_tools/gclient" ]]; then

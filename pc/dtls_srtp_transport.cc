@@ -10,6 +10,7 @@
 
 #include "pc/dtls_srtp_transport.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <utility>
@@ -18,6 +19,7 @@
 #include "absl/functional/any_invocable.h"
 #include "api/dtls_transport_interface.h"
 #include "api/field_trials_view.h"
+#include "api/rtp_header_extension_id.h"
 #include "p2p/base/packet_transport_internal.h"
 #include "p2p/dtls/dtls_transport_internal.h"
 #include "pc/srtp_transport.h"
@@ -111,7 +113,7 @@ void DtlsSrtpTransport::SetRtcpMuxEnabled(bool enable) {
 }
 
 void DtlsSrtpTransport::UpdateSendEncryptedHeaderExtensionIds(
-    const std::vector<int>& send_extension_ids) {
+    const std::vector<RtpHeaderExtensionId>& send_extension_ids) {
   if (send_extension_ids_ == send_extension_ids) {
     return;
   }
@@ -123,7 +125,7 @@ void DtlsSrtpTransport::UpdateSendEncryptedHeaderExtensionIds(
 }
 
 void DtlsSrtpTransport::UpdateRecvEncryptedHeaderExtensionIds(
-    const std::vector<int>& recv_extension_ids) {
+    const std::vector<RtpHeaderExtensionId>& recv_extension_ids) {
   if (recv_extension_ids_ == recv_extension_ids) {
     return;
   }
@@ -177,8 +179,8 @@ void DtlsSrtpTransport::SetupRtpDtlsSrtp() {
   // Use an empty encrypted header extension ID vector if not set. This could
   // happen when the DTLS handshake is completed before processing the
   // Offer/Answer which contains the encrypted header extension IDs.
-  std::vector<int> send_extension_ids;
-  std::vector<int> recv_extension_ids;
+  std::vector<RtpHeaderExtensionId> send_extension_ids;
+  std::vector<RtpHeaderExtensionId> recv_extension_ids;
   if (send_extension_ids_) {
     send_extension_ids = *send_extension_ids_;
   }
@@ -206,8 +208,8 @@ void DtlsSrtpTransport::SetupRtcpDtlsSrtp() {
     return;
   }
 
-  std::vector<int> send_extension_ids;
-  std::vector<int> recv_extension_ids;
+  std::vector<RtpHeaderExtensionId> send_extension_ids;
+  std::vector<RtpHeaderExtensionId> recv_extension_ids;
   if (send_extension_ids_) {
     send_extension_ids = *send_extension_ids_;
   }
@@ -240,9 +242,6 @@ bool DtlsSrtpTransport::ExtractParams(DtlsTransportInternal* dtls_transport,
     return false;
   }
 
-  RTC_LOG(LS_INFO) << "Extracting keys from transport: "
-                   << dtls_transport->transport_name();
-
   int key_len;
   int salt_len;
   if (!GetSrtpKeyAndSaltLengths((*selected_crypto_suite), &key_len,
@@ -252,16 +251,19 @@ bool DtlsSrtpTransport::ExtractParams(DtlsTransportInternal* dtls_transport,
     return false;
   }
 
-  // OK, we're now doing DTLS (RFC 5764)
-  auto dtls_buffer = ZeroOnFreeBuffer<uint8_t>::CreateUninitializedWithSize(
-      key_len * 2 + salt_len * 2);
+  RTC_LOG(LS_INFO) << "Extracting keys from transport: "
+                   << dtls_transport->transport_name();
 
   // RFC 5705 exporter using the RFC 5764 parameters
-  if (!dtls_transport->ExportSrtpKeyingMaterial(dtls_buffer)) {
+  ZeroOnFreeBuffer<uint8_t> dtls_buffer;
+  if (!dtls_transport->AppendSrtpKeyingMaterial(dtls_buffer)) {
     RTC_LOG(LS_ERROR) << "DTLS-SRTP key export failed";
     RTC_DCHECK_NOTREACHED();  // This should never happen
     return false;
   }
+  // Verify that key material size is as expected.
+  RTC_DCHECK_EQ(dtls_buffer.size(),
+                static_cast<size_t>(2 * key_len + 2 * salt_len));
 
   // Sync up the keys with the DTLS-SRTP interface
   // https://datatracker.ietf.org/doc/html/rfc5764#section-4.2
@@ -341,6 +343,7 @@ void DtlsSrtpTransport::OnDtlsState(DtlsTransportInternal* transport,
 void DtlsSrtpTransport::OnWritableState(
     PacketTransportInternal* packet_transport) {
   MaybeSetupDtlsSrtp();
+  MaybeUpdateWritableState();
 }
 
 void DtlsSrtpTransport::SetOnDtlsStateChange(

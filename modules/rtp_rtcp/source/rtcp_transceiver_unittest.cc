@@ -12,10 +12,10 @@
 
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <utility>
 #include <vector>
 
-#include "api/array_view.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
 #include "modules/rtp_rtcp/source/rtcp_packet.h"
@@ -33,52 +33,44 @@
 #include "test/gtest.h"
 #include "test/rtcp_packet_parser.h"
 
+namespace webrtc {
 namespace {
 
 using ::testing::_;
 using ::testing::AtLeast;
-using ::testing::InvokeWithoutArgs;
 using ::testing::IsNull;
 using ::testing::MockFunction;
 using ::testing::NiceMock;
-using ::webrtc::RtcpTransceiver;
-using ::webrtc::RtcpTransceiverConfig;
-using ::webrtc::SimulatedClock;
-using ::webrtc::TaskQueueForTest;
-using ::webrtc::Timestamp;
-using ::webrtc::rtcp::RemoteEstimate;
-using ::webrtc::rtcp::RtcpPacket;
-using ::webrtc::rtcp::TransportFeedback;
-using ::webrtc::test::RtcpPacketParser;
 
-class MockMediaReceiverRtcpObserver : public webrtc::MediaReceiverRtcpObserver {
+using rtcp::RemoteEstimate;
+using rtcp::RtcpPacket;
+using rtcp::TransportFeedback;
+using test::RtcpPacketParser;
+
+class MockMediaReceiverRtcpObserver : public MediaReceiverRtcpObserver {
  public:
-  MOCK_METHOD(void,
-              OnSenderReport,
-              (uint32_t, webrtc::NtpTime, uint32_t),
-              (override));
+  MOCK_METHOD(void, OnSenderReport, (uint32_t, NtpTime, uint32_t), (override));
 };
 
-constexpr webrtc::TimeDelta kTimeout = webrtc::TimeDelta::Seconds(1);
+constexpr TimeDelta kTimeout = TimeDelta::Seconds(1);
 
 void WaitPostedTasks(TaskQueueForTest* queue) {
-  webrtc::Event done;
+  Event done;
   queue->PostTask([&done] { done.Set(); });
   ASSERT_TRUE(done.Wait(kTimeout));
 }
 
 TEST(RtcpTransceiverTest, SendsRtcpOnTaskQueueWhenCreatedOffTaskQueue) {
   SimulatedClock clock(0);
-  MockFunction<void(webrtc::ArrayView<const uint8_t>)> outgoing_transport;
+  MockFunction<void(std::span<const uint8_t>)> outgoing_transport;
   TaskQueueForTest queue("rtcp");
   RtcpTransceiverConfig config;
   config.clock = &clock;
   config.rtcp_transport = outgoing_transport.AsStdFunction();
   config.task_queue = queue.Get();
-  EXPECT_CALL(outgoing_transport, Call).WillRepeatedly(InvokeWithoutArgs([&] {
+  EXPECT_CALL(outgoing_transport, Call).WillRepeatedly([&] {
     EXPECT_TRUE(queue.IsCurrent());
-    return true;
-  }));
+  });
 
   RtcpTransceiver rtcp_transceiver(config);
   rtcp_transceiver.SendCompoundPacket();
@@ -87,16 +79,15 @@ TEST(RtcpTransceiverTest, SendsRtcpOnTaskQueueWhenCreatedOffTaskQueue) {
 
 TEST(RtcpTransceiverTest, SendsRtcpOnTaskQueueWhenCreatedOnTaskQueue) {
   SimulatedClock clock(0);
-  MockFunction<void(webrtc::ArrayView<const uint8_t>)> outgoing_transport;
+  MockFunction<void(std::span<const uint8_t>)> outgoing_transport;
   TaskQueueForTest queue("rtcp");
   RtcpTransceiverConfig config;
   config.clock = &clock;
   config.rtcp_transport = outgoing_transport.AsStdFunction();
   config.task_queue = queue.Get();
-  EXPECT_CALL(outgoing_transport, Call).WillRepeatedly(InvokeWithoutArgs([&] {
+  EXPECT_CALL(outgoing_transport, Call).WillRepeatedly([&] {
     EXPECT_TRUE(queue.IsCurrent());
-    return true;
-  }));
+  });
 
   std::unique_ptr<RtcpTransceiver> rtcp_transceiver;
   queue.PostTask([&] {
@@ -108,7 +99,7 @@ TEST(RtcpTransceiverTest, SendsRtcpOnTaskQueueWhenCreatedOnTaskQueue) {
 
 TEST(RtcpTransceiverTest, CanBeDestroyedOnTaskQueue) {
   SimulatedClock clock(0);
-  MockFunction<void(webrtc::ArrayView<const uint8_t>)> outgoing_transport;
+  MockFunction<void(std::span<const uint8_t>)> outgoing_transport;
   TaskQueueForTest queue("rtcp");
   RtcpTransceiverConfig config;
   config.clock = &clock;
@@ -133,8 +124,8 @@ TEST(RtcpTransceiverTest, CanBeDestroyedWithoutBlocking) {
   auto* rtcp_transceiver = new RtcpTransceiver(config);
   rtcp_transceiver->SendCompoundPacket();
 
-  webrtc::Event done;
-  webrtc::Event heavy_task;
+  Event done;
+  Event heavy_task;
   queue.PostTask([&] {
     EXPECT_TRUE(heavy_task.Wait(kTimeout));
     done.Set();
@@ -148,7 +139,7 @@ TEST(RtcpTransceiverTest, CanBeDestroyedWithoutBlocking) {
 TEST(RtcpTransceiverTest, MaySendPacketsAfterDestructor) {  // i.e. Be careful!
   SimulatedClock clock(0);
   // Must outlive queue below.
-  NiceMock<MockFunction<void(webrtc::ArrayView<const uint8_t>)>> transport;
+  NiceMock<MockFunction<void(std::span<const uint8_t>)>> transport;
   TaskQueueForTest queue("rtcp");
   RtcpTransceiverConfig config;
   config.clock = &clock;
@@ -156,7 +147,7 @@ TEST(RtcpTransceiverTest, MaySendPacketsAfterDestructor) {  // i.e. Be careful!
   config.task_queue = queue.Get();
   auto* rtcp_transceiver = new RtcpTransceiver(config);
 
-  webrtc::Event heavy_task;
+  Event heavy_task;
   queue.PostTask([&] { EXPECT_TRUE(heavy_task.Wait(kTimeout)); });
   rtcp_transceiver->SendCompoundPacket();
   delete rtcp_transceiver;
@@ -168,14 +159,14 @@ TEST(RtcpTransceiverTest, MaySendPacketsAfterDestructor) {  // i.e. Be careful!
 }
 
 // Use rtp timestamp to distinguish different incoming sender reports.
-webrtc::CopyOnWriteBuffer CreateSenderReport(uint32_t ssrc, uint32_t rtp_time) {
-  webrtc::rtcp::SenderReport sr;
+CopyOnWriteBuffer CreateSenderReport(uint32_t ssrc, uint32_t rtp_time) {
+  rtcp::SenderReport sr;
   sr.SetSenderSsrc(ssrc);
   sr.SetRtpTimestamp(rtp_time);
-  webrtc::Buffer buffer = sr.Build();
+  Buffer buffer = sr.Build();
   // Switch to an efficient way creating CopyOnWriteBuffer from RtcpPacket when
   // there is one. Until then do not worry about extra memcpy in test.
-  return webrtc::CopyOnWriteBuffer(buffer.data(), buffer.size());
+  return CopyOnWriteBuffer(buffer.data(), buffer.size());
 }
 
 TEST(RtcpTransceiverTest, DoesntPostToRtcpObserverAfterCallToRemove) {
@@ -186,7 +177,7 @@ TEST(RtcpTransceiverTest, DoesntPostToRtcpObserverAfterCallToRemove) {
   config.clock = &clock;
   config.task_queue = queue.Get();
   RtcpTransceiver rtcp_transceiver(config);
-  webrtc::Event observer_deleted;
+  Event observer_deleted;
 
   auto observer = std::make_unique<MockMediaReceiverRtcpObserver>();
   EXPECT_CALL(*observer, OnSenderReport(kRemoteSsrc, _, 1));
@@ -216,8 +207,8 @@ TEST(RtcpTransceiverTest, RemoveMediaReceiverRtcpObserverIsNonBlocking) {
   auto observer = std::make_unique<MockMediaReceiverRtcpObserver>();
   rtcp_transceiver.AddMediaReceiverRtcpObserver(kRemoteSsrc, observer.get());
 
-  webrtc::Event queue_blocker;
-  webrtc::Event observer_deleted;
+  Event queue_blocker;
+  Event observer_deleted;
   queue.PostTask([&] { EXPECT_TRUE(queue_blocker.Wait(kTimeout)); });
   rtcp_transceiver.RemoveMediaReceiverRtcpObserver(kRemoteSsrc, observer.get(),
                                                    /*on_removed=*/[&] {
@@ -232,7 +223,7 @@ TEST(RtcpTransceiverTest, RemoveMediaReceiverRtcpObserverIsNonBlocking) {
 
 TEST(RtcpTransceiverTest, CanCallSendCompoundPacketFromAnyThread) {
   SimulatedClock clock(0);
-  MockFunction<void(webrtc::ArrayView<const uint8_t>)> outgoing_transport;
+  MockFunction<void(std::span<const uint8_t>)> outgoing_transport;
   TaskQueueForTest queue("rtcp");
   RtcpTransceiverConfig config;
   config.clock = &clock;
@@ -242,10 +233,7 @@ TEST(RtcpTransceiverTest, CanCallSendCompoundPacketFromAnyThread) {
   EXPECT_CALL(outgoing_transport, Call)
       // If test is slow, a periodic task may send an extra packet.
       .Times(AtLeast(3))
-      .WillRepeatedly(InvokeWithoutArgs([&] {
-        EXPECT_TRUE(queue.IsCurrent());
-        return true;
-      }));
+      .WillRepeatedly([&] { EXPECT_TRUE(queue.IsCurrent()); });
 
   RtcpTransceiver rtcp_transceiver(config);
 
@@ -263,8 +251,7 @@ TEST(RtcpTransceiverTest, CanCallSendCompoundPacketFromAnyThread) {
 
 TEST(RtcpTransceiverTest, DoesntSendPacketsAfterStopCallback) {
   SimulatedClock clock(0);
-  NiceMock<MockFunction<void(webrtc::ArrayView<const uint8_t>)>>
-      outgoing_transport;
+  NiceMock<MockFunction<void(std::span<const uint8_t>)>> outgoing_transport;
   TaskQueueForTest queue("rtcp");
   RtcpTransceiverConfig config;
   config.clock = &clock;
@@ -273,7 +260,7 @@ TEST(RtcpTransceiverTest, DoesntSendPacketsAfterStopCallback) {
   config.schedule_periodic_compound_packets = true;
 
   auto rtcp_transceiver = std::make_unique<RtcpTransceiver>(config);
-  webrtc::Event done;
+  Event done;
   rtcp_transceiver->SendCompoundPacket();
   rtcp_transceiver->Stop([&] {
     EXPECT_CALL(outgoing_transport, Call).Times(0);
@@ -287,7 +274,7 @@ TEST(RtcpTransceiverTest, SendsCombinedRtcpPacketOnTaskQueue) {
   static constexpr uint32_t kSenderSsrc = 12345;
 
   SimulatedClock clock(0);
-  MockFunction<void(webrtc::ArrayView<const uint8_t>)> outgoing_transport;
+  MockFunction<void(std::span<const uint8_t>)> outgoing_transport;
   TaskQueueForTest queue("rtcp");
   RtcpTransceiverConfig config;
   config.clock = &clock;
@@ -298,7 +285,7 @@ TEST(RtcpTransceiverTest, SendsCombinedRtcpPacketOnTaskQueue) {
   RtcpTransceiver rtcp_transceiver(config);
 
   EXPECT_CALL(outgoing_transport, Call)
-      .WillOnce([&](webrtc::ArrayView<const uint8_t> buffer) {
+      .WillOnce([&](std::span<const uint8_t> buffer) {
         EXPECT_TRUE(queue.IsCurrent());
         RtcpPacketParser rtcp_parser;
         rtcp_parser.Parse(buffer);
@@ -326,7 +313,7 @@ TEST(RtcpTransceiverTest, SendFrameIntraRequestDefaultsToNewRequest) {
   static constexpr uint32_t kSenderSsrc = 12345;
 
   SimulatedClock clock(0);
-  MockFunction<void(webrtc::ArrayView<const uint8_t>)> outgoing_transport;
+  MockFunction<void(std::span<const uint8_t>)> outgoing_transport;
   TaskQueueForTest queue("rtcp");
   RtcpTransceiverConfig config;
   config.clock = &clock;
@@ -338,7 +325,7 @@ TEST(RtcpTransceiverTest, SendFrameIntraRequestDefaultsToNewRequest) {
 
   uint8_t first_seq_nr;
   EXPECT_CALL(outgoing_transport, Call)
-      .WillOnce([&](webrtc::ArrayView<const uint8_t> buffer) {
+      .WillOnce([&](std::span<const uint8_t> buffer) {
         EXPECT_TRUE(queue.IsCurrent());
         RtcpPacketParser rtcp_parser;
         rtcp_parser.Parse(buffer);
@@ -346,7 +333,7 @@ TEST(RtcpTransceiverTest, SendFrameIntraRequestDefaultsToNewRequest) {
         first_seq_nr = rtcp_parser.fir()->requests()[0].seq_nr;
         return true;
       })
-      .WillOnce([&](webrtc::ArrayView<const uint8_t> buffer) {
+      .WillOnce([&](std::span<const uint8_t> buffer) {
         EXPECT_TRUE(queue.IsCurrent());
         RtcpPacketParser rtcp_parser;
         rtcp_parser.Parse(buffer);
@@ -364,3 +351,5 @@ TEST(RtcpTransceiverTest, SendFrameIntraRequestDefaultsToNewRequest) {
 }
 
 }  // namespace
+
+}  // namespace webrtc

@@ -15,6 +15,7 @@
 
 #include <memory>
 
+#include "api/environment/environment.h"
 #include "api/peer_connection_interface.h"
 #include "api/scoped_refptr.h"
 #include "api/sequence_checker.h"
@@ -49,6 +50,7 @@ class AndroidCallClient {
   void CreatePeerConnection() RTC_RUN_ON(thread_checker_);
   void Connect() RTC_RUN_ON(thread_checker_);
 
+  const webrtc::Environment env_;
   webrtc::SequenceChecker thread_checker_;
 
   bool call_started_ RTC_GUARDED_BY(thread_checker_);
@@ -58,8 +60,6 @@ class AndroidCallClient {
   webrtc::scoped_refptr<webrtc::PeerConnectionFactoryInterface> pcf_
       RTC_GUARDED_BY(thread_checker_);
   std::unique_ptr<webrtc::Thread> network_thread_
-      RTC_GUARDED_BY(thread_checker_);
-  std::unique_ptr<webrtc::Thread> worker_thread_
       RTC_GUARDED_BY(thread_checker_);
   std::unique_ptr<webrtc::Thread> signaling_thread_
       RTC_GUARDED_BY(thread_checker_);

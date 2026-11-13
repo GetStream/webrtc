@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "absl/base/nullability.h"
+#include "absl/functional/any_invocable.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "api/candidate.h"
@@ -221,6 +222,10 @@ RTC_EXPORT std::optional<SdpType> SdpTypeFromString(
 // and is therefore not expected to be thread safe.
 //
 // An instance can be created by CreateSessionDescription.
+struct EncodingOptions {
+  bool use_wildcard = false;
+};
+
 class RTC_EXPORT SessionDescriptionInterface final {
  public:
   static std::unique_ptr<SessionDescriptionInterface> Create(
@@ -228,7 +233,8 @@ class RTC_EXPORT SessionDescriptionInterface final {
       std::unique_ptr<SessionDescription> description,
       absl::string_view id,
       absl::string_view version,
-      std::vector<IceCandidateCollection> candidates = {});
+      std::vector<IceCandidateCollection> candidates = {},
+      EncodingOptions encoding_options = {});
 
   SessionDescriptionInterface(const SessionDescriptionInterface&) = delete;
   SessionDescriptionInterface& operator=(const SessionDescriptionInterface&) =
@@ -289,6 +295,11 @@ class RTC_EXPORT SessionDescriptionInterface final {
   // section.
   const IceCandidateCollection* candidates(size_t mediasection_index) const;
 
+  EncodingOptions encoding_options() const {
+    RTC_DCHECK_RUN_ON(&sequence_checker_);
+    return encoding_options_;
+  }
+
   // Serializes the description to SDP.
   bool ToString(std::string* out) const {
     if (!out)
@@ -326,7 +337,8 @@ class RTC_EXPORT SessionDescriptionInterface final {
       std::unique_ptr<SessionDescription> description,
       absl::string_view id,
       absl::string_view version,
-      std::vector<IceCandidateCollection> candidates = {});
+      std::vector<IceCandidateCollection> candidates = {},
+      EncodingOptions encoding_options = {});
 
  private:
   bool IsValidMLineIndex(int index) const;
@@ -342,6 +354,7 @@ class RTC_EXPORT SessionDescriptionInterface final {
       SequenceChecker::kDetached};
   std::vector<IceCandidateCollection> candidate_collection_
       RTC_GUARDED_BY(sequence_checker_);
+  const EncodingOptions encoding_options_ RTC_GUARDED_BY(sequence_checker_);
 };
 
 // Creates a SessionDescriptionInterface based on the SDP string and the type.
@@ -382,6 +395,14 @@ class RTC_EXPORT CreateSessionDescriptionObserver : public RefCountInterface {
   // is removed; its functionality was the same as passing
   // error.message.
   virtual void OnFailure(RTCError error) = 0;
+
+  // Called after OnSuccess() or OnFailure(). An embedding that delivers the
+  // observer result asynchronously may defer invoking `callback` until the
+  // result has reached its API consumer. The callback must be invoked exactly
+  // once on the operation's sequence.
+  virtual void OnOperationComplete(absl::AnyInvocable<void() &&> callback) {
+    std::move(callback)();
+  }
 
  protected:
   ~CreateSessionDescriptionObserver() override = default;

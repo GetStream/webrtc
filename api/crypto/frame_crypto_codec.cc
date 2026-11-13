@@ -105,7 +105,7 @@ size_t RbspEscapedLength(ArrayView<const uint8_t> data, int seed_zeros) {
   return total;
 }
 
-void RbspEscapeInto(uint8_t* dst,
+void RbspEscapeInto(ArrayView<uint8_t> dst,
                     ArrayView<const uint8_t> data,
                     int seed_zeros) {
   size_t j = 0;

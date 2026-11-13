@@ -340,12 +340,17 @@ rm -rf "$ni_parent"
 
 deps_tmp="$(mktemp -d)"
 fake_bin="$deps_tmp/bin"
-mkdir -p "$fake_bin" "$deps_tmp/webrtc/src" "$deps_tmp/webrtc/.gclient-git-cache"
+mkdir -p "$fake_bin" "$deps_tmp/webrtc/src" "$deps_tmp/.gclient-git-cache"
 init_git_tree "$deps_tmp/webrtc/src"
 cat > "$fake_bin/gclient" <<'FAKE'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${FAKE_GCLIENT_LOG}"
 if [[ "${1:-}" == sync ]]; then
+  # depot_tools 9be95df5: the git cache must not overlap the gclient root.
+  root="$(pwd -P)"
+  cache="$(cd "${GIT_CACHE_PATH:?}" && pwd -P)"
+  case "$cache/" in "$root"/*) echo "git cache inside gclient root" >&2; exit 1 ;; esac
+  case "$root/" in "$cache"/*) echo "git cache contains gclient root" >&2; exit 1 ;; esac
   printf '%s\n' "$*" > "${FAKE_GCLIENT_SYNC_ARGS}"
   printf '%s\n' "${GIT_CACHE_PATH-<unset>}" > "${FAKE_GCLIENT_CACHE}"
 fi
@@ -360,7 +365,7 @@ deps_out="$(
   PATH="$fake_bin:$PATH" \
     DEPS_ROOT="$deps_tmp/webrtc" \
     WEBRTC_SRC="$deps_tmp/webrtc/src" \
-    GIT_CACHE_PATH="$deps_tmp/webrtc/.gclient-git-cache" \
+    GIT_CACHE_PATH="$deps_tmp/.gclient-git-cache" \
     RUN_HOOKS=0 JOBS=2 \
     "$ROOT/scripts/deps.sh" sync
 )"
@@ -371,16 +376,17 @@ grep -q '"managed": False' "$deps_tmp/webrtc/.gclient"
 ! grep -q '"revision"' "$deps_tmp/webrtc/.gclient"
 grep -q 'sync -j2 --no-history --shallow --nohooks' "$deps_tmp/sync_args"
 ! grep -q -- '--revision' "$deps_tmp/sync_args"
+grep -q "$deps_tmp/.gclient-git-cache" "$deps_tmp/cache_env"
 docker_deps_out="$(
   PATH="$fake_bin:$PATH" \
     DEPS_ROOT="$deps_tmp/webrtc" \
     WEBRTC_SRC="$deps_tmp/webrtc/src" \
-    GIT_CACHE_PATH="$deps_tmp/webrtc/.gclient-git-cache" \
+    GIT_CACHE_PATH="$deps_tmp/.gclient-git-cache" \
     RUN_HOOKS=0 JOBS=2 STREAM_ANDROID_IN_DOCKER=1 \
     "$ROOT/scripts/deps.sh" sync
 )"
 printf '%s\n' "$docker_deps_out" | grep -q 'running: gclient sync -j2 --force --no-history --shallow --nohooks'
-grep -q "$deps_tmp/webrtc/.gclient-git-cache" "$deps_tmp/cache_env"
+grep -q "$deps_tmp/.gclient-git-cache" "$deps_tmp/cache_env"
 mkdir -p "$deps_tmp/webrtc/src/third_party/.git/objects/info"
 printf '%s\n' \
   "$deps_tmp/webrtc/.gclient_deps/.gclient-git-cache/fake-repo/objects" \
@@ -388,10 +394,10 @@ printf '%s\n' \
 PATH="$fake_bin:$PATH" \
   DEPS_ROOT="$deps_tmp/webrtc" \
   WEBRTC_SRC="$deps_tmp/webrtc/src" \
-  GIT_CACHE_PATH="$deps_tmp/webrtc/.gclient-git-cache" \
+  GIT_CACHE_PATH="$deps_tmp/.gclient-git-cache" \
   RUN_HOOKS=0 JOBS=2 \
   "$ROOT/scripts/deps.sh" sync >/dev/null
-grep -qx "$deps_tmp/webrtc/.gclient-git-cache/fake-repo/objects" \
+grep -qx "$deps_tmp/.gclient-git-cache/fake-repo/objects" \
   "$deps_tmp/webrtc/src/third_party/.git/objects/info/alternates"
 ! grep -q '.gclient_deps/.gclient-git-cache' \
   "$deps_tmp/webrtc/src/third_party/.git/objects/info/alternates"
@@ -401,22 +407,73 @@ printf '%s\n' \
 PATH="$fake_bin:$PATH" \
   DEPS_ROOT="$deps_tmp/webrtc" \
   WEBRTC_SRC="$deps_tmp/webrtc/src" \
-  GIT_CACHE_PATH="$deps_tmp/webrtc/.gclient-git-cache" \
+  GIT_CACHE_PATH="$deps_tmp/.gclient-git-cache" \
   RUN_HOOKS=0 JOBS=2 \
   "$ROOT/scripts/deps.sh" sync >/dev/null
-grep -qx "$deps_tmp/webrtc/.gclient-git-cache/fake-repo/objects" \
+grep -qx "$deps_tmp/.gclient-git-cache/fake-repo/objects" \
   "$deps_tmp/webrtc/src/third_party/.git/objects/info/alternates"
 ! grep -q '/home/runner/work' \
   "$deps_tmp/webrtc/src/third_party/.git/objects/info/alternates"
 PATH="$fake_bin:$PATH" \
   DEPS_ROOT="$deps_tmp/webrtc" \
   WEBRTC_SRC="$deps_tmp/webrtc/src" \
-  GIT_CACHE_PATH="$deps_tmp/webrtc/.gclient-git-cache" \
+  GIT_CACHE_PATH="$deps_tmp/.gclient-git-cache" \
   RUN_HOOKS=0 JOBS=2 SHALLOW=0 \
   "$ROOT/scripts/deps.sh" sync >/dev/null
 grep -q 'sync -j2 --nohooks' "$deps_tmp/sync_args"
 ! grep -q -- '--no-history' "$deps_tmp/sync_args"
 ! grep -q -- '--shallow' "$deps_tmp/sync_args"
+if PATH="$fake_bin:$PATH" \
+  DEPS_ROOT="$deps_tmp/webrtc" \
+  WEBRTC_SRC="$deps_tmp/webrtc/src" \
+  GIT_CACHE_PATH="$deps_tmp/webrtc/.gclient-git-cache" \
+  RUN_HOOKS=0 JOBS=2 \
+  "$ROOT/scripts/deps.sh" sync >/dev/null 2>"$deps_tmp/overlap_err"; then
+  echo "expected the fake gclient to reject a git cache inside the root" >&2
+  exit 1
+fi
+grep -q 'git cache inside gclient root' "$deps_tmp/overlap_err"
+rm -rf "$deps_tmp/webrtc/.gclient-git-cache" "$deps_tmp/.gclient-git-cache"
+mkdir -p "$deps_tmp/webrtc/.gclient-git-cache/fake-repo/objects"
+printf '%s\n' \
+  "$deps_tmp/webrtc/.gclient-git-cache/fake-repo/objects" \
+  > "$deps_tmp/webrtc/src/third_party/.git/objects/info/alternates"
+legacy_out="$(
+  env -u GIT_CACHE_PATH PATH="$fake_bin:$PATH" \
+    DEPS_ROOT="$deps_tmp/webrtc" \
+    WEBRTC_SRC="$deps_tmp/webrtc/src" \
+    RUN_HOOKS=0 JOBS=2 \
+    "$ROOT/scripts/deps.sh" sync
+)"
+printf '%s\n' "$legacy_out" | grep -q "mv $deps_tmp/webrtc/.gclient-git-cache"
+[[ ! -e "$deps_tmp/webrtc/.gclient-git-cache" ]]
+[[ -d "$deps_tmp/.gclient-git-cache/fake-repo/objects" ]]
+grep -qx "$deps_tmp/.gclient-git-cache" "$deps_tmp/cache_env"
+grep -qx "$deps_tmp/.gclient-git-cache/fake-repo/objects" \
+  "$deps_tmp/webrtc/src/third_party/.git/objects/info/alternates"
+mkdir -p "$deps_tmp/webrtc/.gclient-git-cache"
+touch "$deps_tmp/webrtc/.gclient-git-cache/stale"
+legacy_out="$(
+  env -u GIT_CACHE_PATH PATH="$fake_bin:$PATH" \
+    DEPS_ROOT="$deps_tmp/webrtc" \
+    WEBRTC_SRC="$deps_tmp/webrtc/src" \
+    RUN_HOOKS=0 JOBS=2 \
+    "$ROOT/scripts/deps.sh" sync
+)"
+printf '%s\n' "$legacy_out" | grep -q "note: $deps_tmp/webrtc/.gclient-git-cache is unused"
+[[ -f "$deps_tmp/webrtc/.gclient-git-cache/stale" ]]
+[[ -d "$deps_tmp/.gclient-git-cache/fake-repo/objects" ]]
+rm -rf "$deps_tmp/webrtc/.gclient-git-cache"
+(
+  # shellcheck source=common.sh
+  source "$ROOT/scripts/common.sh"
+  [[ "$(default_git_cache_path /a/webrtc)" == /a/.gclient-git-cache ]]
+  [[ "$(default_git_cache_path /a/webrtc/)" == /a/.gclient-git-cache ]]
+  [[ "$(default_git_cache_path 'D:\a\webrtc\webrtc')" == 'D:\a\webrtc/.gclient-git-cache' ]]
+)
+printf 'print-git-cache:\n\t@echo $(GIT_CACHE_PATH)\n' > "$deps_tmp/print.mk"
+[[ "$(env -u GIT_CACHE_PATH make -s -C "$ROOT" -f Makefile -f "$deps_tmp/print.mk" \
+  print-git-cache DEPS_ROOT=/a/webrtc)" == /a/.gclient-git-cache ]]
 [[ ! -L "$deps_tmp/webrtc/src" ]]
 [[ -f "$deps_tmp/webrtc/src/DEPS" ]]
 wt_after="$(git -C "$deps_tmp/webrtc/src" worktree list | wc -l | tr -d ' ')"
@@ -489,6 +546,7 @@ grep -q 'cli-read-timeout' "$gha/actions/artifact-download/action.yml"
 grep -q 'size mismatch' "$gha/actions/artifact-download/action.yml"
 grep -q 'tar xf "${tar_file}"' "$gha/actions/artifact-download/action.yml"
 grep -q 'git -C src checkout -- resources' "$gha/actions/artifact-download/action.yml"
+grep -q 'git -C src checkout -- resources' "$gha/actions/restore-tools/action.yml"
 grep -q '.hetzner-hit-bytes' "$gha/actions/artifact-download/action.yml"
 grep -q '.hetzner-hit-bytes' "$gha/actions/artifact-put/action.yml"
 grep -q '1073741824' "$gha/actions/artifact-put/action.yml"
@@ -519,22 +577,38 @@ grep -q 'SHALLOW: "1"' "$gha/actions/restore-tree/action.yml"
 grep -q 'RUN_HOOKS: "1"' "$gha/actions/restore-tree/action.yml"
 ! grep -q 'RUN_HOOKS: "0"' "$gha/workflows/_make.yml"
 ! grep -q 'Drop git-cache alternates' "$gha/actions/restore-tree/action.yml"
+for f in workflows/_make.yml actions/restore-tree/action.yml \
+  actions/setup-webrtc/action.yml actions/artifact-put/action.yml; do
+  if grep -nE '(workspace }}|GITHUB_WORKSPACE})/\.gclient-git-cache|^[[:space:]]*GIT_CACHE_PATH:' \
+    "$gha/$f"; then
+    echo "$f: git cache inside the gclient root, or GIT_CACHE_PATH overridden" >&2
+    exit 1
+  fi
+done
+grep -q 'default_git_cache_path "${GITHUB_WORKSPACE}"' "$gha/actions/setup-webrtc/action.yml"
+grep -q 'GIT_CACHE_PATH=${git_cache}' "$gha/actions/setup-webrtc/action.yml"
+grep -q 'mv .gclient-git-cache "${git_cache}"' "$gha/actions/artifact-download/action.yml"
+grep -q 'cache="${GIT_CACHE_PATH:?}"' "$gha/actions/artifact-put/action.yml"
 ! grep -q 'GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache' \
   "$gha/actions/restore-tree/action.yml"
 ! grep -q 'GIT_CACHE_PATH: ${{ github.workspace }}/.gclient-git-cache' \
   "$gha/workflows/_make.yml"
 grep -q 'rewrite_git_cache_alternates' "$ROOT/scripts/deps.sh"
-grep -q '.gclient-git-cache' "$gha/actions/artifact-put/action.yml"
+grep -q -- '-C "${cache_parent}" .gclient-git-cache' "$gha/actions/artifact-put/action.yml"
+# GNU tar rejects a trailing -C with no member after it.
+grep -q 'if ((${#members\[@\]})); then' "$gha/actions/artifact-put/action.yml"
+grep -qx '          tar cf "${tar_file}" -C "${cache_parent}" .gclient-git-cache' \
+  "$gha/actions/artifact-put/action.yml"
 grep -q 'src/resources' "$gha/actions/artifact-put/action.yml"
 grep -q '.cipd' "$gha/actions/artifact-put/action.yml"
 ! grep -q 'src/third_party' "$gha/actions/artifact-put/action.yml"
 ! grep -q 'src/third_party' "$gha/actions/artifact-download/action.yml"
 ! grep -q 'src/third_party' "$gha/actions/restore-tree/action.yml"
-grep -A12 'members=(.gclient-git-cache)' "$gha/actions/artifact-put/action.yml" | \
+grep -A12 'members=()' "$gha/actions/artifact-put/action.yml" | \
   grep -q 'src/resources'
-grep -A12 'members=(.gclient-git-cache)' "$gha/actions/artifact-put/action.yml" | \
+grep -A12 'members=()' "$gha/actions/artifact-put/action.yml" | \
   grep -q '.cipd'
-! grep -A12 'members=(.gclient-git-cache)' "$gha/actions/artifact-put/action.yml" | \
+! grep -A12 'members=()' "$gha/actions/artifact-put/action.yml" | \
   grep -q 'third_party'
 grep -q 'pack members:' "$gha/actions/artifact-put/action.yml"
 grep -q 'cache_key: webrtc-cache' "$gha/workflows/_make.yml"
@@ -547,9 +621,364 @@ if grep -qE 'make rename |final-(apple|android)-renamed|StreamWebRTC\.xcframewor
   exit 1
 fi
 grep -q 'rewrite-android-namespace.sh' "$ROOT/Makefile"
+grep -q 'pin-android-java.sh' "$ROOT/Makefile"
+grep -q 'pin-ios-simulator-boot.sh' "$ROOT/Makefile"
+grep -q 'direct_deps_only = false' "$ROOT/../sdk/android/BUILD.gn"
+grep -q 'jar_excluded_patterns = stream_android_jar_excluded_patterns' \
+  "$ROOT/../sdk/android/BUILD.gn"
+grep -q '"kotlin/\*"' "$ROOT/../extensions/android/stream_android_jar.gni"
+grep -q 'verify-android-jar.sh' "$ROOT/scripts/package-android.sh"
+jar_root="$(mktemp -d)"
+# make_jar OUT ENTRY...: an ENTRY not ending in .class is an empty file. A
+# class ENTRY is "path.class" plus "|m=name:desc" (method), "|n=name:desc"
+# (native method), and "|r=Owner.name:desc" (method reference).
+make_jar() {
+  python3 - "$@" <<'PY'
+import struct, sys, zipfile
+def cls(name, attrs):
+    pool, index = [], {}
+    def add(key, raw):
+        if key not in index:
+            pool.append(raw)
+            index[key] = len(pool)
+        return index[key]
+    def utf8(s):
+        b = s.encode()
+        return add(("u", s), b"\x01" + struct.pack(">H", len(b)) + b)
+    def klass(s):
+        return add(("c", s), b"\x07" + struct.pack(">H", utf8(s)))
+    def nat(n, d):
+        return add(("n", n, d), b"\x0c" + struct.pack(">HH", utf8(n), utf8(d)))
+    this_class, super_class = klass(name), klass("java/lang/Object")
+    methods = b""
+    count = 0
+    for attr in attrs:
+        kind, _, value = attr.partition("=")
+        if kind == "r":
+            owner_name, _, desc = value.partition(":")
+            owner, _, mname = owner_name.rpartition(".")
+            add(("r", value), b"\x0a" + struct.pack(">HH", klass(owner),
+                                                     nat(mname, desc)))
+        else:
+            mname, _, desc = value.partition(":")
+            access = 0x0108 if kind == "n" else 0x0009
+            methods += struct.pack(">HHHH", access, utf8(mname), utf8(desc), 0)
+            count += 1
+    head = b"\xca\xfe\xba\xbe" + struct.pack(">HHH", 0, 52, len(pool) + 1)
+    return (head + b"".join(pool)
+            + struct.pack(">HHHHH", 0x21, this_class, super_class, 0, 0)
+            + struct.pack(">H", count) + methods + struct.pack(">H", 0))
+with zipfile.ZipFile(sys.argv[1], "w") as zf:
+    for entry in sys.argv[2:]:
+        path, *attrs = entry.split("|")
+        if path.endswith(".class"):
+            zf.writestr(path, cls(path[:-len(".class")], attrs))
+        else:
+            zf.writestr(path, b"")
+PY
+}
+gen='org/jni_zero/GEN_JNI'
+track_jni="org/webrtc/MediaStreamTrackJni.class|r=$gen.org_webrtc_MediaStreamTrack_getId:(J)Ljava/lang/String;"
+track_gen="$gen.class|m=org_webrtc_MediaStreamTrack_getId:(J)Ljava/lang/String;"
+make_jar "$jar_root/ok.jar" META-INF/MANIFEST.MF \
+  org/webrtc/MediaStreamTrack.class "$track_jni" \
+  "$track_gen|r=J/N.M0ETufK1:(J)Ljava/lang/String;" \
+  'J/N.class|n=M0ETufK1:(J)Ljava/lang/String;' org/jni_zero/JniZero.class
+"$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/ok.jar" >/dev/null
+make_jar "$jar_root/repackaged.jar" \
+  "io/getstream/webrtc/VideoTrackJni.class|r=$gen.io_getstream_webrtc_VideoTrack_addSink:(JJ)V" \
+  "$gen.class|m=io_getstream_webrtc_VideoTrack_addSink:(JJ)V" \
+  org/jni_zero/JniZero.class
+"$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/repackaged.jar" >/dev/null
+make_jar "$jar_root/nogenjni.jar" "$track_jni"
+if "$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/nogenjni.jar" \
+  2>"$jar_root/err"; then
+  echo "expected a jar without GEN_JNI to fail" >&2
+  exit 1
+fi
+grep -q 'no org/jni_zero/GEN_JNI.class' "$jar_root/err"
+make_jar "$jar_root/nojn.jar" "$track_jni" \
+  "$track_gen|r=J/N.M0ETufK1:(J)Ljava/lang/String;"
+if "$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/nojn.jar" \
+  2>"$jar_root/err"; then
+  echo "expected GEN_JNI forwarding to a missing J.N to fail" >&2
+  exit 1
+fi
+grep -q 'no J/N.class' "$jar_root/err"
+# The 57-character name has length byte 0x39 ("9"), which a byte-pattern
+# scan of the constant pool skips.
+init='org_webrtc_PeerConnectionFactory_initializeAndroidGlobals'
+make_jar "$jar_root/partial.jar" "$track_jni" \
+  "org/webrtc/PeerConnectionFactoryJni.class|r=$gen.$init:()V" \
+  "org/webrtc/VideoTrackJni.class|r=$gen.org_webrtc_VideoTrack_addSink:(JJ)V" \
+  "$track_gen|m=org_webrtc_VideoTrack_addSink:(J)V"
+if "$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/partial.jar" \
+  2>"$jar_root/err"; then
+  echo "expected GEN_JNI missing a proxy method to fail" >&2
+  exit 1
+fi
+grep -q "org/webrtc/PeerConnectionFactoryJni: $init()V" "$jar_root/err"
+grep -q 'org/webrtc/VideoTrackJni: org_webrtc_VideoTrack_addSink(JJ)V' \
+  "$jar_root/err"
+if grep -q 'MediaStreamTrack_getId' "$jar_root/err"; then
+  echo "GEN_JNI check flagged a proxy method that is present" >&2
+  exit 1
+fi
+grep -q '":libwebrtc_final_jni_java",' "$ROOT/../sdk/android/BUILD.gn"
+grep -q 'srcjar_deps = \[ ":libjingle_peerconnection_so__jni_registration" \]' \
+  "$ROOT/../sdk/android/BUILD.gn"
+grep -q 'java_targets = \[ ":libwebrtc_java_targets" \]' \
+  "$ROOT/../sdk/android/BUILD.gn"
+grep -q '^  java_group("libwebrtc_java_targets") {' \
+  "$ROOT/../sdk/android/BUILD.gn"
+make_jar "$jar_root/kotlin.jar" "$track_jni" "$track_gen" \
+  kotlin/TypeAliasesKt.class META-INF/kotlin-stdlib.kotlin_module
+if "$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/kotlin.jar" \
+  2>"$jar_root/err"; then
+  echo "expected a jar with kotlin/ to fail" >&2
+  exit 1
+fi
+grep -qx '  kotlin' "$jar_root/err"
+make_jar "$jar_root/nojni.jar" org/webrtc/VideoTrack.class
+if "$ROOT/scripts/verify-android-jar.sh" --jar "$jar_root/nojni.jar" \
+  2>"$jar_root/err"; then
+  echo "expected a jar without *Jni.class to fail" >&2
+  exit 1
+fi
+grep -q 'no generated \*Jni.class' "$jar_root/err"
+# make_so OUT SYMBOL...: an ELF64 library exporting SYMBOLs. ELF32=1 writes a
+# 32-bit library (armeabi-v7a, x86). NO_SECTIONS=1 omits the section header
+# table, like a fully stripped file.
+make_so() {
+  python3 - "$@" <<'PY'
+import os, struct, sys
+out, *names = sys.argv[1:]
+is32 = os.environ.get("ELF32") == "1"
+sym_fmt, sym_size = ("<IIIBBH", 16) if is32 else ("<IBBHQQ", 24)
+sh_fmt, sh_size, eh_size = ("<IIIIIIIIII", 40, 52) if is32 else (
+    "<IIQQQQIIQQ", 64, 64)
+dynstr = b"\0" + b"".join(n.encode() + b"\0" for n in names)
+syms = b"\0" * sym_size
+pos = 1
+for n in names:
+    syms += (struct.pack(sym_fmt, pos, 0, 0, 0x12, 0, 1) if is32
+             else struct.pack(sym_fmt, pos, 0x12, 0, 1, 0, 0))
+    pos += len(n) + 1
+data_off = eh_size
+str_off = data_off + len(syms)
+sh_off = str_off + len(dynstr)
+sh = b"\0" * sh_size
+sh += struct.pack(sh_fmt, 0, 11, 2, 0, data_off, len(syms), 2, 1, 4, sym_size)
+sh += struct.pack(sh_fmt, 0, 3, 2, 0, str_off, len(dynstr), 0, 0, 1, 0)
+shnum = 3
+if os.environ.get("NO_SECTIONS") == "1":
+    sh, sh_off, shnum = b"", 0, 0
+if is32:
+    ehdr = (b"\x7fELF\x01\x01\x01" + b"\0" * 9
+            + struct.pack("<HHIIIIIHHHHHH", 3, 40, 1, 0, 0, sh_off, 0,
+                          eh_size, 0, 0, sh_size, shnum, 0))
+else:
+    ehdr = (b"\x7fELF\x02\x01\x01" + b"\0" * 9
+            + struct.pack("<HHIQQQIHHHHHH", 3, 183, 1, 0, 0, sh_off, 0,
+                          eh_size, 0, 0, sh_size, shnum, 0))
+open(out, "wb").write(ehdr + syms + dynstr + sh)
+PY
+}
+make_jar "$jar_root/natives.jar" \
+  'J/N.class|n=M0ETufK1:(J)V' \
+  'org/webrtc/EncryptionManager.class|n=nativeCreate:(Ljava/lang/String;I)J|n=nativeDispose:(J)V|m=isEnabled:()Z' \
+  'org/webrtc/Simulcast_Factory.class|n=nativeCreate:(J)J'
+make_so "$jar_root/ok.so" Java_J_N_M0ETufK1 \
+  Java_org_webrtc_EncryptionManager_nativeCreate \
+  'Java_org_webrtc_EncryptionManager_nativeDispose__J' \
+  Java_org_webrtc_Simulcast_1Factory_nativeCreate
+ELF32=1 make_so "$jar_root/ok32.so" Java_J_N_M0ETufK1 \
+  Java_org_webrtc_EncryptionManager_nativeCreate \
+  Java_org_webrtc_EncryptionManager_nativeDispose \
+  Java_org_webrtc_Simulcast_1Factory_nativeCreate
+"$ROOT/scripts/verify-android-natives.sh" --jar "$jar_root/natives.jar" \
+  --so "$jar_root/ok.so" --so "$jar_root/ok32.so" >/dev/null
+ELF32=1 make_so "$jar_root/nodefine32.so" Java_J_N_M0ETufK1 \
+  Java_org_webrtc_EncryptionManager_nativeCreate
+if "$ROOT/scripts/verify-android-natives.sh" --jar "$jar_root/natives.jar" \
+  --so "$jar_root/nodefine32.so" 2>"$jar_root/err"; then
+  echo "expected a 32-bit library missing exports to fail" >&2
+  exit 1
+fi
+grep -q 'nodefine32.so exports no Java_\* symbol for 2 native methods' \
+  "$jar_root/err"
+make_so "$jar_root/nodefine.so" Java_J_N_M0ETufK1 \
+  Java_org_webrtc_Simulcast_1Factory_nativeCreate
+if "$ROOT/scripts/verify-android-natives.sh" --jar "$jar_root/natives.jar" \
+  --so "$jar_root/ok.so" --so "$jar_root/nodefine.so" 2>"$jar_root/err"; then
+  echo "expected natives without exports to fail" >&2
+  exit 1
+fi
+grep -q 'nodefine.so exports no Java_\* symbol for 2 native methods' \
+  "$jar_root/err"
+grep -q '  org/webrtc/EncryptionManager.nativeCreate(Ljava/lang/String;I)J' \
+  "$jar_root/err"
+if grep -q 'ok.so\|isEnabled' "$jar_root/err"; then
+  echo "verify-android-natives.sh flagged a library or a non-native method" >&2
+  exit 1
+fi
+NO_SECTIONS=1 make_so "$jar_root/stripped.so" Java_J_N_M0ETufK1
+if "$ROOT/scripts/verify-android-natives.sh" --jar "$jar_root/natives.jar" \
+  --so "$jar_root/stripped.so" 2>"$jar_root/err"; then
+  echo "expected a library without section headers to fail" >&2
+  exit 1
+fi
+grep -q 'stripped.so has no ELF section headers' "$jar_root/err"
+python3 - "$ROOT/scripts" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+from jvm_classfile import _modified_utf8, jni_mangle
+# U+1F600 as modified UTF-8: two 3-byte surrogates. JNI escapes each
+# UTF-16 unit.
+name = _modified_utf8(b"a\xed\xa0\xbd\xed\xb8\x80_b\xc0\x80")
+assert jni_mangle(name) == "a_0d83d_0de00_1b_00000", jni_mangle(name)
+PY
+grep -q 'verify-android-natives.sh' "$ROOT/scripts/package-android.sh"
+grep -q -- '--slices lists no slices' "$ROOT/scripts/package-android.sh"
+grep -q '^DEFINE_JNI(EncryptionManager)$' \
+  "$ROOT/../sdk/android/src/jni/pc/encryption_manager.cc"
+rm -rf "$jar_root"
+jni_root="$(mktemp -d)"
+mkdir -p "$jni_root/sdk/android/api/org/webrtc" "$jni_root/sdk/android/src/jni"
+cat > "$jni_root/sdk/android/BUILD.gn" <<'EOF'
+dist_jar("libwebrtc") {
+  deps = [ ":foo_java", ":bar_java", ":libwebrtc_final_jni_java" ]
+}
+rtc_android_library("foo_java") {
+  deps = [ ":generated_foo_jni_java" ]
+}
+rtc_android_library("bar_java") {
+  deps = [ ":generated_bar_jni_java" ]
+}
+rtc_shared_library("libjingle_peerconnection_so") {
+  deps = [ ":foo_jni", "//third_party/jni_zero" ]
+  java_targets = [ ":libwebrtc_java_targets" ]
+}
+rtc_library("foo_jni") {
+  sources = [ "src/jni/foo.cc" ]
+  deps = [ ":generated_foo_jni" ]
+}
+rtc_library("bar_jni") {
+  sources = [ "src/jni/bar.cc" ]
+  deps = [ ":generated_bar_jni" ]
+}
+generate_jni("generated_foo_jni") {
+  sources = [ "api/org/webrtc/Foo.java", "api/org/webrtc/Old.java" ]
+}
+generate_jni("generated_bar_jni") {
+  sources = [ "api/org/webrtc/Bar.java" ]
+}
+EOF
+printf 'class Foo { @NativeMethods interface Natives { long create(); } }\n' \
+  > "$jni_root/sdk/android/api/org/webrtc/Foo.java"
+printf 'class Old {\n  // a native call\n  private static native long nativeCreate();\n}\n' \
+  > "$jni_root/sdk/android/api/org/webrtc/Old.java"
+printf 'class Bar { @NativeMethods interface Natives { long create(); } }\n' \
+  > "$jni_root/sdk/android/api/org/webrtc/Bar.java"
+printf '#include "sdk/android/generated_foo_jni/Foo_jni.h"\n' \
+  > "$jni_root/sdk/android/src/jni/foo.cc"
+printf '#include "sdk/android/generated_bar_jni/Bar_jni.h"\nDEFINE_JNI(Bar)\n' \
+  > "$jni_root/sdk/android/src/jni/bar.cc"
+if "$ROOT/scripts/check-android-jni.sh" --src "$jni_root" 2>"$jni_root/err"; then
+  echo "expected check-android-jni.sh to fail" >&2
+  exit 1
+fi
+grep -q 'generated_bar_jni: libwebrtc packs its Java, but' "$jni_root/err"
+grep -q 'foo.cc: includes Foo_jni.h but never invokes DEFINE_JNI(Foo)' \
+  "$jni_root/err"
+grep -q 'Old.java:3: plain `native` method' "$jni_root/err"
+if grep -q 'bar.cc\|Bar.java\|Foo.java' "$jni_root/err"; then
+  echo "check-android-jni.sh flagged a file that invokes DEFINE_JNI" >&2
+  exit 1
+fi
+cp "$jni_root/sdk/android/BUILD.gn" "$jni_root/sdk/android/BUILD.gn.good"
+python3 - "$jni_root/sdk/android/BUILD.gn" <<'PY'
+import sys
+path = sys.argv[1]
+text = open(path).read()
+text = text.replace(', ":libwebrtc_final_jni_java"', "")
+text = text.replace('  java_targets = [ ":libwebrtc_java_targets" ]\n', "")
+open(path, "w").write(text)
+PY
+if "$ROOT/scripts/check-android-jni.sh" --src "$jni_root" 2>"$jni_root/err"; then
+  echo "expected missing GEN_JNI wiring to fail" >&2
+  exit 1
+fi
+grep -q 'deps omit :libwebrtc_final_jni_java' "$jni_root/err"
+grep -q 'java_targets omit :libwebrtc_java_targets' "$jni_root/err"
+cp "$jni_root/sdk/android/BUILD.gn.good" "$jni_root/sdk/android/BUILD.gn"
+sed -i.bak 's/deps = \[ ":foo_jni",/deps = [ ":foo_jni", ":bar_jni",/' \
+  "$jni_root/sdk/android/BUILD.gn"
+printf '#include "sdk/android/generated_foo_jni/Foo_jni.h"\nDEFINE_JNI(Foo)\n' \
+  > "$jni_root/sdk/android/src/jni/foo.cc"
+printf 'class Old { @NativeMethods interface Natives { long create(); } }\n' \
+  > "$jni_root/sdk/android/api/org/webrtc/Old.java"
+"$ROOT/scripts/check-android-jni.sh" --src "$jni_root" >/dev/null
+grep -q 'check-android-jni.sh' "$ROOT/../agents/skills/migrate/resolve-conflicts.md"
+rm -rf "$jni_root"
+pin_root="$(mktemp -d)"
+mkdir -p "$pin_root/build/android/gyp"
+cat > "$pin_root/build/android/gyp/compile_java.py" <<'EOF'
+        # Keep consistent with javac_cmd in //build/android/gyp/turbine.py.
+        # LINT.IfChange
+        '25',
+EOF
+printf "%s\n" "    javac_cmd = ['--release', '25']" \
+  > "$pin_root/build/android/gyp/turbine.py"
+"$ROOT/scripts/pin-android-java.sh" --src "$pin_root"
+grep -q "'17'" "$pin_root/build/android/gyp/compile_java.py"
+grep -q "'17'" "$pin_root/build/android/gyp/turbine.py"
+"$ROOT/scripts/pin-android-java.sh" --src "$pin_root"
+grep -q "'17'" "$pin_root/build/android/gyp/compile_java.py"
+printf '%s\n' 'javac_cmd = ["--release", "25"]' \
+  > "$pin_root/build/android/gyp/turbine.py"
+if "$ROOT/scripts/pin-android-java.sh" --src "$pin_root" 2>"$pin_root/err"; then
+  echo "expected a moved Java release pin to fail" >&2
+  exit 1
+fi
+grep -q 'Java release pin not found' "$pin_root/err" || {
+  echo "unexpected pin failure:" >&2
+  cat "$pin_root/err" >&2
+  exit 1
+}
+rm -rf "$pin_root"
+boot_root="$(mktemp -d)"
+mkdir -p "$boot_root/ios/build/bots/scripts"
+cat > "$boot_root/ios/build/bots/scripts/iossim_util.py" <<'EOF'
+      subprocess.check_call(cmd, timeout=120)
+      return True
+    except subprocess.TimeoutExpired as e:
+      msg = f"Manually booting simulator timed out after 120 seconds."
+EOF
+"$ROOT/scripts/pin-ios-simulator-boot.sh" --src "$boot_root"
+grep -q 'timeout=240' "$boot_root/ios/build/bots/scripts/iossim_util.py"
+grep -q 'after 240 seconds' "$boot_root/ios/build/bots/scripts/iossim_util.py"
+"$ROOT/scripts/pin-ios-simulator-boot.sh" --src "$boot_root"
+printf '%s\n' 'subprocess.check_call(cmd, timeout=120)' \
+  > "$boot_root/ios/build/bots/scripts/iossim_util.py"
+if "$ROOT/scripts/pin-ios-simulator-boot.sh" --src "$boot_root" 2>"$boot_root/err"; then
+  echo "expected a moved simulator boot timeout to fail" >&2
+  exit 1
+fi
+grep -q 'simulator boot timeout not found' "$boot_root/err" || {
+  echo "unexpected simulator boot pin failure:" >&2
+  cat "$boot_root/err" >&2
+  exit 1
+}
+rm -rf "$boot_root"
+grep -q 'env -u TARGET' "$ROOT/Makefile"
+grep -q 'libjingle_peerconnection_so/libstream_jingle_peerconnection_so' "$ROOT/Makefile"
 grep -q 'io.getstream.webrtc' "$gha/workflows/_make.yml"
 grep -q 'products-android-repackaged' "$gha/workflows/_make.yml"
 grep -q 'final-android/libwebrtc.aar' "$gha/workflows/_make.yml"
+grep -q 'release_ref="$(git -C src rev-parse HEAD)"' "$gha/workflows/_make.yml"
+grep -q -- '--target "${release_ref}"' "$gha/workflows/_make.yml"
+! grep -q 'RELEASE_REF:' "$gha/workflows/_make.yml"
 grep -q 'variant=repackaged' "$gha/workflows/promote-release.yml"
 grep -q 'promote_from_upstream_tag' "$gha/workflows/promote-release.yml"
 ! grep -q 'android_namespace:' "$gha/workflows/build.yml"

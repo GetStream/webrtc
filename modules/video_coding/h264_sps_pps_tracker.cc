@@ -13,10 +13,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <utility>
 #include <vector>
 
-#include "api/array_view.h"
 #include "api/video/video_codec_type.h"
 #include "common_video/h264/h264_common.h"
 #include "common_video/h264/pps_parser.h"
@@ -35,7 +35,7 @@ const uint8_t start_code_h264[] = {0, 0, 0, 1};
 }  // namespace
 
 H264SpsPpsTracker::FixedBitstream H264SpsPpsTracker::CopyAndFixBitstream(
-    ArrayView<const uint8_t> bitstream,
+    std::span<const uint8_t> bitstream,
     RTPVideoHeader* video_header) {
   RTC_DCHECK(video_header);
   RTC_DCHECK(video_header->codec == kVideoCodecH264);
@@ -51,12 +51,23 @@ H264SpsPpsTracker::FixedBitstream H264SpsPpsTracker::CopyAndFixBitstream(
   for (const NaluInfo& nalu : h264_header.nalus) {
     switch (nalu.type) {
       case H264::NaluType::kSps: {
+        if (nalu.sps_id < 0 || nalu.sps_id > H264::kMaxSpsId) {
+          RTC_LOG(LS_WARNING) << "SPS id out of bounds: " << nalu.sps_id;
+          return {.action = kDrop};
+        }
         SpsInfo& sps_info = sps_data_[nalu.sps_id];
         sps_info.width = video_header->width;
         sps_info.height = video_header->height;
         break;
       }
       case H264::NaluType::kPps: {
+        if (nalu.pps_id < 0 || nalu.pps_id > H264::kMaxPpsId ||
+            nalu.sps_id < 0 || nalu.sps_id > H264::kMaxSpsId) {
+          RTC_LOG(LS_WARNING)
+              << "PPS or SPS id out of bounds: pps_id=" << nalu.pps_id
+              << " sps_id=" << nalu.sps_id;
+          return {.action = kDrop};
+        }
         pps_data_[nalu.pps_id].sps_id = nalu.sps_id;
         break;
       }
@@ -115,7 +126,7 @@ H264SpsPpsTracker::FixedBitstream H264SpsPpsTracker::CopyAndFixBitstream(
   }
 
   if (h264_header.packetization_type == kH264StapA) {
-    ByteBufferReader nalu(bitstream.subview(1));
+    ByteBufferReader nalu(bitstream.subspan(1));
     while (nalu.Length() > 0) {
       required_size += sizeof(start_code_h264);
 
@@ -159,7 +170,7 @@ H264SpsPpsTracker::FixedBitstream H264SpsPpsTracker::CopyAndFixBitstream(
 
   // Copy the rest of the bitstream and insert start codes.
   if (h264_header.packetization_type == kH264StapA) {
-    ByteBufferReader nalu(bitstream.subview(1));
+    ByteBufferReader nalu(bitstream.subspan(1));
     while (nalu.Length() > 0) {
       fixed.bitstream.AppendData(start_code_h264);
 
@@ -206,9 +217,9 @@ void H264SpsPpsTracker::InsertSpsPpsNalus(const std::vector<uint8_t>& sps,
     return;
   }
   std::optional<SpsParser::SpsState> parsed_sps = SpsParser::ParseSps(
-      ArrayView<const uint8_t>(sps).subview(kNaluHeaderOffset));
+      std::span<const uint8_t>(sps).subspan(kNaluHeaderOffset));
   std::optional<PpsParser::PpsState> parsed_pps = PpsParser::ParsePps(
-      ArrayView<const uint8_t>(pps).subview(kNaluHeaderOffset));
+      std::span<const uint8_t>(pps).subspan(kNaluHeaderOffset));
 
   if (!parsed_sps) {
     RTC_LOG(LS_WARNING) << "Failed to parse SPS.";
@@ -219,6 +230,12 @@ void H264SpsPpsTracker::InsertSpsPpsNalus(const std::vector<uint8_t>& sps,
   }
 
   if (!parsed_pps || !parsed_sps) {
+    return;
+  }
+
+  if (parsed_sps->id > H264::kMaxSpsId || parsed_pps->id > H264::kMaxPpsId ||
+      parsed_pps->sps_id > H264::kMaxSpsId) {
+    RTC_LOG(LS_WARNING) << "Parsed SPS/PPS ID out of bounds.";
     return;
   }
 

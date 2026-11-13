@@ -47,56 +47,49 @@ SdpMungingType DetermineTransportModification(
     return SdpMungingType::kNumberOfContents;
   }
   for (size_t i = 0; i < last_created_transport_infos.size(); i++) {
-    if (last_created_transport_infos[i].description.ice_ufrag !=
-        transport_infos_to_set[i].description.ice_ufrag) {
+    const TransportDescription& last_created =
+        last_created_transport_infos[i].description;
+    const TransportDescription& to_set = transport_infos_to_set[i].description;
+    if (last_created.ice_ufrag != to_set.ice_ufrag) {
       RTC_LOG(LS_WARNING)
           << "SDP munging: ice-ufrag does not match last created description.";
       return SdpMungingType::kIceUfrag;
     }
-    if (last_created_transport_infos[i].description.ice_pwd !=
-        transport_infos_to_set[i].description.ice_pwd) {
+    if (last_created.ice_pwd != to_set.ice_pwd) {
       RTC_LOG(LS_WARNING)
           << "SDP munging: ice-pwd does not match last created description.";
       return SdpMungingType::kIcePwd;
     }
-    if (last_created_transport_infos[i].description.ice_mode !=
-        transport_infos_to_set[i].description.ice_mode) {
+    if (last_created.ice_mode != to_set.ice_mode) {
       RTC_LOG(LS_WARNING)
           << "SDP munging: ice mode does not match last created description.";
       return SdpMungingType::kIceMode;
     }
-    if (last_created_transport_infos[i].description.connection_role !=
-        transport_infos_to_set[i].description.connection_role) {
+    if (last_created.connection_role != to_set.connection_role) {
       RTC_LOG(LS_WARNING)
           << "SDP munging: DTLS role does not match last created description.";
       return SdpMungingType::kDtlsSetup;
     }
-    if (last_created_transport_infos[i].description.transport_options !=
-        transport_infos_to_set[i].description.transport_options) {
+    if (last_created.transport_options != to_set.transport_options) {
       RTC_LOG(LS_WARNING) << "SDP munging: ice_options does not match last "
                              "created description.";
-      bool created_renomination =
-          absl::c_find(
-              last_created_transport_infos[i].description.transport_options,
-              ICE_OPTION_RENOMINATION) !=
-          last_created_transport_infos[i].description.transport_options.end();
-      bool set_renomination =
-          absl::c_find(transport_infos_to_set[i].description.transport_options,
-                       ICE_OPTION_RENOMINATION) !=
-          transport_infos_to_set[i].description.transport_options.end();
-      if (!created_renomination && set_renomination) {
+      // This handles the surprisingly common case where the default `trickle`
+      // is removed together with the entire ice-options attribute.
+      if (!last_created.transport_options.empty() &&
+          to_set.transport_options.empty()) {
+        return SdpMungingType::kIceOptionsRemoved;
+      }
+      // Munging new features is not allowed.
+      if (last_created.HasOption(ICE_OPTION_SPED) !=
+          to_set.HasOption(ICE_OPTION_SPED)) {
+        return SdpMungingType::kIceOptionsSped;
+      }
+      if (!last_created.HasOption(ICE_OPTION_RENOMINATION) &&
+          to_set.HasOption(ICE_OPTION_RENOMINATION)) {
         return SdpMungingType::kIceOptionsRenomination;
       }
-      bool created_trickle =
-          absl::c_find(
-              last_created_transport_infos[i].description.transport_options,
-              ICE_OPTION_TRICKLE) !=
-          last_created_transport_infos[i].description.transport_options.end();
-      bool set_trickle =
-          absl::c_find(transport_infos_to_set[i].description.transport_options,
-                       ICE_OPTION_TRICKLE) !=
-          transport_infos_to_set[i].description.transport_options.end();
-      if (created_trickle && !set_trickle) {
+      if (last_created.HasOption(ICE_OPTION_TRICKLE) &&
+          !to_set.HasOption(ICE_OPTION_TRICKLE)) {
         return SdpMungingType::kIceOptionsTrickle;
       }
       return SdpMungingType::kIceOptions;
@@ -300,6 +293,14 @@ SdpMungingType DetermineRtcpModification(
                ? SdpMungingType::kAudioCodecsRtcpReducedSize
                : SdpMungingType::kVideoCodecsRtcpReducedSize;
   }
+
+  // rtcp-xr:rcvr-rtt. The legacy a=rtcp-fb:<pt> rrtr signals the same thing
+  // but is a codec feedback param and is measured as kAudioCodecsRtcpFbRrtr.
+  if (last_created_media_description->receive_non_sender_rtt() !=
+      media_description_to_set->receive_non_sender_rtt()) {
+    RTC_LOG(LS_ERROR) << "SDP munging: rtcp-xr rcvr-rtt modified.";
+    return SdpMungingType::kRtcpXrRcvrRtt;
+  }
   return SdpMungingType::kNoModification;
 }
 
@@ -489,6 +490,15 @@ SdpMungingType DetermineContentsModification(
       return SdpMungingType::kMid;
     }
 
+    // Rejecting (or unrejecting) an m= section should be done via negotiation,
+    // not munging.
+    if (last_created_contents[content_index].rejected !=
+        contents_to_set[content_index].rejected) {
+      RTC_LOG(LS_WARNING) << "SDP munging: m= section rejected state does not "
+                             "match last created description.";
+      return SdpMungingType::kRejected;
+    }
+
     auto* last_created_media_description =
         last_created_contents[content_index].media_description();
     auto* media_description_to_set =
@@ -544,6 +554,13 @@ SdpMungingType DetermineContentsModification(
       return SdpMungingType::kDirection;
     }
 
+    // Validate Sframe attribute.
+    if (last_created_media_description->sframe_enabled() !=
+        media_description_to_set->sframe_enabled()) {
+      RTC_LOG(LS_ERROR) << "SDP munging: sframe attribute modified.";
+      return SdpMungingType::kSframe;
+    }
+
     // Validate media streams.
     if (last_created_media_description->streams().size() !=
         media_description_to_set->streams().size()) {
@@ -553,11 +570,25 @@ SdpMungingType DetermineContentsModification(
     }
     for (size_t i = 0; i < last_created_media_description->streams().size();
          i++) {
+      // ssrcs, then stream and track ids.
+      const StreamParams& created_stream_params =
+          last_created_media_description->streams()[i];
+      const StreamParams& set_stream_params =
+          media_description_to_set->streams()[i];
       if (last_created_media_description->streams()[i].ssrcs !=
           media_description_to_set->streams()[i].ssrcs) {
         RTC_LOG(LS_WARNING)
             << "SDP munging: SSRCs do not match last created description.";
         return SdpMungingType::kSsrcs;
+      }
+      if (created_stream_params.stream_ids() !=
+          set_stream_params.stream_ids()) {
+        RTC_LOG(LS_WARNING) << "SDP munging: msid stream modified.";
+        return SdpMungingType::kMsidStream;
+      }
+      if (created_stream_params.id != set_stream_params.id) {
+        RTC_LOG(LS_WARNING) << "SDP munging: msid track (deprecated) modified.";
+        return SdpMungingType::kMsidTrack;
       }
     }
 
@@ -578,6 +609,13 @@ SdpMungingType DetermineContentsModification(
         RTC_LOG(LS_WARNING) << "SDP munging: header extension modified.";
         return SdpMungingType::kRtpHeaderExtensionModified;
       }
+    }
+
+    // Validate media level cryptex.
+    if (last_created_media_description->cryptex() !=
+        media_description_to_set->cryptex()) {
+      RTC_LOG(LS_WARNING) << "SDP munging: cryptex changed at media level.";
+      return SdpMungingType::kCryptex;
     }
 
     // Validate b= (which does not have an effect in the local description).
@@ -679,6 +717,13 @@ SdpMungingType DetermineSdpMungingType(
     }
   }
 
+  // Validate cryptex setting.
+  if (sdesc->description()->cryptex() !=
+      last_created_desc->description()->cryptex()) {
+    RTC_LOG(LS_WARNING) << "SDP munging: cryptex changed at session level.";
+    return SdpMungingType::kCryptex;
+  }
+
   // TODO: crbug.com/40567530 - this serializes the descriptions back to a SDP
   // string which is very complex and we not should be be forced to rely on
   // string equality.
@@ -732,7 +777,14 @@ bool IsSdpMungingAllowed(SdpMungingType sdp_munging_type,
       return true;
     case SdpMungingType::kNumberOfContents:
       return false;
-    case kDataChannelSctpInit:
+    case SdpMungingType::kSframe:
+      return false;
+    case SdpMungingType::kDataChannelSctpInit:
+    case SdpMungingType::kIceOptionsSped:
+      return false;
+    case SdpMungingType::kCryptex:
+      return false;
+    case SdpMungingType::kRtcpXrRcvrRtt:
       return false;
     default:
       // Handled below.

@@ -222,11 +222,7 @@ void AudioProcessingSimulator::ProcessStream(bool fixed_interface) {
     applied_input_volume_ = ap_->recommended_stream_analog_level();
   }
 
-  if (buffer_memory_writer_) {
-    RTC_CHECK(!buffer_file_writer_);
-    buffer_memory_writer_->Write(*out_buf_);
-  } else if (buffer_file_writer_) {
-    RTC_CHECK(!buffer_memory_writer_);
+  if (buffer_file_writer_) {
     buffer_file_writer_->Write(*out_buf_);
   }
 
@@ -316,7 +312,10 @@ void AudioProcessingSimulator::SetupBuffersConfigsOutputs(
                        reverse_input_num_channels);
 
   if (settings_.use_verbose_logging) {
-    LogMessage::LogToDebug(LS_VERBOSE);
+    LoggingConfig config;
+    config.set_min_severity(LS_VERBOSE);
+    config.set_debug_severity(LS_VERBOSE);
+    InitializeLogging(std::move(config));
 
     std::cout << "Sample rates:" << std::endl;
     std::cout << " Forward input: " << input_sample_rate_hz << std::endl;
@@ -373,9 +372,6 @@ void AudioProcessingSimulator::SetupOutput() {
                       static_cast<size_t>(out_config_.num_channels()),
                       settings_.wav_output_format));
     buffer_file_writer_.reset(new ChannelBufferWavWriter(std::move(out_file)));
-  } else if (settings_.aec_dump_input_string.has_value()) {
-    buffer_memory_writer_ = std::make_unique<ChannelBufferVectorWriter>(
-        settings_.processed_capture_samples);
   }
 
   if (settings_.linear_aec_output_filename) {
@@ -421,7 +417,7 @@ void AudioProcessingSimulator::DetachAecDump() {
 }
 
 void AudioProcessingSimulator::ConfigureAudioProcessor() {
-  AudioProcessing::Config apm_config;
+  AudioProcessing::Config apm_config = ap_->GetConfig();
   if (settings_.use_ts) {
     apm_config.transient_suppression.enabled = *settings_.use_ts != 0;
   }
@@ -432,6 +428,16 @@ void AudioProcessingSimulator::ConfigureAudioProcessor() {
   if (settings_.multi_channel_capture) {
     apm_config.pipeline.multi_channel_capture =
         *settings_.multi_channel_capture;
+  }
+
+  if (settings_.use_adaptive_stereo_downmixing_for_aec) {
+    if (*settings_.use_adaptive_stereo_downmixing_for_aec) {
+      apm_config.pipeline.capture_downmix_method_stereo_aec =
+          AudioProcessing::Config::Pipeline::DownmixMethod::kAdaptive;
+    } else {
+      apm_config.pipeline.capture_downmix_method_stereo_aec =
+          AudioProcessing::Config::Pipeline::DownmixMethod::kAverageChannels;
+    }
   }
 
   if (settings_.use_agc2) {
@@ -485,11 +491,8 @@ void AudioProcessingSimulator::ConfigureAudioProcessor() {
         *settings_.post_gain_factor;
   }
 
-  const bool use_aec = settings_.use_aec && *settings_.use_aec;
-  const bool use_aecm = settings_.use_aecm && *settings_.use_aecm;
-  if (use_aec || use_aecm) {
-    apm_config.echo_canceller.enabled = true;
-    apm_config.echo_canceller.mobile_mode = use_aecm;
+  if (settings_.use_aec) {
+    apm_config.echo_canceller.enabled = *settings_.use_aec;
   }
   apm_config.echo_canceller.export_linear_aec_output =
       !!settings_.linear_aec_output_filename;

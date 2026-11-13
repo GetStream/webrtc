@@ -13,11 +13,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 
 #include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
-#include "api/array_view.h"
 #include "api/candidate.h"
 #include "api/datagram_connection.h"
 #include "api/environment/environment.h"
@@ -32,6 +32,7 @@
 #include "p2p/dtls/dtls_transport_internal.h"
 #include "pc/dtls_srtp_transport.h"
 #include "pc/dtls_transport.h"
+#include "pc/packet_processor.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/copy_on_write_buffer.h"
 #include "rtc_base/network/sent_packet.h"
@@ -62,7 +63,7 @@ class RTC_EXPORT DatagramConnectionInternal : public DatagramConnection,
                                const uint8_t* digest,
                                size_t digest_len,
                                SSLRole ssl_role) override;
-  void SendPackets(ArrayView<PacketSendParameters> packets) override;
+  void SendPackets(std::span<PacketSendParameters> packets) override;
 
   void Terminate(
       absl::AnyInvocable<void()> terminate_complete_callback) override;
@@ -101,6 +102,7 @@ class RTC_EXPORT DatagramConnectionInternal : public DatagramConnection,
   enum class State { kActive, kTerminated };
   State current_state_ = State::kActive;
 
+  const Environment env_;
   const WireProtocol wire_protocol_;
 
   // Must be before Transport types, to ensure it outlives them.
@@ -118,6 +120,8 @@ class RTC_EXPORT DatagramConnectionInternal : public DatagramConnection,
 
   const std::string ice_username_fragment_;
   const std::string ice_password_;
+
+  std::unique_ptr<PacketProcessor> packet_processor_;
 };
 
 }  // namespace webrtc

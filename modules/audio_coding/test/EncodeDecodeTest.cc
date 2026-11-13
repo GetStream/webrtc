@@ -15,15 +15,14 @@
 #include <cstdlib>
 #include <map>
 #include <memory>
+#include <span>
 #include <string>
 
 #include "absl/strings/string_view.h"
-#include "api/array_view.h"
 #include "api/audio_codecs/audio_format.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "api/audio_codecs/builtin_audio_encoder_factory.h"
 #include "api/environment/environment.h"
-#include "api/environment/environment_factory.h"
 #include "api/neteq/default_neteq_factory.h"
 #include "api/neteq/neteq.h"
 #include "api/units/timestamp.h"
@@ -31,6 +30,7 @@
 #include "modules/audio_coding/include/audio_coding_module_typedefs.h"
 #include "modules/audio_coding/test/RTPFile.h"
 #include "rtc_base/strings/string_builder.h"
+#include "test/create_test_environment.h"
 #include "test/gtest.h"
 #include "test/testsupport/file_utils.h"
 
@@ -182,7 +182,7 @@ bool Receiver::IncomingPacket() {
 
     EXPECT_GE(
         0, _neteq->InsertPacket(_rtpHeader,
-                                ArrayView<const uint8_t>(_incomingPayload,
+                                std::span<const uint8_t>(_incomingPayload,
                                                          _realPayloadSizeBytes),
                                 /*receive_time=*/Timestamp::Millis(_nextTime)));
     _realPayloadSizeBytes = _rtpStream->Read(&_rtpHeader, _incomingPayload,
@@ -251,7 +251,7 @@ void EncodeDecodeTest::Perform() {
       {9, {"G722", 8000, 1}},
 #endif
   };
-  const Environment env = CreateEnvironment();
+  const Environment env = CreateTestEnvironment();
   int file_num = 0;
   for (const auto& send_codec : send_codecs) {
     RTPFile rtpFile;

@@ -27,11 +27,11 @@
 #include "api/video/i420_buffer.h"
 #include "api/video/video_frame.h"
 #include "api/video/video_frame_buffer.h"
-#include "api/video/video_frame_type.h"
 #include "api/video_codecs/video_decoder.h"
 #include "modules/video_coding/codecs/vp8/include/vp8.h"
 #include "modules/video_coding/include/video_error_codes.h"
 #include "rtc_base/checks.h"
+#include "rtc_base/logging.h"
 #include "rtc_base/numerics/exp_filter.h"
 #include "system_wrappers/include/metrics.h"
 #include "third_party/libvpx/source/libvpx/vpx/vp8.h"
@@ -240,8 +240,9 @@ int LibvpxVp8Decoder::Decode(const EncodedImage& input_image,
 
   // Always start with a complete key frame.
   if (key_frame_required_) {
-    if (input_image._frameType != VideoFrameType::kVideoFrameKey)
+    if (!input_image.IsKey()) {
       return WEBRTC_VIDEO_CODEC_ERROR;
+    }
     key_frame_required_ = false;
   }
 
@@ -251,6 +252,14 @@ int LibvpxVp8Decoder::Decode(const EncodedImage& input_image,
   }
   if (vpx_codec_decode(decoder_, buffer, input_image.size(), nullptr,
                        kDecodeDeadlineRealtime)) {
+    return WEBRTC_VIDEO_CODEC_ERROR;
+  }
+
+  int corrupted = 0;
+  if (vpx_codec_control(decoder_, VP8D_GET_FRAME_CORRUPTED, &corrupted) !=
+          VPX_CODEC_OK ||
+      corrupted != 0) {
+    RTC_LOG(LS_WARNING) << "Rejecting corrupted VP8 frame.";
     return WEBRTC_VIDEO_CODEC_ERROR;
   }
 

@@ -33,6 +33,7 @@
 #include "api/enable_media.h"
 #include "api/environment/deprecated_global_field_trials.h"
 #include "api/environment/environment.h"
+#include "api/environment/environment_factory.h"
 #include "api/fec_controller.h"
 #include "api/media_stream_interface.h"
 #include "api/neteq/neteq_factory.h"
@@ -146,10 +147,11 @@ ScopedJavaLocalRef<jobject> NativeToScopedJavaPeerConnectionFactory(
     std::unique_ptr<SocketFactory> socket_factory,
     std::unique_ptr<Thread> network_thread,
     std::unique_ptr<Thread> worker_thread,
-    std::unique_ptr<Thread> signaling_thread) {
+    std::unique_ptr<Thread> signaling_thread,
+    const Environment& webrtc_env) {
   OwnedFactoryAndThreads* owned_factory = new OwnedFactoryAndThreads(
       std::move(socket_factory), std::move(network_thread),
-      std::move(worker_thread), std::move(signaling_thread), pcf);
+      std::move(worker_thread), std::move(signaling_thread), webrtc_env, pcf);
 
   jni_zero::ScopedJavaLocalRef<jobject> j_pcf =
       Java_PeerConnectionFactory_Constructor(
@@ -186,16 +188,21 @@ jobject NativeToJavaPeerConnectionFactory(
     std::unique_ptr<SocketFactory> socket_factory,
     std::unique_ptr<Thread> network_thread,
     std::unique_ptr<Thread> worker_thread,
-    std::unique_ptr<Thread> signaling_thread) {
+    std::unique_ptr<Thread> signaling_thread,
+    const Environment& env) {
   return NativeToScopedJavaPeerConnectionFactory(
              jni, pcf, std::move(socket_factory), std::move(network_thread),
-             std::move(worker_thread), std::move(signaling_thread))
+             std::move(worker_thread), std::move(signaling_thread), env)
       .Release();
 }
 
 static void JNI_PeerConnectionFactory_InitializeAndroidGlobals(JNIEnv* jni) {
   if (!factory_static_initialized) {
-    JVM::Initialize(GetJVM());
+    if (JVM::IsInitialized()) {
+      RTC_LOG(LS_WARNING) << "Trying to initialize the JVM more than once!";
+    } else {
+      JVM::Initialize(GetJVM());
+    }
     factory_static_initialized = true;
   }
 }
@@ -217,7 +224,8 @@ static void JNI_PeerConnectionFactory_InitializeFieldTrials(
 }
 
 static void JNI_PeerConnectionFactory_InitializeInternalTracer(JNIEnv* jni) {
-  tracing::SetupInternalTracer();
+  Environment env = CreateEnvironment();
+  tracing::SetupInternalTracer(env);
 }
 
 static jboolean JNI_PeerConnectionFactory_StartInternalTracingCapture(
@@ -276,10 +284,6 @@ ScopedJavaLocalRef<jobject> CreatePeerConnectionFactoryForJava(
   network_thread->SetName("network_thread", nullptr);
   RTC_CHECK(network_thread->Start()) << "Failed to start thread";
 
-  std::unique_ptr<Thread> worker_thread = Thread::Create();
-  worker_thread->SetName("worker_thread", nullptr);
-  RTC_CHECK(worker_thread->Start()) << "Failed to start thread";
-
   std::unique_ptr<Thread> signaling_thread = Thread::Create();
   signaling_thread->SetName("signaling_thread", NULL);
   RTC_CHECK(signaling_thread->Start()) << "Failed to start thread";
@@ -291,7 +295,6 @@ ScopedJavaLocalRef<jobject> CreatePeerConnectionFactoryForJava(
   dependencies.env = env;
   dependencies.socket_factory = socket_server.get();
   dependencies.network_thread = network_thread.get();
-  dependencies.worker_thread = worker_thread.get();
   dependencies.signaling_thread = signaling_thread.get();
   dependencies.event_log_factory = std::make_unique<RtcEventLogFactory>();
   dependencies.fec_controller_factory = std::move(fec_controller_factory);
@@ -336,7 +339,7 @@ ScopedJavaLocalRef<jobject> CreatePeerConnectionFactoryForJava(
 
   return NativeToScopedJavaPeerConnectionFactory(
       jni, factory, std::move(socket_server), std::move(network_thread),
-      std::move(worker_thread), std::move(signaling_thread));
+      /*worker_thread=*/nullptr, std::move(signaling_thread), env);
 }
 
 static jni_zero::ScopedJavaLocalRef<jobject>
@@ -522,9 +525,9 @@ static jlong JNI_PeerConnectionFactory_CreateVideoSource(
     jboolean align_timestamps) {
   OwnedFactoryAndThreads* factory =
       reinterpret_cast<OwnedFactoryAndThreads*>(native_factory);
-  return jlongFromPointer(CreateVideoSource(jni, factory->signaling_thread(),
-                                            factory->worker_thread(),
-                                            is_screencast, align_timestamps));
+  return jlongFromPointer(CreateVideoSource(
+      jni, factory->signaling_thread(), factory->worker_thread(), is_screencast,
+      align_timestamps, factory->env()));
 }
 
 static jlong JNI_PeerConnectionFactory_CreateVideoTrack(
@@ -578,3 +581,5 @@ static void JNI_PeerConnectionFactory_PrintStackTrace(JNIEnv* env, jint tid) {
 
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(PeerConnectionFactory)

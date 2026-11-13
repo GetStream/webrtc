@@ -16,28 +16,34 @@
 
 #include "api/crypto/frame_crypto_trailer.h"
 
-#include <cstring>
+#include <algorithm>
+
+#include "rtc_base/checks.h"
 
 namespace webrtc {
 namespace {
 
-void WriteBe16(uint8_t* p, uint16_t v) {
+void WriteBe16(ArrayView<uint8_t> p, uint16_t v) {
+  RTC_CHECK_GE(p.size(), 2u);
   p[0] = static_cast<uint8_t>(v >> 8);
   p[1] = static_cast<uint8_t>(v);
 }
 
-void WriteBe32(uint8_t* p, uint32_t v) {
+void WriteBe32(ArrayView<uint8_t> p, uint32_t v) {
+  RTC_CHECK_GE(p.size(), 4u);
   p[0] = static_cast<uint8_t>(v >> 24);
   p[1] = static_cast<uint8_t>(v >> 16);
   p[2] = static_cast<uint8_t>(v >> 8);
   p[3] = static_cast<uint8_t>(v);
 }
 
-uint16_t ReadBe16(const uint8_t* p) {
+uint16_t ReadBe16(ArrayView<const uint8_t> p) {
+  RTC_CHECK_GE(p.size(), 2u);
   return static_cast<uint16_t>((uint16_t{p[0]} << 8) | uint16_t{p[1]});
 }
 
-uint32_t ReadBe32(const uint8_t* p) {
+uint32_t ReadBe32(ArrayView<const uint8_t> p) {
+  RTC_CHECK_GE(p.size(), 4u);
   return (uint32_t{p[0]} << 24) | (uint32_t{p[1]} << 16) |
          (uint32_t{p[2]} << 8) | uint32_t{p[3]};
 }
@@ -52,7 +58,7 @@ std::optional<uint8_t> ReadFramingVersion(ArrayView<const uint8_t> src) {
     return std::nullopt;
   }
   const size_t start = src.size() - kIdent;
-  if (ReadBe32(src.data() + start + 1) != kFrameTrailerMagic) {
+  if (ReadBe32(src.subspan(start + 1, 4)) != kFrameTrailerMagic) {
     return std::nullopt;
   }
   return src[start];
@@ -70,7 +76,7 @@ std::optional<FrameTrailer> ReadFrameTrailer(ArrayView<const uint8_t> src) {
   }
   const size_t start = src.size() - kFrameTrailerLen;
   // Byte 13-14: high bit means the ciphertext+trailer were RBSP-escaped.
-  const uint16_t raw = ReadBe16(src.data() + start + 13);
+  const uint16_t raw = ReadBe16(src.subspan(start + 13, 2));
   const uint16_t clear_bytes = raw & kFrameTrailerMaxClearBytes;
   // Overrun cannot be a valid trailer. Decrypt then re-checks version/magic
   // on the tail to decide unsupported-version vs plaintext.
@@ -78,8 +84,9 @@ std::optional<FrameTrailer> ReadFrameTrailer(ArrayView<const uint8_t> src) {
     return std::nullopt;
   }
   FrameTrailer trailer;
-  trailer.frame_counter = ReadBe32(src.data() + start);
-  memcpy(trailer.iv_prefix.data(), src.data() + start + 4, 8);
+  trailer.frame_counter = ReadBe32(src.subspan(start, 4));
+  const ArrayView<const uint8_t> prefix = src.subspan(start + 4, 8);
+  std::copy(prefix.begin(), prefix.end(), trailer.iv_prefix.begin());
   trailer.key_index = src[start + 12];
   trailer.clear_bytes = clear_bytes;
   trailer.is_rbsp = (raw & kFrameTrailerRbspFlag) != 0;
@@ -96,39 +103,44 @@ std::optional<FrameTrailer> ReadUnescapedTrailerFields(
   }
   const size_t start = unit.size() - kFrameTrailerLen;
   FrameTrailer trailer;
-  trailer.frame_counter = ReadBe32(unit.data() + start);
-  memcpy(trailer.iv_prefix.data(), unit.data() + start + 4, 8);
+  trailer.frame_counter = ReadBe32(unit.subspan(start, 4));
+  const ArrayView<const uint8_t> prefix = unit.subspan(start + 4, 8);
+  std::copy(prefix.begin(), prefix.end(), trailer.iv_prefix.begin());
   trailer.key_index = unit[start + 12];
   return trailer;
 }
 
-void WriteFrameTrailer(uint8_t* dst,
+void WriteFrameTrailer(ArrayView<uint8_t> dst,
                        uint32_t counter,
                        ArrayView<const uint8_t> iv_prefix,
                        uint8_t key_index,
                        uint16_t clear_bytes,
                        bool is_rbsp) {
-  WriteBe32(dst, counter);
-  memcpy(dst + 4, iv_prefix.data(), 8);
+  RTC_CHECK_GE(dst.size(), kFrameTrailerLen);
+  RTC_CHECK_EQ(iv_prefix.size(), 8u);
+  WriteBe32(dst.subspan(0, 4), counter);
+  std::copy(iv_prefix.begin(), iv_prefix.end(), dst.subspan(4, 8).begin());
   dst[12] = key_index;
   // OR the RBSP flag into the high bit of clearBytes. That forces the
   // high byte to >= 0x80, which breaks any 00 00 run before it can reach
   // version/magic, so a decoder can still read those last 7 bytes off
   // the raw (escaped) tail.
-  WriteBe16(dst + 13, is_rbsp ? static_cast<uint16_t>(clear_bytes |
-                                                      kFrameTrailerRbspFlag)
-                              : clear_bytes);
+  WriteBe16(dst.subspan(13, 2),
+            is_rbsp ? static_cast<uint16_t>(clear_bytes | kFrameTrailerRbspFlag)
+                    : clear_bytes);
   dst[15] = kFrameTrailerVersion;
-  WriteBe32(dst + 16, kFrameTrailerMagic);
+  WriteBe32(dst.subspan(16, 4), kFrameTrailerMagic);
 }
 
-void FillFrameIv(uint8_t iv[12],
+void FillFrameIv(ArrayView<uint8_t> iv,
                  ArrayView<const uint8_t> prefix,
                  uint32_t counter) {
   // 12-byte GCM IV: 8-byte per-import prefix + 4-byte big-endian counter.
   // The prefix is what keeps two senders under a shared key from colliding.
-  memcpy(iv, prefix.data(), 8);
-  WriteBe32(iv + 8, counter);
+  RTC_CHECK_GE(iv.size(), 12u);
+  RTC_CHECK_EQ(prefix.size(), 8u);
+  std::copy(prefix.begin(), prefix.end(), iv.begin());
+  WriteBe32(iv.subspan(8, 4), counter);
 }
 
 }  // namespace webrtc

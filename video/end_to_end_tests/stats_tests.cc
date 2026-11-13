@@ -14,13 +14,14 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/algorithm/container.h"
-#include "api/array_view.h"
 #include "api/environment/environment.h"
+#include "api/rtp_header_extension_id.h"
 #include "api/rtp_headers.h"
 #include "api/rtp_parameters.h"
 #include "api/scoped_refptr.h"
@@ -60,10 +61,7 @@
 
 namespace webrtc {
 namespace {
-enum : int {  // The first valid value is 1.
-  kVideoContentTypeExtensionId = 1,
-};
-}  // namespace
+constexpr RtpHeaderExtensionId kVideoContentTypeExtensionId(1);
 
 class StatsEndToEndTest : public test::CallTest {
  public:
@@ -87,7 +85,7 @@ TEST_F(StatsEndToEndTest, GetStats) {
               }) {}
 
    private:
-    Action OnSendRtp(ArrayView<const uint8_t> packet) override {
+    Action OnSendRtp(std::span<const uint8_t> packet) override {
       // Drop every 25th packet => 4% loss.
       static const int kPacketLossFrac = 25;
       RtpPacket header;
@@ -101,17 +99,17 @@ TEST_F(StatsEndToEndTest, GetStats) {
       return SEND_PACKET;
     }
 
-    Action OnSendRtcp(ArrayView<const uint8_t> packet) override {
+    Action OnSendRtcp(std::span<const uint8_t> packet) override {
       check_stats_event_.Set();
       return SEND_PACKET;
     }
 
-    Action OnReceiveRtp(ArrayView<const uint8_t> packet) override {
+    Action OnReceiveRtp(std::span<const uint8_t> packet) override {
       check_stats_event_.Set();
       return SEND_PACKET;
     }
 
-    Action OnReceiveRtcp(ArrayView<const uint8_t> packet) override {
+    Action OnReceiveRtcp(std::span<const uint8_t> packet) override {
       check_stats_event_.Set();
       return SEND_PACKET;
     }
@@ -152,8 +150,8 @@ TEST_F(StatsEndToEndTest, GetStats) {
         receive_stats_filled_["CodecStats"] |= stats.target_delay_ms != 0;
 
         receive_stats_filled_["FrameCounts"] |=
-            stats.frame_counts.key_frames != 0 ||
-            stats.frame_counts.delta_frames != 0;
+            stats.received_frame_counts.key_frames != 0 ||
+            stats.received_frame_counts.delta_frames != 0;
 
         receive_stats_filled_["JitterBufferDelay"] =
             stats.jitter_buffer_delay > TimeDelta::Zero();
@@ -392,7 +390,7 @@ TEST_F(StatsEndToEndTest, GetStats) {
 }
 
 TEST_F(StatsEndToEndTest, TimingFramesAreReported) {
-  static const int kExtensionId = 5;
+  static constexpr RtpHeaderExtensionId kExtensionId(5);
   RegisterRtpExtension(
       RtpExtension(RtpExtension::kVideoTimingUri, kExtensionId));
 
@@ -458,7 +456,7 @@ TEST_F(StatsEndToEndTest, TestReceivedRtpPacketStats) {
 
     void OnStreamsStopped() override { task_safety_flag_->SetNotAlive(); }
 
-    Action OnSendRtp(ArrayView<const uint8_t> packet) override {
+    Action OnSendRtp(std::span<const uint8_t> packet) override {
       if (sent_rtp_ >= kNumRtpPacketsToSend) {
         // Need to check the stats on the correct thread.
         task_queue_->PostTask(SafeTask(task_safety_flag_, [this]() {
@@ -517,7 +515,7 @@ TEST_F(StatsEndToEndTest, MAYBE_ContentTypeSwitches) {
       }
     }
 
-    Action OnSendRtp(ArrayView<const uint8_t> packet) override {
+    Action OnSendRtp(std::span<const uint8_t> packet) override {
       if (MinNumberOfFramesReceived())
         observation_complete_.Set();
       return SEND_PACKET;
@@ -560,7 +558,9 @@ TEST_F(StatsEndToEndTest, MAYBE_ContentTypeSwitches) {
     CreateReceiveTransport(test.GetReceiveTransportConfig(), &test);
     CreateSendTransport(test.GetReceiveTransportConfig(), &test);
 
-    receiver_call_->SignalChannelNetworkState(MediaType::VIDEO, kNetworkUp);
+    network_thread()->BlockingCall([this]() {
+      receiver_call_->SignalChannelNetworkState(MediaType::VIDEO, kNetworkUp);
+    });
     CreateSendConfig(1, 0, 0);
     CreateMatchingReceiveConfigs();
 
@@ -631,7 +631,7 @@ TEST_F(StatsEndToEndTest, VerifyNackStats) {
           task_queue_(task_queue) {}
 
    private:
-    Action OnSendRtp(ArrayView<const uint8_t> packet) override {
+    Action OnSendRtp(std::span<const uint8_t> packet) override {
       {
         MutexLock lock(&mutex_);
         if (++sent_rtp_packets_ == kPacketNumberToDrop) {
@@ -646,7 +646,7 @@ TEST_F(StatsEndToEndTest, VerifyNackStats) {
       return SEND_PACKET;
     }
 
-    Action OnReceiveRtcp(ArrayView<const uint8_t> packet) override {
+    Action OnReceiveRtcp(std::span<const uint8_t> packet) override {
       MutexLock lock(&mutex_);
       test::RtcpPacketParser rtcp_parser;
       rtcp_parser.Parse(packet);
@@ -756,7 +756,9 @@ TEST_F(StatsEndToEndTest, CallReportsRttForSender) {
     CreateFrameGeneratorCapturer(test::VideoTestConstants::kDefaultFramerate,
                                  test::VideoTestConstants::kDefaultWidth,
                                  test::VideoTestConstants::kDefaultHeight);
-    receiver_call_->SignalChannelNetworkState(MediaType::VIDEO, kNetworkUp);
+    network_thread()->BlockingCall([this]() {
+      receiver_call_->SignalChannelNetworkState(MediaType::VIDEO, kNetworkUp);
+    });
     Start();
   });
 
@@ -784,4 +786,5 @@ TEST_F(StatsEndToEndTest, CallReportsRttForSender) {
     DestroyCalls();
   });
 }
+}  // namespace
 }  // namespace webrtc

@@ -21,13 +21,14 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
 #include "absl/strings/string_view.h"
-#include "api/array_view.h"
 #include "api/sequence_checker.h"
 #include "rtc_base/checks.h"
 #include "sdk/android/native_api/jni/scoped_java_ref.h"
@@ -183,11 +184,15 @@ std::vector<T> JavaListToNativeVector(JNIEnv* env,
   return native_list;
 }
 
-template <typename Key, typename T, typename Convert>
-std::map<Key, T> JavaToNativeMap(JNIEnv* env,
-                                 const jni_zero::JavaRef<jobject>& j_map,
-                                 Convert convert) {
-  std::map<Key, T> container;
+template <typename Key,
+          typename T,
+          typename Compare = std::less<Key>,
+          typename Convert>
+std::map<Key, T, Compare> JavaToNativeMap(
+    JNIEnv* env,
+    const jni_zero::JavaRef<jobject>& j_map,
+    Convert convert) {
+  std::map<Key, T, Compare> container;
   for (auto const& j_entry : GetJavaMapEntrySet(env, j_map)) {
     container.emplace(convert(env, GetJavaMapEntryKey(env, j_entry),
                               GetJavaMapEntryValue(env, j_entry)));
@@ -245,10 +250,10 @@ ScopedJavaLocalRef<jobjectArray> NativeToJavaObjectArray(
 
 ScopedJavaLocalRef<jbyteArray> NativeToJavaByteArray(
     JNIEnv* env,
-    ArrayView<int8_t> container);
+    std::span<int8_t> container);
 ScopedJavaLocalRef<jintArray> NativeToJavaIntArray(
     JNIEnv* env,
-    ArrayView<int32_t> container);
+    std::span<int32_t> container);
 
 std::vector<int8_t> JavaToNativeByteArray(
     JNIEnv* env,

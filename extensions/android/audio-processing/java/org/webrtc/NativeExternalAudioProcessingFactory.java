@@ -1,5 +1,6 @@
 package org.webrtc;
 
+import org.jni_zero.NativeMethods;
 import org.webrtc.AudioProcessingFactory;
 
 public class NativeExternalAudioProcessingFactory implements AudioProcessingFactory {
@@ -18,18 +19,17 @@ public class NativeExternalAudioProcessingFactory implements AudioProcessingFact
 
   @Override
   public long createNative(long webrtcEnvRef) {
-    return nativeCreateAudioProcessingModule(libname);
+    return NativeExternalAudioProcessingFactoryJni.get().createAudioProcessingModule(libname);
   }
 
   public void destroyNative() {
-    nativeDestroyAudioProcessingModule();
+    NativeExternalAudioProcessingFactoryJni.get().destroyAudioProcessingModule();
   }
 
-  private static native long nativeCreateAudioProcessingModule(String libname);
+  @NativeMethods
+  interface Natives {
+    long createAudioProcessingModule(String libname);
 
-
-  private static native void nativeDestroyAudioProcessingModule();
-
+    void destroyAudioProcessingModule();
+  }
 }
-
-

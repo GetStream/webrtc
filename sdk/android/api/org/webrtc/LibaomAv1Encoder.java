@@ -11,13 +11,13 @@
 package org.webrtc;
 import java.util.List;
 
+import org.jni_zero.NativeMethods;
+
 public class LibaomAv1Encoder extends WrappedNativeVideoEncoder {
   @Override
   public long createNative(long webrtcEnvRef) {
-    return nativeCreate(webrtcEnvRef);
+    return LibaomAv1EncoderJni.get().create(webrtcEnvRef);
   }
-
-  static native long nativeCreate(long webrtcEnvRef);
 
   @Override
   public boolean isHardwareEncoder() {
@@ -25,8 +25,13 @@ public class LibaomAv1Encoder extends WrappedNativeVideoEncoder {
   }
 
   static List<String> scalabilityModes() {
-    return nativeGetSupportedScalabilityModes();
+    return LibaomAv1EncoderJni.get().getSupportedScalabilityModes();
   }
 
-  static native List<String> nativeGetSupportedScalabilityModes();
+  @NativeMethods
+  interface Natives {
+    long create(long webrtcEnvRef);
+
+    List<String> getSupportedScalabilityModes();
+  }
 }

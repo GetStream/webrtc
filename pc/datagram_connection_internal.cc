@@ -14,11 +14,11 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <utility>
 
 #include "absl/functional/any_invocable.h"
 #include "absl/strings/string_view.h"
-#include "api/array_view.h"
 #include "api/candidate.h"
 #include "api/crypto/crypto_options.h"
 #include "api/datagram_connection.h"
@@ -39,6 +39,7 @@
 #include "p2p/base/transport_description.h"
 #include "p2p/dtls/dtls_transport.h"
 #include "p2p/dtls/dtls_transport_internal.h"
+#include "pc/dtls_packet_processor.h"
 #include "pc/dtls_srtp_transport.h"
 #include "pc/dtls_transport.h"
 #include "pc/ice_transport.h"
@@ -58,6 +59,7 @@ using PacketMetadata = DatagramConnection::Observer::PacketMetadata;
 
 const size_t kMaxRtpPacketLen = 2048;
 const size_t kIceUfragLength = 16;
+const size_t kMinPayloadLengthForRtpCheck = 2;
 
 // Helper function to create IceTransportInit
 IceTransportInit CreateIceTransportInit(const Environment& env,
@@ -100,7 +102,8 @@ DatagramConnectionInternal::DatagramConnectionInternal(
     std::unique_ptr<Observer> observer,
     WireProtocol wire_protocol,
     std::unique_ptr<IceTransportInternal> custom_ice_transport_internal)
-    : wire_protocol_(wire_protocol),
+    : env_(env),
+      wire_protocol_(wire_protocol),
       observer_(std::move(observer)),
       port_allocator_(std::move(port_allocator)),
       transport_channel_(
@@ -144,7 +147,8 @@ DatagramConnectionInternal::DatagramConnectionInternal(
       this,
       std::bind_front(&DatagramConnectionInternal::OnCandidateGathered, this));
 
-  if (wire_protocol_ == WireProtocol::kDtls) {
+  if (wire_protocol_ == WireProtocol::kDtls ||
+      wire_protocol_ == WireProtocol::kDtlsWithFeedback) {
     internal_transport_->SubscribeWritableState(this, [this](bool is_writable) {
       this->OnWritableStatePossiblyChanged();
     });
@@ -199,6 +203,10 @@ DatagramConnectionInternal::DatagramConnectionInternal(
         });
   }
 
+  if (wire_protocol_ == WireProtocol::kDtlsWithFeedback) {
+    packet_processor_ = std::make_unique<DtlsPacketProcessor>();
+  }
+
   RTC_CHECK(internal_transport_->SetLocalCertificate(certificate));
 }
 
@@ -230,7 +238,8 @@ bool DatagramConnectionInternal::Writable() {
   if (current_state_ != State::kActive) {
     return false;
   }
-  if (wire_protocol_ == WireProtocol::kDtls) {
+  if (wire_protocol_ == WireProtocol::kDtls ||
+      wire_protocol_ == WireProtocol::kDtlsWithFeedback) {
     return internal_transport_->writable();
   }
   return internal_transport_->ice_transport()->writable() &&
@@ -254,7 +263,7 @@ void DatagramConnectionInternal::SetRemoteDtlsParameters(
 }
 
 void DatagramConnectionInternal::SendPackets(
-    ArrayView<PacketSendParameters> packets) {
+    std::span<PacketSendParameters> packets) {
   RTC_DCHECK_RUN_ON(&sequence_checker_);
   for (size_t i = 0; i < packets.size(); ++i) {
     SendSinglePacket(packets[i],
@@ -285,13 +294,28 @@ void DatagramConnectionInternal::SendSinglePacket(
     return;
   }
 
+  if (wire_protocol_ == WireProtocol::kDtlsWithFeedback) {
+    // Frame the payload with a transport header (and possibly piggybacked
+    // feedback) before sending it inside a DTLS packet. The provider records
+    // the packet internally for later correlation with incoming feedback.
+    CopyOnWriteBuffer framed = packet_processor_->ProcessOutgoingPacket(
+        packet.payload, env_.clock().CurrentTime());
+    if (internal_transport_->SendPacket(
+            reinterpret_cast<const char*>(framed.cdata()), framed.size(),
+            options) < 0) {
+      DispatchSendOutcome(packet.id, Observer::SendOutcome::Status::kNotSent);
+    }
+    return;
+  }
+
   if (!dtls_srtp_transport_->IsSrtpActive()) {
     RTC_LOG(LS_ERROR) << "Dropping packet on non-active SRTP connection";
     DispatchSendOutcome(packet.id, Observer::SendOutcome::Status::kNotSent);
     return;
   }
 
-  if (IsRtpOrRtcpPacket(packet.payload[0])) {
+  if (packet.payload.size() >= kMinPayloadLengthForRtpCheck &&
+      IsRtpOrRtcpPacket(packet.payload[0])) {
     // Copy the payload into a buffer with some extra capacity to allow space
     // for the SRTP encryption tag to be added.
     CopyOnWriteBuffer buffer(packet.payload.data(), packet.payload.size(),
@@ -384,24 +408,43 @@ void DatagramConnectionInternal::OnDtlsPacket(CopyOnWriteBuffer packet,
     return;
   }
   PacketMetadata metadata{.receive_time = receive_time};
+  if (wire_protocol_ == WireProtocol::kDtlsWithFeedback) {
+    // Strip the transport framing and route any parsed feedback to the feedback
+    // provider; deliver only the application payload (if any) to the app,
+    // through the same path as every other wire protocol.
+    std::optional<CopyOnWriteBuffer> payload =
+        packet_processor_->ProcessIncomingPacket(std::move(packet),
+                                                 receive_time);
+    if (payload) {
+      observer_->OnPacketReceived(
+          std::span<const uint8_t>(payload->cdata(), payload->size()),
+          metadata);
+    }
+    return;
+  }
   observer_->OnPacketReceived(packet, metadata);
 }
 
 void DatagramConnectionInternal::OnSentPacket(const SentPacketInfo& sent_info) {
-  Observer::SendOutcome outcome{};
-  outcome.id = sent_info.packet_id;
-  outcome.status = Observer::SendOutcome::Status::kSuccess;
-  outcome.send_time = Timestamp::Millis(sent_info.send_time_ms);
-  outcome.bytes_sent = sent_info.info.packet_size_bytes;
+  // Ignore internal transport packets (e.g. DTLS handshakes, session tickets,
+  // STUN connectivity checks) which are sent with the default packet ID of -1.
+  if (sent_info.packet_id == -1) {
+    return;
+  }
+  Observer::SendOutcome outcome{
+      .id = static_cast<DatagramConnection::PacketId>(sent_info.packet_id),
+      .status = Observer::SendOutcome::Status::kSuccess,
+      .send_time = sent_info.send_time_ms >= 0
+                       ? Timestamp::Millis(sent_info.send_time_ms)
+                       : Timestamp::MinusInfinity(),
+      .bytes_sent = sent_info.info.packet_size_bytes};
   observer_->OnSendOutcome(outcome);
 }
 
 void DatagramConnectionInternal::DispatchSendOutcome(
     PacketId id,
     Observer::SendOutcome::Status status) {
-  Observer::SendOutcome outcome{};
-  outcome.id = id;
-  outcome.status = status;
+  Observer::SendOutcome outcome{.id = id, .status = status};
   observer_->OnSendOutcome(outcome);
 }
 

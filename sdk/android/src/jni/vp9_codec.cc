@@ -56,3 +56,6 @@ static  webrtc::ScopedJavaLocalRef<jobject> JNI_LibvpxVp9Encoder_GetSupportedSca
 }
 }  // namespace jni
 }  // namespace webrtc
+
+DEFINE_JNI(LibvpxVp9Decoder)
+DEFINE_JNI(LibvpxVp9Encoder)

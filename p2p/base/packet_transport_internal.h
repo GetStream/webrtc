@@ -18,6 +18,7 @@
 
 #include "absl/functional/any_invocable.h"
 #include "api/sequence_checker.h"
+#include "api/task_queue/task_queue_base.h"
 #include "rtc_base/async_packet_socket.h"
 #include "rtc_base/callback_list.h"
 #include "rtc_base/network/received_packet.h"
@@ -87,11 +88,10 @@ class RTC_EXPORT PacketTransportInternal {
   void NotifyReadyToSend(PacketTransportInternal* packet_transport);
 
   // Emitted when receiving state changes to true.
-  [[deprecated]] void SubscribeReceivingState(
-      absl::AnyInvocable<void(PacketTransportInternal*)> callback);
   void SubscribeReceivingState(
       void* tag,
       absl::AnyInvocable<void(PacketTransportInternal*)> callback);
+  void UnsubscribeReceivingState(void* tag);
   void NotifyReceivingState(PacketTransportInternal* packet_transport);
 
   // Callback is invoked each time a packet is received on this channel.
@@ -130,7 +130,7 @@ class RTC_EXPORT PacketTransportInternal {
   virtual ~PacketTransportInternal();
 
  protected:
-  PacketTransportInternal();
+  explicit PacketTransportInternal(TaskQueueBase* attached_queue = nullptr);
 
   void NotifyPacketReceived(const ReceivedIpPacket& packet);
   void NotifyOnClose();

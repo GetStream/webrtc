@@ -20,7 +20,10 @@
 #include "audio_engine_device.h"
 
 #include <mach/mach_time.h>
+
 #include <cmath>
+#include <iomanip>
+#include <sstream>
 
 #include "api/array_view.h"
 #include "api/environment/environment_factory.h"

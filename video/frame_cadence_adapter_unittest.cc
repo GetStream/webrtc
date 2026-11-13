@@ -50,7 +50,6 @@ namespace {
 using ::testing::_;
 using ::testing::ElementsAre;
 using ::testing::InSequence;
-using ::testing::InvokeWithoutArgs;
 using ::testing::Mock;
 using ::testing::NiceMock;
 using ::testing::Pair;
@@ -250,10 +249,10 @@ TEST(FrameCadenceAdapterTest, DelayedProcessingUnderSlightContention) {
   // Expect frame delivery at 1 sec despite target sequence not running
   // callbacks for the time skipped.
   constexpr TimeDelta time_skipped = TimeDelta::Millis(999);
-  EXPECT_CALL(callback, OnFrame).WillOnce(InvokeWithoutArgs([&] {
+  EXPECT_CALL(callback, OnFrame).WillOnce([&] {
     EXPECT_EQ(time_controller.GetClock()->CurrentTime(),
               Timestamp::Zero() + TimeDelta::Seconds(1));
-  }));
+  });
   adapter->OnFrame(CreateFrame());
   time_controller.SkipForwardBy(time_skipped);
   time_controller.AdvanceTime(TimeDelta::Seconds(1) - time_skipped);
@@ -274,10 +273,10 @@ TEST(FrameCadenceAdapterTest, DelayedProcessingUnderHeavyContention) {
   // is not running callbacks for the initial 1+ sec.
   constexpr TimeDelta time_skipped =
       TimeDelta::Seconds(1) + TimeDelta::Micros(1);
-  EXPECT_CALL(callback, OnFrame).WillOnce(InvokeWithoutArgs([&] {
+  EXPECT_CALL(callback, OnFrame).WillOnce([&] {
     EXPECT_EQ(time_controller.GetClock()->CurrentTime(),
               Timestamp::Zero() + time_skipped);
-  }));
+  });
   adapter->OnFrame(CreateFrame());
   time_controller.SkipForwardBy(time_skipped);
   time_controller.AdvanceTime(TimeDelta::Zero());
@@ -611,7 +610,7 @@ TEST(FrameCadenceAdapterTest, IgnoresDropInducedCallbacksPostDestruction) {
   auto callback = std::make_unique<MockCallback>();
   GlobalSimulatedTimeController time_controller(Timestamp::Zero());
   auto queue = time_controller.GetTaskQueueFactory()->CreateTaskQueue(
-      "queue", TaskQueueFactory::Priority::NORMAL);
+      "queue", TaskQueueFactory::Priority::kNormal);
   FieldTrials no_field_trials = CreateTestFieldTrials();
   auto adapter = FrameCadenceAdapterInterface::Create(
       time_controller.GetClock(), queue.get(), /*metronome=*/nullptr,
@@ -638,9 +637,9 @@ TEST(FrameCadenceAdapterTest, EncodeFramesAreAlignedWithMetronomeTick) {
   // infrequent then the encode tasks are aligned with the tick period.
   static constexpr TimeDelta kTickPeriod = TimeDelta::Millis(33);
   auto queue = time_controller.GetTaskQueueFactory()->CreateTaskQueue(
-      "queue", TaskQueueFactory::Priority::NORMAL);
+      "queue", TaskQueueFactory::Priority::kNormal);
   auto worker_queue = time_controller.GetTaskQueueFactory()->CreateTaskQueue(
-      "work_queue", TaskQueueFactory::Priority::NORMAL);
+      "work_queue", TaskQueueFactory::Priority::kNormal);
   test::FakeMetronome metronome(kTickPeriod);
   FieldTrials no_field_trials = CreateTestFieldTrials();
   auto adapter = FrameCadenceAdapterInterface::Create(
@@ -714,7 +713,7 @@ TEST(FrameCadenceAdapterTest, ShutdownUnderMetronome) {
   GlobalSimulatedTimeController time_controller(Timestamp::Zero());
   static constexpr TimeDelta kTickPeriod = TimeDelta::Millis(100);
   auto queue = time_controller.GetTaskQueueFactory()->CreateTaskQueue(
-      "queue", TaskQueueFactory::Priority::NORMAL);
+      "queue", TaskQueueFactory::Priority::kNormal);
   test::FakeMetronome metronome(kTickPeriod);
   FieldTrials no_field_trials = CreateTestFieldTrials();
   auto adapter = FrameCadenceAdapterInterface::Create(
@@ -1076,7 +1075,7 @@ TEST(FrameCadenceAdapterRealTimeTest, TimestampsDoNotDrift) {
   // the repeated frames.
   auto factory = CreateDefaultTaskQueueFactory();
   auto queue =
-      factory->CreateTaskQueue("test", TaskQueueFactory::Priority::NORMAL);
+      factory->CreateTaskQueue("test", TaskQueueFactory::Priority::kNormal);
   MockCallback callback;
   Clock* clock = Clock::GetRealTimeClock();
   std::unique_ptr<FrameCadenceAdapterInterface> adapter;
@@ -1133,7 +1132,7 @@ TEST(FrameCadenceAdapterRealTimeTest, ScheduledRepeatAllowsForSlowEncode) {
   // OnFrame (frame 3).
   auto factory = CreateDefaultTaskQueueFactory();
   auto queue =
-      factory->CreateTaskQueue("test", TaskQueueFactory::Priority::NORMAL);
+      factory->CreateTaskQueue("test", TaskQueueFactory::Priority::kNormal);
   MockCallback callback;
   Clock* clock = Clock::GetRealTimeClock();
   std::unique_ptr<FrameCadenceAdapterInterface> adapter;
@@ -1151,22 +1150,21 @@ TEST(FrameCadenceAdapterRealTimeTest, ScheduledRepeatAllowsForSlowEncode) {
     auto frame = CreateFrame();
     constexpr int kSleepMs = 400;
     constexpr TimeDelta kAllowedBelate = TimeDelta::Millis(151);
-    EXPECT_CALL(callback, OnFrame)
-        .WillRepeatedly(InvokeWithoutArgs([&, kAllowedBelate] {
-          ++frame_counter;
-          // Avoid the first OnFrame and sleep on the second.
-          if (frame_counter == 2) {
-            start_time = clock->CurrentTime();
-            Thread::SleepMs(kSleepMs);
-          } else if (frame_counter == 3) {
-            TimeDelta diff =
-                clock->CurrentTime() - (*start_time + TimeDelta::Millis(500));
-            RTC_LOG(LS_ERROR)
-                << "Difference in when frame should vs is appearing: " << diff;
-            EXPECT_LT(diff, kAllowedBelate);
-            event.Set();
-          }
-        }));
+    EXPECT_CALL(callback, OnFrame).WillRepeatedly([&, kAllowedBelate] {
+      ++frame_counter;
+      // Avoid the first OnFrame and sleep on the second.
+      if (frame_counter == 2) {
+        start_time = clock->CurrentTime();
+        Thread::SleepMs(kSleepMs);
+      } else if (frame_counter == 3) {
+        TimeDelta diff =
+            clock->CurrentTime() - (*start_time + TimeDelta::Millis(500));
+        RTC_LOG(LS_ERROR) << "Difference in when frame should vs is appearing: "
+                          << diff;
+        EXPECT_LT(diff, kAllowedBelate);
+        event.Set();
+      }
+    });
     adapter->OnFrame(frame);
   });
   event.Wait(Event::kForever);

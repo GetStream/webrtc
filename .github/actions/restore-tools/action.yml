@@ -70,3 +70,9 @@ runs:
         echo "tools image: ${CACHE_IMAGE}"
         echo "tools members: ${ARCHIVE_MEMBERS}"
         "$script" pull
+        # The tools package is published from another branch, so src/resources
+        # can replace this checkout's BUILD.gn. Restore tracked files.
+        # Untracked downloaded media stays. Hooks run after this step.
+        if [[ -d src/.git ]]; then
+          git -C src checkout -- resources
+        fi

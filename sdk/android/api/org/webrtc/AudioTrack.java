@@ -11,6 +11,7 @@
 package org.webrtc;
 
 import java.util.IdentityHashMap;
+import org.jni_zero.NativeMethods;
 
 /** Java wrapper for a C++ AudioTrackInterface */
 public class AudioTrack extends MediaStreamTrack {
@@ -20,11 +21,11 @@ public class AudioTrack extends MediaStreamTrack {
     super(nativeTrack);
   }
 
-  /** Sets the volume for the underlying MediaSource. Volume is a gain value in the range
-   *  0 to 10.
+  /**
+   * Sets the volume for the underlying MediaSource. Volume is a gain value in the range 0 to 10.
    */
   public void setVolume(double volume) {
-    nativeSetVolume(getNativeAudioTrack(), volume);
+    lifecycleLock.run(nativeTrack -> AudioTrackJni.get().setVolume(nativeTrack, volume));
   }
 
   /**
@@ -37,11 +38,16 @@ public class AudioTrack extends MediaStreamTrack {
     if (sink == null) {
       throw new IllegalArgumentException("The AudioTrackSink is not allowed to be null");
     }
-    if (!sinks.containsKey(sink)) {
-      final long nativeSink = nativeWrapSink(sink);
-      sinks.put(sink, nativeSink);
-      nativeAddSink(getNativeMediaStreamTrack(), nativeSink);
-    }
+    lifecycleLock.run(
+        nativeTrack -> {
+          synchronized (sinks) {
+            if (!sinks.containsKey(sink)) {
+              final long nativeSink = AudioTrackJni.get().wrapSink(sink);
+              sinks.put(sink, nativeSink);
+              AudioTrackJni.get().addSink(nativeTrack, nativeSink);
+            }
+          }
+        });
   }
 
   /**
@@ -50,21 +56,31 @@ public class AudioTrack extends MediaStreamTrack {
    * If the AudioTrackSink was not attached to the track, this is a no-op.
    */
   public void removeSink(AudioTrackSink sink) {
-    final Long nativeSink = sinks.remove(sink);
-    if (nativeSink != null) {
-      nativeRemoveSink(getNativeMediaStreamTrack(), nativeSink);
-      nativeFreeSink(nativeSink);
-    }
+    lifecycleLock.runIfAlive(
+        nativeTrack -> {
+          synchronized (sinks) {
+            final Long nativeSink = sinks.remove(sink);
+            if (nativeSink != null) {
+              AudioTrackJni.get().removeSink(nativeTrack, nativeSink);
+              AudioTrackJni.get().freeSink(nativeSink);
+            }
+          }
+        });
   }
 
   @Override
   public void dispose() {
-    for (long nativeSink : sinks.values()) {
-      nativeRemoveSink(getNativeMediaStreamTrack(), nativeSink);
-      nativeFreeSink(nativeSink);
-    }
-    sinks.clear();
-    super.dispose();
+    lifecycleLock.dispose(
+        nativeTrack -> {
+          synchronized (sinks) {
+            for (long nativeSink : sinks.values()) {
+              AudioTrackJni.get().removeSink(nativeTrack, nativeSink);
+              AudioTrackJni.get().freeSink(nativeSink);
+            }
+            sinks.clear();
+          }
+          JniCommon.nativeReleaseRef(nativeTrack);
+        });
   }
 
   /** Returns a pointer to webrtc::AudioTrackInterface. */
@@ -72,9 +88,16 @@ public class AudioTrack extends MediaStreamTrack {
     return getNativeMediaStreamTrack();
   }
 
-  private static native void nativeSetVolume(long track, double volume);
-  private static native void nativeAddSink(long track, long nativeSink);
-  private static native void nativeRemoveSink(long track, long nativeSink);
-  private static native long nativeWrapSink(AudioTrackSink sink);
-  private static native void nativeFreeSink(long sink);
+  @NativeMethods
+  interface Natives {
+    void setVolume(long track, double volume);
+
+    void addSink(long track, long nativeSink);
+
+    void removeSink(long track, long nativeSink);
+
+    long wrapSink(AudioTrackSink sink);
+
+    void freeSink(long sink);
+  }
 }

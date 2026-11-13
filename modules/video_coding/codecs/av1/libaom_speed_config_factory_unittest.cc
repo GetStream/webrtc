@@ -11,9 +11,11 @@
 #include <algorithm>
 #include <cstddef>
 #include <set>
+#include <string>
 
 #include "api/video_codecs/encoder_speed_controller.h"
 #include "api/video_codecs/video_codec.h"
+#include "modules/video_coding/utility/frame_sampler.h"
 #include "rtc_base/checks.h"
 #include "test/gtest.h"
 
@@ -56,6 +58,7 @@ TEST(LibaomSpeedConfigFactoryTest, NumLevelsIncreaseWithComplexity) {
 
   LibaomSpeedConfigFactory factory_max(VideoCodecComplexity::kComplexityMax,
                                        VideoCodecMode::kRealtimeVideo);
+
   EncoderSpeedController::Config config_max =
       factory_max.GetSpeedConfig(640, 360, 3);
 
@@ -138,7 +141,7 @@ TEST_P(LibaomSpeedConfigFactoryResolutionTest, GetSpeedConfigStartSpeedIndex) {
   EXPECT_EQ(config.start_speed_index, expected_index);
 }
 
-void CheckDistinctConfigs(const LibaomSpeedConfigFactory& factory,
+void CheckDistinctConfigs(LibaomSpeedConfigFactory& factory,
                           int num_temporal_layers) {
   RTC_DCHECK_GT(num_temporal_layers, 0);
   RTC_DCHECK_LE(num_temporal_layers, 3);
@@ -167,6 +170,20 @@ TEST(LibaomSpeedConfigFactoryTest, DistinctConfigs3Tl) {
   LibaomSpeedConfigFactory factory(VideoCodecComplexity::kComplexityMax,
                                    VideoCodecMode::kRealtimeVideo);
   CheckDistinctConfigs(factory, 3);
+}
+
+TEST(LibaomSpeedConfigFactoryTest, PopulatesPsnrProbingSettings) {
+  LibaomSpeedConfigFactory factory(VideoCodecComplexity::kComplexityMax,
+                                   VideoCodecMode::kRealtimeVideo);
+  EncoderSpeedController::Config config = factory.GetSpeedConfig(1280, 720, 2);
+
+  ASSERT_TRUE(config.psnr_probing_settings.has_value());
+  EXPECT_EQ(config.psnr_probing_settings->mode,
+            EncoderSpeedController::Config::PsnrProbingSettings::Mode::
+                kRegularBaseLayerSampling);
+  EXPECT_EQ(config.psnr_probing_settings->sampling_interval,
+            FrameSampler::kDefaultPsnrFrameSamplingInterval);
+  EXPECT_EQ(config.psnr_probing_settings->average_base_layer_ratio, 0.5);
 }
 
 }  // namespace

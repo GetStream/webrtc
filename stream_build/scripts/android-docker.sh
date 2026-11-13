@@ -205,6 +205,8 @@ main() {
   # into the checkout. Not inside the worktree: binding the worktree onto
   # a directory inside itself loops.
   local state="${host_parent}/.android-gclient-$(short_hash "$host_src")"
+  # Sibling of the gclient root. gclient rejects a cache inside DEPS_ROOT.
+  local git_cache="${host_parent}/.android-git-cache-$(short_hash "$host_src")/.gclient-git-cache"
   local container_src="${state}/src"
   local container_out="${container_src}/out"
   local container_products="${container_src}/products"
@@ -215,6 +217,7 @@ main() {
 
   mkdir -p \
     "$state" \
+    "$(dirname "$git_cache")" \
     "${state}/.cipd-cache" \
     "${state}/.vpython" \
     "${state}/.android-docker-home" \
@@ -227,10 +230,14 @@ main() {
   else
     mkdir -p "${state}/.depot_tools"
   fi
-  if [[ -d "${previous}/.gclient-git-cache" && ! -e "${state}/.gclient-git-cache" ]]; then
-    ln -s "${previous}/.gclient-git-cache" "${state}/.gclient-git-cache"
-  else
-    mkdir -p "${state}/.gclient-git-cache"
+  if [[ ! -e "$git_cache" ]]; then
+    if [[ -d "${state}/.gclient-git-cache" ]]; then
+      mv "${state}/.gclient-git-cache" "$git_cache"
+    elif [[ -d "${previous}/.gclient-git-cache" ]]; then
+      ln -s "${previous}/.gclient-git-cache" "$git_cache"
+    else
+      mkdir -p "$git_cache"
+    fi
   fi
   write_gclient "$state" "${WEBRTC_REPO:-git@github.com:GetStream/webrtc.git}" "android,unix"
 
@@ -274,7 +281,7 @@ main() {
     -e "WEBRTC_SRC=${container_src}"
     -e "OUT=${container_out}"
     -e "PRODUCTS=${container_products}"
-    -e "GIT_CACHE_PATH=${state}/.gclient-git-cache"
+    -e "GIT_CACHE_PATH=${git_cache}"
     -e "HOST_CHECKOUT=${host_src}"
     -e "STREAM_ANDROID_IN_DOCKER=1"
     -e "GIT_CONFIG_COUNT=1"

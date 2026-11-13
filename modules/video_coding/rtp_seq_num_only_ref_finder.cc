@@ -14,7 +14,6 @@
 #include <memory>
 #include <utility>
 
-#include "api/video/video_frame_type.h"
 #include "modules/rtp_rtcp/source/frame_object.h"
 #include "modules/video_coding/rtp_frame_reference_finder.h"
 #include "rtc_base/checks.h"
@@ -48,7 +47,25 @@ RtpFrameReferenceFinder::ReturnVector RtpSeqNumOnlyRefFinder::ManageFrame(
 
 RtpSeqNumOnlyRefFinder::FrameDecision
 RtpSeqNumOnlyRefFinder::ManageFrameInternal(RtpFrameObject* frame) {
-  if (frame->frame_type() == VideoFrameType::kVideoFrameKey) {
+  if (frame->IsKey()) {
+    // After a large sequence-number jump/wrap (>= half the 16-bit space), a
+    // stale pre-jump GoP appears "ahead" of this keyframe and shadows
+    // upper_bound lookups, causing delta frames to be dropped ("has no GoP")
+    // for 60-150s. Remove such stale GoPs. The distance threshold ensures we
+    // only remove GoPs that are *far* ahead (a stale pre-jump GoP is
+    // ~22000-32768 sequence numbers ahead), while protecting a legitimately
+    // reordered near-future keyframe (at most a few hundred ahead) from being
+    // erased. issues.webrtc.org/516639936.
+    constexpr uint16_t kMaxGopReorderingDistance = 0x2000;  // 8192
+    for (auto it = last_seq_num_gop_.begin(); it != last_seq_num_gop_.end();) {
+      if (AheadOf<uint16_t>(it->first, frame->last_seq_num()) &&
+          ForwardDiff<uint16_t>(frame->last_seq_num(), it->first) >
+              kMaxGopReorderingDistance) {
+        it = last_seq_num_gop_.erase(it);
+      } else {
+        ++it;
+      }
+    }
     last_seq_num_gop_.insert(std::make_pair(
         frame->last_seq_num(),
         std::make_pair(frame->last_seq_num(), frame->last_seq_num())));
@@ -82,7 +99,7 @@ RtpSeqNumOnlyRefFinder::ManageFrameInternal(RtpFrameObject* frame) {
   // this frame.
   uint16_t last_picture_id_gop = seq_num_it->second.first;
   uint16_t last_picture_id_with_padding_gop = seq_num_it->second.second;
-  if (frame->frame_type() == VideoFrameType::kVideoFrameDelta) {
+  if (frame->IsDelta()) {
     uint16_t prev_seq_num = frame->first_seq_num() - 1;
 
     if (prev_seq_num != last_picture_id_with_padding_gop)
@@ -94,8 +111,7 @@ RtpSeqNumOnlyRefFinder::ManageFrameInternal(RtpFrameObject* frame) {
   // Since keyframes can cause reordering we can't simply assign the
   // picture id according to some incrementing counter.
   frame->SetId(frame->last_seq_num());
-  frame->num_references =
-      frame->frame_type() == VideoFrameType::kVideoFrameDelta;
+  frame->num_references = frame->IsDelta();
   frame->references[0] = rtp_seq_num_unwrapper_.Unwrap(last_picture_id_gop);
   if (AheadOf<uint16_t>(frame->Id(), last_picture_id_gop)) {
     seq_num_it->second.first = frame->Id();

@@ -52,7 +52,7 @@ struct RTC_EXPORT StreamsConfig {
   // If `enable_repeated_initial_probing` is set to true, Probes are sent
   // periodically every 1s during the first 5s after the network becomes
   // available. The probes ignores max_total_allocated_bitrate.
-  std::optional<bool> enable_repeated_initial_probing;
+  bool enable_repeated_initial_probing = false;
   std::optional<double> pacing_factor;
 
   // TODO(srte): Use BitrateAllocationLimits here.
@@ -88,6 +88,9 @@ struct RTC_EXPORT NetworkRouteChange {
   // The TargetRateConstraints are set here so they can be changed synchronously
   // when network route changes.
   TargetRateConstraints constraints;
+  // If true, the change is significant enough to warrant a reset of the
+  // bandwidth estimator.
+  bool restart_bwe = true;
 };
 
 struct RTC_EXPORT PacedPacketInfo {
@@ -190,6 +193,12 @@ struct RTC_EXPORT PacketResult {
   // this packet as lost, but current report marks it as received.
   bool reported_recovered_for_the_first_time = false;
 
+  // Indicates if the packet receive time is ambiguous (e.g. because the packet
+  // was retransmitted without RTX and could match multiple transmissions),
+  // meaning receive_time is a best-effort estimate and should not be used for
+  // delay or RTT calculations.
+  bool ambiguous_receive_time = false;
+
   // `rtp_packet_info` is only set if the feedback is related to a RTP packet.
   std::optional<RtpPacketInfo> rtp_packet_info;
 };
@@ -202,6 +211,7 @@ struct RTC_EXPORT TransportPacketsFeedback {
   Timestamp feedback_time = Timestamp::PlusInfinity();
   DataSize data_in_flight = DataSize::Zero();
 
+  [[deprecated("Use HasPacketWithBleachedEct1() instead")]]
   bool transport_supports_ecn = false;
   std::vector<PacketResult> packet_feedbacks;
 
@@ -215,6 +225,13 @@ struct RTC_EXPORT TransportPacketsFeedback {
 
   // True if at least one packet is CE marked.
   bool HasPacketWithEcnCe() const;
+  // True if at least one packet that was sent with an ECT(1) marking was
+  // reported received without it, i.e. the path bleached the marking to
+  // Not-ECT or replaced it with ECT(0).
+  bool HasPacketWithBleachedEct1() const;
+  // True if at least one packet that was sent with an ECT(1) marking was
+  // reported received still marked ECT(1) or CE.
+  bool HasPacketWithEcn() const;
 };
 
 // Network estimation
@@ -224,7 +241,6 @@ struct RTC_EXPORT NetworkEstimate {
   // Deprecated, use TargetTransferRate::target_rate instead.
   DataRate bandwidth = DataRate::Infinity();
   TimeDelta round_trip_time = TimeDelta::PlusInfinity();
-  TimeDelta bwe_period = TimeDelta::PlusInfinity();
 
   float loss_rate_ratio = 0;
 };
@@ -271,6 +287,10 @@ struct RTC_EXPORT TargetTransferRate {
   NetworkEstimate network_estimate;
   DataRate target_rate = DataRate::Zero();
   double cwnd_reduce_ratio = 0;
+
+  // True if WebRTC is actively sending near estimated link capacity (not in
+  // ALR).
+  bool is_bandwidth_limited = true;
 };
 
 // Contains updates of network controller comand state. Using optionals to

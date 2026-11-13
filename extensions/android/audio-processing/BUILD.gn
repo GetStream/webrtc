@@ -64,7 +64,11 @@ rtc_android_library("native_plugin_java") {
   sources = [
     "java/org/webrtc/NativeExternalAudioProcessingFactory.java",
   ]
-  deps = [ "//sdk/android:peerconnection_java" ]
+  deps = [
+    ":generated_native_plugin_jni_java",
+    "//sdk/android:peerconnection_java",
+    "//third_party/jni_zero:jni_zero_java",
+  ]
 }
 
 # Java: ExternalAudioProcessingFactory (for Java-based capture/render hooks)
@@ -74,9 +78,11 @@ rtc_android_library("audio_effects_java") {
     "java/org/webrtc/ExternalAudioProcessingFactory.java",
   ]
   deps = [
+    ":generated_effects_jni_java",
     "../../../sdk/android:base_java",
     "../../../sdk/android:peerconnection_java",
     "//third_party/androidx:androidx_annotation_annotation_java",
+    "//third_party/jni_zero:jni_zero_java",
   ]
 }
 

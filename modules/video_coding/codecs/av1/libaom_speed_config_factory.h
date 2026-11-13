@@ -21,7 +21,7 @@ class LibaomSpeedConfigFactory {
 
   EncoderSpeedController::Config GetSpeedConfig(int width,
                                                 int height,
-                                                int num_temporal_layers) const;
+                                                int num_temporal_layers);
 
  private:
   const VideoCodecComplexity complexity_;

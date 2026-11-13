@@ -45,7 +45,6 @@ rtc_library("common_audio") {
   deps = [
     ":common_audio_c",
     ":sinc_resampler",
-    "../api:array_view",
     "../api/audio:audio_frame_api",
     "../api/units:timestamp",
     "../rtc_base:checks",
@@ -91,8 +90,6 @@ rtc_source_set("common_audio_c_arm_asm") {
   sources = []
   deps = []
   if (current_cpu == "arm") {
-    sources += [ "signal_processing/complex_bit_reverse_arm.S" ]
-
     if (arm_version >= 7) {
       sources += [ "signal_processing/filter_ar_fast_q12_armv7.S" ]
     } else {
@@ -109,7 +106,6 @@ rtc_library("common_audio_c") {
     "ring_buffer.h",
     "signal_processing/auto_corr_to_refl_coef.c",
     "signal_processing/auto_correlation.c",
-    "signal_processing/complex_fft_tables.h",
     "signal_processing/copy_set_operations.c",
     "signal_processing/cross_correlation.c",
     "signal_processing/division_operations.c",
@@ -119,7 +115,6 @@ rtc_library("common_audio_c") {
     "signal_processing/filter_ma_fast_q12.c",
     "signal_processing/get_hanning_window.c",
     "signal_processing/get_scaling_square.c",
-    "signal_processing/include/real_fft.h",
     "signal_processing/include/signal_processing_library.h",
     "signal_processing/include/spl_inl.h",
     "signal_processing/include/spl_inl_armv7.h",
@@ -127,7 +122,6 @@ rtc_library("common_audio_c") {
     "signal_processing/lpc_to_refl_coef.c",
     "signal_processing/min_max_operations.c",
     "signal_processing/randomization_functions.c",
-    "signal_processing/real_fft.c",
     "signal_processing/refl_coef_to_lpc.c",
     "signal_processing/resample.c",
     "signal_processing/resample_48khz.c",
@@ -139,7 +133,6 @@ rtc_library("common_audio_c") {
     "signal_processing/spl_inl.c",
     "signal_processing/spl_sqrt.c",
     "signal_processing/splitting_filter.c",
-    "signal_processing/sqrt_of_one_minus_x_squared.c",
     "signal_processing/vector_operations.c",
     "signal_processing/vector_scaling_operations.c",
     "vad/include/webrtc_vad.h",
@@ -156,8 +149,6 @@ rtc_library("common_audio_c") {
 
   if (current_cpu == "mipsel") {
     sources += [
-      "signal_processing/complex_bit_reverse_mips.c",
-      "signal_processing/complex_fft_mips.c",
       "signal_processing/cross_correlation_mips.c",
       "signal_processing/downsample_fast_mips.c",
       "signal_processing/filter_ar_fast_q12_mips.c",
@@ -168,15 +159,10 @@ rtc_library("common_audio_c") {
     if (mips_dsp_rev > 0) {
       sources += [ "signal_processing/vector_scaling_operations_mips.c" ]
     }
-  } else {
-    sources += [ "signal_processing/complex_fft.c" ]
   }
 
   if (current_cpu != "arm" && current_cpu != "mipsel") {
-    sources += [
-      "signal_processing/complex_bit_reverse.c",
-      "signal_processing/filter_ar_fast_q12.c",
-    ]
+    sources += [ "signal_processing/filter_ar_fast_q12.c" ]
   }
 
   deps = [
@@ -348,7 +334,6 @@ if (rtc_include_tests && !build_with_chromium) {
       "resampler/sinusoidal_linear_chirp_source.cc",
       "resampler/sinusoidal_linear_chirp_source.h",
       "ring_buffer_unittest.cc",
-      "signal_processing/real_fft_unittest.cc",
       "signal_processing/signal_processing_unittest.cc",
       "smoothing_filter_unittest.cc",
       "vad/vad_core_unittest.cc",
@@ -388,11 +373,6 @@ if (rtc_include_tests && !build_with_chromium) {
       "../test:rtc_expect_death",
       "../test:test_support",
       "//testing/gtest",
-      "//third_party/abseil-cpp/absl/base:core_headers",
     ]
-
-    if (is_android) {
-      shard_timeout = 900
-    }
   }
 }

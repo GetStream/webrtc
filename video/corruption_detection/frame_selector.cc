@@ -12,19 +12,19 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 
+#include "api/environment/environment.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
 #include "api/video/encoded_image.h"
 #include "api/video/video_frame.h"
 #include "api/video/video_frame_buffer.h"
-#include "api/video/video_frame_type.h"
 #include "api/video_codecs/scalability_mode.h"
 #include "api/video_codecs/video_codec.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/video_coding/svc/scalability_mode_util.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/time_utils.h"
 
 namespace webrtc {
 
@@ -43,14 +43,15 @@ bool CanNativelyHandleFormat(VideoFrameBuffer::Type type) {
 
 }  // namespace
 
-FrameSelector::FrameSelector(ScalabilityMode scalability_mode,
+FrameSelector::FrameSelector(const Environment& env,
+                             ScalabilityMode scalability_mode,
                              Timespan low_overhead_frame_span,
                              Timespan high_overhead_frame_span)
     : inter_layer_pred_mode_(
           ScalabilityModeToInterLayerPredMode(scalability_mode)),
       low_overhead_frame_span_(low_overhead_frame_span),
       high_overhead_frame_span_(high_overhead_frame_span),
-      random_(TimeMicros()) {
+      random_(env.clock().TimeInMicroseconds()) {
   RTC_DCHECK_GE(low_overhead_frame_span.upper_bound,
                 low_overhead_frame_span.lower_bound);
   RTC_DCHECK_GE(high_overhead_frame_span.upper_bound,
@@ -59,9 +60,15 @@ FrameSelector::FrameSelector(ScalabilityMode scalability_mode,
 
 bool FrameSelector::ShouldInstrumentFrame(const VideoFrame& raw_frame,
                                           const EncodedImage& encoded_frame) {
+  return ShouldInstrumentFrame(std::make_optional(raw_frame), encoded_frame);
+}
+
+bool FrameSelector::ShouldInstrumentFrame(
+    const std::optional<VideoFrame>& raw_frame,
+    const EncodedImage& encoded_frame) {
   int layer_id = std::max(encoded_frame.SpatialIndex().value_or(0),
                           encoded_frame.SimulcastIndex().value_or(0));
-  if (encoded_frame._frameType == VideoFrameType::kVideoFrameKey) {
+  if (encoded_frame.IsKey()) {
     // Always insrument keyframes. Clear any state related to this stream.
     if (inter_layer_pred_mode_ != InterLayerPredMode::kOff) {
       // When inter layer prediction is enabled, a keyframe clear all reference
@@ -81,8 +88,11 @@ bool FrameSelector::ShouldInstrumentFrame(const VideoFrame& raw_frame,
         Timestamp::Millis(encoded_frame.RtpTimestamp() / kVideoRtpTicksPerMs);
   }
 
-  bool is_low_overhead =
-      CanNativelyHandleFormat(raw_frame.video_frame_buffer()->type());
+  bool is_low_overhead = true;
+  if (raw_frame.has_value()) {
+    is_low_overhead =
+        CanNativelyHandleFormat(raw_frame->video_frame_buffer()->type());
+  }
   const Timespan& span =
       is_low_overhead ? low_overhead_frame_span_ : high_overhead_frame_span_;
 

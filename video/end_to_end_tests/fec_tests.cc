@@ -12,10 +12,11 @@
 #include <cstdint>
 #include <memory>
 #include <set>
+#include <span>
 #include <vector>
 
-#include "api/array_view.h"
 #include "api/environment/environment.h"
+#include "api/rtp_header_extension_id.h"
 #include "api/rtp_parameters.h"
 #include "api/test/simulated_network.h"
 #include "api/test/video/function_video_encoder_factory.h"
@@ -26,13 +27,12 @@
 #include "api/video/video_sink_interface.h"
 #include "api/video_codecs/sdp_video_format.h"
 #include "api/video_codecs/video_encoder.h"
-#include "call/flexfec_receive_stream.h"
 #include "call/video_receive_stream.h"
 #include "call/video_send_stream.h"
 #include "media/engine/internal_decoder_factory.h"
 #include "modules/include/module_common_types_public.h"
+#include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/byte_io.h"
-#include "modules/rtp_rtcp/source/rtcp_packet/report_block.h"
 #include "modules/rtp_rtcp/source/rtp_packet.h"
 #include "modules/video_coding/codecs/vp8/include/vp8.h"
 #include "rtc_base/random.h"
@@ -53,11 +53,8 @@ using ::testing::Not;
 
 namespace webrtc {
 namespace {
-enum : int {  // The first valid value is 1.
-  kTransportSequenceNumberExtensionId = 1,
-  kVideoRotationExtensionId,
-};
-}  // namespace
+constexpr RtpHeaderExtensionId kTransportSequenceNumberExtensionId(1);
+constexpr RtpHeaderExtensionId kVideoRotationExtensionId(2);
 
 class FecEndToEndTest : public test::CallTest {
  public:
@@ -83,7 +80,7 @@ TEST_F(FecEndToEndTest, ReceivesUlpfec) {
           num_packets_sent_(0) {}
 
    private:
-    Action OnSendRtp(ArrayView<const uint8_t> packet) override {
+    Action OnSendRtp(std::span<const uint8_t> packet) override {
       MutexLock lock(&mutex_);
       RtpPacket rtp_packet;
       EXPECT_TRUE(rtp_packet.Parse(packet));
@@ -191,10 +188,7 @@ TEST_F(FecEndToEndTest, ReceivesUlpfec) {
 class FlexfecRenderObserver : public test::EndToEndTest,
                               public VideoSinkInterface<VideoFrame> {
  public:
-  static constexpr uint32_t kVideoLocalSsrc = 123;
-  static constexpr uint32_t kFlexfecLocalSsrc = 456;
-
-  explicit FlexfecRenderObserver(bool enable_nack, bool expect_flexfec_rtcp)
+  FlexfecRenderObserver(bool enable_nack, bool expect_flexfec_rtcp)
       : test::EndToEndTest(test::VideoTestConstants::kLongTimeout),
         enable_nack_(enable_nack),
         expect_flexfec_rtcp_(expect_flexfec_rtcp),
@@ -205,7 +199,7 @@ class FlexfecRenderObserver : public test::EndToEndTest,
   size_t GetNumFlexfecStreams() const override { return 1; }
 
  private:
-  Action OnSendRtp(ArrayView<const uint8_t> packet) override {
+  Action OnSendRtp(std::span<const uint8_t> packet) override {
     MutexLock lock(&mutex_);
     RtpPacket rtp_packet;
     EXPECT_TRUE(rtp_packet.Parse(packet));
@@ -278,21 +272,18 @@ class FlexfecRenderObserver : public test::EndToEndTest,
     return SEND_PACKET;
   }
 
-  Action OnReceiveRtcp(ArrayView<const uint8_t> data) override {
+  Action OnReceiveRtcp(std::span<const uint8_t> data) override {
     test::RtcpPacketParser parser;
 
     parser.Parse(data);
-    if (parser.sender_ssrc() == kFlexfecLocalSsrc) {
-      EXPECT_EQ(1, parser.receiver_report()->num_packets());
-      const std::vector<rtcp::ReportBlock>& report_blocks =
-          parser.receiver_report()->report_blocks();
-      if (!report_blocks.empty()) {
-        EXPECT_EQ(1U, report_blocks.size());
-        EXPECT_EQ(test::VideoTestConstants::kFlexfecSendSsrc,
-                  report_blocks[0].source_ssrc());
-        MutexLock lock(&mutex_);
-        received_flexfec_rtcp_ = true;
-      }
+    // RTCP for flexfec is distinguished from RTCP for video by looking
+    // at the report_blocks()[0].source_ssrc.
+    if (parser.receiver_report()->num_packets() == 1 &&
+        parser.receiver_report()->report_blocks().size() == 1 &&
+        parser.receiver_report()->report_blocks()[0].source_ssrc() ==
+            test::VideoTestConstants::kFlexfecSendSsrc) {
+      MutexLock lock(&mutex_);
+      received_flexfec_rtcp_ = true;
     }
 
     return SEND_PACKET;
@@ -324,7 +315,6 @@ class FlexfecRenderObserver : public test::EndToEndTest,
       VideoSendStream::Config* send_config,
       std::vector<VideoReceiveStreamInterface::Config>* receive_configs,
       VideoEncoderConfig* encoder_config) override {
-    (*receive_configs)[0].rtp.local_ssrc = kVideoLocalSsrc;
     (*receive_configs)[0].renderer = this;
 
     if (enable_nack_) {
@@ -348,11 +338,6 @@ class FlexfecRenderObserver : public test::EndToEndTest,
   void OnFrameGeneratorCapturerCreated(
       test::FrameGeneratorCapturer* frame_generator_capturer) override {
     frame_generator_capturer->SetFakeRotation(kVideoRotation_90);
-  }
-
-  void ModifyFlexfecConfigs(
-      std::vector<FlexfecReceiveStream::Config>* receive_configs) override {
-    (*receive_configs)[0].rtp.local_ssrc = kFlexfecLocalSsrc;
   }
 
   void PerformTest() override {
@@ -387,11 +372,14 @@ TEST_F(FecEndToEndTest, RecoversWithFlexfecAndSendsCorrespondingRtcp) {
 }
 
 TEST_F(FecEndToEndTest, ReceivedUlpfecPacketsNotNacked) {
+  static constexpr int kWarmupPackets = 30;
+
   class UlpfecNackObserver : public test::EndToEndTest {
    public:
     UlpfecNackObserver()
         : EndToEndTest(test::VideoTestConstants::kDefaultTimeout),
-          state_(kFirstPacket),
+          state_(kWarmup),
+          num_packets_sent_(0),
           ulpfec_sequence_number_(0),
           has_last_sequence_number_(false),
           last_sequence_number_(0),
@@ -401,7 +389,7 @@ TEST_F(FecEndToEndTest, ReceivedUlpfecPacketsNotNacked) {
               }) {}
 
    private:
-    Action OnSendRtp(ArrayView<const uint8_t> packet) override {
+    Action OnSendRtp(std::span<const uint8_t> packet) override {
       MutexLock lock_(&mutex_);
       RtpPacket rtp_packet;
       EXPECT_TRUE(rtp_packet.Parse(packet));
@@ -431,8 +419,14 @@ TEST_F(FecEndToEndTest, ReceivedUlpfecPacketsNotNacked) {
       bool ulpfec_packet = encapsulated_payload_type ==
                            test::VideoTestConstants::kUlpfecPayloadType;
       switch (state_) {
-        case kFirstPacket:
-          state_ = kDropEveryOtherPacketUntilUlpfec;
+        case kWarmup:
+          // Allow an initial burst of packets through without loss so that
+          // RTCP SR/RR can complete at least one round-trip and establish
+          // measured RTT > kLowRttNackMs (20 ms), and so that transport
+          // thread bridges and encoder state stabilize before simulating loss.
+          if (++num_packets_sent_ >= kWarmupPackets) {
+            state_ = kDropEveryOtherPacketUntilUlpfec;
+          }
           break;
         case kDropEveryOtherPacketUntilUlpfec:
           if (ulpfec_packet) {
@@ -469,7 +463,7 @@ TEST_F(FecEndToEndTest, ReceivedUlpfecPacketsNotNacked) {
       return SEND_PACKET;
     }
 
-    Action OnReceiveRtcp(ArrayView<const uint8_t> packet) override {
+    Action OnReceiveRtcp(std::span<const uint8_t> packet) override {
       MutexLock lock_(&mutex_);
       if (state_ == kVerifyUlpfecPacketNotInNackList) {
         test::RtcpPacketParser rtcp_parser;
@@ -494,11 +488,16 @@ TEST_F(FecEndToEndTest, ReceivedUlpfecPacketsNotNacked) {
       return config;
     }
 
-    // TODO(holmer): Investigate why we don't send FEC packets when the bitrate
-    // is 10 kbps.
+    // In hybrid NACK/FEC mode, VCMNackFecMethod::BitRateTooLowForFec() disables
+    // FEC when estimated bytes per frame falls below kMaxBytesPerFrameForFecLow
+    // (400 bytes for resolution <= 352x288, or 96 kbps at 30 fps) when RTT is
+    // below 200 ms. When packet loss occurs, BWE drops towards min_bitrate_bps.
+    // If min_bitrate_bps is below 96 kbps, FEC will be permanently shut off,
+    // causing the test to wait forever for FEC packets. Ensure min_bitrate_bps
+    // is above this threshold.
     void ModifySenderBitrateConfig(
         BitrateConstraints* bitrate_config) override {
-      const int kMinBitrateBps = 30000;
+      const int kMinBitrateBps = 100000;
       bitrate_config->min_bitrate_bps = kMinBitrateBps;
     }
 
@@ -540,23 +539,25 @@ TEST_F(FecEndToEndTest, ReceivedUlpfecPacketsNotNacked) {
           << "Timed out while waiting for FEC packets to be received.";
     }
 
+    Mutex mutex_;
     enum {
-      kFirstPacket,
+      kWarmup,
       kDropEveryOtherPacketUntilUlpfec,
       kDropAllMediaPacketsUntilUlpfec,
       kDropOneMediaPacket,
       kPassOneMediaPacket,
       kVerifyUlpfecPacketNotInNackList,
-    } state_;
+    } state_ RTC_GUARDED_BY(mutex_);
 
-    Mutex mutex_;
-    uint16_t ulpfec_sequence_number_ RTC_GUARDED_BY(&mutex_);
-    bool has_last_sequence_number_;
-    uint16_t last_sequence_number_;
+    int num_packets_sent_ RTC_GUARDED_BY(mutex_);
+    uint16_t ulpfec_sequence_number_ RTC_GUARDED_BY(mutex_);
+    bool has_last_sequence_number_ RTC_GUARDED_BY(mutex_);
+    uint16_t last_sequence_number_ RTC_GUARDED_BY(mutex_);
     test::FunctionVideoEncoderFactory encoder_factory_;
     InternalDecoderFactory decoder_factory_;
   } test;
 
   RunBaseTest(&test);
 }
+}  // namespace
 }  // namespace webrtc

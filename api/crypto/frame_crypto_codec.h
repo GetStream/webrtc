@@ -55,7 +55,7 @@ std::string FrameCodecLabel(const FrameCryptoInput& in);
 // because the pattern can straddle the clear/cipher boundary.
 int BoundarySeedZeros(ArrayView<const uint8_t> clear_header);
 size_t RbspEscapedLength(ArrayView<const uint8_t> data, int seed_zeros);
-void RbspEscapeInto(uint8_t* dst,
+void RbspEscapeInto(ArrayView<uint8_t> dst,
                     ArrayView<const uint8_t> data,
                     int seed_zeros);
 std::vector<uint8_t> RbspUnescape(ArrayView<const uint8_t> data,

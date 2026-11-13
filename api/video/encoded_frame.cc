@@ -23,12 +23,6 @@
 
 namespace webrtc {
 
-std::optional<Timestamp> EncodedFrame::ReceivedTimestamp() const {
-  return ReceivedTime() >= 0
-             ? std::make_optional(Timestamp::Millis(ReceivedTime()))
-             : std::nullopt;
-}
-
 std::optional<Timestamp> EncodedFrame::RenderTimestamp() const {
   return RenderTimeMs() >= 0
              ? std::make_optional(Timestamp::Millis(RenderTimeMs()))
@@ -125,6 +119,10 @@ void EncodedFrame::CopyCodecSpecific(const RTPVideoHeader* header) {
       }
       case kVideoCodecAV1: {
         _codecSpecificInfo.codecType = kVideoCodecAV1;
+        break;
+      }
+      case kVideoCodecH265: {
+        _codecSpecificInfo.codecType = kVideoCodecH265;
         break;
       }
       default: {

@@ -22,7 +22,6 @@
 
 #include "absl/flags/flag.h"
 #include "api/environment/environment.h"
-#include "api/environment/environment_factory.h"
 #include "api/test/metrics/global_metrics_logger_and_exporter.h"
 #include "api/units/data_rate.h"
 #include "api/units/frequency.h"
@@ -40,7 +39,7 @@
 #include "modules/video_coding/svc/scalability_mode_util.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/strings/string_builder.h"
-#include "test/create_test_field_trials.h"
+#include "test/create_test_environment.h"
 #include "test/gtest.h"
 #include "test/test_flags.h"
 #include "test/testsupport/file_utils.h"
@@ -204,7 +203,8 @@ std::unique_ptr<VideoCodecStats> RunEncodeDecodeTest(
       CreateEncoderFactory(encoder_impl);
   if (!encoder_factory
            ->QueryCodecSupport(sdp_video_format,
-                               /*scalability_mode=*/std::nullopt)
+                               /*scalability_mode=*/std::nullopt,
+                               /*resolution=*/std::nullopt)
            .is_supported) {
     RTC_LOG(LS_WARNING) << "No " << encoder_impl << " encoder for video format "
                         << sdp_video_format.ToString();
@@ -215,7 +215,8 @@ std::unique_ptr<VideoCodecStats> RunEncodeDecodeTest(
       CreateDecoderFactory(decoder_impl);
   if (!decoder_factory
            ->QueryCodecSupport(sdp_video_format,
-                               /*reference_scaling=*/false)
+                               /*reference_scaling=*/false,
+                               /*resolution=*/std::nullopt)
            .is_supported) {
     RTC_LOG(LS_WARNING) << "No " << decoder_impl << " decoder for video format "
                         << sdp_video_format.ToString()
@@ -225,7 +226,8 @@ std::unique_ptr<VideoCodecStats> RunEncodeDecodeTest(
     decoder_factory = CreateDecoderFactory("builtin");
     if (!decoder_factory
              ->QueryCodecSupport(sdp_video_format,
-                                 /*reference_scaling=*/false)
+                                 /*reference_scaling=*/false,
+                                 /*resolution=*/std::nullopt)
              .is_supported) {
       RTC_LOG(LS_WARNING) << "No " << decoder_impl
                           << " decoder for video format "
@@ -275,7 +277,8 @@ std::unique_ptr<VideoCodecStats> RunEncodeTest(
       CreateEncoderFactory(encoder_impl);
   if (!encoder_factory
            ->QueryCodecSupport(sdp_video_format,
-                               /*scalability_mode=*/std::nullopt)
+                               /*scalability_mode=*/std::nullopt,
+                               /*resolution=*/std::nullopt)
            .is_supported) {
     RTC_LOG(LS_WARNING) << "No encoder for video format "
                         << sdp_video_format.ToString();
@@ -292,6 +295,7 @@ std::unique_ptr<VideoCodecStats> RunEncodeTest(
   if (absl::GetFlag(FLAGS_dump_encoder_output)) {
     encoder_settings.encoder_output_base_path = output_path + "_enc_output";
   }
+  encoder_settings.num_cores = absl::GetFlag(FLAGS_num_cores);
 
   return VideoCodecTester::RunEncodeTest(env, source_settings,
                                          encoder_factory.get(),
@@ -321,7 +325,7 @@ class SpatialQualityTest : public ::testing::TestWithParam<std::tuple<
 };
 
 TEST_P(SpatialQualityTest, SpatialQuality) {
-  const Environment env = CreateEnvironment();
+  const Environment env = CreateTestEnvironment();
   auto [codec_type, codec_impl, video_info, coding_settings] = GetParam();
   auto [width, height, framerate_fps, bitrate_kbps, expected_min_psnr] =
       coding_settings;
@@ -376,7 +380,7 @@ INSTANTIATE_TEST_SUITE_P(
 #endif
             Values(kFourPeople_1280x720_30),
             Values(std::make_tuple(320, 180, 30, 32, 26),
-                   std::make_tuple(320, 180, 30, 64, 29),
+                   std::make_tuple(320, 180, 30, 64, 27),
                    std::make_tuple(320, 180, 30, 128, 32),
                    std::make_tuple(320, 180, 30, 256, 36),
                    std::make_tuple(640, 360, 30, 128, 29),
@@ -407,7 +411,7 @@ class BitrateAdaptationTest
 
 TEST_P(BitrateAdaptationTest, BitrateAdaptation) {
   auto [codec_type, codec_impl, video_info, bitrate_kbps] = GetParam();
-  const Environment env = CreateEnvironment();
+  const Environment env = CreateTestEnvironment();
 
   int duration_s = 10;  // Duration of fixed rate interval.
   int num_frames =
@@ -501,7 +505,7 @@ class FramerateAdaptationTest
 
 TEST_P(FramerateAdaptationTest, FramerateAdaptation) {
   auto [codec_type, codec_impl, video_info, framerate_fps] = GetParam();
-  const Environment env = CreateEnvironment();
+  const Environment env = CreateTestEnvironment();
 
   int duration_s = 10;  // Duration of fixed rate interval.
 
@@ -577,7 +581,7 @@ INSTANTIATE_TEST_SUITE_P(All,
                          FramerateAdaptationTest::TestParamsToString);
 
 TEST(VideoCodecTest, DISABLED_EncodeDecode) {
-  const Environment env = CreateEnvironment(CreateTestFieldTrialsPtr());
+  const Environment env = CreateTestEnvironment();
 
   VideoSourceSettings source_settings{
       .file_path = absl::GetFlag(FLAGS_input_path),

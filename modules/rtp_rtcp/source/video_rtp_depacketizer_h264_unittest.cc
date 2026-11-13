@@ -10,11 +10,12 @@
 
 #include "modules/rtp_rtcp/source/video_rtp_depacketizer_h264.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <vector>
 
-#include "api/array_view.h"
 #include "api/video/video_codec_type.h"
 #include "api/video/video_frame_type.h"
 #include "common_video/h264/h264_common.h"
@@ -228,9 +229,9 @@ TEST(VideoRtpDepacketizerH264Test, DepacketizeWithRewriting) {
   VideoRtpDepacketizerH264 depacketizer;
   auto parsed = depacketizer.Parse(in_buffer);
   ASSERT_TRUE(parsed);
-  EXPECT_THAT(MakeArrayView(parsed->video_payload.cdata(),
-                            parsed->video_payload.size()),
-              ElementsAreArray(out_buffer));
+  EXPECT_THAT(
+      std::span(parsed->video_payload.cdata(), parsed->video_payload.size()),
+      ElementsAreArray(out_buffer));
 }
 
 TEST(VideoRtpDepacketizerH264Test, DepacketizeWithDoubleRewriting) {
@@ -273,9 +274,9 @@ TEST(VideoRtpDepacketizerH264Test, DepacketizeWithDoubleRewriting) {
   ASSERT_TRUE(parsed);
   std::vector<uint8_t> expected_packet_payload(
       out_buffer.data(), &out_buffer.data()[out_buffer.size()]);
-  EXPECT_THAT(MakeArrayView(parsed->video_payload.cdata(),
-                            parsed->video_payload.size()),
-              ElementsAreArray(out_buffer));
+  EXPECT_THAT(
+      std::span(parsed->video_payload.cdata(), parsed->video_payload.size()),
+      ElementsAreArray(out_buffer));
 }
 
 TEST(VideoRtpDepacketizerH264Test, StapADelta) {
@@ -343,9 +344,9 @@ TEST(VideoRtpDepacketizerH264Test, FuA) {
   ASSERT_TRUE(parsed1);
   // We expect that the first packet is one byte shorter since the FU-A header
   // has been replaced by the original nal header.
-  EXPECT_THAT(MakeArrayView(parsed1->video_payload.cdata(),
-                            parsed1->video_payload.size()),
-              ElementsAreArray(kExpected1));
+  EXPECT_THAT(
+      std::span(parsed1->video_payload.cdata(), parsed1->video_payload.size()),
+      ElementsAreArray(kExpected1));
   EXPECT_EQ(parsed1->video_header.frame_type, VideoFrameType::kVideoFrameKey);
   EXPECT_EQ(parsed1->video_header.codec, kVideoCodecH264);
   EXPECT_TRUE(parsed1->video_header.is_first_packet_in_frame);
@@ -363,9 +364,9 @@ TEST(VideoRtpDepacketizerH264Test, FuA) {
   // Following packets will be 2 bytes shorter since they will only be appended
   // onto the first packet.
   auto parsed2 = depacketizer.Parse(CopyOnWriteBuffer(kPayload2));
-  EXPECT_THAT(MakeArrayView(parsed2->video_payload.cdata(),
-                            parsed2->video_payload.size()),
-              ElementsAreArray(kExpected2));
+  EXPECT_THAT(
+      std::span(parsed2->video_payload.cdata(), parsed2->video_payload.size()),
+      ElementsAreArray(kExpected2));
   EXPECT_FALSE(parsed2->video_header.is_first_packet_in_frame);
   EXPECT_EQ(parsed2->video_header.codec, kVideoCodecH264);
   {
@@ -378,9 +379,9 @@ TEST(VideoRtpDepacketizerH264Test, FuA) {
   }
 
   auto parsed3 = depacketizer.Parse(CopyOnWriteBuffer(kPayload3));
-  EXPECT_THAT(MakeArrayView(parsed3->video_payload.cdata(),
-                            parsed3->video_payload.size()),
-              ElementsAreArray(kExpected3));
+  EXPECT_THAT(
+      std::span(parsed3->video_payload.cdata(), parsed3->video_payload.size()),
+      ElementsAreArray(kExpected3));
   EXPECT_FALSE(parsed3->video_header.is_first_packet_in_frame);
   EXPECT_EQ(parsed3->video_header.codec, kVideoCodecH264);
   {
@@ -595,6 +596,40 @@ TEST(VideoRtpDepacketizerH264Test, EmptyNaluPayload) {
   std::optional<VideoRtpDepacketizer::ParsedRtpPayload> parsed =
       depacketizer.Parse(CopyOnWriteBuffer(kPayload));
   ASSERT_TRUE(parsed);
+}
+
+TEST(VideoRtpDepacketizerH264Test, OutOfSpecPpsIdRejected) {
+  // PPS NALU with pps_id=1000 (0x68 0x00 0x7d 0x38 in RBSP), exceeding spec max
+  // 255.
+  const uint8_t kPayload[] = {H264::kPps, 0x00, 0x7D, 0x38};
+  EXPECT_EQ(VideoRtpDepacketizerH264().Parse(CopyOnWriteBuffer(kPayload)),
+            std::nullopt);
+}
+
+TEST(VideoRtpDepacketizerH264Test, StapASpsRewriteLengthOverflowRejected) {
+  // Construct a STAP-A packet wrapping an SPS with vui_parameters_present_flag
+  // = 0 and ~44,000 trailing zeros. When SpsVuiRewriter rewrites this SPS,
+  // WriteRbsp inserts 0x03 emulation bytes, expanding the SPS past 65,535
+  // bytes. The depacketizer must reject this packet rather than truncating
+  // rewritten_size to uint16_t in the STAP-A length field.
+  CopyOnWriteBuffer in_buffer;
+  uint8_t kHeader[] = {H264::kStapA};
+  in_buffer.AppendData(kHeader, 1);
+
+  std::vector<uint8_t> sps_nalu(std::begin(kOriginalSps),
+                                std::end(kOriginalSps));
+  sps_nalu.resize(44009, 0x00);
+
+  uint8_t len_buf[2];
+  ByteWriter<uint16_t>::WriteBigEndian(len_buf,
+                                       static_cast<uint16_t>(sps_nalu.size()));
+  in_buffer.AppendData(len_buf, 2);
+  in_buffer.AppendData(sps_nalu.data(), sps_nalu.size());
+
+  VideoRtpDepacketizerH264 depacketizer;
+  std::optional<VideoRtpDepacketizer::ParsedRtpPayload> parsed =
+      depacketizer.Parse(in_buffer);
+  EXPECT_EQ(parsed, std::nullopt);
 }
 
 }  // namespace

@@ -14,7 +14,6 @@
 #include <cstdint>
 #include <memory>
 #include <string>
-#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -25,17 +24,15 @@
 #include "api/rtp_receiver_interface.h"
 #include "api/scoped_refptr.h"
 #include "api/test/rtc_error_matchers.h"
+#include "api/test/time_controller.h"
 #include "api/units/time_delta.h"
 #include "p2p/base/port_allocator.h"
-#include "p2p/base/port_interface.h"
 #include "p2p/test/stun_server.h"
-#include "p2p/test/test_stun_server.h"
 #include "pc/test/integration_test_helpers.h"
 #include "pc/test/mock_peer_connection_observers.h"
-#include "rtc_base/fake_clock.h"
-#include "rtc_base/fake_network.h"
 #include "rtc_base/firewall_socket_server.h"
 #include "rtc_base/logging.h"
+#include "rtc_base/net_helper.h"
 #include "rtc_base/socket_address.h"
 #include "rtc_base/test_certificate_verifier.h"
 #include "test/gmock.h"
@@ -54,44 +51,6 @@ class PeerConnectionIntegrationTest
       : PeerConnectionIntegrationBaseTest(GetParam()) {}
 };
 
-// Fake clock must be set before threads are started to prevent race on
-// Set/GetClockForTesting().
-// To achieve that, multiple inheritance is used as a mixin pattern
-// where order of construction is finely controlled.
-// This also ensures peerconnection is closed before switching back to non-fake
-// clock, avoiding other races and DCHECK failures such as in rtp_sender.cc.
-class FakeClockForTest : public ScopedFakeClock {
- protected:
-  FakeClockForTest() {
-    // Some things use a time of "0" as a special value, so we need to start out
-    // the fake clock at a nonzero time.
-    // TODO(deadbeef): Fix this.
-    AdvanceTime(TimeDelta::Seconds(1000));
-  }
-
-  // Explicit handle.
-  ScopedFakeClock& FakeClock() { return *this; }
-};
-
-// Ensure FakeClockForTest is constructed first (see class for rationale).
-class PeerConnectionIntegrationTestWithFakeClock
-    : public FakeClockForTest,
-      public PeerConnectionIntegrationTest {};
-
-class PeerConnectionIntegrationTestPlanB
-    : public PeerConnectionIntegrationBaseTest {
- protected:
-  PeerConnectionIntegrationTestPlanB()
-      : PeerConnectionIntegrationBaseTest(SdpSemantics::kPlanB_DEPRECATED) {}
-};
-
-class PeerConnectionIntegrationTestUnifiedPlan
-    : public PeerConnectionIntegrationBaseTest {
- protected:
-  PeerConnectionIntegrationTestUnifiedPlan()
-      : PeerConnectionIntegrationBaseTest(SdpSemantics::kUnifiedPlan) {}
-};
-
 // Test the OnFirstPacketReceived callback from audio/video RtpReceivers.  This
 // includes testing that the callback is invoked if an observer is connected
 // after the first packet has already been received.
@@ -103,33 +62,29 @@ TEST_P(PeerConnectionIntegrationTest,
   callee()->AddAudioVideoTracks();
   // Start offer/answer exchange and wait for it to complete.
   caller()->CreateAndSetAndSignalOffer();
-  ASSERT_THAT(
-      WaitUntil([&] { return SignalingStateStable(); }, ::testing::IsTrue()),
-      IsRtcOk());
+  ASSERT_TRUE(WaitUntil([&] { return SignalingStateStable(); }));
   // Should be one receiver each for audio/video.
   EXPECT_EQ(2U, caller()->rtp_receiver_observers().size());
   EXPECT_EQ(2U, callee()->rtp_receiver_observers().size());
   // Wait for all "first packet received" callbacks to be fired.
-  EXPECT_THAT(WaitUntil(
-                  [&] {
-                    return absl::c_all_of(
-                        caller()->rtp_receiver_observers(),
-                        [](const std::unique_ptr<MockRtpReceiverObserver>& o) {
-                          return o->first_packet_received();
-                        });
-                  },
-                  ::testing::IsTrue(), {.timeout = kMaxWaitForFrames}),
-              IsRtcOk());
-  EXPECT_THAT(WaitUntil(
-                  [&] {
-                    return absl::c_all_of(
-                        callee()->rtp_receiver_observers(),
-                        [](const std::unique_ptr<MockRtpReceiverObserver>& o) {
-                          return o->first_packet_received();
-                        });
-                  },
-                  ::testing::IsTrue(), {.timeout = kMaxWaitForFrames}),
-              IsRtcOk());
+  EXPECT_TRUE(WaitUntil(
+      [&] {
+        return absl::c_all_of(
+            caller()->rtp_receiver_observers(),
+            [](const std::unique_ptr<MockRtpReceiverObserver>& o) {
+              return o->first_packet_received();
+            });
+      },
+      {.timeout = kMaxWaitForFrames}));
+  EXPECT_TRUE(WaitUntil(
+      [&] {
+        return absl::c_all_of(
+            callee()->rtp_receiver_observers(),
+            [](const std::unique_ptr<MockRtpReceiverObserver>& o) {
+              return o->first_packet_received();
+            });
+      },
+      {.timeout = kMaxWaitForFrames}));
   // If new observers are set after the first packet was already received, the
   // callback should still be invoked.
   caller()->ResetRtpReceiverObservers();
@@ -153,7 +108,8 @@ class DummyDtmfObserver : public DtmfSenderObserverInterface {
   DummyDtmfObserver() : completed_(false) {}
 
   // Implements DtmfSenderObserverInterface.
-  void OnToneChange(const std::string& tone) override {
+  void OnToneChange(const std::string& tone,
+                    const std::string& /* tone_buffer */) override {
     tones_.push_back(tone);
     if (tone.empty()) {
       completed_ = true;
@@ -242,9 +198,7 @@ TEST_P(PeerConnectionIntegrationTest, GetCaptureStartNtpTimeWithOldStatsApi) {
 
   // Do offer/answer, wait for the callee to receive some frames.
   caller()->CreateAndSetAndSignalOffer();
-  ASSERT_THAT(
-      WaitUntil([&] { return SignalingStateStable(); }, ::testing::IsTrue()),
-      IsRtcOk());
+  ASSERT_TRUE(WaitUntil([&] { return SignalingStateStable(); }));
 
   // Get the remote audio track created on the receiver, so they can be used as
   // GetStats filters.
@@ -266,68 +220,13 @@ TEST_P(PeerConnectionIntegrationTest, GetCaptureStartNtpTimeWithOldStatsApi) {
 
 // Test that firewalling the ICE connection causes the clients to identify the
 // disconnected state and then removing the firewall causes them to reconnect.
-class PeerConnectionIntegrationIceStatesTest
-    : public PeerConnectionIntegrationBaseTest,
-      public ::testing::WithParamInterface<
-          std::tuple<SdpSemantics, std::tuple<std::string, uint32_t>>> {
- protected:
-  PeerConnectionIntegrationIceStatesTest()
-      : PeerConnectionIntegrationBaseTest(std::get<0>(GetParam())) {
-    port_allocator_flags_ = std::get<1>(std::get<1>(GetParam()));
-  }
+using PeerConnectionIntegrationIceStatesTest =
+    PeerConnectionIntegrationIceStatesTestBase<
+        PeerConnectionIntegrationBaseTest>;
 
-  void StartStunServer(const SocketAddress& server_address) {
-    stun_server_ = TestStunServer::Create(env_, server_address, *firewall(),
-                                          *network_thread());
-  }
-
-  bool TestIPv6() {
-    return (port_allocator_flags_ & PORTALLOCATOR_ENABLE_IPV6);
-  }
-
-  std::vector<SocketAddress> CallerAddresses() {
-    std::vector<SocketAddress> addresses;
-    addresses.push_back(SocketAddress("1.1.1.1", 0));
-    if (TestIPv6()) {
-      addresses.push_back(SocketAddress("1111:0:a:b:c:d:e:f", 0));
-    }
-    return addresses;
-  }
-
-  std::vector<SocketAddress> CalleeAddresses() {
-    std::vector<SocketAddress> addresses;
-    addresses.push_back(SocketAddress("2.2.2.2", 0));
-    if (TestIPv6()) {
-      addresses.push_back(SocketAddress("2222:0:a:b:c:d:e:f", 0));
-    }
-    return addresses;
-  }
-
-  void SetUpNetworkInterfaces() {
-    // Remove the default interfaces added by the test infrastructure.
-    caller()->network_manager()->RemoveInterface(kDefaultLocalAddress);
-    callee()->network_manager()->RemoveInterface(kDefaultLocalAddress);
-
-    // Add network addresses for test.
-    for (const auto& caller_address : CallerAddresses()) {
-      caller()->network_manager()->AddInterface(caller_address);
-    }
-    for (const auto& callee_address : CalleeAddresses()) {
-      callee()->network_manager()->AddInterface(callee_address);
-    }
-  }
-
-  uint32_t port_allocator_flags() const { return port_allocator_flags_; }
-
- private:
-  uint32_t port_allocator_flags_;
-  TestStunServer::StunServerPtr stun_server_;
-};
-
-// Ensure FakeClockForTest is constructed first (see class for rationale).
-class PeerConnectionIntegrationIceStatesTestWithFakeClock
-    : public FakeClockForTest,
-      public PeerConnectionIntegrationIceStatesTest {};
+using PeerConnectionIntegrationIceStatesTestWithFakeClock =
+    PeerConnectionIntegrationIceStatesTestBase<
+        PeerConnectionIntegrationTestWithSimulatedTime>;
 
 #if !defined(THREAD_SANITIZER)
 // This test provokes TSAN errors. bugs.webrtc.org/11282
@@ -372,12 +271,12 @@ TEST_P(PeerConnectionIntegrationIceStatesTestWithFakeClock, VerifyIceStates) {
   ASSERT_THAT(
       WaitUntil([&] { return caller()->ice_connection_state(); },
                 ::testing::Eq(PeerConnectionInterface::kIceConnectionCompleted),
-                {.clock = &FakeClock()}),
+                {.clock = time_controller_.get()}),
       IsRtcOk());
   ASSERT_THAT(
       WaitUntil([&] { return caller()->standardized_ice_connection_state(); },
                 ::testing::Eq(PeerConnectionInterface::kIceConnectionCompleted),
-                {.clock = &FakeClock()}),
+                {.clock = time_controller_.get()}),
       IsRtcOk());
 
   // Verify that the observer was notified of the intermediate transitions.
@@ -403,18 +302,18 @@ TEST_P(PeerConnectionIntegrationIceStatesTestWithFakeClock, VerifyIceStates) {
     firewall()->AddRule(false, FP_ANY, FD_ANY, caller_address);
   }
   RTC_LOG(LS_INFO) << "Firewall rules applied";
-  ScopedFakeClock& fake_clock = FakeClock();
+  TimeController* fake_clock = time_controller_.get();
   ASSERT_THAT(
       WaitUntil(
           [&] { return caller()->ice_connection_state(); },
           ::testing::Eq(PeerConnectionInterface::kIceConnectionDisconnected),
-          {.timeout = TimeDelta::Seconds(10), .clock = &fake_clock}),
+          {.timeout = TimeDelta::Seconds(10), .clock = fake_clock}),
       IsRtcOk());
   ASSERT_THAT(
       WaitUntil(
           [&] { return caller()->standardized_ice_connection_state(); },
           ::testing::Eq(PeerConnectionInterface::kIceConnectionDisconnected),
-          {.timeout = TimeDelta::Seconds(10), .clock = &fake_clock}),
+          {.timeout = TimeDelta::Seconds(10), .clock = fake_clock}),
       IsRtcOk());
 
   // Let ICE re-establish by removing the firewall rules.
@@ -423,12 +322,12 @@ TEST_P(PeerConnectionIntegrationIceStatesTestWithFakeClock, VerifyIceStates) {
   ASSERT_THAT(
       WaitUntil([&] { return caller()->ice_connection_state(); },
                 ::testing::Eq(PeerConnectionInterface::kIceConnectionCompleted),
-                {.clock = &fake_clock}),
+                {.clock = fake_clock}),
       IsRtcOk());
   ASSERT_THAT(
       WaitUntil([&] { return caller()->standardized_ice_connection_state(); },
                 ::testing::Eq(PeerConnectionInterface::kIceConnectionCompleted),
-                {.clock = &fake_clock}),
+                {.clock = fake_clock}),
       IsRtcOk());
 
   // According to RFC7675, if there is no response within 30 seconds then the
@@ -442,12 +341,12 @@ TEST_P(PeerConnectionIntegrationIceStatesTestWithFakeClock, VerifyIceStates) {
   ASSERT_THAT(
       WaitUntil([&] { return caller()->ice_connection_state(); },
                 ::testing::Eq(PeerConnectionInterface::kIceConnectionFailed),
-                {.timeout = kConsentTimeout, .clock = &fake_clock}),
+                {.timeout = kConsentTimeout, .clock = fake_clock}),
       IsRtcOk());
   ASSERT_THAT(
       WaitUntil([&] { return caller()->standardized_ice_connection_state(); },
                 ::testing::Eq(PeerConnectionInterface::kIceConnectionFailed),
-                {.timeout = kConsentTimeout, .clock = &fake_clock}),
+                {.timeout = kConsentTimeout, .clock = fake_clock}),
       IsRtcOk());
 }
 #endif
@@ -460,9 +359,7 @@ TEST_P(PeerConnectionIntegrationTest, CallTransferredForCallee) {
   caller()->AddAudioVideoTracks();
   callee()->AddAudioVideoTracks();
   caller()->CreateAndSetAndSignalOffer();
-  ASSERT_THAT(
-      WaitUntil([&] { return SignalingStateStable(); }, ::testing::IsTrue()),
-      IsRtcOk());
+  ASSERT_TRUE(WaitUntil([&] { return SignalingStateStable(); }));
 
   // Keep the original peer around which will still send packets to the
   // receiving client. These SRTP packets will be dropped.
@@ -476,9 +373,7 @@ TEST_P(PeerConnectionIntegrationTest, CallTransferredForCallee) {
   ConnectFakeSignaling();
   caller()->AddAudioVideoTracks();
   caller()->CreateAndSetAndSignalOffer();
-  ASSERT_THAT(
-      WaitUntil([&] { return SignalingStateStable(); }, ::testing::IsTrue()),
-      IsRtcOk());
+  ASSERT_TRUE(WaitUntil([&] { return SignalingStateStable(); }));
   // Wait for some additional frames to be transmitted end-to-end.
   MediaExpectations media_expectations;
   media_expectations.ExpectBidirectionalAudioAndVideo();
@@ -493,9 +388,7 @@ TEST_P(PeerConnectionIntegrationTest, CallTransferredForCaller) {
   caller()->AddAudioVideoTracks();
   callee()->AddAudioVideoTracks();
   caller()->CreateAndSetAndSignalOffer();
-  ASSERT_THAT(
-      WaitUntil([&] { return SignalingStateStable(); }, ::testing::IsTrue()),
-      IsRtcOk());
+  ASSERT_TRUE(WaitUntil([&] { return SignalingStateStable(); }));
 
   // Keep the original peer around which will still send packets to the
   // receiving client. These SRTP packets will be dropped.
@@ -506,13 +399,14 @@ TEST_P(PeerConnectionIntegrationTest, CallTransferredForCaller) {
   // directly above.
   original_peer->pc()->Close();
 
-  ConnectFakeSignaling();
+  // Only signal SDP initially to avoid delivering ICE candidates to the new
+  // callee before it has received the remote offer.
+  ConnectFakeSignalingForSdpOnly();
   callee()->AddAudioVideoTracks();
   caller()->SetOfferAnswerOptions(IceRestartOfferAnswerOptions());
   caller()->CreateAndSetAndSignalOffer();
-  ASSERT_THAT(
-      WaitUntil([&] { return SignalingStateStable(); }, ::testing::IsTrue()),
-      IsRtcOk());
+  SetSignalIceCandidates(true);
+  ASSERT_TRUE(WaitUntil([&] { return SignalingStateStable(); }));
   // Wait for some additional frames to be transmitted end-to-end.
   MediaExpectations media_expectations;
   media_expectations.ExpectBidirectionalAudioAndVideo();

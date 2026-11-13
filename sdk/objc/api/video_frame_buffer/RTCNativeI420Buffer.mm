@@ -10,8 +10,11 @@
 
 #import "RTCNativeI420Buffer+Private.h"
 
+#include <cstdint>
+
 #include "api/video/i420_buffer.h"
 #include "third_party/libyuv/include/libyuv/convert.h"
+#include "rtc_base/checks.h"
 
 #if !defined(NDEBUG) && defined(WEBRTC_IOS)
 #import <UIKit/UIKit.h>

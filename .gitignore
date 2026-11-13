@@ -34,11 +34,13 @@
 .cproject
 .gdb_history
 .gdbinit
+.gemini
 .landmines
 .metadata
 .project
 .pydevproject
 .settings
+.siso_failed_targets
 .sw?
 /Makefile
 /base

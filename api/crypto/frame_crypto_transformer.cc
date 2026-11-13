@@ -32,6 +32,7 @@
 #include <sstream>
 #include <string>
 #include <utility>
+#include <variant>
 
 #include "absl/container/inlined_vector.h"
 #include "absl/types/optional.h"
@@ -143,29 +144,33 @@ inline bool IsH265SliceNalu(webrtc::H265::NaluType nalu_type) {
          nalu_type == webrtc::H265::NaluType::kCra;
 }
 
-inline bool NeedsRbspUnescaping(const uint8_t* frameData, size_t frameSize) {
-  for (size_t i = 0; i < frameSize - 3; ++i) {
-    if (frameData[i] == 0 && frameData[i + 1] == 0 && frameData[i + 2] == 3)
+inline bool NeedsRbspUnescaping(webrtc::ArrayView<const uint8_t> frame) {
+  if (frame.size() < 3) {
+    return false;
+  }
+  for (size_t i = 0; i + 2 < frame.size(); ++i) {
+    if (frame[i] == 0 && frame[i + 1] == 0 && frame[i + 2] == 3) {
       return true;
+    }
   }
   return false;
 }
 
-std::string to_uint8_list(const uint8_t* data, int len) {
+std::string to_uint8_list(webrtc::ArrayView<const uint8_t> data) {
   std::stringstream ss;
   ss << "[";
-  for (int i = 0; i < len; i++) {
-    ss << static_cast<unsigned>(data[i]) << ",";
+  for (uint8_t byte : data) {
+    ss << static_cast<unsigned>(byte) << ",";
   }
   ss << "]";
   return ss.str();
 }
 
-std::string to_hex(const uint8_t* data, int len) {
+std::string to_hex(webrtc::ArrayView<const uint8_t> data) {
   std::stringstream ss;
   ss << std::uppercase << std::hex << std::setfill('0');
-  for (int i = 0; i < len; i++) {
-    ss << std::setw(2) << static_cast<unsigned>(data[i]);
+  for (uint8_t byte : data) {
+    ss << std::setw(2) << static_cast<unsigned>(byte);
   }
   return ss.str();
 }
@@ -192,9 +197,11 @@ uint8_t get_unencrypted_bytes(webrtc::TransformableFrameInterface* frame,
 
         int idx = 0;
         for (const auto& index : nalu_indices) {
-          const uint8_t* slice = data_in.data() + index.payload_start_offset;
-          webrtc::H264::NaluType nalu_type =
-              webrtc::H264::ParseNaluType(slice[0]);
+          if (index.payload_start_offset >= data_in.size()) {
+            continue;
+          }
+          webrtc::H264::NaluType nalu_type = webrtc::H264::ParseNaluType(
+              data_in[index.payload_start_offset]);
           switch (nalu_type) {
             case webrtc::H264::NaluType::kIdr:
             case webrtc::H264::NaluType::kSlice:
@@ -215,9 +222,11 @@ uint8_t get_unencrypted_bytes(webrtc::TransformableFrameInterface* frame,
 
         int idx = 0;
         for (const auto& index : nalu_indices) {
-          const uint8_t* slice = data_in.data() + index.payload_start_offset;
-          webrtc::H265::NaluType nalu_type =
-              webrtc::H265::ParseNaluType(slice[0]);
+          if (index.payload_start_offset >= data_in.size()) {
+            continue;
+          }
+          webrtc::H265::NaluType nalu_type = webrtc::H265::ParseNaluType(
+              data_in[index.payload_start_offset]);
           if (IsH265SliceNalu(nalu_type)) {
             // H.265 has a 2-byte NALU header, so unencrypted bytes = offset +
             // header size
@@ -503,7 +512,8 @@ FrameCryptoInput MakeCryptoInput(
   in.media_type = type;
   in.track_type = track_type;
   in.ssrc = frame->GetSsrc();
-  in.rtp_timestamp = frame->GetTimestamp();
+  in.rtp_timestamp = std::visit(
+      [](const auto& info) { return info.value; }, frame->GetRtpTimestampInfo());
   in.key_index = key_index;
   in.participant_id = participant_id;
   // Encode may pin a lowercase codec name. Decode always passes nullopt:

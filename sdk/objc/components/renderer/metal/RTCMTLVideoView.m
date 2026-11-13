@@ -27,10 +27,20 @@
 // To avoid unreconized symbol linker errors, we're taking advantage of the objc
 // runtime. Linking errors occur when compiling for architectures that don't
 // support Metal.
+#define RTC_OBJC_TYPE_PREFIX_STRING_HELPER(x) #x
+#define RTC_OBJC_TYPE_PREFIX_STRING(x) \
+  RTC_OBJC_TYPE_PREFIX_STRING_HELPER(x)
+
 #define MTKViewClass NSClassFromString(@"MTKView")
-#define RTCMTLNV12RendererClass NSClassFromString(@"RTCMTLNV12Renderer")
-#define RTCMTLI420RendererClass NSClassFromString(@"RTCMTLI420Renderer")
-#define RTCMTLRGBRendererClass NSClassFromString(@"RTCMTLRGBRenderer")
+#define RTCMTLNV12RendererClass                      \
+  NSClassFromString(@"" RTC_OBJC_TYPE_PREFIX_STRING( \
+      RTC_OBJC_TYPE_PREFIX) @"RTCMTLNV12Renderer")
+#define RTCMTLI420RendererClass                      \
+  NSClassFromString(@"" RTC_OBJC_TYPE_PREFIX_STRING( \
+      RTC_OBJC_TYPE_PREFIX) @"RTCMTLI420Renderer")
+#define RTCMTLRGBRendererClass                       \
+  NSClassFromString(@"" RTC_OBJC_TYPE_PREFIX_STRING( \
+      RTC_OBJC_TYPE_PREFIX) @"RTCMTLRGBRenderer")
 
 @interface RTC_OBJC_TYPE (RTCMTLVideoView) ()<MTKViewDelegate> 
 @property(nonatomic) RTC_OBJC_TYPE(RTCMTLI420Renderer) *rendererI420;

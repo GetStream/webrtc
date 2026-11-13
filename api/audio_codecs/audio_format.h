@@ -13,8 +13,9 @@
 
 #include <stddef.h>
 
-#include <map>
+#include <initializer_list>
 #include <string>
+#include <utility>
 
 #include "absl/strings/string_view.h"
 #include "api/rtp_parameters.h"
@@ -26,9 +27,6 @@ namespace webrtc {
 
 // SDP specification for a single audio codec.
 struct RTC_EXPORT SdpAudioFormat {
-  using Parameters [[deprecated("Use CodecParameterMap")]] =
-      std::map<std::string, std::string>;
-
   SdpAudioFormat(const SdpAudioFormat&);
   SdpAudioFormat(SdpAudioFormat&&);
   SdpAudioFormat(absl::string_view name, int clockrate_hz, size_t num_channels);
@@ -36,6 +34,12 @@ struct RTC_EXPORT SdpAudioFormat {
                  int clockrate_hz,
                  size_t num_channels,
                  const CodecParameterMap& param);
+  SdpAudioFormat(
+      absl::string_view name,
+      int clockrate_hz,
+      size_t num_channels,
+      std::initializer_list<std::pair<absl::string_view, absl::string_view>>
+          param);
   SdpAudioFormat(absl::string_view name,
                  int clockrate_hz,
                  size_t num_channels,

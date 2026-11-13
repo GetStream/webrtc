@@ -11,12 +11,15 @@
 #ifndef API_VIDEO_CODECS_SDP_VIDEO_FORMAT_H_
 #define API_VIDEO_CODECS_SDP_VIDEO_FORMAT_H_
 
+#include <initializer_list>
 #include <map>
 #include <optional>
+#include <span>
 #include <string>
+#include <utility>
 
 #include "absl/container/inlined_vector.h"
-#include "api/array_view.h"
+#include "absl/strings/string_view.h"
 #include "api/rtp_parameters.h"
 #include "api/video_codecs/scalability_mode.h"
 #include "rtc_base/system/rtc_export.h"
@@ -29,20 +32,48 @@ struct RTC_EXPORT SdpVideoFormat {
   using Parameters [[deprecated("Use CodecParameterMap")]] =
       std::map<std::string, std::string>;
 
-  explicit SdpVideoFormat(const std::string& name);
-  SdpVideoFormat(const std::string& name, const CodecParameterMap& parameters);
+  explicit SdpVideoFormat(absl::string_view name);
+  SdpVideoFormat(absl::string_view name, const CodecParameterMap& parameters);
+  SdpVideoFormat(absl::string_view name, CodecParameterMap&& parameters);
   SdpVideoFormat(
-      const std::string& name,
-      const CodecParameterMap& parameters,
-      const absl::InlinedVector<ScalabilityMode, kScalabilityModeCount>&
-          scalability_modes);
+      absl::string_view name,
+      std::initializer_list<std::pair<absl::string_view, absl::string_view>>
+          parameters);
+  SdpVideoFormat(absl::string_view name,
+                 const CodecParameterMap& parameters,
+                 std::span<const ScalabilityMode> scalability_modes);
+  SdpVideoFormat(absl::string_view name,
+                 CodecParameterMap&& parameters,
+                 std::span<const ScalabilityMode> scalability_modes);
+  SdpVideoFormat(
+      absl::string_view name,
+      std::initializer_list<std::pair<absl::string_view, absl::string_view>>
+          parameters,
+      std::span<const ScalabilityMode> scalability_modes);
   // Creates a new SdpVideoFormat object identical to the supplied
   // SdpVideoFormat except the scalability_modes that are set to be the same as
   // the supplied scalability modes.
+  SdpVideoFormat(const SdpVideoFormat& format,
+                 std::span<const ScalabilityMode> scalability_modes);
+
+  SdpVideoFormat(absl::string_view name,
+                 const CodecParameterMap& parameters,
+                 std::initializer_list<ScalabilityMode> scalability_modes)
+      : SdpVideoFormat(name,
+                       parameters,
+                       std::span<const ScalabilityMode>(scalability_modes)) {}
   SdpVideoFormat(
-      const SdpVideoFormat& format,
-      const absl::InlinedVector<ScalabilityMode, kScalabilityModeCount>&
-          scalability_modes);
+      absl::string_view name,
+      std::initializer_list<std::pair<absl::string_view, absl::string_view>>
+          parameters,
+      std::initializer_list<ScalabilityMode> scalability_modes)
+      : SdpVideoFormat(name,
+                       parameters,
+                       std::span<const ScalabilityMode>(scalability_modes)) {}
+  SdpVideoFormat(const SdpVideoFormat& format,
+                 std::initializer_list<ScalabilityMode> scalability_modes)
+      : SdpVideoFormat(format,
+                       std::span<const ScalabilityMode>(scalability_modes)) {}
 
   SdpVideoFormat(const SdpVideoFormat&);
   SdpVideoFormat(SdpVideoFormat&&);
@@ -55,7 +86,7 @@ struct RTC_EXPORT SdpVideoFormat {
   // specific parameters. Please note that two SdpVideoFormats can represent the
   // same codec even though not all parameters are the same.
   bool IsSameCodec(const SdpVideoFormat& other) const;
-  bool IsCodecInList(ArrayView<const SdpVideoFormat> formats) const;
+  bool IsCodecInList(std::span<const SdpVideoFormat> formats) const;
 
   std::string ToString() const;
 
@@ -69,6 +100,8 @@ struct RTC_EXPORT SdpVideoFormat {
   std::string name;
   CodecParameterMap parameters;
   absl::InlinedVector<ScalabilityMode, kScalabilityModeCount> scalability_modes;
+  std::optional<std::string> packetization;
+  std::optional<std::string> tx_mode;
 
   // Well-known video codecs and their format parameters.
   static const SdpVideoFormat VP8();
@@ -92,7 +125,7 @@ struct RTC_EXPORT SdpVideoFormat {
 // anymore. Until we stop misusing SdpVideoFormats provide this convenience
 // function to perform fuzzy matching.
 std::optional<SdpVideoFormat> FuzzyMatchSdpVideoFormat(
-    ArrayView<const SdpVideoFormat> supported_formats,
+    std::span<const SdpVideoFormat> supported_formats,
     const SdpVideoFormat& format);
 
 }  // namespace webrtc

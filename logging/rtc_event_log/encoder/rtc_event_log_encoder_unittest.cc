@@ -23,13 +23,11 @@
 #include <utility>
 #include <vector>
 
-#include "api/field_trials.h"
 #include "api/field_trials_view.h"
 #include "api/rtc_event_log/rtc_event.h"
 #include "api/rtc_event_log/rtc_event_log.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
-#include "logging/rtc_event_log/encoder/rtc_event_log_encoder_legacy.h"
 #include "logging/rtc_event_log/encoder/rtc_event_log_encoder_new_format.h"
 #include "logging/rtc_event_log/encoder/rtc_event_log_encoder_v3.h"
 #include "logging/rtc_event_log/events/logged_rtp_rtcp.h"
@@ -67,6 +65,7 @@
 #include "modules/rtp_rtcp/source/rtcp_packet/sender_report.h"
 #include "modules/rtp_rtcp/source/rtcp_packet/transport_feedback.h"
 #include "rtc_base/buffer.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/numerics/safe_conversions.h"
 #include "rtc_base/random.h"
@@ -97,7 +96,7 @@ class RtcEventLogEncoderTest
     std::unique_ptr<RtcEventLogEncoder> encoder;
     switch (encoding_type_) {
       case RtcEventLog::EncodingType::Legacy:
-        encoder = std::make_unique<RtcEventLogEncoderLegacy>();
+        RTC_CHECK_NOTREACHED();
         break;
       case RtcEventLog::EncodingType::NewFormat:
         encoder = std::make_unique<RtcEventLogEncoderNewFormat>(field_trials);
@@ -1308,23 +1307,6 @@ TEST_P(RtcEventLogEncoderTest, RtcEventRtpPacketOutgoing) {
   TestRtpPackets<RtcEventRtpPacketOutgoing, LoggedRtpPacketOutgoing>(*encoder);
 }
 
-TEST_P(RtcEventLogEncoderTest,
-       RtcEventRtpPacketIncomingNoDependencyDescriptor) {
-  FieldTrials no_dd = CreateTestFieldTrials(
-      "WebRTC-RtcEventLogEncodeDependencyDescriptor/Disabled/");
-  std::unique_ptr<RtcEventLogEncoder> encoder = CreateEncoder(no_dd);
-  verifier_.ExpectDependencyDescriptorExtensionIsSet(false);
-  TestRtpPackets<RtcEventRtpPacketIncoming, LoggedRtpPacketIncoming>(*encoder);
-}
-
-TEST_P(RtcEventLogEncoderTest,
-       RtcEventRtpPacketOutgoingNoDependencyDescriptor) {
-  FieldTrials no_dd = CreateTestFieldTrials(
-      "WebRTC-RtcEventLogEncodeDependencyDescriptor/Disabled/");
-  std::unique_ptr<RtcEventLogEncoder> encoder = CreateEncoder(no_dd);
-  verifier_.ExpectDependencyDescriptorExtensionIsSet(false);
-  TestRtpPackets<RtcEventRtpPacketOutgoing, LoggedRtpPacketOutgoing>(*encoder);
-}
 
 // TODO(eladalon/terelius): Test with multiple events in the batch.
 TEST_P(RtcEventLogEncoderTest, RtcEventVideoReceiveStreamConfig) {
@@ -1365,8 +1347,7 @@ INSTANTIATE_TEST_SUITE_P(
     RtcEventLogEncoderTest,
     ::testing::Combine(/* Random seed*: */ ::testing::Values(1, 2, 3, 4, 5),
                        /* Encoding: */
-                       ::testing::Values(RtcEventLog::EncodingType::Legacy,
-                                         RtcEventLog::EncodingType::NewFormat),
+                       ::testing::Values(RtcEventLog::EncodingType::NewFormat),
                        /* Event count: */ ::testing::Values(1, 2, 10, 100),
                        /* Repeated fields: */ ::testing::Bool()));
 
@@ -1376,7 +1357,8 @@ class RtcEventLogEncoderSimpleTest
   std::unique_ptr<RtcEventLogEncoder> CreateEncoder() {
     switch (GetParam()) {
       case RtcEventLog::EncodingType::Legacy:
-        return std::make_unique<RtcEventLogEncoderLegacy>();
+        RTC_CHECK_NOTREACHED();
+        return nullptr;
       case RtcEventLog::EncodingType::NewFormat:
         return std::make_unique<RtcEventLogEncoderNewFormat>(
             CreateTestFieldTrials());
@@ -1428,7 +1410,6 @@ TEST_P(RtcEventLogEncoderSimpleTest, RtcEventLargeCompoundRtcpPacketIncoming) {
 INSTANTIATE_TEST_SUITE_P(
     LargeCompoundRtcp,
     RtcEventLogEncoderSimpleTest,
-    ::testing::Values(RtcEventLog::EncodingType::Legacy,
-                      RtcEventLog::EncodingType::NewFormat));
+    ::testing::Values(RtcEventLog::EncodingType::NewFormat));
 
 }  // namespace webrtc

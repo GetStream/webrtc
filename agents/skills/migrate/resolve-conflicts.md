@@ -41,6 +41,20 @@ Stop on these paths when the two sides disagree about a version or a symbol.
 4. A public ObjC header
 5. A public JNI signature
 
+In `sdk/android/BUILD.gn`, keep `dist_jar("libwebrtc")` on `direct_deps_only = false` with `jar_excluded_patterns = stream_android_jar_excluded_patterns`.
+
+Keep the `stream_android_jar.gni` import.
+
+Do not take upstream `direct_deps_only = true`. It drops the generated jni_zero `*Jni` classes and the AAR crashes at runtime.
+
+When packaging reports a package outside the allowlist, add it to `extensions/android/stream_android_jar.gni`.
+
+Keep `:libwebrtc_final_jni_java` in the `libwebrtc` deps, declared as `java_library` with `supports_android` and `requires_android`. It packs jni_zero's `GEN_JNI` and `J.N`. `rtc_android_library` strips `GEN_JNI.class` because the srcjar dep name contains `jni`. Without `GEN_JNI` the AAR crashes in `PeerConnectionFactory.initialize`.
+
+Keep `java_targets = [ ":libwebrtc_java_targets" ]` on `libjingle_peerconnection_so`.
+
+When a Java target joins `libwebrtc_java_targets`, link its `*_jni` target into `libjingle_peerconnection_so`.
+
 For other `BUILD.gn` files, union the deps.
 
 Keep Stream-only targets.
@@ -74,6 +88,29 @@ Keep the addition in one labeled block.
 Do not exempt an official file that upstream still checks.
 
 Record the exempt path as debt.
+
+## Silent upstream rules
+
+Some upstream changes break Stream files with no conflict and no compile error.
+
+Upstream applies them to its own files in the same roll.
+
+1. Find official commits in the merge that touch many files with the same edit.
+2. List the Stream-added files of the same kind.
+3. Apply the same edit to each one.
+4. Record each edit as a decision.
+
+M156 example: jni_zero emits Java-to-native entry points only inside `DEFINE_JNI(<Class>)`, and only for `@NativeMethods` interfaces. Upstream added `DEFINE_JNI` to its JNI files and moved its plain `native` methods into `@NativeMethods` interfaces. `EncryptionManager` and `LibaomAv1Encoder` were Stream-only, so their plain `native` methods compiled and linked with no `Java_*` export, and E2EE and AV1 threw `UnsatisfiedLinkError`.
+
+Run this check after the conflicts. It needs no build.
+
+```bash
+stream_build/scripts/check-android-jni.sh --src .
+```
+
+It reports a missing `DEFINE_JNI`, a plain `native` method in a `generate_jni` source, and a Java/native `generate_jni` mismatch.
+
+Fix each report, or record why it is safe.
 
 ## Past examples
 

@@ -46,7 +46,8 @@ endif
 DEPS_ROOT     ?= $(abspath $(REPO_ROOT)/..)
 OUT           ?= $(DEPS_ROOT)/out
 PRODUCTS      ?= $(DEPS_ROOT)/products
-GIT_CACHE_PATH ?= $(DEPS_ROOT)/.gclient-git-cache
+# Outside the gclient root. See default_git_cache_path in scripts/common.sh.
+GIT_CACHE_PATH ?= $(abspath $(DEPS_ROOT)/..)/.gclient-git-cache
 TARGET        ?=
 NINJA_TARGET  ?=
 ARCHS         ?=
@@ -348,11 +349,14 @@ ninja: require-src
 	 if [[ -z "$$ninja_target" ]]; then \
 	   ninja_target="$$($(SCRIPTS)/gn-gen.sh --ninja-target "$(TARGET)")"; \
 	 fi; \
+	 if [[ "$(TARGET)" == android-* ]]; then \
+	   "$(SCRIPTS)/pin-android-java.sh" --src "$(WEBRTC_SRC)"; \
+	 fi; \
 	 if [[ "$(ANDROID_NAMESPACE)" == io.getstream.webrtc ]]; then \
 	   ninja_target="$${ninja_target//libjingle_peerconnection_so/libstream_jingle_peerconnection_so}"; \
 	 fi; \
-	 echo "$$ninja_bin -C $(OUT)/$(TARGET) $$ninja_target"; \
-	 "$$ninja_bin" -C "$(OUT)/$(TARGET)" $$ninja_target -j"$(JOBS)"
+	 echo "env -u TARGET $$ninja_bin -C $(OUT)/$(TARGET) $$ninja_target"; \
+	 env -u TARGET "$$ninja_bin" -C "$(OUT)/$(TARGET)" $$ninja_target -j"$(JOBS)"
 
 slice: gen ninja
 
@@ -412,6 +416,7 @@ compile-tests-ios: require-darwin maybe-deps require-src
 	 "$$ninja_bin" -C "$(OUT)/ios_tests" $$targets -j"$(JOBS)"
 
 test-ios: compile-tests-ios
+	@$(SCRIPTS)/pin-ios-simulator-boot.sh --src "$(WEBRTC_SRC)"
 	@$(SCRIPTS)/run-ios-tests.sh \
 		--build-dir "$(OUT)/ios_tests" \
 		--targets "$(if $(TEST_TARGETS),$(TEST_TARGETS),$(IOS_TEST_TARGETS))" \
@@ -451,6 +456,7 @@ compile-tests-android: validate-android-test-args require-linux maybe-deps requi
 		--config debug \
 		--overlay android-test \
 		--extra "$(strip $(ALL_GN_ARGS) target_cpu=\"$(android_test_cpu)\")"
+	@"$(SCRIPTS)/pin-android-java.sh" --src "$(WEBRTC_SRC)"
 	@ninja_bin="$$($(SCRIPTS)/common.sh ninja "$(WEBRTC_SRC)")"; \
 	 targets="$(if $(TEST_TARGETS),$(TEST_TARGETS),$(ANDROID_TEST_TARGETS))"; \
 	 echo "$$ninja_bin -C $(ANDROID_TEST_OUT) $$targets"; \

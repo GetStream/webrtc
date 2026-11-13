@@ -7,7 +7,6 @@
  *  in the file PATENTS.  All contributing project authors may
  *  be found in the AUTHORS file in the root of the source tree.
  */
-#include <cstddef>
 #include <functional>
 #include <list>
 #include <memory>
@@ -17,6 +16,7 @@
 
 #include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
+#include "api/rtp_header_extension_id.h"
 #include "api/rtp_parameters.h"
 #include "api/test/create_frame_generator.h"
 #include "api/test/simulated_network.h"
@@ -109,10 +109,9 @@ class LogObserver {
 
   Callback callback_;
 };
-}  // namespace
 
-static const int kTOFExtensionId = 4;
-static const int kASTExtensionId = 5;
+constexpr RtpHeaderExtensionId kTOFExtensionId(4);
+constexpr RtpHeaderExtensionId kASTExtensionId(5);
 
 class BitrateEstimatorTest : public test::CallTest {
  public:
@@ -152,8 +151,6 @@ class BitrateEstimatorTest : public test::CallTest {
           VideoReceiveStreamInterface::Config(receive_transport_.get());
       // receive_config_.decoders will be set by every stream separately.
       receive_config_.rtp.remote_ssrc = GetVideoSendConfig()->rtp.ssrcs[0];
-      receive_config_.rtp.local_ssrc =
-          test::VideoTestConstants::kReceiverLocalVideoSsrc;
     });
   }
 
@@ -209,7 +206,6 @@ class BitrateEstimatorTest : public test::CallTest {
       test_->receive_config_.decoders.push_back(decoder);
       test_->receive_config_.rtp.remote_ssrc =
           test_->GetVideoSendConfig()->rtp.ssrcs[0];
-      test_->receive_config_.rtp.local_ssrc++;
       test_->receive_config_.renderer = &test->fake_renderer_;
       video_receive_stream_ = test_->receiver_call_->CreateVideoReceiveStream(
           test_->receive_config_.Copy());
@@ -335,4 +331,5 @@ TEST_F(BitrateEstimatorTest, DISABLED_SwitchesToASTThenBackToTOFForVideo) {
   });
   EXPECT_TRUE(receiver_log_.Wait());
 }
+}  // namespace
 }  // namespace webrtc

@@ -11,9 +11,9 @@
 #include "api/video/video_frame_buffer.h"
 
 #include <cstddef>
+#include <span>
 #include <string>
 
-#include "api/array_view.h"
 #include "api/scoped_refptr.h"
 #include "api/video/i420_buffer.h"
 #include "api/video/i422_buffer.h"
@@ -88,8 +88,12 @@ const NV12BufferInterface* VideoFrameBuffer::GetNV12() const {
   return static_cast<const NV12BufferInterface*>(this);
 }
 
+scoped_refptr<I420BufferInterface> VideoFrameBuffer::ToI420ForInspection() {
+  return ToI420();
+}
+
 scoped_refptr<VideoFrameBuffer> VideoFrameBuffer::GetMappedFrameBuffer(
-    ArrayView<Type> /* types */) {
+    std::span<Type> /* types */) {
   RTC_CHECK(type() == Type::kNative);
   return nullptr;
 }

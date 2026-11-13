@@ -17,12 +17,12 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/algorithm/container.h"
-#include "api/array_view.h"
 #include "api/video/video_codec_type.h"
 #include "api/video/video_frame_type.h"
 #include "common_video/h264/h264_common.h"
@@ -77,7 +77,7 @@ bool HasSps(const H26xPacketBuffer::Packet& packet) {
   });
 }
 
-int64_t* GetContinuousSequence(ArrayView<int64_t> last_continuous,
+int64_t* GetContinuousSequence(std::span<int64_t> last_continuous,
                                int64_t unwrapped_seq_num) {
   for (int64_t& last : last_continuous) {
     if (unwrapped_seq_num - 1 == last) {
@@ -324,6 +324,10 @@ bool H26xPacketBuffer::MaybeAssembleFrame(int64_t start_seq_num_unwrapped,
   return true;
 }
 
+void H26xPacketBuffer::SetH264IdrOnlyKeyframesAllowed(bool allowed) {
+  h264_idr_only_keyframes_allowed_ = allowed;
+}
+
 void H26xPacketBuffer::SetSpropParameterSets(
     const std::string& sprop_parameter_sets) {
   if (!h264_idr_only_keyframes_allowed_) {
@@ -361,9 +365,9 @@ void H26xPacketBuffer::InsertSpsPpsNalus(const std::vector<uint8_t>& sps,
     return;
   }
   std::optional<SpsParser::SpsState> parsed_sps = SpsParser::ParseSps(
-      ArrayView<const uint8_t>(sps).subview(kNaluHeaderOffset));
+      std::span<const uint8_t>(sps).subspan(kNaluHeaderOffset));
   std::optional<PpsParser::PpsState> parsed_pps = PpsParser::ParsePps(
-      ArrayView<const uint8_t>(pps).subview(kNaluHeaderOffset));
+      std::span<const uint8_t>(pps).subspan(kNaluHeaderOffset));
 
   if (!parsed_sps) {
     RTC_LOG(LS_WARNING) << "Failed to parse SPS.";
@@ -374,6 +378,12 @@ void H26xPacketBuffer::InsertSpsPpsNalus(const std::vector<uint8_t>& sps,
   }
 
   if (!parsed_pps || !parsed_sps) {
+    return;
+  }
+
+  if (parsed_sps->id > H264::kMaxSpsId || parsed_pps->id > H264::kMaxPpsId ||
+      parsed_pps->sps_id > H264::kMaxSpsId) {
+    RTC_LOG(LS_WARNING) << "Parsed SPS/PPS ID out of bounds.";
     return;
   }
 
@@ -419,12 +429,23 @@ bool H26xPacketBuffer::FixH264Packet(Packet& packet) {
     for (const NaluInfo& nalu : h264_header.nalus) {
       switch (nalu.type) {
         case H264::NaluType::kSps: {
+          if (nalu.sps_id < 0 || nalu.sps_id > H264::kMaxSpsId) {
+            RTC_LOG(LS_WARNING) << "SPS id out of bounds: " << nalu.sps_id;
+            return false;
+          }
           SpsInfo& sps_info = sps_data_[nalu.sps_id];
           sps_info.width = video_header.width;
           sps_info.height = video_header.height;
           break;
         }
         case H264::NaluType::kPps: {
+          if (nalu.pps_id < 0 || nalu.pps_id > H264::kMaxPpsId ||
+              nalu.sps_id < 0 || nalu.sps_id > H264::kMaxSpsId) {
+            RTC_LOG(LS_WARNING)
+                << "PPS or SPS id out of bounds: pps_id=" << nalu.pps_id
+                << " sps_id=" << nalu.sps_id;
+            return false;
+          }
           pps_data_[nalu.pps_id].sps_id = nalu.sps_id;
           break;
         }

@@ -13,10 +13,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <utility>
 #include <vector>
 
-#include "api/array_view.h"
 #include "api/audio_codecs/audio_decoder.h"
 #include "api/field_trials_view.h"
 #include "modules/audio_coding/codecs/opus/audio_coder_opus_common.h"
@@ -34,9 +34,8 @@ AudioDecoderOpusImpl::AudioDecoderOpusImpl(const FieldTrialsView& field_trials,
       generate_plc_(field_trials.IsEnabled("WebRTC-Audio-OpusGeneratePlc")) {
   RTC_DCHECK(num_channels == 1 || num_channels == 2);
   RTC_DCHECK(sample_rate_hz == 16000 || sample_rate_hz == 48000);
-  const int error =
-      WebRtcOpus_DecoderCreate(&dec_state_, channels_, sample_rate_hz_);
-  RTC_DCHECK(error == 0);
+  RTC_CHECK_EQ(
+      WebRtcOpus_DecoderCreate(&dec_state_, channels_, sample_rate_hz_), 0);
   WebRtcOpus_DecoderInit(dec_state_);
 }
 
@@ -121,9 +120,7 @@ int AudioDecoderOpusImpl::PacketDurationRedundant(const uint8_t* encoded,
 
 bool AudioDecoderOpusImpl::PacketHasFec(const uint8_t* encoded,
                                         size_t encoded_len) const {
-  int fec;
-  fec = WebRtcOpus_PacketHasFec(encoded, encoded_len);
-  return (fec == 1);
+  return WebRtcOpus_PacketHasFec(encoded, encoded_len) == 1;
 }
 
 int AudioDecoderOpusImpl::SampleRateHz() const {
@@ -141,14 +138,14 @@ void AudioDecoderOpusImpl::GeneratePlc(
     return;
   }
   int plc_size = WebRtcOpus_PlcDuration(dec_state_) * channels_;
-  concealment_audio->AppendData(plc_size, [&](ArrayView<int16_t> decoded) {
+  concealment_audio->AppendData(plc_size, [&](std::span<int16_t> decoded) {
     int16_t temp_type = 1;
     int ret =
         WebRtcOpus_Decode(dec_state_, nullptr, 0, decoded.data(), &temp_type);
     if (ret < 0) {
       return 0;
     }
-    return ret;
+    return ret * static_cast<int>(channels_);
   });
 }
 

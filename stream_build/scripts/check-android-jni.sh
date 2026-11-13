@@ -1,0 +1,189 @@
+#!/usr/bin/env bash
+# Static jni_zero checks for sdk/android that need no gclient sync or build.
+#
+# 1. Every .cc that includes a generated <Class>_jni.h for a Java class with
+#    native methods invokes DEFINE_JNI(<Class>). Without it jni_zero emits no
+#    Java_* entry points, the build still passes, and the AAR throws
+#    UnsatisfiedLinkError on first call.
+# 2. The generate_jni targets reachable from dist_jar("libwebrtc") match the
+#    ones linked into libjingle_peerconnection_so. jni_zero's generate-final
+#    rejects a mismatch, and a Java proxy with no linked native crashes at
+#    runtime.
+# 3. libwebrtc depends on :libwebrtc_final_jni_java, and the .so sets
+#    java_targets to :libwebrtc_java_targets. Without those lines the AAR
+#    has no GEN_JNI, or GEN_JNI misses packed classes, and
+#    PeerConnectionFactory.initialize crashes. The build still passes.
+# 4. Java sources of generate_jni targets declare natives only through
+#    @NativeMethods interfaces. jni_zero ignores plain `native` methods in
+#    .java sources, so they compile, link, and then throw
+#    UnsatisfiedLinkError.
+#
+# The BUILD.gn walk is textual: it follows deps, public_deps, and java_targets
+# lists inside each target and ignores conditions. Treat a report as a lead to
+# confirm in BUILD.gn, not as proof.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=common.sh
+source "${SCRIPT_DIR}/common.sh"
+
+require_cmd python3
+
+SRC=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --src) SRC="$2"; shift 2 ;;
+    *) die "check-android-jni.sh: unknown flag $1" ;;
+  esac
+done
+[[ -n "$SRC" ]] || die "check-android-jni.sh requires --src"
+[[ -f "$SRC/sdk/android/BUILD.gn" ]] || die "missing $SRC/sdk/android/BUILD.gn"
+
+python3 - "$SRC" <<'PY'
+import os
+import re
+import sys
+
+root = sys.argv[1]
+JAR = "sdk/android:libwebrtc"
+SO = "sdk/android:libjingle_peerconnection_so"
+SCANNED = ("sdk/android", "extensions/android")
+targets = {}
+parsed = set()
+
+
+def label(raw, base):
+    raw = raw.split("(")[0]
+    if raw.startswith(":"):
+        return f"{base}:{raw[1:]}"
+    path, _, name = raw.partition(":")
+    path = path[2:] if path.startswith("//") else os.path.normpath(
+        os.path.join(base, path))
+    return f"{path}:{name or os.path.basename(path)}"
+
+
+def parse(rel):
+    if rel in parsed:
+        return
+    parsed.add(rel)
+    path = os.path.join(root, rel, "BUILD.gn")
+    if not os.path.exists(path):
+        return
+    text = open(path).read()
+    for m in re.finditer(r'^\s*([a-z_]+)\("([^"]+)"\)\s*\{', text, re.M):
+        depth, i = 1, m.end()
+        while depth and i < len(text):
+            depth += {"{": 1, "}": -1}.get(text[i], 0)
+            i += 1
+        body = text[m.end():i]
+        deps = [label(d, rel)
+                for lst in re.finditer(
+                    r'\b(?:deps|public_deps|java_targets)\s*\+?=\s*\[(.*?)\]',
+                    body, re.S)
+                for d in re.findall(r'"([^"]+)"', lst.group(1))]
+        targets[f"{rel}:{m.group(2)}"] = {
+            "type": m.group(1),
+            "deps": deps,
+            "java": re.findall(r'"([^"]+\.java)"', body),
+        }
+
+
+def closure(start):
+    seen, todo = set(), [start]
+    while todo:
+        t = todo.pop()
+        if t in seen:
+            continue
+        seen.add(t)
+        if t.startswith(("third_party/", "build/")):
+            continue
+        parse(t.split(":")[0])
+        todo += targets.get(t, {}).get("deps", [])
+    return seen
+
+
+def is_generate_jni(t):
+    return targets.get(t, {}).get("type") == "generate_jni"
+
+
+failed = False
+
+native_side = {t for t in closure(SO) if is_generate_jni(t)}
+java_side = {t[:-len("_java")] for t in closure(JAR)
+             if t.endswith("_java") and is_generate_jni(t[:-len("_java")])}
+for t in sorted(java_side - native_side):
+    failed = True
+    print(f"{t}: libwebrtc packs its Java, but {SO} does not link its "
+          "native side.", file=sys.stderr)
+for t in sorted(native_side - java_side):
+    failed = True
+    print(f"{t}: {SO} links its native side, but libwebrtc does not pack "
+          "its Java.", file=sys.stderr)
+
+def require_dep(target, dep, message):
+    global failed
+    info = targets.get(target)
+    if not info or dep not in info["deps"]:
+        failed = True
+        print(message, file=sys.stderr)
+
+require_dep(
+    JAR,
+    "sdk/android:libwebrtc_final_jni_java",
+    f"{JAR} deps omit :libwebrtc_final_jni_java. The AAR then has no "
+    "GEN_JNI and PeerConnectionFactory.initialize crashes.",
+)
+require_dep(
+    SO,
+    "sdk/android:libwebrtc_java_targets",
+    f"{SO} java_targets omit :libwebrtc_java_targets. GEN_JNI then "
+    "misses packed proxy methods.",
+)
+
+for rel in SCANNED:
+    for dirpath, _, files in os.walk(os.path.join(root, rel)):
+        for f in files:
+            if f.endswith(".gn"):
+                parse(os.path.relpath(dirpath, root))
+
+legacy_native = re.compile(r"^\s*(?:\w+\s+)*native\s+[\w<>\[\], .]+\s+\w+\s*\(",
+                           re.M)
+java_with_natives = set()
+for t, info in targets.items():
+    if info["type"] != "generate_jni":
+        continue
+    base = t.split(":")[0]
+    for src in info["java"]:
+        path = os.path.join(root, base, src)
+        if not os.path.exists(path):
+            continue
+        text = open(path).read()
+        if "@NativeMethods" in text:
+            java_with_natives.add(os.path.basename(src)[:-len(".java")])
+        for m in legacy_native.finditer(text):
+            failed = True
+            line = text.count("\n", 0, m.start()) + 1
+            print(f"{os.path.join(base, src)}:{line}: plain `native` method in "
+                  f"a {t} source. jni_zero only binds @NativeMethods "
+                  "interfaces, so this gets no Java_* export.", file=sys.stderr)
+
+include = re.compile(r'#include\s+"[^"]*/([A-Za-z0-9_$]+)_jni\.h"')
+for rel in SCANNED:
+    for dirpath, _, files in os.walk(os.path.join(root, rel)):
+        for f in files:
+            if not f.endswith(".cc"):
+                continue
+            path = os.path.join(dirpath, f)
+            text = open(path).read()
+            for cls in include.findall(text):
+                if cls in java_with_natives and \
+                        f"DEFINE_JNI({cls})" not in text:
+                    failed = True
+                    print(f"{os.path.relpath(path, root)}: includes "
+                          f"{cls}_jni.h but never invokes DEFINE_JNI({cls}).",
+                          file=sys.stderr)
+
+if failed:
+    sys.exit(1)
+print(f"jni ok: {len(java_side)} generate_jni targets match")
+PY

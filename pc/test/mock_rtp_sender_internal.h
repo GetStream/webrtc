@@ -11,8 +11,10 @@
 #ifndef PC_TEST_MOCK_RTP_SENDER_INTERNAL_H_
 #define PC_TEST_MOCK_RTP_SENDER_INTERNAL_H_
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -31,6 +33,7 @@
 #include "media/base/codec.h"
 #include "media/base/media_channel.h"
 #include "pc/rtp_sender.h"
+#include "pc/scoped_operations_batcher.h"
 #include "test/gmock.h"
 
 namespace webrtc {
@@ -60,8 +63,15 @@ class MockRtpSenderInternal : public RtpSenderInternal {
               set_transport,
               (webrtc::scoped_refptr<DtlsTransportInterface>),
               (override));
+  MOCK_METHOD(void,
+              SetCachedParameters,
+              (std::optional<RtpParameters>),
+              (override));
   MOCK_METHOD(RtpParameters, GetParameters, (), (const, override));
-  MOCK_METHOD(RtpParameters, GetParametersInternal, (), (const, override));
+  MOCK_METHOD(RtpParameters,
+              GetParametersInternal,
+              (bool, bool),
+              (const, override));
   MOCK_METHOD(RtpParameters,
               GetParametersInternalWithAllLayers,
               (),
@@ -71,7 +81,7 @@ class MockRtpSenderInternal : public RtpSenderInternal {
               SetParametersAsync,
               (const RtpParameters&, SetParametersCallback),
               (override));
-  MOCK_METHOD(void,
+  MOCK_METHOD(RTCError,
               SetParametersInternal,
               (const RtpParameters&, SetParametersCallback, bool blocking),
               (override));
@@ -101,6 +111,10 @@ class MockRtpSenderInternal : public RtpSenderInternal {
               SetEncoderSelector,
               (std::unique_ptr<VideoEncoderFactory::EncoderSelectorInterface>),
               (override));
+  MOCK_METHOD(void,
+              SetEncoderSelector,
+              (scoped_refptr<VideoEncoderFactory::EncoderSelectorInterface>),
+              (override));
   MOCK_METHOD(void, SetObserver, (RtpSenderObserverInterface*), (override));
 
   // RtpSenderInternal methods.
@@ -109,6 +123,10 @@ class MockRtpSenderInternal : public RtpSenderInternal {
               (webrtc::MediaSendChannelInterface*),
               (override));
   MOCK_METHOD(void, SetSsrc, (uint32_t), (override));
+  MOCK_METHOD(ScopedOperationsBatcher::BatchTaskWithFinalizer,
+              SetSsrcTask,
+              (uint32_t, size_t),
+              (override));
   MOCK_METHOD(void,
               set_stream_ids,
               (const std::vector<std::string>&),
@@ -129,6 +147,7 @@ class MockRtpSenderInternal : public RtpSenderInternal {
               (const std::vector<std::string>&),
               (override));
   MOCK_METHOD(void, NotifyFirstPacketSent, (), (override));
+  MOCK_METHOD(void, OnParametersChanged, (), (override));
 };
 
 }  // namespace webrtc

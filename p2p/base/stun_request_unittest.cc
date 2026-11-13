@@ -10,24 +10,26 @@
 
 #include "p2p/base/stun_request.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <utility>
-#include <vector>
 
+#include "absl/strings/string_view.h"
 #include "api/environment/environment.h"
 #include "api/test/rtc_error_matchers.h"
 #include "api/transport/stun.h"
 #include "api/units/time_delta.h"
-#include "rtc_base/fake_clock.h"
-#include "rtc_base/gunit.h"
+#include "api/units/timestamp.h"
+#include "rtc_base/byte_buffer.h"
 #include "rtc_base/logging.h"
-#include "rtc_base/thread.h"
 #include "test/create_test_environment.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
+#include "test/time_controller/simulated_time_controller.h"
 #include "test/wait_until.h"
 
 namespace webrtc {
@@ -43,22 +45,16 @@ std::unique_ptr<StunMessage> CreateStunMessage(
   return msg;
 }
 
-int TotalDelay(int sends) {
-  std::vector<int> delays = {0,    250,   750,   1750,  3750,
-                             7750, 15750, 23750, 31750, 39750};
-  return delays[sends];
-}
-}  // namespace
-
 class StunRequestThunker;
 
 class StunRequestTest : public ::testing::Test {
  public:
   StunRequestTest()
-      : env_(CreateTestEnvironment()),
-        manager_(Thread::Current(),
-                 [this](const void* data, size_t size, StunRequest* request) {
-                   OnSendPacket(data, size, request);
+      : time_controller_(Timestamp::Seconds(12345)),
+        env_(CreateTestEnvironment({.time = &time_controller_})),
+        manager_(time_controller_.GetMainThread(),
+                 [this](std::span<const uint8_t> data, StunRequest* request) {
+                   OnSendPacket(data, request);
                  }),
         request_count_(0),
         response_(nullptr),
@@ -68,7 +64,7 @@ class StunRequestTest : public ::testing::Test {
 
   std::unique_ptr<StunRequestThunker> CreateStunRequest();
 
-  void OnSendPacket(const void* data, size_t size, StunRequest* req) {
+  void OnSendPacket(std::span<const uint8_t> data, StunRequest* req) {
     request_count_++;
   }
 
@@ -83,7 +79,7 @@ class StunRequestTest : public ::testing::Test {
   virtual void OnTimeout() { timeout_ = true; }
 
  protected:
-  AutoThread main_thread_;
+  GlobalSimulatedTimeController time_controller_;
   const Environment env_;
   StunRequestManager manager_;
   int request_count_;
@@ -117,6 +113,47 @@ class StunRequestThunker : public StunRequest {
 
   StunRequestTest* test_;
 };
+
+class AuthenticatedStunRequestThunker : public StunRequest {
+ public:
+  AuthenticatedStunRequestThunker(const Environment& env,
+                                  StunRequestManager& manager,
+                                  StunRequestTest* test,
+                                  absl::string_view password)
+      : StunRequest(env, manager, CreateRequestMessage(password)), test_(test) {
+    SetAuthenticationRequired(true);
+  }
+
+  static std::unique_ptr<StunMessage> CreateRequestMessage(
+      absl::string_view password) {
+    auto req = CreateStunMessage(STUN_BINDING_REQUEST);
+    req->AddMessageIntegrity(password);
+    return req;
+  }
+
+ private:
+  void OnResponse(StunMessage* res) override { test_->OnResponse(res); }
+  void OnErrorResponse(StunMessage* res) override {
+    test_->OnErrorResponse(res);
+  }
+  void OnTimeout() override { test_->OnTimeout(); }
+
+  StunRequestTest* test_;
+};
+
+std::unique_ptr<StunMessage> CreateParsedStunMessage(
+    StunMessageType type,
+    const std::string& transaction_id,
+    absl::string_view password) {
+  StunMessage msg(type, transaction_id);
+  msg.AddMessageIntegrity(password);
+  ByteBufferWriter writer;
+  msg.Write(&writer);
+  ByteBufferReader reader(writer);
+  auto parsed_msg = std::make_unique<StunMessage>();
+  parsed_msg->Read(&reader);
+  return parsed_msg;
+}
 
 std::unique_ptr<StunRequestThunker> StunRequestTest::CreateStunRequest() {
   return std::make_unique<StunRequestThunker>(env_, manager_, this);
@@ -164,25 +201,30 @@ TEST_F(StunRequestTest, TestUnexpected) {
   EXPECT_FALSE(timeout_);
 }
 
-// Test that requests are sent at the right times.
 TEST_F(StunRequestTest, TestBackoff) {
-  ScopedFakeClock fake_clock;
   std::unique_ptr<StunRequestThunker> request = CreateStunRequest();
   std::unique_ptr<StunMessage> res =
       request->CreateResponseMessage(STUN_BINDING_RESPONSE);
+  constexpr auto kTotalDelays = std::to_array<TimeDelta>(
+      {TimeDelta::Zero(), TimeDelta::Millis(250), TimeDelta::Millis(750),
+       TimeDelta::Millis(1750), TimeDelta::Millis(3750),
+       TimeDelta::Millis(7750), TimeDelta::Millis(15750),
+       TimeDelta::Millis(23750), TimeDelta::Millis(31750),
+       TimeDelta::Millis(39750)});
 
-  int64_t start = env_.clock().TimeInMilliseconds();
   manager_.Send(std::move(request));
-  for (int i = 0; i < 9; ++i) {
+  Timestamp start = env_.clock().CurrentTime();
+  for (size_t i = 0; i < kTotalDelays.size() - 1; ++i) {
     EXPECT_THAT(WaitUntil([&] { return request_count_; }, Ne(i),
                           {.timeout = TimeDelta::Millis(STUN_TOTAL_TIMEOUT),
-                           .clock = &fake_clock}),
+                           .clock = &time_controller_}),
                 IsRtcOk());
-    int64_t elapsed = env_.clock().TimeInMilliseconds() - start;
-    RTC_DLOG(LS_INFO) << "STUN request #" << (i + 1) << " sent at " << elapsed
-                      << " ms";
-    EXPECT_EQ(TotalDelay(i), elapsed);
+    TimeDelta elapsed = env_.clock().CurrentTime() - start;
+    RTC_DLOG(LS_INFO) << "STUN request #" << (i + 1) << " sent at " << elapsed;
+    EXPECT_EQ(kTotalDelays[i], elapsed);
   }
+  ASSERT_EQ(request_count_, 9);
+
   EXPECT_TRUE(manager_.CheckResponse(res.get()));
 
   EXPECT_TRUE(response_ == res.get());
@@ -193,13 +235,12 @@ TEST_F(StunRequestTest, TestBackoff) {
 
 // Test that we timeout properly if no response is received.
 TEST_F(StunRequestTest, TestTimeout) {
-  ScopedFakeClock fake_clock;
   std::unique_ptr<StunRequestThunker> request = CreateStunRequest();
   std::unique_ptr<StunMessage> res =
       request->CreateResponseMessage(STUN_BINDING_RESPONSE);
 
   manager_.Send(std::move(request));
-  SIMULATED_WAIT(false, STUN_TOTAL_TIMEOUT, fake_clock);
+  time_controller_.AdvanceTime(TimeDelta::Millis(STUN_TOTAL_TIMEOUT));
 
   EXPECT_FALSE(manager_.CheckResponse(res.get()));
   EXPECT_TRUE(response_ == nullptr);
@@ -246,6 +287,75 @@ TEST_F(StunRequestTest, TestUnrecognizedComprehensionRequiredAttribute) {
   EXPECT_FALSE(timeout_);
 }
 
+// Test handling of a response when the password has changed between ping and
+// response. If the response was checked with a different password prior to
+// CheckResponse (e.g. Connection::OnReadPacket checking against updated remote
+// candidate password), CheckResponse should revalidate against the request
+// password and not crash.
+TEST_F(StunRequestTest, ResponseValidatedWithDifferentPasswordRevalidates) {
+  constexpr absl::string_view kOldPassword = "old_password";
+  constexpr absl::string_view kNewPassword = "new_password";
+
+  auto request = std::make_unique<AuthenticatedStunRequestThunker>(
+      env_, manager_, this, kOldPassword);
+  std::string transaction_id = request->id();
+  manager_.Send(std::move(request));
+
+  // Response was signed with kOldPassword, but pre-validated with kNewPassword.
+  std::unique_ptr<StunMessage> res = CreateParsedStunMessage(
+      STUN_BINDING_RESPONSE, transaction_id, kOldPassword);
+  EXPECT_EQ(res->ValidateMessageIntegrity(std::string(kNewPassword)),
+            StunMessage::IntegrityStatus::kIntegrityBad);
+  EXPECT_EQ(res->password(), kNewPassword);
+
+  // CheckResponse should revalidate with kOldPassword and succeed.
+  EXPECT_TRUE(manager_.CheckResponse(res.get()));
+  EXPECT_EQ(response_, res.get());
+  EXPECT_TRUE(success_);
+}
+
+TEST_F(StunRequestTest, ResponseWithNewPasswordDoesNotMatchOldRequest) {
+  constexpr absl::string_view kOldPassword = "old_password";
+  constexpr absl::string_view kNewPassword = "new_password";
+
+  auto request = std::make_unique<AuthenticatedStunRequestThunker>(
+      env_, manager_, this, kOldPassword);
+  std::string transaction_id = request->id();
+  manager_.Send(std::move(request));
+
+  // Response was signed with kNewPassword, and pre-validated with kNewPassword.
+  std::unique_ptr<StunMessage> res = CreateParsedStunMessage(
+      STUN_BINDING_RESPONSE, transaction_id, kNewPassword);
+  EXPECT_EQ(res->ValidateMessageIntegrity(std::string(kNewPassword)),
+            StunMessage::IntegrityStatus::kIntegrityOk);
+  EXPECT_EQ(res->password(), kNewPassword);
+
+  // CheckResponse should revalidate with kOldPassword, fail integrity check,
+  // and not crash.
+  EXPECT_FALSE(manager_.CheckResponse(res.get()));
+  EXPECT_EQ(response_, nullptr);
+  EXPECT_FALSE(success_);
+}
+
+TEST_F(StunRequestTest, ResponseValidatedWithMatchingPassword) {
+  constexpr absl::string_view kPassword = "password";
+
+  auto request = std::make_unique<AuthenticatedStunRequestThunker>(
+      env_, manager_, this, kPassword);
+  std::string transaction_id = request->id();
+  manager_.Send(std::move(request));
+
+  std::unique_ptr<StunMessage> res =
+      CreateParsedStunMessage(STUN_BINDING_RESPONSE, transaction_id, kPassword);
+  EXPECT_EQ(res->ValidateMessageIntegrity(std::string(kPassword)),
+            StunMessage::IntegrityStatus::kIntegrityOk);
+  EXPECT_EQ(res->password(), kPassword);
+
+  EXPECT_TRUE(manager_.CheckResponse(res.get()));
+  EXPECT_EQ(response_, res.get());
+  EXPECT_TRUE(success_);
+}
+
 class StunRequestReentranceTest : public StunRequestTest {
  public:
   void OnResponse(StunMessage* res) override {
@@ -284,4 +394,5 @@ TEST_F(StunRequestReentranceTest, TestError) {
   EXPECT_FALSE(timeout_);
 }
 
+}  // namespace
 }  // namespace webrtc

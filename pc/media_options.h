@@ -25,6 +25,7 @@
 #include "p2p/base/transport_description.h"
 #include "p2p/base/transport_description_factory.h"
 #include "pc/simulcast_description.h"
+#include "rtc_base/system/plan_b_only.h"
 
 namespace webrtc {
 
@@ -53,13 +54,13 @@ struct MediaDescriptionOptions {
 
   // TODO(deadbeef): When we don't support Plan B, there will only be one
   // sender per media description and this can be simplified.
-  void AddAudioSender(const std::string& track_id,
-                      const std::vector<std::string>& stream_ids);
-  void AddVideoSender(const std::string& track_id,
-                      const std::vector<std::string>& stream_ids,
-                      const std::vector<RidDescription>& rids,
-                      const SimulcastLayerList& simulcast_layers,
-                      int num_sim_layers);
+  PLAN_B_ONLY void AddAudioSender(const std::string& track_id,
+                                  const std::vector<std::string>& stream_ids);
+  PLAN_B_ONLY void AddVideoSender(const std::string& track_id,
+                                  const std::vector<std::string>& stream_ids,
+                                  const std::vector<RidDescription>& rids,
+                                  const SimulcastLayerList& simulcast_layers,
+                                  int num_sim_layers);
 
   MediaType type;
   std::string mid;
@@ -74,14 +75,16 @@ struct MediaDescriptionOptions {
   // Codecs to include in a generated offer or answer.
   // If this is used, session-level codec lists MUST be ignored.
   std::vector<Codec> codecs_to_include;
+  // Whether Sframe encryption is requested for this media section.
+  bool sframe_enabled = false;
 
  private:
   // Doesn't DCHECK on `type`.
-  void AddSenderInternal(const std::string& track_id,
-                         const std::vector<std::string>& stream_ids,
-                         const std::vector<RidDescription>& rids,
-                         const SimulcastLayerList& simulcast_layers,
-                         int num_sim_layers);
+  PLAN_B_ONLY void AddSenderInternal(const std::string& track_id,
+                                     const std::vector<std::string>& stream_ids,
+                                     const std::vector<RidDescription>& rids,
+                                     const SimulcastLayerList& simulcast_layers,
+                                     int num_sim_layers);
 };
 
 // Provides a mechanism for describing how m= sections should be generated.

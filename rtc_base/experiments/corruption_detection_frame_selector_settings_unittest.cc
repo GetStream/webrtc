@@ -12,29 +12,32 @@
 
 #include "api/field_trials.h"
 #include "api/units/time_delta.h"
+#include "test/create_test_field_trials.h"
 #include "test/gtest.h"
 
 namespace webrtc {
 namespace {
 
 TEST(CorruptionDetectionFrameSelectorSettingsTest, DisabledByDefault) {
-  FieldTrials trials("");
+  FieldTrials trials = CreateTestFieldTrials("");
   CorruptionDetectionFrameSelectorSettings settings(trials);
   EXPECT_FALSE(settings.is_enabled());
 }
 
 TEST(CorruptionDetectionFrameSelectorSettingsTest, EnabledWithDefaults) {
-  FieldTrials trials("WebRTC-CorruptionDetectionFrameSelector/enabled:true/");
+  FieldTrials trials = CreateTestFieldTrials(
+      "WebRTC-CorruptionDetectionFrameSelector/enabled:true/");
   CorruptionDetectionFrameSelectorSettings settings(trials);
   EXPECT_TRUE(settings.is_enabled());
   EXPECT_EQ(settings.low_overhead_lower_bound(), TimeDelta::Millis(1));
   EXPECT_EQ(settings.low_overhead_upper_bound(), TimeDelta::Millis(500));
   EXPECT_EQ(settings.high_overhead_lower_bound(), TimeDelta::Millis(33));
   EXPECT_EQ(settings.high_overhead_upper_bound(), TimeDelta::Millis(5000));
+  EXPECT_FALSE(settings.use_asynchronous_evaluation());
 }
 
 TEST(CorruptionDetectionFrameSelectorSettingsTest, ParsesValues) {
-  FieldTrials trials(
+  FieldTrials trials = CreateTestFieldTrials(
       "WebRTC-CorruptionDetectionFrameSelector/enabled:true,"
       "low_overhead_lower_bound:10ms,low_overhead_upper_bound:100ms,"
       "high_overhead_lower_bound:20ms,high_overhead_upper_bound:200ms/");
@@ -47,7 +50,7 @@ TEST(CorruptionDetectionFrameSelectorSettingsTest, ParsesValues) {
 }
 
 TEST(CorruptionDetectionFrameSelectorSettingsTest, ValidationLowOverhead) {
-  FieldTrials trials(
+  FieldTrials trials = CreateTestFieldTrials(
       "WebRTC-CorruptionDetectionFrameSelector/enabled:true,"
       "low_overhead_lower_bound:100ms,low_overhead_upper_bound:10ms/");
   CorruptionDetectionFrameSelectorSettings settings(trials);
@@ -55,11 +58,19 @@ TEST(CorruptionDetectionFrameSelectorSettingsTest, ValidationLowOverhead) {
 }
 
 TEST(CorruptionDetectionFrameSelectorSettingsTest, ValidationHighOverhead) {
-  FieldTrials trials(
+  FieldTrials trials = CreateTestFieldTrials(
       "WebRTC-CorruptionDetectionFrameSelector/enabled:true,"
       "high_overhead_lower_bound:100ms,high_overhead_upper_bound:10ms/");
   CorruptionDetectionFrameSelectorSettings settings(trials);
   EXPECT_FALSE(settings.is_enabled());
+}
+
+TEST(CorruptionDetectionFrameSelectorSettingsTest,
+     ParsesAsynchronousEvaluation) {
+  FieldTrials trials = CreateTestFieldTrials(
+      "WebRTC-CorruptionDetectionFrameSelector/asynchronous_evaluation:true/");
+  CorruptionDetectionFrameSelectorSettings settings(trials);
+  EXPECT_TRUE(settings.use_asynchronous_evaluation());
 }
 
 }  // namespace

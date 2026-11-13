@@ -37,7 +37,6 @@ rtc_source_set("rtc_event_log_parse_status") {
   sources = [ "rtc_event_log/events/rtc_event_log_parse_status.h" ]
   deps = [
     "../rtc_base:checks",
-    "//third_party/abseil-cpp/absl/base:core_headers",
     "//third_party/abseil-cpp/absl/strings:string_view",
   ]
 }
@@ -58,13 +57,11 @@ rtc_library("rtc_event_field") {
   deps = [
     ":rtc_event_log_parse_status",
     ":rtc_event_number_encodings",
-    "../api:array_view",
     "../api/rtc_event_log",
     "../api/units:timestamp",
     "../rtc_base:bitstream_reader",
     "../rtc_base:checks",
     "../rtc_base:logging",
-    "//third_party/abseil-cpp/absl/base:core_headers",
     "//third_party/abseil-cpp/absl/strings:string_view",
   ]
 }
@@ -92,7 +89,6 @@ rtc_library("rtc_event_pacing") {
   deps = [
     ":rtc_event_field",
     ":rtc_event_log_parse_status",
-    "../api:array_view",
     "../api/rtc_event_log",
     "../api/units:timestamp",
     "//third_party/abseil-cpp/absl/memory",
@@ -119,7 +115,6 @@ rtc_library("rtc_event_audio") {
     ":rtc_event_field",
     ":rtc_event_log_parse_status",
     ":rtc_stream_config",
-    "../api:array_view",
     "../api/rtc_event_log",
     "../api/units:timestamp",
     "../modules/audio_coding:audio_network_adaptor_config",
@@ -140,7 +135,6 @@ rtc_library("rtc_event_begin_end") {
   deps = [
     ":rtc_event_field",
     ":rtc_event_log_parse_status",
-    "../api:array_view",
     "../api/rtc_event_log",
     "../api/units:timestamp",
     "//third_party/abseil-cpp/absl/strings:string_view",
@@ -168,7 +162,6 @@ rtc_library("rtc_event_bwe") {
   deps = [
     ":rtc_event_field",
     ":rtc_event_log_parse_status",
-    "../api:array_view",
     "../api/rtc_event_log",
     "../api/transport:bandwidth_usage",
     "../api/units:data_rate",
@@ -188,7 +181,6 @@ rtc_library("rtc_event_bwe_update_scream") {
 
   deps = [
     ":rtc_event_log_parse_status",
-    "../api:array_view",
     "../api/rtc_event_log",
     "../api/units:data_rate",
     "../api/units:data_size",
@@ -209,7 +201,6 @@ rtc_library("rtc_event_frame_events") {
   deps = [
     ":rtc_event_field",
     ":rtc_event_log_parse_status",
-    "../api:array_view",
     "../api/rtc_event_log",
     "../api/units:timestamp",
     "../api/video:video_frame",
@@ -236,7 +227,6 @@ rtc_library("rtc_event_rtp_rtcp") {
   deps = [
     ":rtc_event_field",
     ":rtc_event_log_parse_status",
-    "../api:array_view",
     "../api:rtp_headers",
     "../api/rtc_event_log",
     "../api/units:timestamp",
@@ -261,7 +251,6 @@ rtc_library("rtc_event_video") {
     ":rtc_event_field",
     ":rtc_event_log_parse_status",
     ":rtc_stream_config",
-    "../api:array_view",
     "../api/rtc_event_log",
     "../api/units:timestamp",
     "../rtc_base:checks",
@@ -368,12 +357,10 @@ rtc_library("rtc_event_log_impl_encoder") {
       ":rtc_event_log_api",
       ":rtc_event_log_blob_encoding",
       ":rtc_event_log_delta_encoding",
-      ":rtc_event_log_proto",
       ":rtc_event_pacing",
       ":rtc_event_rtp_rtcp",
       ":rtc_event_video",
       ":rtc_stream_config",
-      "../api:array_view",
       "../api:candidate",
       "../api:dtls_transport_interface",
       "../api/rtc_event_log",
@@ -385,8 +372,6 @@ rtc_library("rtc_event_log_impl_encoder") {
       "../modules/rtp_rtcp:rtp_rtcp_format",
     ]
     sources += [
-      "rtc_event_log/encoder/rtc_event_log_encoder_legacy.cc",
-      "rtc_event_log/encoder/rtc_event_log_encoder_legacy.h",
       "rtc_event_log/encoder/rtc_event_log_encoder_new_format.cc",
       "rtc_event_log/encoder/rtc_event_log_encoder_new_format.h",
       "rtc_event_log/encoder/rtc_event_log_encoder_v3.cc",
@@ -406,8 +391,6 @@ if (rtc_enable_protobuf) {
       ":rtc_event_log_delta_encoding",
       ":rtc_event_log_optional_blob_encoding",
       ":rtc_event_log_parse_status",
-      ":rtc_event_log_proto",  # Why does this need to be included here?
-      "../api:array_view",
       "../rtc_base:bitstream_reader",
       "../rtc_base:checks",
       "../rtc_base:logging",
@@ -482,6 +465,8 @@ rtc_library("fake_rtc_event_log") {
 
 if (rtc_enable_protobuf) {
   proto_library("rtc_event_log_proto") {
+    # Deprecated V1 event log format. Retained for offline parsing tools and
+    # historical log analysis pipelines (do not link into production binaries).
     visibility = [ "*" ]
     sources = [ "rtc_event_log/rtc_event_log.proto" ]
     proto_out_dir = "logging/rtc_event_log"
@@ -525,6 +510,7 @@ if (rtc_enable_protobuf) {
       "../api:candidate",
       "../api:dtls_transport_interface",
       "../api:function_view",
+      "../api:rtp_header_extension_id",
       "../api:rtp_headers",
       "../api:rtp_parameters",
       "../api/rtc_event_log",
@@ -544,7 +530,6 @@ if (rtc_enable_protobuf) {
       "../rtc_base:rtc_numerics",
       "../rtc_base:safe_conversions",
       "../rtc_base/system:file_wrapper",
-      "//third_party/abseil-cpp/absl/base:core_headers",
       "//third_party/abseil-cpp/absl/memory",
       "//third_party/abseil-cpp/absl/strings:string_view",
     ]
@@ -598,13 +583,13 @@ if (rtc_enable_protobuf) {
         ":rtc_event_rtp_rtcp",
         ":rtc_event_video",
         ":rtc_stream_config",
-        "../api:array_view",
         "../api:candidate",
         "../api:dtls_transport_interface",
         "../api:field_trials",
         "../api:field_trials_view",
         "../api:libjingle_logging_api",
         "../api:rtc_event_log_output_file",
+        "../api:rtp_header_extension_id",
         "../api:rtp_headers",
         "../api:rtp_parameters",
         "../api/environment",
@@ -650,7 +635,6 @@ if (rtc_enable_protobuf) {
         deps = [
           ":rtc_event_log_parser",
           ":rtc_event_rtp_rtcp",
-          "../api:array_view",
           "../api:rtp_headers",
           "../api/rtc_event_log",
           "../modules/rtp_rtcp",
@@ -688,7 +672,6 @@ rtc_library("ice_log") {
   deps = [
     ":rtc_event_field",
     ":rtc_event_log_parse_status",
-    "../api:array_view",
     "../api:candidate",
     "../api:dtls_transport_interface",
     "../api:libjingle_logging_api",

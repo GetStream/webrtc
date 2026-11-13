@@ -81,16 +81,23 @@ Required tree (gclient parent **must** be named `webrtc`, checkout **must**
 be named `src`):
 
 ```
+.gclient-git-cache/          # GIT_CACHE_PATH (outside the gclient root)
 webrtc/                      # DEPS_ROOT / gclient root
   Makefile                   # bootstrap copies webrtc.mk if missing
   .gclient
-  .gclient-git-cache/        # GIT_CACHE_PATH
   src/                       # this git checkout (WEBRTC_SRC)
     DEPS
     stream_build/
     third_party/             # gclient writes here
   out/                       # ninja (sibling of src)
 ```
+
+The git cache must not be the gclient root, be inside it, or contain it.
+gclient rejects such a cache since depot_tools 9be95df5, and CI always
+clones depot_tools at HEAD. `default_git_cache_path` in
+`scripts/common.sh` (and the Makefile default) puts it next to `webrtc/`.
+`make bootstrap` and `make deps` move an older `webrtc/.gclient-git-cache`
+there when the new one is missing or empty.
 
 `solutions.name = src`, `managed: False`. `src` is this worktree, not a
 symlink and not a second clone. Official DEPS stays (`src/build`,
@@ -126,12 +133,14 @@ Same-OS only (Linux tree on Mac is forbidden). Members: required
 Not packed: working trees (`src/third_party`, `src/build`,
 `src/buildtools`, `src/testing`, `src/tools`, `src/ios`), `out/`,
 `.gclient` / `.gclient_entries` (setup-webrtc writes `.gclient` every
-job), `src/.git`, Stream-tracked `src` files, `products/`. Restore:
-checkout `src`, extract git-cache to `GIT_CACHE_PATH`
-(`${{ github.workspace }}/.gclient-git-cache`), `src/resources`, and
-`.cipd` if present. Then `git checkout -- resources` so a cache packed
-from another branch cannot replace tracked files such as `BUILD.gn`.
-Do not strip git alternates; `make deps` runs
+job), `src/.git`, Stream-tracked `src` files, `products/`. On the runner
+the cache lives at `GIT_CACHE_PATH`
+(`$(dirname $GITHUB_WORKSPACE)/.gclient-git-cache`, outside the gclient
+root). setup-webrtc and restore-git-cache export that path; do not
+override it in workflow or step env. `restore-tools` then runs
+`git checkout -- resources`, because that package is published from
+another branch and would replace this checkout's `BUILD.gn`. Untracked
+downloaded media stays. Do not strip git alternates; `make deps` runs
 `rewrite_git_cache_alternates` so Linux-packed cache paths retarget
 to this runner. Always `make deps` after HIT (cheap from cache).
 Build `CONFIG` is dispatch (default release); `make test` always uses debug
@@ -142,7 +151,7 @@ and that only reaches `resources/` from an out dir under `src`. test.yml HITs th
 `build-ios` / `build-macos` / `build-android` keys. Pull requests run
 Test for iOS, macOS, and Android (`rtc_unittests` on an x64 emulator).
 Manual Test still picks platforms; Android defaults off there.
-Windows Deps still uploads `deps-windows` to GitHub.
+Windows jobs use the same GHCR git cache. There is no `deps-windows` artifact.
 Package/Release Build jobs also `make package` and upload `products-*`
 (GitHub). Package combine consumes `products-*` (no third ninja) and
 uploads `final-*`. Release attaches `final-*`. `TARGET_OS` is the
@@ -183,7 +192,7 @@ not use `${{ secrets.* }}`. `products-*` / `final-*` stay on
 | `DEPS_ROOT` | gclient parent (`webrtc/`; `.gclient` + `src/` + `out/`) |
 | `WEBRTC_SRC` | this git checkout (`webrtc/src`; default: parent of `stream_build/`) |
 | `OUT` / `PRODUCTS` | ninja dirs / packaged output (default under `DEPS_ROOT`, sibling of `src`) |
-| `GIT_CACHE_PATH` | gclient object cache (default `DEPS_ROOT/.gclient-git-cache`) |
+| `GIT_CACHE_PATH` | gclient object cache (default `DEPS_ROOT/../.gclient-git-cache`; must be outside the gclient root) |
 | `ARCHS` | android ABI or windows cpu (`arm64-v8a`, `x64`, …) |
 | `ARCH` | Android test CPU: `x64` (default, CI emulator) or `arm64`. Output is `src/out/android_tests` or `src/out/android_tests_arm64`. |
 | `ADB_SERVER` | `host:port` of an adb server. Before the test compile, the first emulator whose ABI matches `ARCH` is selected; a non-emulator device is used only when no emulator matches. Loopback is rewritten to `host.docker.internal` inside the container. Omit it to boot an emulator in the Linux environment. |

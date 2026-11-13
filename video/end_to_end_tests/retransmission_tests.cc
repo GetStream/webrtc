@@ -12,12 +12,13 @@
 #include <cstdint>
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <vector>
 
-#include "api/array_view.h"
 #include "api/call/transport.h"
 #include "api/environment/environment.h"
+#include "api/rtp_header_extension_id.h"
 #include "api/rtp_parameters.h"
 #include "api/task_queue/task_queue_base.h"
 #include "api/test/video/function_video_encoder_factory.h"
@@ -50,10 +51,7 @@
 
 namespace webrtc {
 namespace {
-enum : int {  // The first valid value is 1.
-  kVideoRotationExtensionId = 1,
-};
-}  // namespace
+constexpr RtpHeaderExtensionId kVideoRotationExtensionId(1);
 
 class RetransmissionEndToEndTest : public test::CallTest {
  public:
@@ -80,7 +78,7 @@ TEST_F(RetransmissionEndToEndTest, ReceivesAndRetransmitsNack) {
           nacks_left_(kNumberOfNacksToObserve) {}
 
    private:
-    Action OnSendRtp(ArrayView<const uint8_t> packet) override {
+    Action OnSendRtp(std::span<const uint8_t> packet) override {
       MutexLock lock(&mutex_);
       RtpPacket rtp_packet;
       EXPECT_TRUE(rtp_packet.Parse(packet));
@@ -117,7 +115,7 @@ TEST_F(RetransmissionEndToEndTest, ReceivesAndRetransmitsNack) {
       return SEND_PACKET;
     }
 
-    Action OnReceiveRtcp(ArrayView<const uint8_t> packet) override {
+    Action OnReceiveRtcp(std::span<const uint8_t> packet) override {
       MutexLock lock(&mutex_);
       test::RtcpPacketParser parser;
       EXPECT_TRUE(parser.Parse(packet));
@@ -165,7 +163,7 @@ TEST_F(RetransmissionEndToEndTest, ReceivesNackAndRetransmitsAudio) {
     size_t GetNumVideoStreams() const override { return 0; }
     size_t GetNumAudioStreams() const override { return 1; }
 
-    Action OnSendRtp(ArrayView<const uint8_t> packet) override {
+    Action OnSendRtp(std::span<const uint8_t> packet) override {
       RtpPacket rtp_packet;
       EXPECT_TRUE(rtp_packet.Parse(packet));
 
@@ -198,7 +196,6 @@ TEST_F(RetransmissionEndToEndTest, ReceivesNackAndRetransmitsAudio) {
                                 receive_configs) override {
       (*receive_configs)[0].rtp.nack.rtp_history_ms =
           test::VideoTestConstants::kNackRtpHistoryMs;
-      local_ssrc_ = (*receive_configs)[0].rtp.local_ssrc;
       remote_ssrc_ = (*receive_configs)[0].rtp.remote_ssrc;
       receive_transport_ = (*receive_configs)[0].rtcp_send_transport;
     }
@@ -233,7 +230,7 @@ TEST_F(RetransmissionEndToEndTest,
       receive_stream_ = receive_streams[0];
     }
 
-    Action OnReceiveRtcp(ArrayView<const uint8_t> packet) override {
+    Action OnReceiveRtcp(std::span<const uint8_t> packet) override {
       test::RtcpPacketParser parser;
       EXPECT_TRUE(parser.Parse(packet));
       if (parser.pli()->num_packets() > 0)
@@ -305,7 +302,7 @@ void RetransmissionEndToEndTest::ReceivesPliAndRecovers(int rtp_history_ms) {
           received_pli_(false) {}
 
    private:
-    Action OnSendRtp(ArrayView<const uint8_t> packet) override {
+    Action OnSendRtp(std::span<const uint8_t> packet) override {
       MutexLock lock(&mutex_);
       RtpPacket rtp_packet;
       EXPECT_TRUE(rtp_packet.Parse(packet));
@@ -323,7 +320,7 @@ void RetransmissionEndToEndTest::ReceivesPliAndRecovers(int rtp_history_ms) {
       return SEND_PACKET;
     }
 
-    Action OnReceiveRtcp(ArrayView<const uint8_t> packet) override {
+    Action OnReceiveRtcp(std::span<const uint8_t> packet) override {
       MutexLock lock(&mutex_);
       test::RtcpPacketParser parser;
       EXPECT_TRUE(parser.Parse(packet));
@@ -401,7 +398,7 @@ void RetransmissionEndToEndTest::DecodesRetransmittedFrame(bool enable_rtx,
           retransmitted_timestamp_(0) {}
 
    private:
-    Action OnSendRtp(ArrayView<const uint8_t> packet) override {
+    Action OnSendRtp(std::span<const uint8_t> packet) override {
       MutexLock lock(&mutex_);
       RtpPacket rtp_packet;
       EXPECT_TRUE(rtp_packet.Parse(packet));
@@ -547,4 +544,5 @@ TEST_F(RetransmissionEndToEndTest, DecodesRetransmittedFrameByRedOverRtx) {
   DecodesRetransmittedFrame(true, true);
 }
 
+}  // namespace
 }  // namespace webrtc

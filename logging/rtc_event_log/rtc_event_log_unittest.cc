@@ -20,7 +20,6 @@
 #include <utility>
 #include <vector>
 
-#include "absl/strings/string_view.h"
 #include "api/rtc_event_log/rtc_event_log_factory.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
@@ -54,7 +53,6 @@
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/rtp_dependency_descriptor_extension.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/fake_clock.h"
 #include "rtc_base/random.h"
 #include "rtc_base/time_utils.h"
 #include "system_wrappers/include/clock.h"
@@ -65,6 +63,7 @@
 #include "test/logging/memory_log_writer.h"
 #include "test/near_matcher.h"
 #include "test/testsupport/file_utils.h"
+#include "test/time_controller/simulated_time_controller.h"
 
 namespace webrtc {
 
@@ -114,18 +113,6 @@ struct EventCounts {
   }
 };
 
-absl::string_view FieldTrialsFor(RtcEventLog::EncodingType encoding_type) {
-  switch (encoding_type) {
-    case RtcEventLog::EncodingType::Legacy:
-      return "WebRTC-RtcEventLogNewFormat/Disabled/";
-    case RtcEventLog::EncodingType::NewFormat:
-      return "WebRTC-RtcEventLogNewFormat/Enabled/";
-    case RtcEventLog::EncodingType::ProtoFree:
-      RTC_CHECK_NOTREACHED();
-      return "";
-  }
-}
-
 class RtcEventLogSession
     : public ::testing::TestWithParam<
           std::tuple<uint64_t, int64_t, RtcEventLog::EncodingType>> {
@@ -138,12 +125,12 @@ class RtcEventLogSession
         clock_(Timestamp::Micros(prng_.Rand<uint32_t>())),
         gen_(seed_ * 880001UL, &clock_),
         verifier_(encoding_type_),
+        time_controller_(Timestamp::Micros(prng_.Rand<uint32_t>())),
         log_storage_(),
         log_output_factory_(log_storage_.CreateFactory()) {
-    // `clock_` and `utc_clock_` may have arbitrary offset.
-    // UTC clock is only used for logging start event, so doesn't need to
-    // advance.
-    utc_clock_.SetTime(Timestamp::Micros(prng_.Rand<uint32_t>()));
+    // `clock_` and the global clock overridden by `time_controller_` may have
+    // arbitrary offset. The global clock is only used for logging start event,
+    // so doesn't need to advance.
     // Find the name of the current test, in order to use it as a temporary
     // filename.
     auto test_info = ::testing::UnitTest::GetInstance()->current_test_info();
@@ -226,7 +213,7 @@ class RtcEventLogSession
   SimulatedClock clock_;
   test::EventGenerator gen_;
   test::EventVerifier verifier_;
-  ScopedFakeClock utc_clock_;
+  GlobalSimulatedTimeController time_controller_;
   std::string temp_filename_;
   MemoryLogStorage log_storage_;
   std::unique_ptr<LogWriterFactoryInterface> log_output_factory_;
@@ -364,8 +351,7 @@ void RtcEventLogSession::WriteLog(EventCounts count,
 
   // The log will be flushed to output when the event_log goes out of scope.
   std::unique_ptr<RtcEventLog> event_log =
-      RtcEventLogFactory().Create(CreateTestEnvironment(
-          {.field_trials = FieldTrialsFor(encoding_type_), .time = &clock_}));
+      RtcEventLogFactory().Create(CreateTestEnvironment({.time = &clock_}));
 
   // We can't send or receive packets without configured streams.
   RTC_CHECK_GE(count.video_recv_streams, 1);
@@ -885,8 +871,7 @@ INSTANTIATE_TEST_SUITE_P(
                           RtcEventLog::EncodingType::NewFormat)));
 
 class RtcEventLogCircularBufferTest
-    : public ::testing::TestWithParam<RtcEventLog::EncodingType> {
-};
+    : public ::testing::TestWithParam<RtcEventLog::EncodingType> {};
 
 TEST_P(RtcEventLogCircularBufferTest, KeepsMostRecentEvents) {
   // TODO(terelius): Maybe make a separate RtcEventLogImplTest that can access
@@ -901,17 +886,15 @@ TEST_P(RtcEventLogCircularBufferTest, KeepsMostRecentEvents) {
   std::replace(test_name.begin(), test_name.end(), '/', '_');
   const std::string temp_filename = test::OutputPath() + test_name;
 
-  // Use ScopedFakeClock to control result of `TimeUTCMicros` during
-  // `StartLogging`.
-  ScopedFakeClock utc_clock;
-  utc_clock.SetTime(kUtcTime);
+  // Use GlobalSimulatedTimeController to control result of `TimeUTCMicros`
+  // during `StartLogging`.
+  GlobalSimulatedTimeController time_controller(kUtcTime);
   const RtcEventLog::EncodingType encoding_type = GetParam();
   MemoryLogStorage log_storage;
   SimulatedClock clock(Timestamp::Seconds(1));
 
   std::unique_ptr<RtcEventLog> log =
-      RtcEventLogFactory().Create(CreateTestEnvironment(
-          {.field_trials = FieldTrialsFor(encoding_type), .time = &clock}));
+      RtcEventLogFactory().Create(CreateTestEnvironment({.time = &clock}));
 
   for (size_t i = 0; i < kNumEvents; i++) {
     // The purpose of the test is to verify that the log can handle

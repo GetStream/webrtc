@@ -20,7 +20,8 @@ env:
   SHALLOW           1 (default) adds --no-history --shallow; 0 for full history
   RUN_HOOKS         1 to run hooks during sync, 0 for --nohooks
   WEBRTC_REPO       default: git@github.com:GetStream/webrtc.git
-  GIT_CACHE_PATH    default: DEPS_ROOT/.gclient-git-cache
+  GIT_CACHE_PATH    default: DEPS_ROOT/../.gclient-git-cache (outside the
+                    gclient root; gclient rejects one inside it)
   WEBRTC_REVISION   refused (src is this worktree; gclient must not reset it)
   WEBRTC_REF        refused (same as WEBRTC_REVISION)
 EOF
@@ -58,7 +59,8 @@ cmd_sync() {
     die "src is seeded from your git checkout; will not reset it"
   fi
   echo "src is already present; will not reset it"
-  GIT_CACHE_PATH="${GIT_CACHE_PATH:-$DEPS_ROOT/.gclient-git-cache}"
+  GIT_CACHE_PATH="${GIT_CACHE_PATH:-$(default_git_cache_path "$DEPS_ROOT")}"
+  move_legacy_git_cache "$DEPS_ROOT" "$GIT_CACHE_PATH"
   mkdir -p "$GIT_CACHE_PATH"
   export GIT_CACHE_PATH
   rewrite_git_cache_alternates "${WEBRTC_SRC:-$DEPS_ROOT/src}" "$GIT_CACHE_PATH"

@@ -137,3 +137,17 @@ A local build takes hours.
 `gclient sync` is also out of scope unless the user asks.
 
 Record `DEPS` changes as a risk when that file differs.
+
+Run the checks that need no build.
+
+```bash
+make -C stream_build check
+stream_build/scripts/check-android-jni.sh --src .
+```
+
+Fix a failure before you push.
+
+Record changes to the tools that set build rules as risks.
+
+1. `third_party/jni_zero` and `build/config/android`.
+2. CI clones depot_tools HEAD onto `PATH`. The `DEPS` pin is a different checkout, `src/third_party/depot_tools`.

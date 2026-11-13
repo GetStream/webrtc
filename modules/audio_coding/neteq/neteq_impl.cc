@@ -17,11 +17,11 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <utility>
 #include <vector>
 
 #include "absl/strings/str_cat.h"
-#include "api/array_view.h"
 #include "api/audio/audio_frame.h"
 #include "api/audio/audio_view.h"
 #include "api/audio_codecs/audio_decoder.h"
@@ -112,7 +112,8 @@ NetEqImpl::Dependencies::Dependencies(
           std::make_unique<DecoderDatabase>(env, std::move(decoder_factory))),
       dtmf_buffer(new DtmfBuffer(config.sample_rate_hz)),
       dtmf_tone_generator(new DtmfToneGenerator),
-      packet_buffer(new PacketBuffer(config.max_packets_in_buffer,
+      packet_buffer(new PacketBuffer(env.field_trials(),
+                                     config.max_packets_in_buffer,
                                      tick_timer.get(),
                                      stats.get())),
       neteq_controller(controller_factory.Create(
@@ -180,7 +181,7 @@ NetEqImpl::NetEqImpl(const NetEq::Config& config,
 NetEqImpl::~NetEqImpl() = default;
 
 int NetEqImpl::InsertPacket(const RTPHeader& rtp_header,
-                            ArrayView<const uint8_t> payload,
+                            std::span<const uint8_t> payload,
                             const RtpPacketInfo& packet_info) {
   MsanCheckInitialized(payload);
   TRACE_EVENT0("webrtc", "NetEqImpl::InsertPacket");
@@ -288,7 +289,6 @@ int NetEqImpl::InsertPacket(const RTPHeader& rtp_header,
   }
 
   PacketList parsed_packet_list;
-  bool is_dtx = false;
   while (!packet_list.empty()) {
     Packet& packet = packet_list.front();
     const DecoderDatabase::DecoderInfo* info =
@@ -331,7 +331,6 @@ int NetEqImpl::InsertPacket(const RTPHeader& rtp_header,
         for (auto& result : results) {
           RTC_DCHECK(result.frame);
           RTC_DCHECK_GE(result.priority, 0);
-          is_dtx = is_dtx || result.frame->IsDtxPacket();
           if (first) {
             // Re-use the node and move it to parsed_packet_list.
             packet_list.front() = packet_from_result(result);
@@ -355,34 +354,42 @@ int NetEqImpl::InsertPacket(const RTPHeader& rtp_header,
                                      number_of_primary_packets);
   }
 
-  bool buffer_flush_occured = false;
+  const int target_level_ms = controller_->TargetLevelMs();
   for (Packet& packet : parsed_packet_list) {
+    NetEqController::PacketArrivedInfo info = ToPacketArrivedInfo(packet);
     if (MaybeChangePayloadType(packet.payload_type)) {
       packet_buffer_->Flush();
-      buffer_flush_occured = true;
+      new_codec_ = true;
+      update_sample_rate_and_channels = true;
+      info.buffer_flush = true;
     }
-    NetEqController::PacketArrivedInfo info = ToPacketArrivedInfo(packet);
-    int return_val = packet_buffer_->InsertPacket(std::move(packet));
+    int return_val = packet_buffer_->InsertPacket(
+        std::move(packet), decoder_frame_length_, last_output_sample_rate_hz_,
+        target_level_ms);
     if (return_val == PacketBuffer::kFlushed) {
-      buffer_flush_occured = true;
+      new_codec_ = true;
+      update_sample_rate_and_channels = true;
+      info.buffer_flush = true;
+    } else if (return_val == PacketBuffer::kPartialFlush) {
+      // Forward sync buffer timestamp.
+      const Packet* next_packet = packet_buffer_->PeekNextPacket();
+      if (next_packet) {
+        timestamp_ = next_packet->timestamp;
+        sync_buffer_->IncreaseEndTimestamp(timestamp_ -
+                                           sync_buffer_->end_timestamp());
+      }
+      info.buffer_flush = true;
     } else if (return_val != PacketBuffer::kOK) {
       // An error occurred.
       return kFail;
     }
 
-    info.buffer_flush = buffer_flush_occured;
-    const bool should_update_stats = !new_codec_ && !buffer_flush_occured;
+    const bool should_update_stats = !new_codec_;
     auto relative_delay =
         controller_->PacketArrived(fs_hz_, should_update_stats, info);
     if (relative_delay) {
       stats_->RelativePacketArrivalDelay(relative_delay.value());
     }
-  }
-
-  if (buffer_flush_occured) {
-    // Reset DSP timestamp etc. if packet buffer flushed.
-    new_codec_ = true;
-    update_sample_rate_and_channels = true;
   }
 
   if (first_packet_) {
@@ -1340,7 +1347,7 @@ int NetEqImpl::DecodeLoop(PacketList* packet_list,
                operation == Operation::kPreemptiveExpand);
 
     auto opt_result = packet_list->front().frame->Decode(
-        ArrayView<int16_t>(&decoded_buffer_[*decoded_length],
+        std::span<int16_t>(&decoded_buffer_[*decoded_length],
                            decoded_buffer_length_ - *decoded_length));
     if (packet_list->front().packet_info) {
       last_decoded_packet_infos_.push_back(*packet_list->front().packet_info);
@@ -1999,6 +2006,7 @@ NetEqController::PacketArrivedInfo NetEqImpl::ToPacketArrivedInfo(
   info.main_timestamp = packet.timestamp;
   info.main_sequence_number = packet.sequence_number;
   info.is_dtx = packet.frame && packet.frame->IsDtxPacket();
+  info.buffer_flush = false;
   return info;
 }
 
