@@ -236,8 +236,8 @@ jobs:
                   promotion/releases-during-cleanup.json >/dev/null; then
                 current_sha="$(
                   gh api \
-                    "repos/${GITHUB_REPOSITORY}/git/ref/tags/${encoded_version}" \
-                    --jq '.object.sha' 2>/dev/null || true
+                    "repos/${GITHUB_REPOSITORY}/commits/${encoded_version}" \
+                    --jq '.sha' 2>/dev/null || true
                 )"
                 if [[ "${current_sha}" == "${source_commit}" ]]; then
                   gh api --method DELETE \
@@ -250,11 +250,24 @@ jobs:
           }
           trap cleanup_target_ref EXIT
 
-          gh api --method POST \
-            "repos/${GITHUB_REPOSITORY}/git/refs" \
-            --raw-field "ref=refs/tags/${RELEASE_VERSION}" \
-            --raw-field "sha=${source_commit}" \
-            > promotion/created-ref.json
+          # POST /git/refs rejects GITHUB_TOKEN for a commit that is not a
+          # branch tip. Push the source release's existing tag instead. The
+          # commit is already in the repository, so this works for a release
+          # cut from any branch. The release below omits target_commitish
+          # because the tag already exists.
+          source_tag="$(jq -r '.tag_name' promotion/source-release.json)"
+          tag_repo="$(mktemp -d)"
+          git init --bare "${tag_repo}" >/dev/null
+          git -C "${tag_repo}" remote add origin \
+            "https://github.com/${GITHUB_REPOSITORY}.git"
+          git -C "${tag_repo}" \
+            -c "http.extraheader=AUTHORIZATION: bearer ${GH_TOKEN}" \
+            fetch --depth=1 origin \
+            "+refs/tags/${source_tag}:refs/tags/${source_tag}"
+          git -C "${tag_repo}" \
+            -c "http.extraheader=AUTHORIZATION: bearer ${GH_TOKEN}" \
+            push origin \
+            "refs/tags/${source_tag}:refs/tags/${RELEASE_VERSION}"
           created_target_ref=true
 
           shopt -s dotglob nullglob
@@ -271,6 +284,15 @@ jobs:
           gh api \
             "repos/${GITHUB_REPOSITORY}/releases/tags/${encoded_version}" \
             > promotion/created-release.json
+          published_commit="$(
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/commits/${encoded_version}" \
+              --jq '.sha'
+          )"
+          if [[ "${published_commit}" != "${source_commit}" ]]; then
+            echo "::error::The published tag does not point at the pre-release commit."
+            exit 1
+          fi
 
           if ! jq -e '.draft == false and .prerelease == false' \
             promotion/created-release.json >/dev/null; then
