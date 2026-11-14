@@ -71,9 +71,6 @@ env:
   DEPS_ROOT: ${{ github.workspace }}
   WEBRTC_SRC: ${{ github.workspace }}/src
   # GIT_CACHE_PATH is set by setup-webrtc, outside the gclient root.
-  HETZNER_ACCESS_KEY_CI_ARTIFACTS: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
-  HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
-  HETZNER_BUCKET_CI_ARTIFACTS: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
 
 jobs:
   validate_inputs:
@@ -169,9 +166,6 @@ jobs:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ios
           cache_key: build-ios
-          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
       - name: Pull build cache
         uses: ./src/.github/actions/pull-build-cache
         with:
@@ -238,9 +232,6 @@ jobs:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: mac
           cache_key: build-macos
-          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
       - name: Pull build cache
         uses: ./src/.github/actions/pull-build-cache
         with:
@@ -312,9 +303,6 @@ jobs:
           target_os: ${{ needs.plan.outputs.android_target_os }}
           cache_key: build-android
           install_android_packages: "true"
-          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
       - name: Pull build cache
         uses: ./src/.github/actions/pull-build-cache
         with:
@@ -377,9 +365,6 @@ jobs:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: ios
           cache_key: build-ios
-          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
       - name: Pull build cache
         uses: ./src/.github/actions/pull-build-cache
         with:
@@ -409,9 +394,6 @@ jobs:
           webrtc_ref: ${{ inputs.webrtc_ref }}
           target_os: mac
           cache_key: build-macos
-          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
       - name: Pull build cache
         uses: ./src/.github/actions/pull-build-cache
         with:
@@ -442,9 +424,6 @@ jobs:
           target_os: ${{ needs.plan.outputs.android_target_os }}
           cache_key: build-android
           install_android_packages: "true"
-          hetzner_access_key: ${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_secret_access_key: ${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}
-          hetzner_bucket: ${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}
       - name: Pull build cache
         uses: ./src/.github/actions/pull-build-cache
         with:

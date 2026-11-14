@@ -168,12 +168,9 @@ While GET runs, logs `have / ContentLength (%)` every ~15s.
 of the whole object. Peak disk is tar + tree (~2x); delete the tar
 after extract/upload. `aws s3 cp` / `s3api` talk to Hetzner's
 S3-compatible API, not AWS.
-Callers pass org secrets via `with:`
-`${{ secrets.HETZNER_ACCESS_KEY_CI_ARTIFACTS }}`,
-`${{ secrets.HETZNER_SECRET_ACCESS_KEY_CI_ARTIFACTS }}`, and
-`${{ secrets.HETZNER_BUCKET_CI_ARTIFACTS }}`. Composite actions must
-not use `${{ secrets.* }}`. `products-*` / `final-*` stay on
-`actions/upload-artifact`.
+No workflow calls these actions, and `restore-tree` does not take
+Hetzner inputs. Composite actions must not use `${{ secrets.* }}`.
+`products-*` / `final-*` stay on `actions/upload-artifact`.
 
 ## Host gates
 

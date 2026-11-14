@@ -569,7 +569,9 @@ grep -A5 'name: Build iOS' "$gha/workflows/_make.yml" | grep -q 'needs: \[plan\]
 grep -A5 'name: Test iOS' "$gha/workflows/_make.yml" | grep -q 'needs: \[plan\]'
 ! grep -A8 'name: Test iOS' "$gha/workflows/_make.yml" | grep -q deps
 grep -q 'restore-git-cache' "$gha/actions/restore-tree/action.yml"
-grep -q 'hetzner_access_key' "$gha/actions/restore-tree/action.yml"
+! grep -q 'hetzner_access_key' "$gha/actions/restore-tree/action.yml"
+! grep -q 'HETZNER_' "$gha/workflows/_make.yml"
+! grep -q 'RELEASE_PIPELINE_TOKEN' "$gha/workflows/"*.yml
 ! grep -q 'actions/download-artifact' "$gha/actions/restore-tree/action.yml"
 ! grep -q 'tar xf' "$gha/actions/restore-tree/action.yml"
 ! grep -q 'artifact-download' "$gha/actions/restore-tree/action.yml"

@@ -20,18 +20,6 @@ inputs:
     required: false
     default: "false"
     description: Install apt packages needed for Android builds.
-  hetzner_access_key:
-    required: false
-    default: ""
-    description: Hetzner object storage access key.
-  hetzner_secret_access_key:
-    required: false
-    default: ""
-    description: Hetzner object storage secret access key.
-  hetzner_bucket:
-    required: false
-    default: ""
-    description: Hetzner object storage bucket name.
 
 runs:
   using: composite
