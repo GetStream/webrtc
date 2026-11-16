@@ -20,8 +20,10 @@ and framework rows are the uncompressed bytes a device installs.
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import zipfile
 
 ANDROID_AAR = "libwebrtc.aar"
@@ -52,25 +54,36 @@ def is_framework_executable(name):
         ".framework/Versions/A/WebRTC")
 
 
+def slice_name(path):
+    parts = path.split("/")
+    for i, part in enumerate(parts):
+        if part.endswith(".framework") and i:
+            return parts[i - 1]
+    return ""
+
+
 def framework_slices(entry_sizes):
-    """Map xcframework slice name to the uncompressed framework executable."""
-    binaries = []
+    """Map each xcframework slice to its uncompressed executable.
+
+    A combined archive has unversioned iOS executables and versioned
+    macOS executables. Prefer Versions/A only inside the slice that has
+    one, so a versioned macOS binary does not drop the iOS slices.
+    """
+    grouped = {}
     for name, size in entry_sizes.items():
         if not is_framework_executable(name):
             continue
-        binaries.append((name, size))
-    versioned = [item for item in binaries if "/Versions/A/" in item[0]]
-    chosen = versioned or binaries
+        if "/Versions/" in name and "/Versions/A/" not in name:
+            continue
+        name_of_slice = slice_name(name)
+        if not name_of_slice:
+            continue
+        grouped.setdefault(name_of_slice, []).append((name, size))
     slices = {}
-    for name, size in chosen:
-        parts = name.split("/")
-        slice_name = ""
-        for i, part in enumerate(parts):
-            if part.endswith(".framework") and i:
-                slice_name = parts[i - 1]
-                break
-        if slice_name:
-            slices[slice_name] = size
+    for name_of_slice, binaries in grouped.items():
+        versioned = [item for item in binaries if "/Versions/A/" in item[0]]
+        chosen = versioned[0] if versioned else binaries[0]
+        slices[name_of_slice] = chosen[1]
     return slices
 
 
@@ -94,26 +107,18 @@ def measure_apple_zip(path):
 
 
 def measure_apple_dir(path):
-    rows = {}
+    entries = {}
     for dirpath, _, files in os.walk(path):
         for name in files:
             full = os.path.join(dirpath, name)
             if os.path.islink(full):
                 continue
-            rel = os.path.relpath(full, path)
-            if not is_framework_executable(rel):
-                continue
-            if "/Versions/" in rel and "/Versions/A/" not in rel:
-                continue
-            parts = rel.split(os.sep)
-            slice_name = ""
-            for i, part in enumerate(parts):
-                if part.endswith(".framework") and i:
-                    slice_name = parts[i - 1]
-                    break
-            if slice_name:
-                rows[f"apple:{slice_name}"] = os.path.getsize(full)
-    return rows
+            rel = os.path.relpath(full, path).replace(os.sep, "/")
+            entries[rel] = os.path.getsize(full)
+    return {
+        f"apple:{name}": size
+        for name, size in framework_slices(entries).items()
+    }
 
 
 def measure(path):
@@ -161,6 +166,7 @@ def releases(repo, limit):
             "gh", "release", "list",
             "--repo", repo,
             "--limit", str(limit),
+            "--exclude-drafts",
             "--json", "tagName,isPrerelease",
         ],
         text=True,
@@ -298,15 +304,15 @@ def main():
             if not before_tag:
                 raise SystemExit(f"{args.repo} has no stable release to compare")
 
-    work = os.path.join(
-        os.environ.get("RUNNER_TEMP", "/tmp"),
-        "webrtc-size-diff",
-    )
-    before_label, before = resolve_side(
-        args.before, before_tag, os.path.join(work, "before"), args.repo)
-    after_label, after = resolve_side(
-        args.after, after_tag, os.path.join(work, "after"), args.repo)
-    table = render(before_label, after_label, before, after)
+    work = tempfile.mkdtemp(prefix="webrtc-size-diff-")
+    try:
+        before_label, before = resolve_side(
+            args.before, before_tag, os.path.join(work, "before"), args.repo)
+        after_label, after = resolve_side(
+            args.after, after_tag, os.path.join(work, "after"), args.repo)
+        table = render(before_label, after_label, before, after)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
     sys.stdout.write(table)
     if args.output:
         with open(args.output, "w") as handle:

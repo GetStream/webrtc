@@ -1273,6 +1273,10 @@ def fill(path, so_size, jar_size, ios_size):
                 "WebRTC.xcframework/ios-arm64/WebRTC.framework/Headers/WebRTC",
                 b"header",
             )
+            archive.writestr(
+                "WebRTC.xcframework/macos-arm64/WebRTC.framework/Versions/A/WebRTC",
+                b"m" * (ios_size + 500_000),
+            )
 
 fill(os.path.join(root, "before", "libwebrtc.aar"), 2_000_000, 100_000, 0)
 fill(os.path.join(root, "after", "libwebrtc.aar"), 3_500_000, 200_000, 0)
@@ -1285,6 +1289,7 @@ printf '%s\n' "$size_table" | grep -q '| libwebrtc.aar |'
 printf '%s\n' "$size_table" | grep -q '| jni/arm64-v8a/libjingle_peerconnection_so.so |'
 printf '%s\n' "$size_table" | grep -q '| jni/armeabi-v7a/libjingle_peerconnection_so.so |'
 printf '%s\n' "$size_table" | grep -q '| ios-arm64 WebRTC |'
+printf '%s\n' "$size_table" | grep -q '| macos-arm64 WebRTC |'
 printf '%s\n' "$size_table" | grep -q '+1.43 MB'
 printf '%s\n' "$size_table" | grep -q '+1.14 MB'
 grep -q 'workflow_dispatch:' "$gha/workflows/size-diff.yml"
@@ -1292,6 +1297,8 @@ grep -q 'workflow_dispatch:' "$gha/workflows/size-diff.yml"
 grep -q 'size-diff.py' "$gha/workflows/size-diff.yml"
 grep -q 'size-diff.py' "$gha/workflows/_make.yml"
 grep -q 'isPrerelease == false' "$gha/workflows/_make.yml"
+grep -q -- '--exclude-drafts' "$gha/workflows/_make.yml"
+grep -q -- '--exclude-drafts' "$ROOT/scripts/size-diff.py"
 python3 "$ROOT/scripts/size-diff.py" --selftest
 rm -rf "$size_root"
 
