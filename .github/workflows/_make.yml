@@ -750,6 +750,23 @@ jobs:
           else
             printf 'Automated WebRTC SDK release %s.\n' "${RELEASE_VERSION}" > "${notes_file}"
           fi
+          repo="${{ github.repository }}"
+          previous="$(gh release list --repo "${repo}" --limit 20 --json tagName \
+            --jq "[.[] | select(.tagName != \"${RELEASE_VERSION}\")][0].tagName // empty")"
+          size_table="${RUNNER_TEMP}/size-diff.md"
+          if [[ -n "${previous}" ]]; then
+            if python3 src/stream_build/scripts/size-diff.py \
+                --before-tag "${previous}" \
+                --after "${GITHUB_WORKSPACE}/release-assets" \
+                --repo "${repo}" \
+                --output "${size_table}"; then
+              printf '\n%s\n' "$(cat "${size_table}")" >> "${notes_file}"
+            else
+              echo "::warning::Could not compare artifact sizes with ${previous}."
+            fi
+          else
+            echo "No previous release to compare."
+          fi
           release_args=(
             "${RELEASE_VERSION}"
             "${assets[@]}"
@@ -758,7 +775,6 @@ jobs:
             --title "${RELEASE_VERSION}"
             --notes-file "${notes_file}"
           )
-          repo="${{ github.repository }}"
           if gh release view "${RELEASE_VERSION}" --repo "${repo}" >/dev/null 2>&1; then
             echo "Release ${RELEASE_VERSION} already exists. Adding assets."
             existing="$(gh release view "${RELEASE_VERSION}" --repo "${repo}" --json assets --jq '.assets[].name')"

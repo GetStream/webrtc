@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Compare packaged Android and Apple WebRTC artifacts.
 
-The same script runs locally and from .github/workflows/size-diff.yml.
-It does not compile. Point it at two directories, archives, or release tags.
+The Release workflow compares the artifacts it just packaged with the
+previous GitHub release and adds this table to the release notes. The
+same script runs locally and does not compile. Point it at two
+directories, archives, or release tags.
 
   python3 stream_build/scripts/size-diff.py \
       --before /tmp/webrtc-145 --after /tmp/webrtc-156
@@ -199,7 +201,6 @@ def render(before_label, after_label, before, after):
         "",
         "Archive rows are the file size. Library rows are the uncompressed",
         "bytes stored in the archive, which is what a device installs.",
-        "This does not compile the pull request.",
         "",
         "| Measurement | Before | After | Difference |",
         "|---|---:|---:|---:|",

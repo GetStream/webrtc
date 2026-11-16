@@ -1,15 +1,12 @@
-# Compare packaged Android and Apple artifacts and print the size table.
-# Pull requests compare the two newest GitHub releases. Dispatch can name
-# the tags. The same script runs locally and does not compile:
+# Compare two published releases without compiling. The Release workflow
+# compares a new build with the previous release on its own. Run this by
+# hand when you want the same table for two tags:
 #
-#   python3 stream_build/scripts/size-diff.py --before DIR --after DIR
 #   python3 stream_build/scripts/size-diff.py --before-tag 145.25.0 --after-tag 156.0.4
 
 name: Size diff
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
   workflow_dispatch:
     inputs:
       before_tag:
@@ -23,7 +20,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
   size-diff:
@@ -47,27 +43,3 @@ jobs:
             args+=(--after-tag "${AFTER_TAG}")
           fi
           python3 stream_build/scripts/size-diff.py "${args[@]}"
-
-      - name: Comment on the pull request
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v9
-        with:
-          script: |
-            const fs = require('fs');
-            const marker = '<!-- webrtc-size-diff -->';
-            const body = fs.readFileSync('size-diff.md', 'utf8');
-            const { owner, repo } = context.repo;
-            const issue_number = context.issue.number;
-            const { data: comments } = await github.rest.issues.listComments({
-              owner, repo, issue_number,
-            });
-            const existing = comments.find(comment => comment.body.includes(marker));
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner, repo, comment_id: existing.id, body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner, repo, issue_number, body,
-              });
-            }

@@ -1287,8 +1287,10 @@ printf '%s\n' "$size_table" | grep -q '| jni/armeabi-v7a/libjingle_peerconnectio
 printf '%s\n' "$size_table" | grep -q '| ios-arm64 WebRTC |'
 printf '%s\n' "$size_table" | grep -q '+1.43 MB'
 printf '%s\n' "$size_table" | grep -q '+1.14 MB'
-grep -q 'pull_request:' "$gha/workflows/size-diff.yml"
+grep -q 'workflow_dispatch:' "$gha/workflows/size-diff.yml"
+! grep -q 'pull_request:' "$gha/workflows/size-diff.yml"
 grep -q 'size-diff.py' "$gha/workflows/size-diff.yml"
+grep -q 'size-diff.py' "$gha/workflows/_make.yml"
 rm -rf "$size_root"
 
 echo "ok"
