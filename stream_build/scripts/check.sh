@@ -1291,6 +1291,8 @@ grep -q 'workflow_dispatch:' "$gha/workflows/size-diff.yml"
 ! grep -q 'pull_request:' "$gha/workflows/size-diff.yml"
 grep -q 'size-diff.py' "$gha/workflows/size-diff.yml"
 grep -q 'size-diff.py' "$gha/workflows/_make.yml"
+grep -q 'isPrerelease == false' "$gha/workflows/_make.yml"
+python3 "$ROOT/scripts/size-diff.py" --selftest
 rm -rf "$size_root"
 
 echo "ok"

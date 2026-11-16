@@ -2,8 +2,9 @@
 """Compare packaged Android and Apple WebRTC artifacts.
 
 The Release workflow compares the artifacts it just packaged with the
-previous GitHub release and adds this table to the release notes. The
-same script runs locally and does not compile. Point it at two
+newest stable GitHub release and adds this table to the release notes.
+The build being published may be a prerelease. The baseline is not.
+The same script runs locally and does not compile. Point it at two
 directories, archives, or release tags.
 
   python3 stream_build/scripts/size-diff.py \
@@ -154,18 +155,54 @@ def download_release(tag, dest, repo):
     return dest
 
 
-def release_tags(repo, limit):
+def releases(repo, limit):
     raw = subprocess.check_output(
         [
             "gh", "release", "list",
             "--repo", repo,
             "--limit", str(limit),
-            "--json", "tagName",
+            "--json", "tagName,isPrerelease",
         ],
         text=True,
     )
     import json
-    return [item["tagName"] for item in json.loads(raw)]
+    return json.loads(raw)
+
+
+def previous_stable(releases, exclude=""):
+    """Newest stable tag. The release being built may be a prerelease; exclude skips it when it is already published and stable."""
+    for item in releases:
+        if item.get("isPrerelease"):
+            continue
+        tag = item.get("tagName") or ""
+        if not tag or tag == exclude:
+            continue
+        return tag
+    return ""
+
+
+def selftest():
+    found = [
+        {"tagName": "156.0.5", "isPrerelease": False},
+        {"tagName": "156.0.4", "isPrerelease": True},
+        {"tagName": "156.0.3", "isPrerelease": True},
+        {"tagName": "145.25.0", "isPrerelease": False},
+    ]
+    if previous_stable(found) != "156.0.5":
+        raise SystemExit("latest stable should be 156.0.5")
+    if previous_stable(found, exclude="156.0.5") != "145.25.0":
+        raise SystemExit("stable before 156.0.5 should skip the prereleases")
+    publishing = [
+        {"tagName": "156.0.6", "isPrerelease": True},
+        {"tagName": "156.0.5", "isPrerelease": False},
+        {"tagName": "156.0.4", "isPrerelease": True},
+        {"tagName": "145.25.0", "isPrerelease": False},
+    ]
+    if previous_stable(publishing, exclude="156.0.6") != "156.0.5":
+        raise SystemExit("a prerelease build should compare with the latest stable release")
+    if previous_stable([{"tagName": "156.0.4", "isPrerelease": True}]) != "":
+        raise SystemExit("prereleases alone are not a baseline")
+    print("size-diff selftest passed")
 
 
 def row_sort_key(name):
@@ -240,27 +277,26 @@ def main():
     parser.add_argument("--after-tag", help="GitHub release tag for the after column")
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", "GetStream/webrtc"))
     parser.add_argument("--output", help="Write the markdown table to this file too")
+    parser.add_argument("--selftest", action="store_true", help="Run the baseline selector checks")
     args = parser.parse_args()
+    if args.selftest:
+        selftest()
+        return
 
     before_tag = args.before_tag
     after_tag = args.after_tag
     need_before = not args.before and not before_tag
     need_after = not args.after and not after_tag
     if need_before or need_after:
-        tags = release_tags(args.repo, 20)
-        if need_before and need_after:
-            if len(tags) < 2:
-                raise SystemExit(f"{args.repo} needs two releases to compare")
-            after_tag, before_tag = tags[0], tags[1]
-        elif need_before:
-            older = [tag for tag in tags if tag != after_tag]
-            if not older:
-                raise SystemExit(f"no release before {after_tag}")
-            before_tag = older[0]
-        else:
-            if not tags:
+        found = releases(args.repo, 50)
+        if need_after:
+            if not found:
                 raise SystemExit(f"{args.repo} has no releases")
-            after_tag = tags[0]
+            after_tag = found[0]["tagName"]
+        if need_before:
+            before_tag = previous_stable(found, exclude=after_tag or "")
+            if not before_tag:
+                raise SystemExit(f"{args.repo} has no stable release to compare")
 
     work = os.path.join(
         os.environ.get("RUNNER_TEMP", "/tmp"),

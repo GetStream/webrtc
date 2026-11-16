@@ -1,6 +1,7 @@
 # Compare two published releases without compiling. The Release workflow
-# compares a new build with the previous release on its own. Run this by
-# hand when you want the same table for two tags:
+# compares a new build, including a prerelease, with the newest stable
+# release. An empty before_tag here does the same. Run this by hand
+# for two tags:
 #
 #   python3 stream_build/scripts/size-diff.py --before-tag 145.25.0 --after-tag 156.0.4
 
@@ -10,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       before_tag:
-        description: Older release tag. Empty uses the release before after_tag.
+        description: Older release tag. Empty uses the newest stable release.
         required: false
         default: ""
       after_tag:

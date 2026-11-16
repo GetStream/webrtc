@@ -751,8 +751,11 @@ jobs:
             printf 'Automated WebRTC SDK release %s.\n' "${RELEASE_VERSION}" > "${notes_file}"
           fi
           repo="${{ github.repository }}"
-          previous="$(gh release list --repo "${repo}" --limit 20 --json tagName \
-            --jq "[.[] | select(.tagName != \"${RELEASE_VERSION}\")][0].tagName // empty")"
+          # This release may be a prerelease. The baseline is the newest
+          # stable release, so a prerelease is not compared with the
+          # prerelease before it.
+          previous="$(gh release list --repo "${repo}" --limit 50 --json tagName,isPrerelease \
+            --jq "[.[] | select(.isPrerelease == false and .tagName != \"${RELEASE_VERSION}\")][0].tagName // empty")"
           size_table="${RUNNER_TEMP}/size-diff.md"
           if [[ -n "${previous}" ]]; then
             if python3 src/stream_build/scripts/size-diff.py \
@@ -765,7 +768,7 @@ jobs:
               echo "::warning::Could not compare artifact sizes with ${previous}."
             fi
           else
-            echo "No previous release to compare."
+            echo "No previous stable release to compare."
           fi
           release_args=(
             "${RELEASE_VERSION}"
