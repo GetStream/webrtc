@@ -729,7 +729,7 @@ jobs:
 
       - name: Create GitHub release
         env:
-          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ inputs.version }}
           IS_PRERELEASE: ${{ inputs.prerelease }}
           RELEASE_NOTES: ${{ inputs.release_notes }}
@@ -801,7 +801,7 @@ jobs:
       - name: Trigger stream-video-swift-webrtc release
         if: ${{ inputs.ios || inputs.macos }}
         env:
-          GH_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
           RELEASE_VERSION: ${{ inputs.version }}
           IS_PRERELEASE: ${{ inputs.prerelease }}
         run: |
@@ -815,7 +815,7 @@ jobs:
       - name: Trigger stock stream-video-android-webrtc release
         if: ${{ inputs.android }}
         env:
-          GH_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
           RELEASE_VERSION: ${{ inputs.version }}
           IS_PRERELEASE: ${{ inputs.prerelease }}
           ANDROID_WORKFLOW_REF: ${{ inputs.android_workflow_ref }}
@@ -844,7 +844,7 @@ jobs:
       - name: Send repackaged AAR to stream-video-android-webrtc
         if: ${{ inputs.android }}
         env:
-          GH_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
           RELEASE_VERSION: ${{ inputs.version }}
           IS_PRERELEASE: ${{ inputs.prerelease }}
           ANDROID_WORKFLOW_REF: ${{ inputs.android_workflow_ref }}

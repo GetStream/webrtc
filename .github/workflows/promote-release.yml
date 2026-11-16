@@ -37,7 +37,7 @@ jobs:
       trigger_android: ${{ steps.validate.outputs.trigger_android }}
       source_tag: ${{ steps.validate.outputs.source_tag }}
     env:
-      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
       RELEASE_VERSION: ${{ inputs.version }}
       SOURCE_RELEASE_URL: ${{ inputs.source_release_url }}
     steps:
@@ -261,11 +261,11 @@ jobs:
           git -C "${tag_repo}" remote add origin \
             "https://github.com/${GITHUB_REPOSITORY}.git"
           git -C "${tag_repo}" \
-            -c "http.extraheader=AUTHORIZATION: bearer ${GH_TOKEN}" \
+            -c "http.extraheader=AUTHORIZATION: bearer ${GITHUB_TOKEN}" \
             fetch --depth=1 origin \
             "+refs/tags/${source_tag}:refs/tags/${source_tag}"
           git -C "${tag_repo}" \
-            -c "http.extraheader=AUTHORIZATION: bearer ${GH_TOKEN}" \
+            -c "http.extraheader=AUTHORIZATION: bearer ${GITHUB_TOKEN}" \
             push origin \
             "refs/tags/${source_tag}:refs/tags/${RELEASE_VERSION}"
           created_target_ref=true
@@ -328,7 +328,7 @@ jobs:
       - name: Trigger stream-video-swift-webrtc release
         if: ${{ needs.promote.outputs.trigger_swift == 'true' }}
         env:
-          GH_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
           RELEASE_VERSION: ${{ inputs.version }}
           IS_PRERELEASE: "false"
         run: |
@@ -342,7 +342,7 @@ jobs:
       - name: Trigger stream-video-android-webrtc release
         if: ${{ needs.promote.outputs.trigger_android == 'true' }}
         env:
-          GH_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
           RELEASE_VERSION: ${{ inputs.version }}
           IS_PRERELEASE: "false"
           ANDROID_WORKFLOW_REF: ${{ inputs.android_workflow_ref }}
@@ -364,7 +364,7 @@ jobs:
       - name: Trigger repackaged stream-video-android-webrtc release
         if: ${{ needs.promote.outputs.trigger_android == 'true' }}
         env:
-          GH_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.CROSS_REPO_TRIGGER_RELEASE_TOKEN }}
           RELEASE_VERSION: ${{ inputs.version }}
           SOURCE_TAG: ${{ needs.promote.outputs.source_tag }}
           IS_PRERELEASE: "false"

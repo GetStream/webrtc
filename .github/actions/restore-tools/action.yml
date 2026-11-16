@@ -48,10 +48,10 @@ runs:
     - name: Log in to GHCR
       shell: bash
       env:
-        GH_TOKEN: ${{ github.token }}
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
-        echo "$GH_TOKEN" | oras login ghcr.io \
+        echo "$GITHUB_TOKEN" | oras login ghcr.io \
           --username "${{ github.actor }}" \
           --password-stdin
 

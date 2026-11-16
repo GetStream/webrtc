@@ -263,7 +263,7 @@ PY
 
 with_origin_auth() {
   if [ -n "${GITHUB_ACTIONS:-}" ]; then
-    local token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+    local token="${GITHUB_TOKEN:-}"
     git -c "http.extraheader=AUTHORIZATION: bearer ${token}" "$@"
   else
     git "$@"
