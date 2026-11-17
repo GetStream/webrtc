@@ -1245,4 +1245,63 @@ grep -q 'test-ios: compile-tests-ios' "$ROOT/Makefile"
 python3 "$ROOT/scripts/ios_xctest_completion/sitecustomize.py" --selftest
 grep -q 'ios_xctest_completion' "$ROOT/scripts/run-ios-tests.sh"
 
+size_root="$(mktemp -d)"
+python3 - "$size_root" <<'PY'
+import os
+import sys
+import zipfile
+
+root = sys.argv[1]
+
+def fill(path, so_size, jar_size, ios_size):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with zipfile.ZipFile(path, "w") as archive:
+        if path.endswith(".aar"):
+            archive.writestr("classes.jar", b"j" * jar_size)
+            archive.writestr(
+                "jni/arm64-v8a/libjingle_peerconnection_so.so",
+                b"s" * so_size,
+            )
+            archive.writestr(
+                "jni/armeabi-v7a/libjingle_peerconnection_so.so",
+                b"s" * (so_size // 2),
+            )
+        else:
+            archive.writestr(
+                "WebRTC.xcframework/ios-arm64/WebRTC.framework/WebRTC",
+                b"f" * ios_size,
+            )
+            archive.writestr(
+                "WebRTC.xcframework/ios-arm64/WebRTC.framework/Headers/WebRTC",
+                b"header",
+            )
+            archive.writestr(
+                "WebRTC.xcframework/macos-arm64/WebRTC.framework/Versions/A/WebRTC",
+                b"m" * (ios_size + 500_000),
+            )
+
+fill(os.path.join(root, "before", "libwebrtc.aar"), 2_000_000, 100_000, 0)
+fill(os.path.join(root, "after", "libwebrtc.aar"), 3_500_000, 200_000, 0)
+fill(os.path.join(root, "before", "WebRTC.xcframework.zip"), 0, 0, 2_000_000)
+fill(os.path.join(root, "after", "WebRTC.xcframework.zip"), 0, 0, 3_200_000)
+PY
+size_table="$(python3 "$ROOT/scripts/size-diff.py" \
+  --before "$size_root/before" --after "$size_root/after")"
+printf '%s\n' "$size_table" | grep -q '| libwebrtc.aar |'
+printf '%s\n' "$size_table" | grep -q '| jni/arm64-v8a/libjingle_peerconnection_so.so |'
+printf '%s\n' "$size_table" | grep -q '| jni/armeabi-v7a/libjingle_peerconnection_so.so |'
+printf '%s\n' "$size_table" | grep -q '| ios-arm64 WebRTC |'
+printf '%s\n' "$size_table" | grep -q '| macos-arm64 WebRTC |'
+printf '%s\n' "$size_table" | grep -q '+1.43 MB'
+printf '%s\n' "$size_table" | grep -q '+1.14 MB'
+grep -q 'workflow_dispatch:' "$gha/workflows/size-diff.yml"
+! grep -q 'pull_request:' "$gha/workflows/size-diff.yml"
+grep -q 'size-diff.py' "$gha/workflows/size-diff.yml"
+grep -q 'size-diff.py' "$gha/workflows/_make.yml"
+grep -q 'isPrerelease == false' "$gha/workflows/_make.yml"
+grep -q -- '--exclude-drafts' "$gha/workflows/_make.yml"
+grep -q -- '--exclude-drafts' "$ROOT/scripts/size-diff.py"
+python3 "$ROOT/scripts/size-diff.py" --selftest
+rm -rf "$size_root"
+
 echo "ok"
