@@ -1,0 +1,34 @@
+# Consumer rules. package-android.sh stores this file as proguard.txt at the
+# AAR root, and the Android Gradle Plugin applies it when the app minifies.
+# rewrite-android-namespace.sh rewrites org.webrtc in this file for
+# libwebrtc-repackaged.aar. org.jni_zero and J.N are unchanged.
+
+# Native -> Java. Names and descriptors are strings in the .so.
+# keepclasseswithmembers retains classes the app never mentions
+# (WebRtcClassLoader, JniHelper, fromNativeIndex, callback interfaces).
+-keepclasseswithmembers,includedescriptorclasses class ** {
+    @org.jni_zero.CalledByNative <methods>;
+}
+-keepclasseswithmembers,includedescriptorclasses class ** {
+    @org.jni_zero.CalledByNative <init>(...);
+}
+-keepclasseswithmembers,includedescriptorclasses class ** {
+    @org.webrtc.CalledByNative <methods>;
+}
+-keepclasseswithmembers,includedescriptorclasses class ** {
+    @org.webrtc.CalledByNative <init>(...);
+}
+
+# Java -> native. Class and method names must match the .so exports.
+-keepclasseswithmembernames,includedescriptorclasses class org.webrtc.** {
+    native <methods>;
+}
+
+# jni_zero multiplexed entry points. J.N is package J, class N (J/N.class).
+# GEN_JNI is the Java forwarder onto J.N.
+-keep class org.jni_zero.GEN_JNI {
+    native <methods>;
+}
+-keep class J.N {
+    native <methods>;
+}
