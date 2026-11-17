@@ -630,6 +630,8 @@ grep -q 'jar_excluded_patterns = stream_android_jar_excluded_patterns' \
   "$ROOT/../sdk/android/BUILD.gn"
 grep -q '"kotlin/\*"' "$ROOT/../extensions/android/stream_android_jar.gni"
 grep -q 'verify-android-jar.sh' "$ROOT/scripts/package-android.sh"
+grep -q 'sdk/android/proguard.txt' "$ROOT/scripts/package-android.sh"
+grep -q 'aar.write(proguard, "proguard.txt")' "$ROOT/scripts/package-android.sh"
 jar_root="$(mktemp -d)"
 # make_jar OUT ENTRY...: an ENTRY not ending in .class is an empty file. A
 # class ENTRY is "path.class" plus "|m=name:desc" (method), "|n=name:desc"

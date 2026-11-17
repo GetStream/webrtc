@@ -46,7 +46,9 @@ case "$NAMESPACE" in
 esac
 
 manifest="$SRC/sdk/android/AndroidManifest.xml"
+proguard="$SRC/sdk/android/proguard.txt"
 [[ -f "$manifest" ]] || die "missing $manifest"
+[[ -f "$proguard" ]] || die "missing $proguard"
 
 arch_from_slice() {
   printf '%s\n' "${1#android-}"
@@ -81,15 +83,16 @@ mkdir -p "$PRODUCTS"
 out_aar="$PRODUCTS/$aar_name"
 rm -f "$out_aar"
 
-python3 - "$out_aar" "$manifest" "$jar" "$OUT" "$so_name" $SLICES <<'PY'
+python3 - "$out_aar" "$manifest" "$jar" "$proguard" "$OUT" "$so_name" $SLICES <<'PY'
 import os
 import sys
 import zipfile
 
-out_aar, manifest, jar, out_root, so_name, *slices = sys.argv[1:]
+out_aar, manifest, jar, proguard, out_root, so_name, *slices = sys.argv[1:]
 
 with zipfile.ZipFile(out_aar, "w") as aar:
     aar.write(manifest, "AndroidManifest.xml")
+    aar.write(proguard, "proguard.txt")
     aar.write(jar, "classes.jar")
     for slice in slices:
         arch = slice[len("android-"):]
