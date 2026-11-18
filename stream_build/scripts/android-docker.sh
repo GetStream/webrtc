@@ -56,6 +56,16 @@ path_is_under() {
   [[ "$path" == "$root" || "$path" == "$root"/* ]]
 }
 
+# Docker Desktop tries to mkdir a bind-mount source. The macOS SSH agent
+# socket lives under launchd, and mkdir there fails with "operation not
+# supported".
+ssh_agent_path_unmountable() {
+  case "$1" in
+    /private/var/run/*|/var/run/*|*com.apple.launchd.*) return 0 ;;
+  esac
+  return 1
+}
+
 short_hash() {
   if command -v shasum >/dev/null 2>&1; then
     printf '%s' "$1" | shasum -a 256 | awk '{print substr($1,1,12)}'
@@ -81,7 +91,7 @@ container_name_for() {
   local sysroot="$2"
   local uid="$3"
   printf 'stream-webrtc-android-%s\n' \
-    "$(short_hash "${host_src}|${sysroot}|${uid}|layout-v4")"
+    "$(short_hash "${host_src}|${sysroot}|${uid}|layout-v5")"
 }
 
 require_docker() {
@@ -145,10 +155,18 @@ launch_container() {
   if docker container inspect "$name" >/dev/null 2>&1; then
     container_image="$(docker inspect -f '{{.Image}}' "$name")"
     mounts="$(docker inspect -f '{{range .Mounts}}{{.Destination}}{{"\n"}}{{end}}' "$name")"
+    local mount_source bad_ssh=0
     # A mount anywhere under src/build stops gclient from replacing that
-    # checkout. Drop containers left from that experiment.
+    # checkout. A launchd SSH socket cannot be mounted, and docker start
+    # retries whatever was stored on the container.
+    while IFS= read -r mount_source; do
+      if ssh_agent_path_unmountable "$mount_source"; then
+        bad_ssh=1
+      fi
+    done < <(docker inspect -f '{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}' "$name")
     if [[ "$container_image" != "$image_id" ]] \
-      || grep -q "${container_src}/build/" <<<"$mounts"; then
+      || grep -q "${container_src}/build/" <<<"$mounts" \
+      || [[ "$bad_ssh" == 1 ]]; then
       docker rm -f "$name" >/dev/null
     fi
   fi
@@ -178,7 +196,9 @@ launch_container() {
   if [[ "$git_common" != "$git_dir" ]] && ! path_is_under "$git_common" "$host_src"; then
     run+=(-v "${git_common}:${git_common}")
   fi
-  if [[ -n "${SSH_AUTH_SOCK:-}" && -S "${SSH_AUTH_SOCK}" ]]; then
+  if [[ "$(uname -s)" == Darwin && -n "${SSH_AUTH_SOCK:-}" ]]; then
+    echo "not mounting the macOS SSH agent socket; Docker Desktop cannot mount it"
+  elif [[ -n "${SSH_AUTH_SOCK:-}" && -S "${SSH_AUTH_SOCK}" ]]; then
     run+=(-v "${SSH_AUTH_SOCK}:${SSH_AUTH_SOCK}" -e "SSH_AUTH_SOCK=${SSH_AUTH_SOCK}")
   fi
   run+=("$tag" sleep infinity)

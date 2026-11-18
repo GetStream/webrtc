@@ -87,6 +87,11 @@ source "$ROOT/scripts/android-docker.sh"
 [[ "$(rewrite_adb_server_for_container 127.0.0.1:5037)" == "host.docker.internal:5037" ]]
 [[ "$(rewrite_adb_server_for_container localhost:5037)" == "host.docker.internal:5037" ]]
 [[ "$(rewrite_adb_server_for_container 10.1.2.3:5037)" == "10.1.2.3:5037" ]]
+ssh_agent_path_unmountable /private/var/run/com.apple.launchd.x/Listeners
+ssh_agent_path_unmountable /var/run/com.apple.launchd.x/Listeners
+! ssh_agent_path_unmountable /tmp/ssh-agent.sock
+grep -q 'layout-v5' "$ROOT/scripts/android-docker.sh"
+grep -q 'not mounting the macOS SSH agent socket' "$ROOT/scripts/android-docker.sh"
 # shellcheck source=android-docker-bin/cipd
 source "$ROOT/scripts/android-docker-bin/cipd"
 cipd_in="$(mktemp)"
