@@ -76,7 +76,7 @@ env:
 jobs:
   publish:
     name: Publish git cache
-    runs-on: ubuntu-latest
+    runs-on: { group: github-public-amd64 }
     timeout-minutes: 360
     outputs:
       pushed: ${{ steps.gate.outputs.pushed }}
@@ -207,7 +207,7 @@ jobs:
     name: Publish tools (${{ matrix.platform }})
     needs: publish
     if: needs.publish.outputs.run_tools == 'true'
-    runs-on: ${{ matrix.runs_on }}
+    runs-on: ${{ matrix.runs_on == 'ubuntu-latest' && fromJSON('{"group":"github-public-amd64"}') || matrix.runs_on }}
     timeout-minutes: 360
     strategy:
       fail-fast: false

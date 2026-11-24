@@ -75,7 +75,7 @@ env:
 jobs:
   validate_inputs:
     name: Validate inputs
-    runs-on: ubuntu-latest
+    runs-on: { group: github-public-amd64 }
     steps:
       - name: Ensure at least one platform is selected
         env:
@@ -124,7 +124,7 @@ jobs:
   plan:
     name: Plan
     needs: validate_inputs
-    runs-on: ubuntu-latest
+    runs-on: { group: github-public-amd64 }
     outputs:
       config: ${{ inputs.config }}
       mode: ${{ inputs.mode }}
@@ -284,7 +284,7 @@ jobs:
     name: Build Android
     needs: [plan]
     if: ${{ (inputs.mode == 'build' || inputs.mode == 'package' || inputs.mode == 'release') && inputs.android }}
-    runs-on: ubuntu-latest
+    runs-on: { group: github-public-amd64 }
     timeout-minutes: 360
     strategy:
       fail-fast: false
@@ -411,7 +411,7 @@ jobs:
     name: Test Android
     needs: [plan]
     if: ${{ (inputs.mode == 'test' || inputs.mode == 'release') && inputs.android }}
-    runs-on: ubuntu-latest
+    runs-on: { group: github-public-amd64 }
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
@@ -476,7 +476,7 @@ jobs:
     name: Tests passed
     needs: [plan, test_ios, test_macos, test_android, test_windows]
     if: ${{ always() && !cancelled() && inputs.mode == 'release' }}
-    runs-on: ubuntu-latest
+    runs-on: { group: github-public-amd64 }
     steps:
       - name: Require tests before publish
         env:
@@ -572,7 +572,7 @@ jobs:
     name: Package
     needs: [plan, build_ios, build_macos, build_android, build_windows]
     if: ${{ always() && !cancelled() && (inputs.mode == 'package' || inputs.mode == 'release') && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && (needs.build_ios.result == 'success' || needs.build_macos.result == 'success' || needs.build_android.result == 'success' || needs.build_windows.result == 'success') }}
-    runs-on: ${{ (inputs.ios || inputs.macos) && 'macos-26' || 'ubuntu-latest' }}
+    runs-on: ${{ (inputs.ios || inputs.macos) && 'macos-26' || fromJSON('{"group":"github-public-amd64"}') }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
@@ -713,7 +713,7 @@ jobs:
     name: Release
     needs: [plan, tests_passed, package]
     if: ${{ always() && !cancelled() && inputs.mode == 'release' && needs.tests_passed.result == 'success' && needs.package.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: { group: github-public-amd64 }
     steps:
       - uses: actions/checkout@v7
         with:
@@ -796,7 +796,7 @@ jobs:
     name: Trigger downstream WebRTC releases
     needs: [plan, github_release]
     if: ${{ always() && !cancelled() && inputs.mode == 'release' && needs.github_release.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: { group: github-public-amd64 }
     steps:
       - name: Trigger stream-video-swift-webrtc release
         if: ${{ inputs.ios || inputs.macos }}
