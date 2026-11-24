@@ -35,7 +35,7 @@ concurrency:
 jobs:
   migrate:
     name: Migrate extended stable
-    runs-on: ubuntu-latest
+    runs-on: { group: github-public-amd64 }
     timeout-minutes: 180
     permissions:
       contents: write

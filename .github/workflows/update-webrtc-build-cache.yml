@@ -110,7 +110,7 @@ concurrency:
 jobs:
   plan:
     name: Plan build cache
-    runs-on: ubuntu-latest
+    runs-on: { group: github-public-amd64 }
     outputs:
       include: ${{ steps.matrix.outputs.include }}
     steps:
@@ -191,7 +191,7 @@ jobs:
   publish:
     name: Publish ${{ matrix.kind }} ${{ matrix.configuration }} (${{ matrix.platform }})
     needs: plan
-    runs-on: ${{ matrix.runs_on }}
+    runs-on: ${{ matrix.runs_on == 'ubuntu-latest' && fromJSON('{"group":"github-public-amd64"}') || matrix.runs_on }}
     timeout-minutes: 360
     strategy:
       fail-fast: false

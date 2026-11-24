@@ -31,7 +31,7 @@ concurrency:
 jobs:
   promote:
     name: Promote pre-release
-    runs-on: ubuntu-latest
+    runs-on: { group: github-public-amd64 }
     outputs:
       trigger_swift: ${{ steps.validate.outputs.trigger_swift }}
       trigger_android: ${{ steps.validate.outputs.trigger_android }}
@@ -323,7 +323,7 @@ jobs:
     name: Trigger downstream WebRTC releases
     needs: promote
     if: ${{ always() && !cancelled() && needs.promote.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: { group: github-public-amd64 }
     steps:
       - name: Trigger stream-video-swift-webrtc release
         if: ${{ needs.promote.outputs.trigger_swift == 'true' }}
