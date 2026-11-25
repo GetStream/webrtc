@@ -36,7 +36,7 @@ runs:
         GITHUB_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
-        git config --global credential.helper store
+        git config --global --replace-all credential.helper store
         git credential approve <<EOF
         protocol=https
         host=github.com
