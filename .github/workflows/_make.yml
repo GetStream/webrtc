@@ -154,7 +154,7 @@ jobs:
     name: Build iOS
     needs: [plan]
     if: ${{ (inputs.mode == 'build' || inputs.mode == 'package' || inputs.mode == 'release') && inputs.ios }}
-    runs-on: macos-26
+    runs-on: { group: scaleway-macos }
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
@@ -220,7 +220,7 @@ jobs:
     name: Build macOS
     needs: [plan]
     if: ${{ (inputs.mode == 'build' || inputs.mode == 'package' || inputs.mode == 'release') && inputs.macos }}
-    runs-on: macos-26
+    runs-on: { group: scaleway-macos }
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
@@ -353,7 +353,7 @@ jobs:
     name: Test iOS
     needs: [plan]
     if: ${{ (inputs.mode == 'test' || inputs.mode == 'release') && inputs.ios }}
-    runs-on: macos-26
+    runs-on: { group: scaleway-macos }
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v7
@@ -382,7 +382,7 @@ jobs:
     name: Test macOS
     needs: [plan]
     if: ${{ (inputs.mode == 'test' || inputs.mode == 'release') && inputs.macos }}
-    runs-on: macos-26
+    runs-on: { group: scaleway-macos }
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v7
@@ -572,7 +572,7 @@ jobs:
     name: Package
     needs: [plan, build_ios, build_macos, build_android, build_windows]
     if: ${{ always() && !cancelled() && (inputs.mode == 'package' || inputs.mode == 'release') && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && (needs.build_ios.result == 'success' || needs.build_macos.result == 'success' || needs.build_android.result == 'success' || needs.build_windows.result == 'success') }}
-    runs-on: ${{ (inputs.ios || inputs.macos) && 'macos-26' || fromJSON('{"group":"github-public-amd64"}') }}
+    runs-on: ${{ (inputs.ios || inputs.macos) && fromJSON('{"group":"scaleway-macos"}') || fromJSON('{"group":"github-public-amd64"}') }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7

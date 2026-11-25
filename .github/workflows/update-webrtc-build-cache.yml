@@ -191,7 +191,7 @@ jobs:
   publish:
     name: Publish ${{ matrix.kind }} ${{ matrix.configuration }} (${{ matrix.platform }})
     needs: plan
-    runs-on: ${{ matrix.runs_on == 'ubuntu-latest' && fromJSON('{"group":"github-public-amd64"}') || matrix.runs_on }}
+    runs-on: ${{ matrix.runs_on == 'ubuntu-latest' && fromJSON('{"group":"github-public-amd64"}') || fromJSON('{"group":"scaleway-macos"}') }}
     timeout-minutes: 360
     strategy:
       fail-fast: false
