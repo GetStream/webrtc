@@ -1,0 +1,46 @@
+# Compare two published releases without compiling. The Release workflow
+# compares a new build, including a prerelease, with the newest stable
+# release. An empty before_tag here does the same. Run this by hand
+# for two tags:
+#
+#   python3 stream_build/scripts/size-diff.py --before-tag 145.25.0 --after-tag 156.0.4
+
+name: Size diff
+
+on:
+  workflow_dispatch:
+    inputs:
+      before_tag:
+        description: Older release tag. Empty uses the newest stable release.
+        required: false
+        default: ""
+      after_tag:
+        description: Newer release tag. Empty uses the latest release.
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  size-diff:
+    name: Size diff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Compare packaged artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE_TAG: ${{ inputs.before_tag }}
+          AFTER_TAG: ${{ inputs.after_tag }}
+        run: |
+          set -euo pipefail
+          args=(--output size-diff.md)
+          if [[ -n "${BEFORE_TAG}" ]]; then
+            args+=(--before-tag "${BEFORE_TAG}")
+          fi
+          if [[ -n "${AFTER_TAG}" ]]; then
+            args+=(--after-tag "${AFTER_TAG}")
+          fi
+          python3 stream_build/scripts/size-diff.py "${args[@]}"

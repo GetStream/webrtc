@@ -750,6 +750,31 @@ jobs:
           else
             printf 'Automated WebRTC SDK release %s.\n' "${RELEASE_VERSION}" > "${notes_file}"
           fi
+          repo="${{ github.repository }}"
+          # This release may be a prerelease. The baseline is the newest
+          # published stable release. A lookup failure must not stop the
+          # release: the size table is optional.
+          previous=""
+          if ! previous="$(gh release list --repo "${repo}" --limit 50 --exclude-drafts \
+              --json tagName,isPrerelease \
+              --jq "[.[] | select(.isPrerelease == false and .tagName != \"${RELEASE_VERSION}\")][0].tagName // empty")"; then
+            echo "::warning::Could not look up the previous stable release."
+            previous=""
+          fi
+          size_table="${RUNNER_TEMP}/size-diff.md"
+          if [[ -n "${previous}" ]]; then
+            if python3 src/stream_build/scripts/size-diff.py \
+                --before-tag "${previous}" \
+                --after "${GITHUB_WORKSPACE}/release-assets" \
+                --repo "${repo}" \
+                --output "${size_table}"; then
+              printf '\n%s\n' "$(cat "${size_table}")" >> "${notes_file}"
+            else
+              echo "::warning::Could not compare artifact sizes with ${previous}."
+            fi
+          else
+            echo "No previous stable release to compare."
+          fi
           release_args=(
             "${RELEASE_VERSION}"
             "${assets[@]}"
@@ -758,7 +783,6 @@ jobs:
             --title "${RELEASE_VERSION}"
             --notes-file "${notes_file}"
           )
-          repo="${{ github.repository }}"
           if gh release view "${RELEASE_VERSION}" --repo "${repo}" >/dev/null 2>&1; then
             echo "Release ${RELEASE_VERSION} already exists. Adding assets."
             existing="$(gh release view "${RELEASE_VERSION}" --repo "${repo}" --json assets --jq '.assets[].name')"
@@ -780,6 +804,16 @@ jobs:
               exit 1
             fi
             gh release upload "${RELEASE_VERSION}" "${to_upload[@]}" --repo "${repo}"
+            if [[ -s "${size_table}" ]]; then
+              existing_notes="$(mktemp)"
+              if gh release view "${RELEASE_VERSION}" --repo "${repo}" --json body --jq '.body // ""' > "${existing_notes}" \
+                  && python3 -c 'import pathlib,sys; notes=pathlib.Path(sys.argv[1]); table=pathlib.Path(sys.argv[2]).read_text(); body=notes.read_text(); marker="<!-- webrtc-size-diff -->"; index=body.find(marker); body=body[:index] if index!=-1 else body; body=body.rstrip(); notes.write_text((body+"\n\n" if body else "")+table)' "${existing_notes}" "${size_table}" \
+                  && gh release edit "${RELEASE_VERSION}" --repo "${repo}" --notes-file "${existing_notes}"; then
+                echo "Added the size table to the existing release notes."
+              else
+                echo "::warning::Could not add the size table to the existing release notes."
+              fi
+            fi
             if [[ "${IS_PRERELEASE}" != "true" ]]; then
               gh release edit "${RELEASE_VERSION}" --repo "${repo}" --latest
             fi

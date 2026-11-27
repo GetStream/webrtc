@@ -100,7 +100,7 @@ export ANDROID_NAMESPACE ARCH ADB_SERVER STREAM_ANDROID_IN_DOCKER
 	announce require-layout require-gclient require-src require-darwin \
 	require-linux require-windows maybe-deps validate-android-test-args \
 	combine apple rename rename-apple rename-android rewrite-android-namespace \
-	migrate plan prepare open issue docker-cleanup \
+	migrate plan prepare open issue docker-cleanup size-diff \
 	$(PLATFORMS) $(VERBS) \
 	build-ios build-macos build-android build-windows \
 	compile-tests-ios compile-tests-macos compile-tests-android \
@@ -157,6 +157,7 @@ help:
 	@echo "  make build ios GN_ARGS='rtc_use_h264=false' CONFIG=debug"
 	@echo "  make bootstrap CONFIRM=1"
 	@echo "  make build ios SKIP_MACCATALYST=1"
+	@echo "  make size-diff BEFORE=dir-or-archive AFTER=dir-or-archive"
 	@echo
 	@echo "Also: deps runhooks check clean print-gn-args TARGET=slice"
 	@echo "Vars: DEPS_ROOT WEBRTC_SRC OUT PRODUCTS GIT_CACHE_PATH CONFIG GN_ARGS JOBS SHALLOW ARCHS ARCH ADB_SERVER ZIP XCFRAMEWORK AAR RENAMED ANDROID_NAMESPACE SKIP_DEPS SKIP_LICENSES SKIP_MACCATALYST CONFIRM"
@@ -164,6 +165,15 @@ help:
 
 check:
 	@$(SCRIPTS)/check.sh
+
+# BEFORE and AFTER are packaged artifacts, not source trees. Each may be
+# an .aar, an xcframework .zip, or a directory that holds either.
+size-diff:
+	@test -n "$(BEFORE)" && test -n "$(AFTER)" || { \
+		echo "usage: make size-diff BEFORE=<path> AFTER=<path>" >&2; \
+		exit 1; \
+	}
+	@python3 $(SCRIPTS)/size-diff.py --before "$(BEFORE)" --after "$(AFTER)"
 
 migrate:
 	@action="$(firstword $(filter plan prepare open issue,$(MAKECMDGOALS)))"; \
